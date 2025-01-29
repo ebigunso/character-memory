@@ -1,0 +1,11 @@
+[package]
+name = "agent_memory"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dotenvy = "0.15.7"
+secrecy = { version = "0.10.3", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+config = "0.15.6"
+thiserror = "2.0.0"
