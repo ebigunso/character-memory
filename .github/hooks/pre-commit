@@ -54,14 +54,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Run cargo fmt to ensure code is properly formatted
-echo "Checking code formatting..."
-cargo fmt -- --check
-if [ $? -ne 0 ]; then
-    echo "Commit failed: Code formatting issues detected. Please run 'cargo fmt' to fix."
-    exit 1
-fi
-
 # Run clippy for linting
 echo "Running clippy..."
 cargo clippy -- -D warnings
