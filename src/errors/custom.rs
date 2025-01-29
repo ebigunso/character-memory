@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum CustomError {
+pub enum CustomError {
     #[error("Environment file not found: {0}")]
     EnvFileNotFound(String),
 
