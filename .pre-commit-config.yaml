@@ -1,0 +1,55 @@
+# .pre-commit-config.yaml
+# Top-level settings
+default_stages: [pre-commit]
+exclude: '^target/.*'  # Regex to exclude all files in target/ directory
+
+repos:
+  # Use the pre-commit-rust-hooks repository for basic Rust checks
+  - repo: https://github.com/backplane/pre-commit-rust-hooks
+    rev: v1.1.0
+    hooks:
+      # 1) check: ensures the code at least compiles
+      - id: check
+        name: Cargo Check
+
+      # 2) clippy: run lint checks
+      - id: clippy
+        name: Cargo Clippy
+        args: ["--", "-D", "warnings"]
+        # The "-D warnings" argument turns Clippy warnings into errors.
+
+      # 3) test: ensure all tests pass
+      - id: test
+        name: Cargo Test
+
+  # Use the pre-commit-hooks repository for additional basic checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    # 4) trailing-whitespace: remove trailing whitespace
+    -   id: trailing-whitespace
+    # 5) end-of-file-fixer: ensure a newline at the end of each file
+    -   id: end-of-file-fixer
+    # 6) check-added-large-files: prevent large files over 100MB from being added
+    -   id: check-added-large-files
+        args: ['--maxkb=102400']
+
+  # Local hooks for additional custom checks
+  - repo: local
+    hooks:
+      # 7) Warn on TODO comments without failing
+      - id: warn-todo
+        name: Warn for TODO Comments
+        language: system
+        entry: bash
+        args:
+          - -c
+          - |
+            # If any TODO is found, just display a warning; do not fail the commit
+            if git grep --ignore-case 'TODO' >/dev/null 2>&1; then
+              echo "Warning: TODO comments found."
+            fi
+            exit 0
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
