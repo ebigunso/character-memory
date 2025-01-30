@@ -3,6 +3,22 @@ use serde::Deserialize;
 use std::path::{PathBuf};
 use crate::errors::custom::CustomError;
 use mockall::automock;
+use config::{Config};
+
+#[automock]
+pub trait ConfigLoader {
+    fn build_config(&self) -> Result<Config, config::ConfigError>;
+}
+
+pub struct DefaultConfigLoader;
+
+impl ConfigLoader for DefaultConfigLoader {
+    fn build_config(&self) -> Result<Config, config::ConfigError> {
+        Config::builder()
+            .add_source(config::Environment::default())
+            .build()
+    }
+}
 
 #[automock]
 pub trait EnvLoader {
@@ -31,10 +47,17 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub(crate) fn load() -> Result<Self, CustomError> {
-        Self::load_with_env_loader(DefaultEnvLoader)
+        Self::load_with_loaders(DefaultEnvLoader, DefaultConfigLoader)
     }
 
     pub(crate) fn load_with_env_loader<E: EnvLoader>(env_loader: E) -> Result<Self, CustomError> {
+        Self::load_with_loaders(env_loader, DefaultConfigLoader)
+    }
+
+    pub(crate) fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
+        env_loader: E,
+        config_loader: C
+    ) -> Result<Self, CustomError> {
         // Get project root directory from CARGO_MANIFEST_DIR
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let env_path = project_root.join(".env");
@@ -53,9 +76,7 @@ impl Settings {
             ))?;
 
         // Build configuration
-        let settings = config::Config::builder()
-            .add_source(config::Environment::default())
-            .build()
+        let settings = config_loader.build_config()
             .map_err(|e| CustomError::ConfigParseError(
                 format!("Failed to build configuration: {}", e)
             ))?;
