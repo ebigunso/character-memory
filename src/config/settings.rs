@@ -1,9 +1,9 @@
-use secrecy::{SecretString, ExposeSecret};
+use crate::errors::custom::CustomError;
+use config::{Config};
+use mockall::automock;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::path::{PathBuf};
-use crate::errors::custom::CustomError;
-use mockall::automock;
-use config::{Config};
 
 #[automock]
 pub trait ConfigLoader {
