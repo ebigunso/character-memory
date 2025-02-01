@@ -50,10 +50,6 @@ impl Settings {
         Self::load_with_loaders(DefaultEnvLoader, DefaultConfigLoader)
     }
 
-    pub(crate) fn load_with_env_loader<E: EnvLoader>(env_loader: E) -> Result<Self, CustomError> {
-        Self::load_with_loaders(env_loader, DefaultConfigLoader)
-    }
-
     pub(crate) fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
         env_loader: E,
         config_loader: C
