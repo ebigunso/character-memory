@@ -40,6 +40,7 @@ impl EnvLoader for DefaultEnvLoader {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // Fields will be used when implementing database connections
 pub(crate) struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_connection_string: SecretString,
@@ -84,10 +85,12 @@ impl Settings {
             ))
     }
 
+    #[allow(dead_code)] // Will be used when implementing Qdrant database connection
     pub(crate) fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
     }
 
+    #[allow(dead_code)] // Will be used when implementing Oxigraph database connection
     pub(crate) fn get_oxigraph_connection(&self) -> &str {
         self.oxigraph_connection_string.expose_secret()
     }
