@@ -1,7 +1,7 @@
 # .pre-commit-config.yaml
 # Top-level settings
 default_stages: [pre-commit]
-exclude: '^target/.*'  # Regex to exclude all files in target/ directory
+exclude: '^target/.*'  # Exclude all files in target/ directory
 
 repos:
   # Use the pre-commit-hooks repository for basic checks
