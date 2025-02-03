@@ -7,6 +7,6 @@ edition = "2021"
 dotenvy = "0.15.7"
 secrecy = { version = "0.10.3", features = ["serde"] }
 serde = { version = "1.0.217", features = ["derive"] }
-config = "0.15.6"
+config = "0.15.7"
 thiserror = "2.0.11"
 mockall = "0.13.1"
