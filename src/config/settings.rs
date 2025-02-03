@@ -1,16 +1,16 @@
 use crate::errors::custom::CustomError;
-use config::{Config};
+use config::Config;
 use mockall::automock;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 #[automock]
-pub trait ConfigLoader {
+pub(crate) trait ConfigLoader {
     fn build_config(&self) -> Result<Config, config::ConfigError>;
 }
 
-pub struct DefaultConfigLoader;
+pub(crate) struct DefaultConfigLoader;
 
 impl ConfigLoader for DefaultConfigLoader {
     fn build_config(&self) -> Result<Config, config::ConfigError> {
@@ -21,13 +21,13 @@ impl ConfigLoader for DefaultConfigLoader {
 }
 
 #[automock]
-pub trait EnvLoader {
+pub(crate) trait EnvLoader {
     fn load_from_path(&self, path: PathBuf) -> Result<(), std::io::Error>;
     fn exists(&self, path: PathBuf) -> bool;
 }
 
 #[derive(Default)]
-pub struct DefaultEnvLoader;
+pub(crate) struct DefaultEnvLoader;
 
 impl EnvLoader for DefaultEnvLoader {
     fn load_from_path(&self, path: PathBuf) -> Result<(), std::io::Error> {
@@ -41,7 +41,7 @@ impl EnvLoader for DefaultEnvLoader {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)] // Fields will be used when implementing database connections
-pub(crate) struct Settings {
+pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_connection_string: SecretString,
 }
@@ -83,6 +83,15 @@ impl Settings {
             .map_err(|e| CustomError::ConfigParseError(
                 format!("Failed to parse configuration: {}", e)
             ))
+    }
+
+    /// Creates a Settings instance from an externally provided `config::Config`.
+    /// This method is intended for consumers who wish to build their configuration using custom sources (files, command-line, etc.) and inject it.
+    pub fn from_config(config: Config) -> Result<Self, CustomError> {
+        config.try_deserialize()
+            .map_err(|e| {
+                CustomError::ConfigParseError(format!("Failed to parse external configuration: {}", e))
+            })
     }
 
     #[allow(dead_code)] // Will be used when implementing Qdrant database connection
