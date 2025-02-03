@@ -70,4 +70,36 @@ mod tests {
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
     }
+
+    #[test]
+    fn test_settings_from_config_success() {
+        let external_config = config::Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let result = Settings::from_config(external_config);
+        assert!(result.is_ok());
+
+        let settings = result.unwrap();
+        assert_eq!(settings.get_qdrant_connection(), "external_qdrant");
+        assert_eq!(settings.get_oxigraph_connection(), "external_oxigraph");
+    }
+
+    #[test]
+    fn test_settings_from_config_error() {
+        // Missing required fields
+        let incomplete_config = config::Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            // oxigraph_connection_string is missing
+            .build()
+            .unwrap();
+
+        let result = Settings::from_config(incomplete_config);
+        assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
+    }
 }
