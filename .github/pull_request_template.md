@@ -1,21 +1,21 @@
-# 概要
-<!-- 変更の目的-->
+# Overview
+<!-- Purpose of the changes -->
 
-# 変更内容
-<!-- 機能の説明 -->
+# Changes
+<!-- Description of functionality -->
 
-# 影響範囲
-<!-- この関数を変更したのでこの機能にも影響がある、など -->
+# Scope of Impact
+<!-- e.g., "Changes to this function affect these features..." -->
 
-# テスト
-## テストの有無
-テストは<!-- すでにしている/まだしていない/お任せしたい -->
+# Testing
+## Test Status
+Tests are <!-- completed/not yet done/in need of assistance -->
 
-## すでに実施済みのテスト内容
-<!-- 説明をここに書く -->
+## Already Completed Tests
+<!-- Describe tests here -->
 
-## テストに必要な環境変数 / 依存関係 など
-<!-- 説明をここに書く -->
+## Required Environment Variables / Dependencies
+<!-- Describe requirements here -->
 
-# 補足
-<!-- レビューをする際に見てほしい点、ローカル環境で試す際の注意点、など -->
+# Additional Notes
+<!-- Points to focus on during review, notes for local testing, etc. -->
