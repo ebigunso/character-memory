@@ -7,18 +7,18 @@ assignees: ''
 
 ---
 
-<!-- issueの種類に応じて「要望」または「バグ」からテンプレートを選択する -->
+<!-- Select template from "Feature Request" or "Bug Report" based on issue type -->
 
-<!-- 要望のテンプレート -->
-# 概要
-# 目的
-# 提案内容
-# タスク
-- [ ] 細かいタスクに分解できているなら書き出す
+<!-- Feature Request Template -->
+# Overview
+# Purpose
+# Proposal
+# Tasks
+- [ ] Break down into smaller tasks if possible
 
-<!-- バグのテンプレート -->
-# 概要
-# 再現手順
-# 修正しないとどう困るか
-# 原因
-# 修正案
+<!-- Bug Report Template -->
+# Overview
+# Steps to Reproduce
+# Impact if Not Fixed
+# Root Cause
+# Proposed Solution
