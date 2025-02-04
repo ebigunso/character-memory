@@ -1,18 +1,19 @@
 # Vector Database Memory Schema & Payload Specification
 
-This document defines the schema for storing memory entries in Qdrant, detailing the intended structure and data types. It distinguishes between **episodic** and **semantic** memories using a shared common structure, while allowing episodic entries to include additional metadata. The specification leverages Qdrant's supported payload types (e.g., `uuid`, `keyword`, `datetime`, `geo`) to enforce consistency and enable effective filtering.
+This document defines the schema for storing memory entries in Qdrant, detailing the intended structure and data types. It distinguishes between **episodic** and **semantic** memories using a shared common structure, while allowing episodic entries to include additional metadata. The specification leverages Qdrant's supported payload types (e.g., `uuid`, `keyword`, `datetime`) to enforce consistency and enable effective filtering.
 
 ## Schema Quick Reference
 
-| Field | Type | Required For | Description |
-|-------|------|-------------|-------------|
-| id | `uuid` | All | Unique identifier linking to graph database |
-| memory_type | `keyword` | All | Either "episodic" or "semantic" |
-| content | `keyword` | All | Raw textual content for vector generation |
-| timestamp | `datetime` | Episodic | Event occurrence time (RFC 3339) |
-| location_text | `keyword` | Episodic | Textual location description |
-| location_geo | `geo` | Episodic (Optional) | Geographic coordinates (lon/lat) |
-| participants | `keyword[]` | Episodic | Array of involved entities |
+| Field          | Type         | Required For | Description                                   |
+|----------------|--------------|--------------|-----------------------------------------------|
+| id             | `uuid`       | All          | Unique identifier linking to graph database   |
+| memory_type    | `keyword`    | All          | Either "episodic" or "semantic"               |
+| content        | `keyword`    | All          | Raw textual content for vector generation      |
+| timestamp      | `datetime`   | Episodic     | Event occurrence time (RFC 3339)              |
+| location_text  | `keyword`    | Episodic     | Textual location description                  |
+| participants   | `keyword[]`  | Episodic     | Array of involved entities                    |
+
+*Note: A `location_geo` field (using Qdrant's `geo` type for geographic coordinates) is considered as a future enhancement and is not included in the current schema requirements.*
 
 ## 1. Common Fields
 
@@ -45,7 +46,7 @@ Every memory entry—whether episodic or semantic—**must include** the followi
 
 ## 2. Episodic-Specific Fields
 
-These fields **must be included only** in entries where `memory_type` is set to `"episodic"`. Note that the location field is now flexible to support both vague or digital representations as well as precise geographic data when available.
+These fields **must be included only** in entries where `memory_type` is set to `"episodic"`. Note that while the schema currently requires a textual representation of location, future enhancements may introduce precise geographic data if needed.
 
 - **timestamp**
   - **Type**: `datetime`
@@ -64,14 +65,6 @@ These fields **must be included only** in entries where `memory_type` is set to 
     "location_text": "Café Central"
     ```
 
-- **location_geo** (Optional)
-  - **Type**: `geo`
-  - **Description**: An optional field for physical locations. When a precise geographic location is available, store the coordinates as an object containing `lon` (longitude) and `lat` (latitude). This field is used for spatial queries but can be omitted when it isn’t applicable.
-  - **Example**:
-    ```json
-    "location_geo": { "lon": 13.4050, "lat": 52.5200 }
-    ```
-
 - **participants**
   - **Type**: Array of `keyword` values
   - **Description**: A list of individuals or entities involved in the event. This helps in establishing relationships within the graph database and supports queries to retrieve all memories associated with a particular participant.
@@ -84,7 +77,7 @@ These fields **must be included only** in entries where `memory_type` is set to 
 
 ### Episodic Memory Entry
 
-If you have both a textual and a precise geographic representation of the location:
+Using a textual description of the location:
 
 ```json
 {
@@ -93,12 +86,11 @@ If you have both a textual and a precise geographic representation of the locati
   "content": "Discussed plans for the weekend at Café Central.",
   "timestamp": "2025-02-02T14:00:00Z",
   "location_text": "Café Central",
-  "location_geo": { "lon": 13.4050, "lat": 52.5200 },
   "participants": ["Alice", "Bob"]
 }
 ```
 
-If the location is more abstract or digital, only the textual field is necessary:
+If the event took place in a digital space:
 
 ```json
 {
@@ -140,4 +132,9 @@ Semantic memories do not require any location data:
   }
   ```
 
-  This filter will automatically ignore entries that do not contain the episodic-specific keys, such as semantic memories. Likewise, filtering on location can be done by applying conditions on `location_text` or `location_geo` based on the type of query required.
+  This filter will automatically ignore entries that do not contain the episodic-specific keys, such as semantic memories. Likewise, filtering on location can be done by applying conditions on `location_text` based on the type of query required.
+
+## Future Considerations
+
+- **Geographic Coordinates (`location_geo`)**:
+  While the current schema excludes geographic coordinates to keep the implementation simple and within scope, future versions of the system may benefit from capturing precise location data. If a requirement arises to support spatial queries (e.g., "Show me all events near Berlin"), the schema can be extended to include a `location_geo` field (of type `geo`). This would be integrated in a way that complements the existing `location_text` field without disrupting the current functionality.
