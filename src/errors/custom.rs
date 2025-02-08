@@ -1,4 +1,5 @@
 use thiserror::Error;
+use qdrant_client::QdrantError;
 
 #[derive(Error, Debug)]
 pub enum CustomError {
@@ -24,7 +25,7 @@ pub enum CustomError {
     DatabaseError(String),
 
     #[error("Vector database error: {0}")]
-    QdrantError(#[from] qdrant_client::Error),
+    QdrantError(#[from] QdrantError),
 }
 
 impl CustomError {
