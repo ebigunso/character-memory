@@ -1,18 +1,19 @@
 use async_trait::async_trait;
 use qdrant_client::{
-    prelude::*,
     qdrant::{
-        vectors_config::Config, CreateCollection, Distance, PointStruct, SearchPoints,
+        vectors_config::Config, Distance, PointStruct, SearchPoints,
         VectorParams, VectorsConfig, PointsSelector,
+        CreateCollectionBuilder, UpsertPointsBuilder, DeletePointsBuilder, SearchPointsBuilder,
     },
+    Qdrant,
 };
 use crate::errors::custom::CustomError;
 use super::vector_database::VectorDatabase;
 
-pub(crate) struct QdrantDatabaseImpl(QdrantClient);
+pub(crate) struct QdrantDatabaseImpl(Qdrant);
 
 impl QdrantDatabaseImpl {
-    pub fn new(client: QdrantClient) -> Self {
+    pub fn new(client: Qdrant) -> Self {
         Self(client)
     }
 }
@@ -33,28 +34,47 @@ impl VectorDatabase for QdrantDatabaseImpl {
             })),
         };
 
-        self.0.create_collection(&CreateCollection {
-            collection_name: collection_name.to_string(),
-            vectors_config: Some(vectors_config),
-            ..Default::default()
-        })
-        .await?;
+        let create_req = CreateCollectionBuilder::new(collection_name)
+            .vectors_config(vectors_config)
+            .build();
+        self.0.create_collection(create_req).await?;
 
         Ok(())
     }
 
     async fn upsert_points(&self, collection_name: &str, points: Vec<PointStruct>) -> Result<(), CustomError> {
-        self.0.upsert_points(collection_name, points, None).await?;
+        let upsert_req = UpsertPointsBuilder::new(collection_name, points)
+            .build();
+        self.0.upsert_points(upsert_req).await?;
         Ok(())
     }
 
     async fn search_points(&self, search: &SearchPoints) -> Result<Vec<PointStruct>, CustomError> {
-        let result = self.0.search_points(search).await?;
-        Ok(result.result)
+        let search_req = SearchPointsBuilder::new(
+            &search.collection_name,
+            search.vector.clone(),
+            search.limit
+        )
+        .with_payload(search.with_payload)
+        .build();
+        let response = self.0.search_points(search_req).await?;
+        let points: Vec<PointStruct> = response.result
+            .into_iter()
+            .map(|sp| PointStruct {
+                id: sp.id,
+                payload: sp.payload,
+                vectors: sp.vectors.map(|v| v.into()),
+                ..Default::default()
+            })
+            .collect();
+        Ok(points)
     }
 
     async fn delete_points(&self, collection_name: &str, selector: &PointsSelector) -> Result<(), CustomError> {
-        self.0.delete_points(collection_name, selector, None).await?;
+        let delete_req = DeletePointsBuilder::new(collection_name)
+            .points(selector.clone().into())
+            .build();
+        self.0.delete_points(delete_req).await?;
         Ok(())
     }
 }

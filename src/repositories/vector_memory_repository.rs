@@ -1,5 +1,5 @@
-use qdrant_client::qdrant::{PointStruct, SearchPoints, Filter, Condition, Range, PointsSelector};
-use chrono::{DateTime, Utc};
+use qdrant_client::qdrant::{PointStruct, Filter, Condition, Range, PointId, SearchPointsBuilder};
+use chrono::DateTime;
 use uuid::Uuid;
 use serde_json::json;
 
@@ -103,7 +103,8 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 
     /// Deletes a memory by its ID
     pub(crate) async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-        let selector = PointsSelector::PointIds(vec![id.to_string()]);
+        let point_id: PointId = id.to_string().into();
+        let selector = vec![point_id].into();
         self.client.delete_points(&self.config.collection_name, &selector).await
     }
 
@@ -131,15 +132,20 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             )));
         }
 
-        let search_points = SearchPoints {
-            collection_name: self.config.collection_name.clone(),
-            vector: query_vector.to_vec(),
-            limit: top_k as u64,
-            filter: filters.map(|f| self.build_filter(f)),
-            ..Default::default()
-        };
+        let mut search_req = SearchPointsBuilder::new(
+            &self.config.collection_name,
+            query_vector.to_vec(),
+            top_k as u64
+        )
+        .with_payload(true.into());
 
-        let points = self.client.search_points(&search_points).await?;
+        if let Some(f) = filters {
+            search_req = search_req.filter(self.build_filter(f));
+        }
+
+        let search_req = search_req.build();
+
+        let points = self.client.search_points(&search_req).await?;
         let mut memories = Vec::with_capacity(points.len());
         for point in points {
             memories.push(self.point_to_memory(&point)?);
@@ -178,7 +184,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 
         // Add episodic-specific fields if present
         if let Some(timestamp) = &memory.timestamp {
-            payload["timestamp"] = json!(timestamp.to_rfc3339());
+            payload["timestamp"] = json!(timestamp.timestamp());
         }
         if let Some(location) = &memory.location_text {
             payload["location_text"] = json!(location);
@@ -188,14 +194,14 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         }
 
         PointStruct {
-            id: Some(memory.id.to_string().into()),
-            payload: payload.into(),
+            id: Some(format!("{:?}", memory.id).into()),
+            payload: payload.try_into().expect("Payload conversion failed"),
             vectors: Some(memory.embedding.clone().into()),
         }
     }
 
     fn point_to_memory(&self, point: &PointStruct) -> Result<MemoryEntry, CustomError> {
-        let payload = point.payload.as_ref();
+        let payload = &point.payload;
 
         // Extract required fields with proper error handling
         let memory_type_str = payload.get("memory_type")
@@ -216,21 +222,21 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 
         let embedding = point.vectors.as_ref()
             .ok_or_else(|| CustomError::DatabaseError("Missing vectors in point".to_string()))?
-            .to_vec();
+            .clone()
+            .into();
 
         let id = point.id.as_ref()
             .ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
-        let id = Uuid::parse_str(&id.to_string())
+        let id = Uuid::parse_str(&format!("{:?}", id))
             .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
 
         // Extract optional fields
         let timestamp = payload
             .get("timestamp")
-            .and_then(|v| v.as_str())
-            .map(|ts| DateTime::parse_from_rfc3339(ts)
-                .map_err(|e| CustomError::DatabaseError(format!("Invalid timestamp format: {}", e))))
-            .transpose()?
-            .map(|dt| dt.with_timezone(&Utc));
+            .and_then(|v| v.as_i64())
+            .map(|ts| DateTime::from_timestamp(ts, 0)
+                .ok_or_else(|| CustomError::DatabaseError("Invalid timestamp value".to_string())))
+            .transpose()?;
 
         let location_text = payload
             .get("location_text")
@@ -270,12 +276,12 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         let mut has_date_filter = false;
 
         if let Some(start_date) = &filters.start_date {
-            date_range.gte = Some(start_date.to_rfc3339().into());
+            date_range.gte = Some((start_date.timestamp() as f64).into());
             has_date_filter = true;
         }
 
         if let Some(end_date) = &filters.end_date {
-            date_range.lte = Some(end_date.to_rfc3339().into());
+            date_range.lte = Some((end_date.timestamp() as f64).into());
             has_date_filter = true;
         }
 
@@ -303,6 +309,8 @@ mod tests {
     use crate::models::MemoryInput;
     use crate::databases::vector_database::MockVectorDatabase;
     use mockall::predicate::*;
+    use chrono::Utc;
+    use qdrant_client::qdrant::{PointsSelector, points_selector::PointsSelectorOneOf, SearchPoints};
 
     // Common test setup
     fn create_test_config() -> VectorMemoryConfig {
@@ -359,7 +367,7 @@ mod tests {
             mock_db.expect_upsert_points()
                 .withf(move |collection: &str, points: &Vec<PointStruct>| {
                     collection == "test_memories" && points.len() == 1 &&
-                    points[0].id.as_ref().unwrap().to_string() == memory_id.to_string()
+                    format!("{:?}", points[0].id.as_ref().unwrap()) == format!("{:?}", memory_id)
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -379,7 +387,7 @@ mod tests {
             mock_db.expect_upsert_points()
                 .withf(move |collection: &str, points: &Vec<PointStruct>| {
                     collection == "test_memories" && points.len() == 1 &&
-                    points[0].id.as_ref().unwrap().to_string() == memory_id.to_string()
+                    format!("{:?}", points[0].id.as_ref().unwrap()) == format!("{:?}", memory_id)
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -399,7 +407,7 @@ mod tests {
             mock_db.expect_delete_points()
                 .withf(move |collection: &str, selector: &PointsSelector| {
                     collection == "test_memories" &&
-                    matches!(selector, PointsSelector::PointIds(ids) if ids[0] == memory_id.to_string())
+                    matches!(selector, PointsSelector::OneOf(PointsSelectorOneOf::Ids(ref ids)) if format!("{:?}", ids.ids[0]) == format!("{:?}", memory_id))
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -420,7 +428,7 @@ mod tests {
                 payload: json!({
                     "memory_type": "episodic",
                     "content": "Test memory",
-                    "timestamp": memory.timestamp.as_ref().map(|t| t.to_rfc3339()),
+                    "timestamp": memory.timestamp.as_ref().map(|t| t.timestamp()),
                     "location_text": "Test Location",
                     "participants": ["Alice", "Bob"]
                 }).into(),
@@ -498,7 +506,7 @@ mod tests {
                 payload: json!({
                     "memory_type": "episodic",
                     "content": "Memory 2",
-                    "timestamp": memory2.timestamp.as_ref().map(|t| t.to_rfc3339()),
+                    "timestamp": memory2.timestamp.as_ref().map(|t| t.timestamp()),
                     "location_text": "Location B",
                     "participants": ["Bob"]
                 }).into(),
