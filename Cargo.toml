@@ -4,9 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dotenvy = "0.15.7"
-secrecy = { version = "0.10.3", features = ["serde"] }
-serde = { version = "1.0.217", features = ["derive"] }
+# Core
 config = "0.15.7"
+dotenvy = "0.15.7"
 thiserror = "2.0.11"
 mockall = "0.13.1"
+
+# Serialization & Security
+serde = { version = "1.0.217", features = ["derive"] }
+secrecy = { version = "0.10.3", features = ["serde"] }
+
+# Database
+qdrant-client = "1.10.0"
+
+# Async Runtime
+tokio = { version = "1.43.0", features = ["full"] }
+async-trait = "0.1.86"
+
+# Utils
+uuid = { version = "1.13.1", features = ["v4", "serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
