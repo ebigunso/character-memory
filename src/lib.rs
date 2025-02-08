@@ -1,5 +1,8 @@
 mod config;
+mod databases;
 mod errors;
+mod models;
+mod repositories;
 
 use config::settings::Settings;
 
