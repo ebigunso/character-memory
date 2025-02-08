@@ -301,7 +301,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 mod tests {
     use super::*;
     use crate::models::MemoryInput;
-use crate::databases::vector_database::MockVectorDatabase;
+    use crate::databases::vector_database::MockVectorDatabase;
     use mockall::predicate::*;
 
     // Common test setup
