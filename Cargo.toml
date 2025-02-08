@@ -15,7 +15,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 secrecy = { version = "0.10.3", features = ["serde"] }
 
 # Database
-qdrant-client = "1.10.0"
+qdrant-client = "1.13.0"
 serde_json = "1.0.138"
 
 # Async Runtime
