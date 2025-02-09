@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use qdrant_client::{
     qdrant::{
-        vectors_config::Config, Distance, PointStruct, SearchPoints,
-        VectorParams, VectorsConfig, PointsIdsList, PointsSelector, points_selector::PointsSelectorOneOf,
+        vectors_config::Config, Distance, PointStruct, SearchPoints, ScoredPoint, VectorParams, VectorsConfig, PointsSelector,
         CreateCollectionBuilder, UpsertPointsBuilder, DeletePointsBuilder, SearchPointsBuilder,
     },
-    Qdrant,
+    Qdrant
 };
 use crate::errors::custom::CustomError;
 use super::vector_database::VectorDatabase;
@@ -49,35 +48,33 @@ impl VectorDatabase for QdrantDatabaseImpl {
         Ok(())
     }
 
-    async fn search_points(&self, search: &SearchPoints) -> Result<Vec<PointStruct>, CustomError> {
+    async fn search_points(&self, search: &SearchPoints) -> Result<Vec<ScoredPoint>, CustomError> {
         let search_req = SearchPointsBuilder::new(
             &search.collection_name,
             search.vector.clone(),
-            search.limit
+            search.limit,
         )
-        .with_payload(search.with_payload.unwrap_or(true))
+        .with_payload(
+            search.with_payload
+                .as_ref()
+                .and_then(|s| s.selector_options.clone())
+                .unwrap_or_else(|| true.into())
+        )
         .build();
+
         let response = self.0.search_points(search_req).await?;
-        let points: Vec<PointStruct> = response.result
-            .into_iter()
-            .map(|sp| PointStruct {
-                id: sp.id,
-                payload: sp.payload,
-                vectors: sp.vectors.map(|v| match v {
-                    qdrant_client::qdrant::Vectors::Simple(vec) => vec,
-                    _ => panic!("Unexpected vector variant encountered in search response"),
-                }),
-                ..Default::default()
-            })
-            .collect();
-        Ok(points)
+
+        Ok(response.result)
     }
 
     async fn delete_points(&self, collection_name: &str, selector: &PointsSelector) -> Result<(), CustomError> {
+        let points_selector = selector
+            .clone()
+            .points_selector_one_of
+            .ok_or_else(|| CustomError::database_error("points_selector_one_of must be specified for delete operation"))?;
+
         let delete_req = DeletePointsBuilder::new(collection_name)
-            .points::<PointsSelectorOneOf>(
-                PointsIdsList::from(selector.clone())
-            )
+            .points(points_selector)
             .build();
         self.0.delete_points(delete_req).await?;
         Ok(())

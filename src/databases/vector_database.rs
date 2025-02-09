@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use qdrant_client::qdrant::{PointStruct, SearchPoints, PointsSelector};
+use qdrant_client::qdrant::{PointStruct, PointsSelector, ScoredPoint, SearchPoints};
 use crate::errors::custom::CustomError;
 
 #[cfg_attr(test, mockall::automock)]
@@ -15,7 +15,7 @@ pub(crate) trait VectorDatabase {
     async fn upsert_points(&self, collection_name: &str, points: Vec<PointStruct>) -> Result<(), CustomError>;
 
     /// Search for points using the provided search parameters
-    async fn search_points(&self, search: &SearchPoints) -> Result<Vec<PointStruct>, CustomError>;
+    async fn search_points(&self, search: &SearchPoints) -> Result<Vec<ScoredPoint>, CustomError>;
 
     /// Delete points from the specified collection using the provided selector
     async fn delete_points(&self, collection_name: &str, selector: &PointsSelector) -> Result<(), CustomError>;
