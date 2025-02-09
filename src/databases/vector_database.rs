@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use qdrant_client::qdrant::{PointStruct, PointsSelector, ScoredPoint, SearchPoints};
 use crate::errors::custom::CustomError;
 
+// ToDo: This still uses qdrant specific types, we need to abstract them away
+
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub(crate) trait VectorDatabase {
