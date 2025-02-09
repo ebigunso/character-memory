@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use qdrant_client::{
     qdrant::{
         vectors_config::Config, Distance, PointStruct, SearchPoints,
-        VectorParams, VectorsConfig, PointsSelector,
+        VectorParams, VectorsConfig, PointsIdsList, PointsSelector, points_selector::PointsSelectorOneOf,
         CreateCollectionBuilder, UpsertPointsBuilder, DeletePointsBuilder, SearchPointsBuilder,
     },
     Qdrant,
@@ -55,7 +55,7 @@ impl VectorDatabase for QdrantDatabaseImpl {
             search.vector.clone(),
             search.limit
         )
-        .with_payload(search.with_payload)
+        .with_payload(search.with_payload.unwrap_or(true))
         .build();
         let response = self.0.search_points(search_req).await?;
         let points: Vec<PointStruct> = response.result
@@ -63,7 +63,10 @@ impl VectorDatabase for QdrantDatabaseImpl {
             .map(|sp| PointStruct {
                 id: sp.id,
                 payload: sp.payload,
-                vectors: sp.vectors.map(|v| v.into()),
+                vectors: sp.vectors.map(|v| match v {
+                    qdrant_client::qdrant::Vectors::Simple(vec) => vec,
+                    _ => panic!("Unexpected vector variant encountered in search response"),
+                }),
                 ..Default::default()
             })
             .collect();
@@ -72,7 +75,9 @@ impl VectorDatabase for QdrantDatabaseImpl {
 
     async fn delete_points(&self, collection_name: &str, selector: &PointsSelector) -> Result<(), CustomError> {
         let delete_req = DeletePointsBuilder::new(collection_name)
-            .points(selector.clone().into())
+            .points::<PointsSelectorOneOf>(
+                PointsIdsList::from(selector.clone())
+            )
             .build();
         self.0.delete_points(delete_req).await?;
         Ok(())

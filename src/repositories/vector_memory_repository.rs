@@ -137,7 +137,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             query_vector.to_vec(),
             top_k as u64
         )
-        .with_payload(true.into());
+        .with_payload(true);
 
         if let Some(f) = filters {
             search_req = search_req.filter(self.build_filter(f));
@@ -193,9 +193,11 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             payload["participants"] = json!(participants);
         }
 
+        use qdrant_client::payload::Payload;
+
         PointStruct {
             id: Some(format!("{:?}", memory.id).into()),
-            payload: payload.try_into().expect("Payload conversion failed"),
+            payload: Payload::try_from(payload).expect("Payload conversion failed"),
             vectors: Some(memory.embedding.clone().into()),
         }
     }
@@ -209,7 +211,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             .as_str()
             .ok_or_else(|| CustomError::DatabaseError("Invalid memory_type format".to_string()))?;
 
-        let memory_type = match memory_type_str {
+        let memory_type = match memory_type_str.as_str() {
             "episodic" => MemoryType::Episodic,
             _ => MemoryType::Semantic,
         };
@@ -220,10 +222,14 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             .ok_or_else(|| CustomError::DatabaseError("Invalid content format".to_string()))?
             .to_string();
 
-        let embedding = point.vectors.as_ref()
-            .ok_or_else(|| CustomError::DatabaseError("Missing vectors in point".to_string()))?
-            .clone()
-            .into();
+        let embedding = if let Some(vectors) = &point.vectors {
+            match vectors {
+                qdrant_client::qdrant::Vectors::Simple(vec) => vec.clone(),
+                _ => return Err(CustomError::DatabaseError("Unexpected vector variant".to_string())),
+            }
+        } else {
+            return Err(CustomError::DatabaseError("Missing vectors in point".to_string()));
+        };
 
         let id = point.id.as_ref()
             .ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
@@ -233,24 +239,44 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         // Extract optional fields
         let timestamp = payload
             .get("timestamp")
-            .and_then(|v| v.as_i64())
+            .and_then(|v| {
+                if let qdrant_client::qdrant::Value::IntValue(ts) = v {
+                    Some(*ts)
+                } else {
+                    None
+                }
+            })
             .map(|ts| DateTime::from_timestamp(ts, 0)
                 .ok_or_else(|| CustomError::DatabaseError("Invalid timestamp value".to_string())))
             .transpose()?;
 
         let location_text = payload
             .get("location_text")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+            .and_then(|v| {
+                if let qdrant_client::qdrant::Value::StrValue(s) = v {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            });
 
         let participants = payload
             .get("participants")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .map(|v| v.as_str()
-                    .ok_or_else(|| CustomError::DatabaseError("Invalid participant format".to_string()))
-                    .map(String::from))
-                .collect::<Result<Vec<_>, _>>())
+            .and_then(|v| {
+                if let qdrant_client::qdrant::Value::ListValue(arr) = v {
+                    Some(arr.iter()
+                        .map(|v| {
+                            if let qdrant_client::qdrant::Value::StrValue(s) = v {
+                                Ok(s.clone())
+                            } else {
+                                Err(CustomError::DatabaseError("Invalid participant format".to_string()))
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>())
+                } else {
+                    None
+                }
+            })
             .transpose()?;
 
         Ok(MemoryEntry {
@@ -310,7 +336,7 @@ mod tests {
     use crate::databases::vector_database::MockVectorDatabase;
     use mockall::predicate::*;
     use chrono::Utc;
-    use qdrant_client::qdrant::{PointsSelector, points_selector::PointsSelectorOneOf, SearchPoints};
+    use qdrant_client::qdrant::{PointsSelector, SearchPoints};
 
     // Common test setup
     fn create_test_config() -> VectorMemoryConfig {
@@ -407,7 +433,7 @@ mod tests {
             mock_db.expect_delete_points()
                 .withf(move |collection: &str, selector: &PointsSelector| {
                     collection == "test_memories" &&
-                    matches!(selector, PointsSelector::OneOf(PointsSelectorOneOf::Ids(ref ids)) if format!("{:?}", ids.ids[0]) == format!("{:?}", memory_id))
+                    matches!(selector, PointsSelector::OneOf(ref ids) if format!("{:?}", ids[0]) == format!("{:?}", memory_id))
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
