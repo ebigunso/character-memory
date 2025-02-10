@@ -177,27 +177,44 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 
     // Helper methods
     fn memory_to_point(&self, memory: &MemoryEntry) -> PointStruct {
-        let mut payload = json!({
-            "memory_type": format!("{:?}", memory.memory_type).to_lowercase(),
-            "content": memory.content,
-        });
+        use std::collections::HashMap;
+        use qdrant_client::qdrant::Value;
+
+        let mut payload_map = HashMap::new();
+
+        // Add required fields
+        payload_map.insert(
+            "memory_type".to_string(),
+            Value::from(format!("{:?}", memory.memory_type).to_lowercase())
+        );
+        payload_map.insert(
+            "content".to_string(),
+            Value::from(memory.content.clone())
+        );
 
         // Add episodic-specific fields if present
         if let Some(timestamp) = &memory.timestamp {
-            payload["timestamp"] = json!(timestamp.timestamp());
+            payload_map.insert(
+                "timestamp".to_string(),
+                Value::from(timestamp.timestamp())
+            );
         }
         if let Some(location) = &memory.location_text {
-            payload["location_text"] = json!(location);
+            payload_map.insert(
+                "location_text".to_string(),
+                Value::from(location.clone())
+            );
         }
         if let Some(participants) = &memory.participants {
-            payload["participants"] = json!(participants);
+            payload_map.insert(
+                "participants".to_string(),
+                Value::from(participants.clone())
+            );
         }
-
-        use qdrant_client::payload::Payload;
 
         PointStruct {
             id: Some(format!("{:?}", memory.id).into()),
-            payload: Payload::try_from(payload).expect("Payload conversion failed"),
+            payload: payload_map,
             vectors: Some(memory.embedding.clone().into()),
         }
     }
