@@ -1,7 +1,7 @@
+use qdrant_client::qdrant::vectors::VectorsOptions;
 use qdrant_client::qdrant::{PointStruct, Filter, Condition, Range, PointId, SearchPointsBuilder};
 use chrono::DateTime;
 use uuid::Uuid;
-use serde_json::json;
 
 use crate::databases::vector_database::VectorDatabase;
 use crate::errors::custom::CustomError;
@@ -240,9 +240,10 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             .to_string();
 
         let embedding = if let Some(vectors) = &point.vectors {
-            match vectors {
-                qdrant_client::qdrant::Vectors::Simple(vec) => vec.clone(),
-                _ => return Err(CustomError::DatabaseError("Unexpected vector variant".to_string())),
+            if let Some(VectorsOptions::Vector(ref vec)) = vectors.vectors_options {
+                vec.data.clone()
+            } else {
+                return Err(CustomError::DatabaseError("Invalid vectors format".to_string()));
             }
         } else {
             return Err(CustomError::DatabaseError("Missing vectors in point".to_string()));
@@ -256,45 +257,25 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         // Extract optional fields
         let timestamp = payload
             .get("timestamp")
-            .and_then(|v| {
-                if let qdrant_client::qdrant::Value::IntValue(ts) = v {
-                    Some(*ts)
-                } else {
-                    None
-                }
-            })
+            .and_then(|v| v.as_integer())
             .map(|ts| DateTime::from_timestamp(ts, 0)
-                .ok_or_else(|| CustomError::DatabaseError("Invalid timestamp value".to_string())))
+            .ok_or_else(|| CustomError::DatabaseError("Invalid timestamp value".to_string())))
             .transpose()?;
 
         let location_text = payload
             .get("location_text")
-            .and_then(|v| {
-                if let qdrant_client::qdrant::Value::StrValue(s) = v {
-                    Some(s.clone())
-                } else {
-                    None
-                }
-            });
+            .and_then(|v| v.as_str().map(|s| s.to_owned()));
 
         let participants = payload
             .get("participants")
             .and_then(|v| {
-                if let qdrant_client::qdrant::Value::ListValue(arr) = v {
-                    Some(arr.iter()
-                        .map(|v| {
-                            if let qdrant_client::qdrant::Value::StrValue(s) = v {
-                                Ok(s.clone())
-                            } else {
-                                Err(CustomError::DatabaseError("Invalid participant format".to_string()))
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>())
-                } else {
-                    None
-                }
-            })
-            .transpose()?;
+                v.as_list()?
+                    .iter()
+                    .map(|item| {
+                        item.as_str().map(|s| s.to_owned())
+                    })
+                    .collect::<Option<Vec<String>>>()
+            });
 
         Ok(MemoryEntry {
             id,
