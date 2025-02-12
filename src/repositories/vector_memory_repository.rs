@@ -1,5 +1,7 @@
-use qdrant_client::qdrant::vectors::VectorsOptions;
-use qdrant_client::qdrant::{PointStruct, Filter, Condition, Range, PointId, SearchPointsBuilder};
+use std::vec;
+
+use qdrant_client::qdrant::vectors_output::VectorsOptions;
+use qdrant_client::qdrant::{PointStruct, Filter, Condition, Range, PointId, SearchPointsBuilder, ScoredPoint};
 use chrono::DateTime;
 use uuid::Uuid;
 
@@ -148,7 +150,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         let points = self.client.search_points(&search_req).await?;
         let mut memories = Vec::with_capacity(points.len());
         for point in points {
-            memories.push(self.point_to_memory(&point)?);
+            memories.push(self.scored_point_to_memory(&point)?);
         }
         Ok(memories)
     }
@@ -212,14 +214,14 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             );
         }
 
-        PointStruct {
+        return PointStruct {
             id: Some(format!("{:?}", memory.id).into()),
             payload: payload_map,
             vectors: Some(memory.embedding.clone().into()),
-        }
+        };
     }
 
-    fn point_to_memory(&self, point: &PointStruct) -> Result<MemoryEntry, CustomError> {
+    fn scored_point_to_memory(&self, point: &ScoredPoint) -> Result<MemoryEntry, CustomError> {
         let payload = &point.payload;
 
         // Extract required fields with proper error handling
@@ -277,7 +279,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
                     .collect::<Option<Vec<String>>>()
             });
 
-        Ok(MemoryEntry {
+        return Ok(MemoryEntry {
             id,
             memory_type,
             content,
@@ -285,7 +287,7 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             timestamp,
             location_text,
             participants,
-        })
+        });
     }
 
     fn build_filter(&self, filters: &MemoryFilters) -> Filter {
