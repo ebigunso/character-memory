@@ -336,7 +336,9 @@ mod tests {
     use crate::databases::vector_database::MockVectorDatabase;
     use mockall::predicate::*;
     use chrono::Utc;
-    use qdrant_client::qdrant::{PointsSelector, SearchPoints};
+    use qdrant_client::qdrant::{PointsSelector, SearchPoints, Value, VectorsOutput, VectorOutput};
+    use qdrant_client::qdrant::vectors_output::VectorsOptions;
+    use std::collections::HashMap;
 
     // Common test setup
     fn create_test_config() -> VectorMemoryConfig {
@@ -360,6 +362,7 @@ mod tests {
     // CRUD Operation Tests
     mod crud_tests {
         use super::*;
+        use qdrant_client::qdrant::points_selector::PointsSelectorOneOf::Points;
 
         #[tokio::test]
         async fn test_init_collection() {
@@ -433,7 +436,13 @@ mod tests {
             mock_db.expect_delete_points()
                 .withf(move |collection: &str, selector: &PointsSelector| {
                     collection == "test_memories" &&
-                    matches!(selector, PointsSelector::OneOf(ref ids) if format!("{:?}", ids[0]) == format!("{:?}", memory_id))
+                    if let Some(points_selector) = &selector.points_selector_one_of {
+                        matches!(points_selector, Points(ids) if ids.ids.get(0).map_or(false, |id|
+                            format!("{:?}", id) == format!("{:?}", memory_id)
+                        ))
+                    } else {
+                        false
+                    }
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -449,23 +458,46 @@ mod tests {
             let mut mock_db = MockVectorDatabase::new();
             let memory = create_test_memory(vector_size);
 
-            let search_result = vec![PointStruct {
+            let mut payload = HashMap::new();
+            payload.insert("memory_type".to_string(), Value::from("episodic"));
+            payload.insert("content".to_string(), Value::from("Test memory"));
+            if let Some(ts) = memory.timestamp.as_ref() {
+                payload.insert("timestamp".to_string(), Value::from(ts.timestamp()));
+            }
+            payload.insert("location_text".to_string(), Value::from("Test Location"));
+            payload.insert("participants".to_string(), Value::from(vec!["Alice".to_string(), "Bob".to_string()]));
+
+            let search_result = vec![ScoredPoint {
                 id: Some(memory.id.to_string().into()),
-                payload: json!({
-                    "memory_type": "episodic",
-                    "content": "Test memory",
-                    "timestamp": memory.timestamp.as_ref().map(|t| t.timestamp()),
-                    "location_text": "Test Location",
-                    "participants": ["Alice", "Bob"]
-                }).into(),
-                vectors: Some(vec![0.1; vector_size].into()),
+                payload,
+                vectors: Some(VectorsOutput {
+                    vectors_options: Some(VectorsOptions::Vector(
+                        VectorOutput {
+                            indices: None,
+                            vector: Some(qdrant_client::qdrant::vector_output::Vector::Dense(
+                                qdrant_client::qdrant::DenseVector {
+                                    data: vec![0.1; vector_size]
+                                }
+                            )),
+                            vectors_count: Some(1),
+                            data: vec![0.1; vector_size],
+                        }
+                    ))
+                }),
+                score: 0.9,
+                version: 1,
+                shard_key: None,
+                order_value: None,
             }];
 
             mock_db.expect_search_points()
-                .withf(|search: &SearchPoints| {
-                    search.collection_name == "test_memories" &&
-                    search.vector.len() == vector_size &&
-                    search.limit == 1
+                .withf({
+                    let vs = vector_size;
+                    move |search: &SearchPoints| {
+                        search.collection_name == "test_memories" &&
+                        search.vector.len() == vs &&
+                        search.limit == 1
+                    }
                 })
                 .times(1)
                 .returning(move |_| Ok(search_result.clone()));
@@ -480,6 +512,8 @@ mod tests {
     // Search and Filter Tests
     mod search_tests {
         use super::*;
+        use qdrant_client::qdrant::DenseVector;
+        use qdrant_client::qdrant::vector_output::Vector;
 
         #[tokio::test]
         async fn test_search_with_filters() {
@@ -527,24 +561,47 @@ mod tests {
             ).unwrap();
 
             // Setup mock for search with filters
-            let search_result = vec![PointStruct {
+            let mut payload = HashMap::new();
+            payload.insert("memory_type".to_string(), Value::from("episodic"));
+            payload.insert("content".to_string(), Value::from("Memory 2"));
+            if let Some(ts) = memory2.timestamp.as_ref() {
+                payload.insert("timestamp".to_string(), Value::from(ts.timestamp()));
+            }
+            payload.insert("location_text".to_string(), Value::from("Location B"));
+            payload.insert("participants".to_string(), Value::from(vec!["Bob".to_string()]));
+
+            let search_result = vec![ScoredPoint {
                 id: Some(memory2.id.to_string().into()),
-                payload: json!({
-                    "memory_type": "episodic",
-                    "content": "Memory 2",
-                    "timestamp": memory2.timestamp.as_ref().map(|t| t.timestamp()),
-                    "location_text": "Location B",
-                    "participants": ["Bob"]
-                }).into(),
-                vectors: Some(vec![0.1; vector_size].into()),
+                payload,
+                vectors: Some(VectorsOutput {
+                    vectors_options: Some(VectorsOptions::Vector(
+                        VectorOutput {
+                            indices: None,
+                            vector: Some(Vector::Dense(
+                                DenseVector {
+                                    data: vec![0.1; vector_size]
+                                }
+                            )),
+                            vectors_count: Some(1),
+                            data: vec![0.1; vector_size],
+                        }
+                    ))
+                }),
+                score: 0.9,
+                version: 1,
+                shard_key: None,
+                order_value: None,
             }];
 
             mock_db.expect_search_points()
-                .withf(|search: &SearchPoints| {
-                    search.collection_name == "test_memories" &&
-                    search.vector.len() == vector_size &&
-                    search.limit == 10 &&
-                    matches!(search.filter.as_ref(), Some(filter) if filter.must.len() == 2)
+                .withf({
+                    let vs = vector_size;
+                    move |search: &SearchPoints| {
+                        search.collection_name == "test_memories" &&
+                        search.vector.len() == vs &&
+                        search.limit == 10 &&
+                        matches!(search.filter.as_ref(), Some(filter) if filter.must.len() == 2)
+                    }
                 })
                 .times(1)
                 .returning(move |_| Ok(search_result.clone()));
