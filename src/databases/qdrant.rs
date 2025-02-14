@@ -71,7 +71,7 @@ impl VectorDatabase for QdrantDatabaseImpl {
         let points_selector = selector
             .clone()
             .points_selector_one_of
-            .ok_or_else(|| CustomError::database_error("points_selector_one_of must be specified for delete operation"))?;
+            .ok_or_else(|| CustomError::DatabaseError("points_selector_one_of must be specified for delete operation".to_string()))?;
 
         let delete_req = DeletePointsBuilder::new(collection_name)
             .points(points_selector)

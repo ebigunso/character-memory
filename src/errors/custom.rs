@@ -27,13 +27,3 @@ pub enum CustomError {
     #[error("Vector database error: {0}")]
     QdrantError(#[from] QdrantError),
 }
-
-impl CustomError {
-    pub(crate) fn missing_episodic_field(field: &'static str) -> Self {
-        CustomError::MissingEpisodicField(field)
-    }
-
-    pub(crate) fn database_error(msg: impl Into<String>) -> Self {
-        CustomError::DatabaseError(msg.into())
-    }
-}

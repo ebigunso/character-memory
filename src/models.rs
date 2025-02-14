@@ -75,13 +75,13 @@ impl MemoryEntry {
         match self.memory_type {
             MemoryType::Episodic => {
                 if self.timestamp.is_none() {
-                    return Err(CustomError::missing_episodic_field("timestamp"));
+                    return Err(CustomError::MissingEpisodicField("timestamp"));
                 }
                 if self.location_text.is_none() {
-                    return Err(CustomError::missing_episodic_field("location_text"));
+                    return Err(CustomError::MissingEpisodicField("location_text"));
                 }
                 if self.participants.is_none() {
-                    return Err(CustomError::missing_episodic_field("participants"));
+                    return Err(CustomError::MissingEpisodicField("participants"));
                 }
             }
             MemoryType::Semantic => {
