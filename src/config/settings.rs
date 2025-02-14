@@ -110,3 +110,18 @@ impl Settings {
         self.openai_api_key.expose_secret()
     }
 }
+
+#[cfg(test)]
+impl Settings {
+    pub fn new_for_tests(
+        qdrant_connection_string: SecretString,
+        oxigraph_connection_string: SecretString,
+        openai_api_key: SecretString,
+    ) -> Self {
+        Settings {
+            qdrant_connection_string,
+            oxigraph_connection_string,
+            openai_api_key,
+        }
+    }
+}

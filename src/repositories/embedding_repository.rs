@@ -11,13 +11,13 @@ use reqwest::blocking::Client;
 use serde_json::json;
 
 pub(crate) struct EmbeddingRepository {
-    api_key: String,
-    client: Client,
+    pub(crate) api_key: String,
+    pub(crate) client: Client,
 }
 
 impl EmbeddingRepository {
     pub(crate) fn new(settings: &Settings) -> Result<Self, CustomError> {
-        let api_key = settings.get_openai_api_key();
+        let api_key = settings.get_openai_api_key().to_string();
         if api_key.trim().is_empty() {
             return Err(CustomError::EmbeddingInitializationError("OPENAI_API_KEY is not provided.".into()));
         }
@@ -80,11 +80,11 @@ mod tests {
     use secrecy::SecretString;
 
     fn dummy_settings_with_api(api: &str) -> Settings {
-        Settings {
-            qdrant_connection_string: SecretString::new("dummy".into()),
-            oxigraph_connection_string: SecretString::new("dummy".into()),
-            openai_api_key: SecretString::new(api.into()),
-        }
+        Settings::new_for_tests(
+            SecretString::new("dummy".into()),
+            SecretString::new("dummy".into()),
+            SecretString::new(api.into())
+        )
     }
 
     #[test]
