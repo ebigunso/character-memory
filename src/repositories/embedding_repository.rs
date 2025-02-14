@@ -20,7 +20,7 @@ use serde_json::json;
 pub(crate) fn init_model(settings: &Settings) -> Result<(), CustomError> {
     let api_key = settings.get_openai_api_key();
     if api_key.trim().is_empty() {
-        println!("Embedding repository: Warning - OPENAI_API_KEY is not provided. Dummy embeddings will be used.");
+        return Err(CustomError::EmbeddingInitializationError("OPENAI_API_KEY is not provided.".into()));
     } else {
         println!("Embedding repository: Initialized with provided OpenAI API key.");
         // Optionally, perform a connectivity test to the OpenAI API.
@@ -43,9 +43,7 @@ pub(crate) fn generate_embedding(settings: &Settings, text: &str) -> Result<Vec<
     }
     let api_key = settings.get_openai_api_key();
     if api_key.trim().is_empty() {
-        println!("Embedding repository: OPENAI_API_KEY not provided. Using dummy embedding.");
-        let embedding = vec![text.len() as f32, 0.5, 1.0];
-        return Ok(embedding);
+        return Err(CustomError::EmbeddingGenerationError("OPENAI_API_KEY is not provided.".into()));
     }
     let client = Client::new();
     let payload = json!({
@@ -109,9 +107,16 @@ mod tests {
 
     #[test]
     fn test_init_model() {
+        let settings = dummy_settings_with_api("dummy_key");
+        let result = init_model(&settings);
+        assert!(result.is_ok(), "Model initialization should succeed with valid API key.");
+    }
+
+    #[test]
+    fn test_init_model_empty_api() {
         let settings = dummy_settings_with_api("");
         let result = init_model(&settings);
-        assert!(result.is_ok(), "Model initialization should succeed.");
+        assert!(result.is_err(), "Model initialization should fail with empty API key.");
     }
 
     #[test]
@@ -124,20 +129,16 @@ mod tests {
     #[test]
     fn test_generate_embedding_with_valid_text() {
         let text = "hello, world";
-        let settings = dummy_settings_with_api("");
+        let settings = dummy_settings_with_api("valid_api_key");
         let result = generate_embedding(&settings, text);
-        assert!(result.is_ok(), "Valid text should produce an embedding.");
-        let embedding = result.unwrap();
-        assert_eq!(embedding[0], text.len() as f32);
+        assert!(result.is_err(), "Valid text with invalid API key should produce an error.");
     }
 
     #[test]
     fn test_batch_generate_embeddings() {
-        let settings = dummy_settings_with_api("");
+        let settings = dummy_settings_with_api("valid_api_key");
         let texts = ["first test", "second test"];
         let result = batch_generate_embeddings(&settings, &texts);
-        assert!(result.is_ok(), "Batch generation should succeed.");
-        let embeddings = result.unwrap();
-        assert_eq!(embeddings.len(), texts.len());
+        assert!(result.is_err(), "Batch generation should fail with invalid API key.");
     }
 }
