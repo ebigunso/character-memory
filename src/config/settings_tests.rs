@@ -19,6 +19,7 @@ mod tests {
                 Ok(config::Config::builder()
                     .set_override("qdrant_connection_string", "test_qdrant").unwrap()
                     .set_override("oxigraph_connection_string", "test_oxigraph").unwrap()
+                    .set_override("openai_api_key", "test_openai").unwrap()
                     .build().unwrap())
             });
 
@@ -78,6 +79,7 @@ mod tests {
             .unwrap()
             .set_override("oxigraph_connection_string", "external_oxigraph")
             .unwrap()
+            .set_override("openai_api_key", "external_openai").unwrap()
             .build()
             .unwrap();
 
