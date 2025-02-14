@@ -10,85 +10,67 @@ use crate::config::settings::Settings;
 use reqwest::blocking::Client;
 use serde_json::json;
 
-/// Initializes the embedding model by setting up necessary configurations such as
-/// reading API credentials and validating connectivity to the OpenAI service. In a production
-/// scenario, this function would perform these tasks. Here, the initialization is simulated.
-///
-/// Returns:
-///   - Ok(()) on success.
-///   - Err(CustomError) if initialization fails.
-pub(crate) fn init_model(settings: &Settings) -> Result<(), CustomError> {
-    let api_key = settings.get_openai_api_key();
-    if api_key.trim().is_empty() {
-        return Err(CustomError::EmbeddingInitializationError("OPENAI_API_KEY is not provided.".into()));
-    } else {
+pub(crate) struct EmbeddingRepository {
+    api_key: String,
+    client: Client,
+}
+
+impl EmbeddingRepository {
+    pub(crate) fn new(settings: &Settings) -> Result<Self, CustomError> {
+        let api_key = settings.get_openai_api_key();
+        if api_key.trim().is_empty() {
+            return Err(CustomError::EmbeddingInitializationError("OPENAI_API_KEY is not provided.".into()));
+        }
         println!("Embedding repository: Initialized with provided OpenAI API key.");
-        // Optionally, perform a connectivity test to the OpenAI API.
+        Ok(EmbeddingRepository {
+            api_key,
+            client: Client::new(),
+        })
     }
-    Ok(())
-}
 
-/// Generates a vector embedding for the provided text by invoking the OpenAI text-embedding-3-large API.
-/// For demonstration purposes, this function simulates embedding generation by constructing a dummy vector.
-///
-/// Parameters:
-///   - text: Input string for which the embedding is generated.
-///
-/// Returns:
-///   - Ok(Vec<f32>) containing the embedding vector if successful.
-///   - Err(CustomError) if the input text is empty or generation fails.
-pub(crate) fn generate_embedding(settings: &Settings, text: &str) -> Result<Vec<f32>, CustomError> {
-    if text.trim().is_empty() {
-        return Err(CustomError::EmbeddingGenerationError("Input text is empty.".into()));
+    /// Generates a vector embedding for the provided text by invoking the OpenAI text-embedding-3-large API.
+    /// Returns a vector of f32 values representing the embedding, or an error if the API call fails.
+    pub(crate) fn generate_embedding(&self, text: &str) -> Result<Vec<f32>, CustomError> {
+        if text.trim().is_empty() {
+            return Err(CustomError::EmbeddingGenerationError("Input text is empty.".into()));
+        }
+        let payload = json!({
+            "model": "text-embedding-3-large",
+            "input": text,
+        });
+        let response = self.client.post("https://api.openai.com/v1/embeddings")
+            .bearer_auth(&self.api_key)
+            .json(&payload)
+            .send()
+            .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
+        if !response.status().is_success() {
+            return Err(CustomError::EmbeddingGenerationError(
+                format!("OpenAI API error: {}", response.status())
+            ));
+        }
+        let resp_json: serde_json::Value = response.json()
+            .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
+        let embedding = resp_json.get("data")
+            .and_then(|data| data.get(0))
+            .and_then(|item| item.get("embedding"))
+            .and_then(|emb| emb.as_array())
+            .ok_or_else(|| CustomError::EmbeddingGenerationError("Failed to parse embedding from API response".into()))?;
+        let vec_embedding: Vec<f32> = embedding.iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+        Ok(vec_embedding)
     }
-    let api_key = settings.get_openai_api_key();
-    if api_key.trim().is_empty() {
-        return Err(CustomError::EmbeddingGenerationError("OPENAI_API_KEY is not provided.".into()));
-    }
-    let client = Client::new();
-    let payload = json!({
-        "model": "text-embedding-3-large",
-        "input": text,
-    });
-    let response = client.post("https://api.openai.com/v1/embeddings")
-        .bearer_auth(api_key)
-        .json(&payload)
-        .send()
-        .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
-    if !response.status().is_success() {
-        return Err(CustomError::EmbeddingGenerationError(
-            format!("OpenAI API error: {}", response.status())
-        ));
-    }
-    let resp_json: serde_json::Value = response.json()
-        .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
-    let embedding = resp_json.get("data")
-        .and_then(|data| data.get(0))
-        .and_then(|item| item.get("embedding"))
-        .and_then(|emb| emb.as_array())
-        .ok_or_else(|| CustomError::EmbeddingGenerationError("Failed to parse embedding from API response".into()))?;
-    let vec_embedding: Vec<f32> = embedding.iter()
-        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-        .collect();
-    Ok(vec_embedding)
-}
 
-/// Generates embeddings for a batch of texts. This function calls generate_embedding for each text
-/// and accumulates the results.
-///
-/// Parameters:
-///   - texts: A slice of string slices for which embeddings should be generated.
-///
-/// Returns:
-///   - Ok(Vec<Vec<f32>>): A vector of embeddings corresponding to each input text.
-///   - Err(CustomError) if any invocation of generate_embedding fails.
-pub(crate) fn batch_generate_embeddings(settings: &Settings, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
-    let mut embeddings = Vec::with_capacity(texts.len());
-    for &text in texts {
-        let emb = generate_embedding(settings, text)?;
-        embeddings.push(emb);
+    /// Generates embeddings for a batch of texts.
+    /// Calls generate_embedding for each text and accumulates the results.
+    pub(crate) fn batch_generate_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
+        let mut embeddings = Vec::with_capacity(texts.len());
+        for &text in texts {
+            let emb = self.generate_embedding(text)?;
+            embeddings.push(emb);
+        }
+        Ok(embeddings)
     }
-    Ok(embeddings)
 }
 
 #[cfg(test)]
@@ -106,23 +88,24 @@ mod tests {
     }
 
     #[test]
-    fn test_init_model() {
+    fn test_new_with_valid_api() {
         let settings = dummy_settings_with_api("dummy_key");
-        let result = init_model(&settings);
-        assert!(result.is_ok(), "Model initialization should succeed with valid API key.");
+        let repo = EmbeddingRepository::new(&settings);
+        assert!(repo.is_ok(), "EmbeddingRepository initialization should succeed with valid API key.");
     }
 
     #[test]
-    fn test_init_model_empty_api() {
+    fn test_new_with_empty_api() {
         let settings = dummy_settings_with_api("");
-        let result = init_model(&settings);
-        assert!(result.is_err(), "Model initialization should fail with empty API key.");
+        let repo = EmbeddingRepository::new(&settings);
+        assert!(repo.is_err(), "EmbeddingRepository initialization should fail with empty API key.");
     }
 
     #[test]
     fn test_generate_embedding_with_empty_text() {
-        let settings = dummy_settings_with_api("");
-        let result = generate_embedding(&settings, "  ");
+        let settings = dummy_settings_with_api("valid_key");
+        let repo = EmbeddingRepository::new(&settings).unwrap();
+        let result = repo.generate_embedding("  ");
         assert!(result.is_err(), "Empty text should return an error.");
     }
 
@@ -130,15 +113,17 @@ mod tests {
     fn test_generate_embedding_with_valid_text() {
         let text = "hello, world";
         let settings = dummy_settings_with_api("valid_api_key");
-        let result = generate_embedding(&settings, text);
-        assert!(result.is_err(), "Valid text with invalid API key should produce an error.");
+        let repo = EmbeddingRepository::new(&settings).unwrap();
+        let result = repo.generate_embedding(text);
+        assert!(result.is_err(), "Valid text with a dummy API key should produce an error during API call.");
     }
 
     #[test]
     fn test_batch_generate_embeddings() {
         let settings = dummy_settings_with_api("valid_api_key");
+        let repo = EmbeddingRepository::new(&settings).unwrap();
         let texts = ["first test", "second test"];
-        let result = batch_generate_embeddings(&settings, &texts);
-        assert!(result.is_err(), "Batch generation should fail with invalid API key.");
+        let result = repo.batch_generate_embeddings(&texts);
+        assert!(result.is_err(), "Batch generation should fail with a dummy API key.");
     }
 }
