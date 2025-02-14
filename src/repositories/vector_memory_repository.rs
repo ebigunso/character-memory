@@ -105,7 +105,11 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
 
     /// Deletes a memory by its ID
     pub(crate) async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-        let point_id: PointId = id.to_string().into();
+        let point_id = PointId {
+            point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+                id.to_string()
+            ))
+        };
         let selector = vec![point_id].into();
         self.client.delete_points(&self.config.collection_name, &selector).await
     }
@@ -215,7 +219,11 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
         }
 
         return PointStruct {
-            id: Some(format!("{:?}", memory.id).into()),
+            id: Some(PointId {
+                point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+                    memory.id.to_string()
+                ))
+            }),
             payload: payload_map,
             vectors: Some(memory.embedding.clone().into()),
         };
@@ -251,9 +259,13 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
             return Err(CustomError::DatabaseError("Missing vectors in point".to_string()));
         };
 
-        let id = point.id.as_ref()
+        let point_id = point.id.as_ref()
             .ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
-        let id = Uuid::parse_str(&format!("{:?}", id))
+        let uuid_str = match point_id.point_id_options.as_ref() {
+            Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid)) => uuid,
+            _ => return Err(CustomError::DatabaseError("Invalid point id variant".to_string())),
+        };
+        let id = Uuid::parse_str(uuid_str)
             .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
 
         // Extract optional fields
@@ -494,7 +506,11 @@ mod tests {
             payload.insert("participants".to_string(), Value::from(vec!["Alice".to_string(), "Bob".to_string()]));
 
             let search_result = vec![ScoredPoint {
-                id: Some(memory.id.to_string().into()),
+                id: Some(PointId {
+                    point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+                        memory.id.to_string()
+                    ))
+                }),
                 payload,
                 vectors: Some(VectorsOutput {
                     vectors_options: Some(VectorsOptions::Vector(
@@ -597,7 +613,11 @@ mod tests {
             payload.insert("participants".to_string(), Value::from(vec!["Bob".to_string()]));
 
             let search_result = vec![ScoredPoint {
-                id: Some(memory2.id.to_string().into()),
+                id: Some(PointId {
+                    point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(
+                        memory2.id.to_string()
+                    ))
+                }),
                 payload,
                 vectors: Some(VectorsOutput {
                     vectors_options: Some(VectorsOptions::Vector(
