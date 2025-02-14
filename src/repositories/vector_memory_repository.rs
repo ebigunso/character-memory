@@ -396,7 +396,15 @@ mod tests {
             mock_db.expect_upsert_points()
                 .withf(move |collection: &str, points: &Vec<PointStruct>| {
                     collection == "test_memories" && points.len() == 1 &&
-                    format!("{:?}", points[0].id.as_ref().unwrap()) == format!("{:?}", memory_id)
+                    points[0].id.as_ref().and_then(|point_id| {
+                        point_id.point_id_options.as_ref().and_then(|option| {
+                            if let qdrant_client::qdrant::point_id::PointIdOptions::Uuid(u) = option {
+                                Some(u == &memory_id.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    }).unwrap_or(false)
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -415,8 +423,20 @@ mod tests {
 
             mock_db.expect_upsert_points()
                 .withf(move |collection: &str, points: &Vec<PointStruct>| {
-                    collection == "test_memories" && points.len() == 1 &&
-                    format!("{:?}", points[0].id.as_ref().unwrap()) == format!("{:?}", memory_id)
+                    collection == "test_memories" &&
+                    points.len() == 1 &&
+                    points[0].payload.get("memory_type").map_or(false, |v| v.as_str().map_or(false, |s| s == "episodic")) &&
+                    points[0].payload.get("content").map_or(false, |v| v.as_str().map_or(false, |s| s == "Test memory")) &&
+                    points[0].vectors.is_some() &&
+                    points[0].id.as_ref().and_then(|point_id| {
+                        point_id.point_id_options.as_ref().and_then(|option| {
+                            if let qdrant_client::qdrant::point_id::PointIdOptions::Uuid(u) = option {
+                                Some(u == &memory_id.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    }).unwrap_or(false)
                 })
                 .times(1)
                 .returning(|_, _| Ok(()));
@@ -438,7 +458,13 @@ mod tests {
                     collection == "test_memories" &&
                     if let Some(points_selector) = &selector.points_selector_one_of {
                         matches!(points_selector, Points(ids) if ids.ids.get(0).map_or(false, |id|
-                            format!("{:?}", id) == format!("{:?}", memory_id)
+                            id.point_id_options.as_ref().and_then(|option| {
+                                if let qdrant_client::qdrant::point_id::PointIdOptions::Uuid(u) = option {
+                                    Some(u == &memory_id.to_string())
+                                } else {
+                                    None
+                                }
+                            }).unwrap_or(false)
                         ))
                     } else {
                         false
