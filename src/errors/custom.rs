@@ -26,4 +26,10 @@ pub enum CustomError {
 
     #[error("Vector database error: {0}")]
     QdrantError(#[from] QdrantError),
+
+    #[error("Embedding initialization error: {0}")]
+    EmbeddingInitializationError(String),
+
+    #[error("Embedding generation error: {0}")]
+    EmbeddingGenerationError(String),
 }
