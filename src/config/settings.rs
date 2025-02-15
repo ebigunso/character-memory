@@ -1,9 +1,9 @@
-use crate::errors::custom::CustomError;
+use std::path::PathBuf;
 use config::Config;
 use mockall::automock;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use std::path::PathBuf;
+use crate::errors::custom::CustomError;
 
 #[automock]
 pub(crate) trait ConfigLoader {
@@ -31,7 +31,8 @@ pub(crate) struct DefaultEnvLoader;
 
 impl EnvLoader for DefaultEnvLoader {
     fn load_from_path(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        dotenvy::from_path(&path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        dotenvy::from_path(&path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 
     fn exists(&self, path: PathBuf) -> bool {
@@ -40,7 +41,7 @@ impl EnvLoader for DefaultEnvLoader {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // Fields will be used when implementing database connections
+#[allow(dead_code)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_connection_string: SecretString,
@@ -54,7 +55,7 @@ impl Settings {
 
     pub(crate) fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
         env_loader: E,
-        config_loader: C
+        config_loader: C,
     ) -> Result<Self, CustomError> {
         // Get project root directory from CARGO_MANIFEST_DIR
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -63,49 +64,45 @@ impl Settings {
         // Check if .env exists in project root
         if !env_loader.exists(env_path.clone()) {
             return Err(CustomError::EnvFileNotFound(
-                "Please create .env file with required secrets in the project root.".to_string()
+                "Please create .env file with required secrets in the project root.".to_string(),
             ));
         }
 
         // Load .env file from project root
-        env_loader.load_from_path(env_path)
-            .map_err(|e| CustomError::EnvLoadError(
-                format!("Failed to load .env file: {}", e)
-            ))?;
+        env_loader.load_from_path(env_path).map_err(|e| {
+            CustomError::EnvLoadError(format!("Failed to load .env file: {}", e))
+        })?;
 
         // Build configuration
-        let settings = config_loader.build_config()
-            .map_err(|e| CustomError::ConfigParseError(
-                format!("Failed to build configuration: {}", e)
-            ))?;
+        let settings = config_loader.build_config().map_err(|e| {
+            CustomError::ConfigParseError(format!("Failed to build configuration: {}", e))
+        })?;
 
         // Try to convert into Settings struct
-        settings.try_deserialize()
-            .map_err(|e| CustomError::ConfigParseError(
-                format!("Failed to parse configuration: {}", e)
-            ))
+        settings.try_deserialize().map_err(|e| {
+            CustomError::ConfigParseError(format!("Failed to parse configuration: {}", e))
+        })
     }
 
     /// Creates a Settings instance from an externally provided `config::Config`.
     /// This method is intended for consumers who wish to build their configuration using custom sources (files, command-line, etc.) and inject it.
     pub fn from_config(config: Config) -> Result<Self, CustomError> {
-        config.try_deserialize()
-            .map_err(|e| {
-                CustomError::ConfigParseError(format!("Failed to parse external configuration: {}", e))
-            })
+        config.try_deserialize().map_err(|e| {
+            CustomError::ConfigParseError(format!("Failed to parse external configuration: {}", e))
+        })
     }
 
-    #[allow(dead_code)] // Will be used when implementing Qdrant database connection
+    #[allow(dead_code)]
     pub(crate) fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
     }
 
-    #[allow(dead_code)] // Will be used when implementing Oxigraph database connection
+    #[allow(dead_code)]
     pub(crate) fn get_oxigraph_connection(&self) -> &str {
         self.oxigraph_connection_string.expose_secret()
     }
 
-    #[allow(dead_code)] // Will be used when implementing OpenAI API connection
+    #[allow(dead_code)]
     pub(crate) fn get_openai_api_key(&self) -> &str {
         self.openai_api_key.expose_secret()
     }
@@ -134,20 +131,21 @@ mod tests {
     #[test]
     fn test_settings_load_success() {
         let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists()
-            .return_const(true);
-        mock_env.expect_load_from_path()
-            .returning(|_| Ok(()));
+        mock_env.expect_exists().return_const(true);
+        mock_env.expect_load_from_path().returning(|_| Ok(()));
 
         let mut mock_config = MockConfigLoader::new();
-        mock_config.expect_build_config()
-            .returning(|| {
-                Ok(config::Config::builder()
-                    .set_override("qdrant_connection_string", "test_qdrant").unwrap()
-                    .set_override("oxigraph_connection_string", "test_oxigraph").unwrap()
-                    .set_override("openai_api_key", "test_openai").unwrap()
-                    .build().unwrap())
-            });
+        mock_config.expect_build_config().returning(|| {
+            Ok(config::Config::builder()
+                .set_override("qdrant_connection_string", "test_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "test_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "test_openai")
+                .unwrap()
+                .build()
+                .unwrap())
+        });
 
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(result.is_ok());
@@ -160,8 +158,7 @@ mod tests {
     #[test]
     fn test_settings_load_env_missing() {
         let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists()
-            .return_const(false);
+        mock_env.expect_exists().return_const(false);
         let mock_config = MockConfigLoader::new();
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::EnvFileNotFound(_))));
@@ -170,13 +167,10 @@ mod tests {
     #[test]
     fn test_settings_load_env_error() {
         let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists()
-            .return_const(true);
-        mock_env.expect_load_from_path()
-            .returning(|_| Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Mock env load error"
-            )));
+        mock_env.expect_exists().return_const(true);
+        mock_env.expect_load_from_path().returning(|_| {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "Mock env load error"))
+        });
         let mock_config = MockConfigLoader::new();
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::EnvLoadError(_))));
@@ -185,14 +179,11 @@ mod tests {
     #[test]
     fn test_settings_load_config_error() {
         let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists()
-            .return_const(true);
-        mock_env.expect_load_from_path()
-            .returning(|_| Ok(()));
+        mock_env.expect_exists().return_const(true);
+        mock_env.expect_load_from_path().returning(|_| Ok(()));
 
         let mut mock_config = MockConfigLoader::new();
-        mock_config.expect_build_config()
-            .returning(|| Err(config::ConfigError::NotFound("test".to_string())));
+        mock_config.expect_build_config().returning(|| Err(config::ConfigError::NotFound("test".to_string())));
 
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
@@ -205,7 +196,8 @@ mod tests {
             .unwrap()
             .set_override("oxigraph_connection_string", "external_oxigraph")
             .unwrap()
-            .set_override("openai_api_key", "external_openai").unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
             .build()
             .unwrap();
 
@@ -219,11 +211,9 @@ mod tests {
 
     #[test]
     fn test_settings_from_config_error() {
-        // Missing required fields
         let incomplete_config = config::Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            // oxigraph_connection_string is missing
             .build()
             .unwrap();
 

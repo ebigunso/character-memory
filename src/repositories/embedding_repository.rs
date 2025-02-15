@@ -1,9 +1,7 @@
-/*
- * Module: embedding_repository.rs
- * Description: Implements functionality for converting text into vector embeddings using the OpenAI text-embedding-3-large model.
- * This repository abstracts the call to the OpenAI API and provides a clean internal API for generating embeddings.
- * Visibility: pub(crate)
- */
+ //! Module: embedding_repository
+ //! Implements functionality for converting text into vector embeddings using the OpenAI text-embedding-3-large model.
+ //! This repository abstracts the call to the OpenAI API and provides a clean internal API for generating embeddings.
+ //! Visibility: pub(crate)
 
 use crate::errors::custom::CustomError;
 use crate::config::settings::Settings;
