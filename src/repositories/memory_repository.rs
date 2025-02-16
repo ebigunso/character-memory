@@ -1,7 +1,8 @@
-use crate::models::{MemoryInput, MemoryEntry, MemoryFilters};
+use crate::models::public::{MemoryInput, MemoryFilters};
+use crate::models::internal::MemoryEntry;
 use crate::errors::custom::CustomError;
 use crate::repositories::embedding_repository::EmbeddingRepository;
-use crate::repositories::vector_memory_repository::{VectorMemoryRepository, VectorMemoryConfig};
+use crate::repositories::vector_memory_repository::VectorMemoryRepository;
 use crate::databases::vector_database::VectorDatabase;
 use uuid::Uuid;
 

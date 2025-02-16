@@ -6,6 +6,7 @@ mod repositories;
 
 use config::settings::Settings;
 use crate::errors::custom::CustomError;
+use crate::models::{Memory, MemoryInput, MemoryFilters};
 use crate::repositories::{embedding_repository, memory_repository, vector_memory_repository};
 use crate::databases::qdrant::QdrantDatabaseImpl;
 use qdrant_client::Qdrant;
@@ -40,10 +41,10 @@ impl AgentMemory {
     pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
         // Create the embedding repository using provided settings.
         let embed_repo = embedding_repository::EmbeddingRepository::new(&settings)?;
-    // Instantiate a Qdrant client using the connection string from settings by constructing a QdrantConfig.
-    use qdrant_client::config::QdrantConfig;
-    let q_config = QdrantConfig::from_url(settings.get_qdrant_connection());
-    let qdrant_client = Qdrant::new(q_config)?;
+        // Instantiate a Qdrant client using the connection string from settings by constructing a QdrantConfig.
+        use qdrant_client::config::QdrantConfig;
+        let q_config = QdrantConfig::from_url(settings.get_qdrant_connection());
+        let qdrant_client = Qdrant::new(q_config)?;
         // Create the Qdrant database implementation.
         let qdrant_db = QdrantDatabaseImpl::new(qdrant_client);
         // Configure the vector memory repository. Adjust dimensions as needed.
@@ -65,18 +66,21 @@ impl AgentMemory {
     }
 
     /// Creates a new memory entry.
-    pub async fn create_memory(&self, input: models::MemoryInput) -> Result<models::MemoryEntry, CustomError> {
-        self.memory_repo.create_memory(input).await
+    pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
+        let mem_entry = self.memory_repo.create_memory(input).await?;
+        Ok(mem_entry.into_public())
     }
 
     /// Retrieves a memory entry by its unique identifier.
-    pub async fn get_memory_by_id(&self, id: uuid::Uuid) -> Result<models::MemoryEntry, CustomError> {
-        self.memory_repo.get_memory_by_id(id).await
+    pub async fn get_memory_by_id(&self, id: uuid::Uuid) -> Result<Memory, CustomError> {
+        let mem_entry = self.memory_repo.get_memory_by_id(id).await?;
+        Ok(mem_entry.into_public())
     }
 
     /// Updates an existing memory entry.
-    pub async fn update_memory(&self, input: models::MemoryInput) -> Result<models::MemoryEntry, CustomError> {
-        self.memory_repo.update_memory(input).await
+    pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
+        let mem_entry = self.memory_repo.update_memory(input).await?;
+        Ok(mem_entry.into_public())
     }
 
     /// Deletes a memory entry by its unique identifier.
@@ -89,8 +93,9 @@ impl AgentMemory {
         &self,
         query: &str,
         top_k: usize,
-        filters: Option<models::MemoryFilters>
-    ) -> Result<Vec<models::MemoryEntry>, CustomError> {
-        self.memory_repo.search_memories(query, top_k, filters).await
+        filters: Option<MemoryFilters>
+    ) -> Result<Vec<Memory>, CustomError> {
+        let entries = self.memory_repo.search_memories(query, top_k, filters).await?;
+        Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
     }
 }
