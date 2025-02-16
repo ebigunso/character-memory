@@ -7,16 +7,18 @@ use uuid::Uuid;
 
 use crate::databases::vector_database::VectorDatabase;
 use crate::errors::custom::CustomError;
-use crate::models::{MemoryEntry, MemoryType, MemoryFilters};
+use crate::models::internal::{MemoryEntry, MemoryType};
+use crate::models::public::MemoryFilters;
 
 /// Configuration for VectorMemoryRepository
+///
+/// * `url` - URL of the vector database server
+/// * `collection_name` - Name of the collection to store memories
+/// * `vector_size` - Size of the embedding vectors
 #[derive(Debug, Clone)]
 pub(crate) struct VectorMemoryConfig {
-    /// URL of the vector database server
     pub(crate) url: String,
-    /// Name of the collection to store memories
     pub(crate) collection_name: String,
-    /// Size of the embedding vectors
     pub(crate) vector_size: u64,
 }
 
