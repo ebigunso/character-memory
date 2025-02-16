@@ -48,7 +48,11 @@ impl QdrantDatabaseImpl {
         let payload = point.payload.into_iter().map(|(k, v)| {
             (k, serde_json::Value::String(v.to_string()))
         }).collect();
-        let vector = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
+        let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
+        let vector = match vectors_output.vectors_options {
+            Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(vo)) => vo.data,
+            _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
+        };
         Ok(DbSearchResult {
             id: id_str,
             payload,
@@ -109,9 +113,7 @@ impl VectorDatabase for QdrantDatabaseImpl {
                 point_id_options: Some(PointIdOptions::Uuid(s)),
             }
         }).collect();
-        let selector = PointsSelector {
-            points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList { ids: q_ids })),
-        };
+        let selector = PointsSelectorOneOf::Points(PointsIdsList { ids: q_ids });
         let delete_req = DeletePointsBuilder::new(collection_name).points(selector).build();
         self.0.delete_points(delete_req).await?;
         Ok(())
