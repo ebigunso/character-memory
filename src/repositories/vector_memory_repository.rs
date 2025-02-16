@@ -43,14 +43,20 @@ impl VectorMemoryConfig {
 }
 
 /// Repository implementation for storing and retrieving memories using a vector database.
-pub(crate) struct VectorMemoryRepository<T: VectorDatabase> {
-    client: T,
+pub(crate) struct VectorMemoryRepository<T>
+where
+    T: VectorDatabase + ?Sized,
+{
+    client: Box<T>,
     config: VectorMemoryConfig,
 }
 
-impl<T: VectorDatabase> VectorMemoryRepository<T> {
+impl<T> VectorMemoryRepository<T>
+where
+    T: VectorDatabase + ?Sized,
+{
     /// Creates a new VectorMemoryRepository instance.
-    pub(crate) fn new(client: T, config: VectorMemoryConfig) -> Self {
+    pub(crate) fn new(client: Box<T>, config: VectorMemoryConfig) -> Self {
         Self { client, config }
     }
 
@@ -297,7 +303,7 @@ mod tests {
                 .times(1)
                 .returning(|_, _| Ok(()));
 
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
             assert!(repo.init_collection().await.is_ok());
         }
 
@@ -317,7 +323,7 @@ mod tests {
                 .times(1)
                 .returning(|_, _| Ok(()));
 
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
             assert!(repo.store_memory(&memory).await.is_ok());
         }
 
@@ -340,7 +346,7 @@ mod tests {
                 .times(1)
                 .returning(|_, _| Ok(()));
 
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
             assert!(repo.update_memory(&memory).await.is_ok());
         }
 
@@ -360,7 +366,7 @@ mod tests {
                 .times(1)
                 .returning(|_, _| Ok(()));
 
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
             assert!(repo.delete_memory(memory.id).await.is_ok());
         }
 
@@ -401,7 +407,7 @@ mod tests {
                 .times(1)
                 .returning(move |_| Ok(search_result.clone()));
 
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
             let results = repo.search_memory(&memory.embedding, 1, None).await.unwrap();
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].content, memory.content);
@@ -434,7 +440,7 @@ mod tests {
             let tomorrow = now + chrono::Duration::days(1);
 
             // Create test memories
-            let memory1 = MemoryEntry::new(
+            let _memory1 = MemoryEntry::new(
                 MemoryInput {
                     content: "Memory 1".to_string(),
                     memory_type: "episodic".to_string(),
@@ -496,7 +502,7 @@ mod tests {
                 .returning(move |_| Ok(search_result.clone()));
 
             // Create repository with mock
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
 
             // Initialize collection
             repo.init_collection().await.unwrap();
@@ -529,7 +535,7 @@ mod tests {
         async fn test_invalid_vector_size() {
             let config = create_test_config();
             let mock_db = MockVectorDatabase::new();
-            let repo = VectorMemoryRepository::new(mock_db, config);
+            let repo = VectorMemoryRepository::new(Box::new(mock_db), config);
 
             let input = MemoryInput {
                 content: "Test memory".to_string(),

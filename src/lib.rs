@@ -5,11 +5,9 @@ mod models;
 mod repositories;
 
 use config::settings::Settings;
-use databases::qdrant::QdrantDatabaseImpl;
+use databases::database_settings::DatabaseSettings;
 use errors::custom::CustomError;
 use models::{Memory, MemoryInput, MemoryFilters};
-use qdrant_client::Qdrant;
-use qdrant_client::config::QdrantConfig;
 use repositories::{embedding_repository, memory_repository, vector_memory_repository};
 
 /// Initialize the library with externally supplied settings.
@@ -28,33 +26,31 @@ pub(crate) fn init_from_env() -> Result<(), CustomError> {
 }
 
 /// AgentMemory provides a high-level API for memory operations.
-/// It encapsulates the required settings, repository configuration,
-/// and exposes methods for memory manipulation.
+/// The public API no longer exposes any Qdrant-specific types.
 pub struct AgentMemory {
     settings: Settings,
     collection_name: String,
-    memory_repo: memory_repository::MemoryRepository<QdrantDatabaseImpl>,
+    memory_repo: memory_repository::MemoryRepository,
 }
 
 impl AgentMemory {
     /// Constructs a new AgentMemory instance.
-    /// The consumer must provide the application settings and the desired collection name.
-    pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
+    pub async fn new(
+        settings: Settings,
+        collection_name: String,
+        database_settings: DatabaseSettings,
+    ) -> Result<Self, CustomError> {
         // Create the embedding repository using provided settings.
         let embed_repo = embedding_repository::EmbeddingRepository::new(&settings)?;
-        // Instantiate a Qdrant client using the connection string from settings by constructing a QdrantConfig.
-        let q_config = QdrantConfig::from_url(settings.get_qdrant_connection());
-        let qdrant_client = Qdrant::new(q_config)?;
-        // Create the Qdrant database implementation.
-        let qdrant_db = QdrantDatabaseImpl::new(qdrant_client);
+        // Create the vector database using the provided settings.
+        let vector_db = database_settings.create_database().await?;
         // Configure the vector memory repository. Adjust dimensions as needed.
         let vector_config = vector_memory_repository::VectorMemoryConfig::text_embedding_3_large(
             settings.get_qdrant_connection().to_string(),
-            collection_name.clone()
+            collection_name.clone(),
         );
-        // Create the vector memory repository.
-        let vector_repo =
-            vector_memory_repository::VectorMemoryRepository::new(qdrant_db, vector_config);
+        // Create the vector memory repository with the abstracted vector database.
+        let vector_repo = vector_memory_repository::VectorMemoryRepository::new(Box::new(vector_db), vector_config);
         // Assemble the high-level MemoryRepository.
         let memory_repo = memory_repository::MemoryRepository::new(embed_repo, vector_repo);
 
@@ -93,7 +89,7 @@ impl AgentMemory {
         &self,
         query: &str,
         top_k: usize,
-        filters: Option<MemoryFilters>
+        filters: Option<MemoryFilters>,
     ) -> Result<Vec<Memory>, CustomError> {
         let entries = self.memory_repo.search_memories(query, top_k, filters).await?;
         Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
