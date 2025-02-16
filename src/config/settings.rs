@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use config::Config;
+use config::{Config, ConfigError};
 use mockall::automock;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -7,13 +7,13 @@ use crate::errors::custom::CustomError;
 
 #[automock]
 pub(crate) trait ConfigLoader {
-    fn build_config(&self) -> Result<Config, config::ConfigError>;
+    fn build_config(&self) -> Result<Config, ConfigError>;
 }
 
 pub(crate) struct DefaultConfigLoader;
 
 impl ConfigLoader for DefaultConfigLoader {
-    fn build_config(&self) -> Result<Config, config::ConfigError> {
+    fn build_config(&self) -> Result<Config, ConfigError> {
         Config::builder()
             .add_source(config::Environment::default())
             .build()
@@ -136,7 +136,7 @@ mod tests {
 
         let mut mock_config = MockConfigLoader::new();
         mock_config.expect_build_config().returning(|| {
-            Ok(config::Config::builder()
+            Ok(Config::builder()
                 .set_override("qdrant_connection_string", "test_qdrant")
                 .unwrap()
                 .set_override("oxigraph_connection_string", "test_oxigraph")
@@ -183,7 +183,7 @@ mod tests {
         mock_env.expect_load_from_path().returning(|_| Ok(()));
 
         let mut mock_config = MockConfigLoader::new();
-        mock_config.expect_build_config().returning(|| Err(config::ConfigError::NotFound("test".to_string())));
+        mock_config.expect_build_config().returning(|| Err(ConfigError::NotFound("test".to_string())));
 
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_settings_from_config_success() {
-        let external_config = config::Config::builder()
+        let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
             .set_override("oxigraph_connection_string", "external_oxigraph")
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_settings_from_config_error() {
-        let incomplete_config = config::Config::builder()
+        let incomplete_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
             .build()

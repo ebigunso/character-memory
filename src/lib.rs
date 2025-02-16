@@ -5,11 +5,12 @@ mod models;
 mod repositories;
 
 use config::settings::Settings;
-use crate::errors::custom::CustomError;
-use crate::models::{Memory, MemoryInput, MemoryFilters};
-use crate::repositories::{embedding_repository, memory_repository, vector_memory_repository};
-use crate::databases::qdrant::QdrantDatabaseImpl;
+use databases::qdrant::QdrantDatabaseImpl;
+use errors::custom::CustomError;
+use models::{Memory, MemoryInput, MemoryFilters};
 use qdrant_client::Qdrant;
+use qdrant_client::config::QdrantConfig;
+use repositories::{embedding_repository, memory_repository, vector_memory_repository};
 
 /// Initialize the library with externally supplied settings.
 #[allow(unused_variables)]
@@ -42,7 +43,6 @@ impl AgentMemory {
         // Create the embedding repository using provided settings.
         let embed_repo = embedding_repository::EmbeddingRepository::new(&settings)?;
         // Instantiate a Qdrant client using the connection string from settings by constructing a QdrantConfig.
-        use qdrant_client::config::QdrantConfig;
         let q_config = QdrantConfig::from_url(settings.get_qdrant_connection());
         let qdrant_client = Qdrant::new(q_config)?;
         // Create the Qdrant database implementation.
