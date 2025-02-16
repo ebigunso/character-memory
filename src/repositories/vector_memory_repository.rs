@@ -104,12 +104,39 @@ impl<T: VectorDatabase> VectorMemoryRepository<T> {
                 query_vector.len()
             )));
         }
-        // For now, we are not converting filters; set filter to None.
+        let filter = if let Some(filters) = filters {
+            let mut must_conditions = Vec::new();
+            if let Some(mem_type) = &filters.memory_type {
+                must_conditions.push(serde_json::json!({
+                    "key": "memory_type",
+                    "match": { "value": mem_type.to_lowercase() }
+                }));
+            }
+            if filters.start_date.is_some() || filters.end_date.is_some() {
+                let mut range_obj = serde_json::Map::new();
+                if let Some(start) = filters.start_date {
+                    range_obj.insert("gte".to_string(), serde_json::json!(start.timestamp()));
+                }
+                if let Some(end) = filters.end_date {
+                    range_obj.insert("lte".to_string(), serde_json::json!(end.timestamp()));
+                }
+                must_conditions.push(serde_json::json!({
+                    "key": "timestamp",
+                    "range": range_obj
+                }));
+            }
+            Some(serde_json::json!({
+                "must": must_conditions
+            }))
+        } else {
+            None
+        };
+
         let db_query = DbSearchQuery {
             collection_name: self.config.collection_name.clone(),
             vector: query_vector.to_vec(),
             limit: top_k as u64,
-            filter: None,
+            filter,
             with_payload: true,
         };
         let results = self.client.search_points(&db_query).await?;

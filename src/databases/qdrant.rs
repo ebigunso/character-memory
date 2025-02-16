@@ -1,15 +1,8 @@
 use async_trait::async_trait;
-use qdrant_client::{
-    Qdrant,
-    qdrant::{
-        CreateCollectionBuilder, DeletePointsBuilder, Distance, PointStruct,
-        SearchPointsBuilder, ScoredPoint, UpsertPointsBuilder, VectorParams, VectorsConfig,
-        PointsSelector,
-        points_selector::PointsSelectorOneOf,
-        point_id::PointIdOptions,
-        PointsIdsList,
-    },
-};
+use qdrant_client::qdrant::{
+        point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder, DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint, SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig
+    };
+use qdrant_client::Qdrant;
 use crate::errors::custom::CustomError;
 use crate::databases::domain_types::{DbPoint, DbSearchQuery, DbSearchResult};
 use crate::databases::vector_database::VectorDatabase;
@@ -60,6 +53,33 @@ impl QdrantDatabaseImpl {
             score: point.score,
         })
     }
+
+    // Helper: Parse filter conditions from a JSON object.
+    fn parse_filter_conditions(&self, filter_json: &serde_json::Value) -> Option<Vec<qdrant_client::qdrant::Condition>> {
+        filter_json.get("must").and_then(|v| v.as_array()).map(|must_array| {
+            let mut conditions = Vec::new();
+            for cond in must_array {
+                if let Some(key) = cond.get("key").and_then(|v| v.as_str()) {
+                    if let Some(match_obj) = cond.get("match") {
+                        if let Some(value_str) = match_obj.get("value").and_then(|v| v.as_str()) {
+                            conditions.push(qdrant_client::qdrant::Condition::matches(key, value_str.to_string()));
+                        }
+                    } else if let Some(range_obj) = cond.get("range") {
+                        let gte = range_obj.get("gte").and_then(|v| v.as_f64());
+                        let lte = range_obj.get("lte").and_then(|v| v.as_f64());
+                        let range = Range {
+                            gt: None,
+                            gte,
+                            lt: None,
+                            lte,
+                        };
+                        conditions.push(qdrant_client::qdrant::Condition::range(key, range));
+                    }
+                }
+            }
+            conditions
+        })
+    }
 }
 
 #[async_trait]
@@ -97,7 +117,20 @@ impl VectorDatabase for QdrantDatabaseImpl {
     async fn search_points(&self, query: &DbSearchQuery) -> Result<Vec<DbSearchResult>, CustomError> {
         let mut builder = SearchPointsBuilder::new(&query.collection_name, query.vector.clone(), query.limit);
         builder = builder.with_payload(query.with_payload);
-        // Note: Filter conversion is omitted for simplicity.
+
+        // Apply filters if present.
+        if let Some(filter_json) = &query.filter {
+            if let Some(conditions) = self.parse_filter_conditions(filter_json) {
+                let filter = qdrant_client::qdrant::Filter {
+                    must: conditions,
+                    should: vec![],
+                    must_not: vec![],
+                    min_should: None,
+                };
+                builder = builder.filter(filter);
+            }
+        }
+
         let search_req = builder.build();
         let response = self.0.search_points(search_req).await?;
         let mut results = Vec::new();
