@@ -10,8 +10,8 @@ use uuid::Uuid;
 ///
 /// Delegates embedding generation to an EmbeddingRepository and storage/retrieval to a
 /// VectorMemoryRepository. All dependencies are injected as arguments.
-pub struct MemoryRepository {
-    pub embed_repo: EmbeddingRepository,
+pub(crate) struct MemoryRepository {
+    pub embed_repo: Box<dyn EmbeddingRepository>,
     pub vector_repo: VectorMemoryRepository<Box<dyn VectorDatabase + Send + Sync + 'static>>,
 }
 
@@ -22,7 +22,7 @@ impl MemoryRepository
     /// # Arguments
     /// * `embed_repo` - The embedding repository to generate embeddings.
     /// * `vector_repo` - The vector memory repository for storing memory entries.
-    pub fn new(embed_repo: EmbeddingRepository, vector_repo: VectorMemoryRepository<Box<dyn VectorDatabase + Send + Sync + 'static>>) -> Self {
+    pub fn new(embed_repo: Box<dyn EmbeddingRepository>, vector_repo: VectorMemoryRepository<Box<dyn VectorDatabase + Send + Sync + 'static>>) -> Self {
         Self { embed_repo, vector_repo }
     }
 
