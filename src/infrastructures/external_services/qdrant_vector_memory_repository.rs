@@ -1,99 +1,100 @@
-use std::collections::HashMap;
-use uuid::Uuid;
 use async_trait::async_trait;
-use crate::databases::vector_database::VectorDatabase;
-use crate::databases::domain_types::{DbPoint, DbSearchQuery};
+use qdrant_client::qdrant::{
+    point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
+    DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
+    SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig
+};
+use qdrant_client::Qdrant;
+use serde_json::{Value, Map};
+use uuid::Uuid;
+
 use crate::errors::custom::CustomError;
-use crate::models::internal::{MemoryEntry, MemoryType};
+use crate::models::domain::{Point, SearchQuery, SearchResult};
+use crate::models::internal::MemoryEntry;
 use crate::models::public::MemoryFilters;
-use crate::repositories::vector_memory_repository::{VectorMemoryRepository, VectorMemoryConfig};
+use crate::repositories::vector_memory_repository::{VectorMemoryConfig, VectorMemoryRepository};
 
 pub struct QdrantVectorMemoryRepository {
-    client: Box<dyn VectorDatabase + Send + Sync>,
+    client: Qdrant,
     config: VectorMemoryConfig,
 }
 
 impl QdrantVectorMemoryRepository {
-    pub fn new(client: Box<dyn VectorDatabase + Send + Sync>, config: VectorMemoryConfig) -> Self {
+    pub(crate) fn from_config(config: VectorMemoryConfig) -> Result<Self, CustomError> {
+        let client = Qdrant::new(
+            qdrant_client::config::QdrantConfig::from_url(&config.url)
+        )?;
+        Ok(Self { client, config })
+    }
+
+    fn new(client: Qdrant, config: VectorMemoryConfig) -> Self {
         Self { client, config }
     }
 
-    // Helper: Convert a MemoryEntry into a domain DbPoint.
-    fn memory_to_db_point(memory: &MemoryEntry) -> DbPoint {
-        let mut payload_map = HashMap::new();
-        payload_map.insert(
-            "memory_type".to_string(),
-            serde_json::Value::String(format!("{:?}", memory.memory_type).to_lowercase()),
-        );
-        payload_map.insert(
-            "content".to_string(),
-            serde_json::Value::String(memory.content.clone()),
-        );
-        if let Some(timestamp) = &memory.timestamp {
-            payload_map.insert(
-                "timestamp".to_string(),
-                serde_json::Value::Number(serde_json::Number::from(timestamp.timestamp())),
-            );
-        }
-        if let Some(location) = &memory.location_text {
-            payload_map.insert(
-                "location_text".to_string(),
-                serde_json::Value::String(location.clone()),
-            );
-        }
-        if let Some(participants) = &memory.participants {
-            payload_map.insert(
-                "participants".to_string(),
-                serde_json::Value::Array(
-                    participants.iter().map(|p| serde_json::Value::String(p.clone())).collect()
-                ),
-            );
-        }
-        DbPoint {
-            id: Some(memory.id.to_string()),
-            payload: payload_map,
-            vector: memory.embedding.clone(),
+    // Helper: Convert a Point to a Qdrant PointStruct.
+    fn convert_point(&self, point: Point) -> PointStruct {
+        let q_id = point.id.map(|s| {
+            qdrant_client::qdrant::PointId {
+                point_id_options: Some(PointIdOptions::Uuid(s)),
+            }
+        });
+        let payload = point.payload.into_iter().map(|(k, v)| {
+            (k, qdrant_client::qdrant::Value::from(v.to_string()))
+        }).collect();
+        PointStruct {
+            id: q_id,
+            payload,
+            vectors: Some(point.vector.into()),
         }
     }
 
-    // Helper: Convert a domain DbSearchResult into a MemoryEntry.
-    fn scored_point_to_memory(result: &crate::databases::domain_types::DbSearchResult) -> Result<MemoryEntry, CustomError> {
-        let payload = &result.payload;
-        let memory_type_str = payload.get("memory_type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CustomError::DatabaseError("Missing memory_type in payload".to_string()))?;
-        let memory_type = match memory_type_str {
-            "episodic" => MemoryType::Episodic,
-            _ => MemoryType::Semantic,
+    // Helper: Convert a Qdrant ScoredPoint to a SearchResult.
+    fn convert_scored_point(&self, point: ScoredPoint) -> Result<SearchResult, CustomError> {
+        let id = point.id.ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
+        let id_str = match id.point_id_options {
+            Some(PointIdOptions::Uuid(ref s)) => s.clone(),
+            _ => return Err(CustomError::DatabaseError("Invalid point id variant".to_string())),
         };
-        let content = payload.get("content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CustomError::DatabaseError("Missing content in payload".to_string()))?
-            .to_string();
-        let embedding = result.vector.clone();
-        let id = Uuid::parse_str(&result.id)
-            .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
-        let timestamp = payload.get("timestamp")
-            .and_then(|v| v.as_i64())
-            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0));
-        let location_text = payload.get("location_text")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_owned());
-        let participants = payload.get("participants")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|item| item.as_str().map(|s| s.to_owned()))
-                    .collect::<Vec<_>>()
-            });
-        Ok(MemoryEntry {
-            id,
-            memory_type,
-            content,
-            embedding,
-            timestamp,
-            location_text,
-            participants,
+        let payload = point.payload.into_iter().map(|(k, v)| {
+            (k, serde_json::Value::String(v.to_string()))
+        }).collect();
+        let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
+        let vector = match vectors_output.vectors_options {
+            Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(vo)) => vo.data,
+            _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
+        };
+        Ok(SearchResult {
+            id: id_str,
+            payload,
+            vector,
+            score: point.score,
+        })
+    }
+
+    // Helper: Parse filter conditions from a JSON object.
+    fn parse_filter_conditions(&self, filter_json: &serde_json::Value) -> Option<Vec<qdrant_client::qdrant::Condition>> {
+        filter_json.get("must").and_then(|v| v.as_array()).map(|must_array| {
+            let mut conditions = Vec::new();
+            for cond in must_array {
+                if let Some(key) = cond.get("key").and_then(|v| v.as_str()) {
+                    if let Some(match_obj) = cond.get("match") {
+                        if let Some(value_str) = match_obj.get("value").and_then(|v| v.as_str()) {
+                            conditions.push(qdrant_client::qdrant::Condition::matches(key, value_str.to_string()));
+                        }
+                    } else if let Some(range_obj) = cond.get("range") {
+                        let gte = range_obj.get("gte").and_then(|v| v.as_f64());
+                        let lte = range_obj.get("lte").and_then(|v| v.as_f64());
+                        let range = Range {
+                            gt: None,
+                            gte,
+                            lt: None,
+                            lte,
+                        };
+                        conditions.push(qdrant_client::qdrant::Condition::range(key, range));
+                    }
+                }
+            }
+            conditions
         })
     }
 }
@@ -102,23 +103,40 @@ impl QdrantVectorMemoryRepository {
 impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     async fn init_collection(&self) -> Result<(), CustomError> {
         let collections = self.client.list_collections().await?;
-        if collections.iter().any(|name| name == &self.config.collection_name) {
-            return Ok(());
+        if !collections.collections.iter().any(|c| c.name == self.config.collection_name) {
+            let vectors_config = VectorsConfig {
+                config: Some(
+                    qdrant_client::qdrant::vectors_config::Config::Params(VectorParams {
+                        size: self.config.vector_size,
+                        distance: Distance::Cosine.into(),
+                        ..Default::default()
+                    }),
+                ),
+            };
+
+            let create_req = CreateCollectionBuilder::new(&self.config.collection_name)
+                .vectors_config(vectors_config)
+                .build();
+            self.client.create_collection(create_req).await?;
         }
-        self.client.create_collection(&self.config.collection_name, self.config.vector_size).await
+        Ok(())
     }
 
     async fn store_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
-        if memory.embedding.len() != self.config.vector_size as usize {
-            return Err(CustomError::MemoryValidation(format!(
-                "Embedding size mismatch. Expected {}, got {}",
-                self.config.vector_size,
-                memory.embedding.len()
-            )));
-        }
-        memory.validate()?;
-        let db_point = Self::memory_to_db_point(memory);
-        self.client.upsert_points(&self.config.collection_name, vec![db_point]).await
+        let memory_value = serde_json::to_value(memory)?;
+        let payload = memory_value.as_object()
+            .ok_or_else(|| CustomError::DatabaseError("Failed to convert memory to object".to_string()))?
+            .clone();
+
+        let point = Point {
+            id: Some(memory.id.to_string()),
+            payload: payload.into_iter().collect(),
+            vector: memory.embedding.clone(),
+        };
+        let q_point = self.convert_point(point);
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, vec![q_point]).build();
+        self.client.upsert_points(upsert_req).await?;
+        Ok(())
     }
 
     async fn update_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
@@ -126,9 +144,13 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     }
 
     async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-        self.client
-            .delete_points(&self.config.collection_name, vec![id.to_string()])
-            .await
+        let q_id = qdrant_client::qdrant::PointId {
+            point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
+        };
+        let selector = PointsSelectorOneOf::Points(PointsIdsList { ids: vec![q_id] });
+        let delete_req = DeletePointsBuilder::new(&self.config.collection_name).points(selector).build();
+        self.client.delete_points(delete_req).await?;
+        Ok(())
     }
 
     async fn search_memory<'a>(
@@ -137,70 +159,55 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         top_k: usize,
         filters: Option<&'a MemoryFilters>,
     ) -> Result<Vec<MemoryEntry>, CustomError> {
-        if query_vector.len() != self.config.vector_size as usize {
-            return Err(CustomError::MemoryValidation(format!(
-                "Query vector size mismatch. Expected {}, got {}",
-                self.config.vector_size,
-                query_vector.len()
-            )));
+        let mut builder = SearchPointsBuilder::new(&self.config.collection_name, query_vector.to_vec(), top_k as u64);
+        builder = builder.with_payload(true);
+
+        // Apply filters if present
+        if let Some(filters) = filters {
+            let filter_json = serde_json::to_value(filters)?;
+            if let Some(conditions) = self.parse_filter_conditions(&filter_json) {
+                let filter = qdrant_client::qdrant::Filter {
+                    must: conditions,
+                    should: vec![],
+                    must_not: vec![],
+                    min_should: None,
+                };
+                builder = builder.filter(filter);
+            }
         }
 
-        let filter = if let Some(filters) = filters {
-            let mut must_conditions = Vec::new();
-            if let Some(mem_type) = &filters.memory_type {
-                must_conditions.push(serde_json::json!({
-                    "key": "memory_type",
-                    "match": { "value": mem_type.to_lowercase() }
-                }));
-            }
-            if filters.start_date.is_some() || filters.end_date.is_some() {
-                let mut range_obj = serde_json::Map::new();
-                if let Some(start) = filters.start_date {
-                    range_obj.insert("gte".to_string(), serde_json::json!(start.timestamp()));
-                }
-                if let Some(end) = filters.end_date {
-                    range_obj.insert("lte".to_string(), serde_json::json!(end.timestamp()));
-                }
-                must_conditions.push(serde_json::json!({
-                    "key": "timestamp",
-                    "range": range_obj
-                }));
-            }
-            Some(serde_json::json!({
-                "must": must_conditions
-            }))
-        } else {
-            None
-        };
-
-        let db_query = DbSearchQuery {
-            collection_name: self.config.collection_name.clone(),
-            vector: query_vector.to_vec(),
-            limit: top_k as u64,
-            filter,
-            with_payload: true,
-        };
-        let results = self.client.search_points(&db_query).await?;
-        let mut memories = Vec::with_capacity(results.len());
-        for res in results {
-            memories.push(Self::scored_point_to_memory(&res)?);
+        let search_req = builder.build();
+        let response = self.client.search_points(search_req).await?;
+        let mut results = Vec::new();
+        for scored in response.result {
+            let search_result = self.convert_scored_point(scored)?;
+            let memory_value = Value::Object(search_result.payload);
+            let memory: MemoryEntry = serde_json::from_value(memory_value)?;
+            results.push(memory);
         }
-        Ok(memories)
+        Ok(results)
     }
 
     async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
-        let mut points = Vec::new();
-        for memory in memories {
-            if memory.embedding.len() != self.config.vector_size as usize {
-                return Err(CustomError::MemoryValidation(format!(
-                    "Embedding size mismatch. Expected {}, got {}",
-                    self.config.vector_size,
-                    memory.embedding.len()
-                )));
-            }
-            memory.validate()?;
-            points.push(Self::memory_to_db_point(memory));
-        }
-        self.client.upsert_points(&self.config.collection_name, points).await
+        let points: Vec<Point> = memories
+            .iter()
+            .map(|memory| {
+                let memory_value = serde_json::to_value(memory)?;
+                let payload = memory_value.as_object()
+                    .ok_or_else(|| CustomError::DatabaseError("Failed to convert memory to object".to_string()))?
+                    .clone();
+
+                Ok(Point {
+                    id: Some(memory.id.to_string()),
+                    payload: payload.into_iter().collect(),
+                    vector: memory.embedding.clone(),
+                })
+            })
+            .collect::<Result<_, CustomError>>()?;
+
+        let q_points: Vec<PointStruct> = points.into_iter().map(|p| self.convert_point(p)).collect();
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, q_points).build();
+        self.client.upsert_points(upsert_req).await?;
+        Ok(())
     }
 }

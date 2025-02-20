@@ -1,12 +1,11 @@
 mod config;
-mod databases;
 mod errors;
 mod models;
 mod repositories;
 mod infrastructures;
 
 use config::settings::Settings;
-use databases::database_settings::DatabaseSettings;
+use config::database_settings::DatabaseSettings;
 use errors::custom::CustomError;
 use models::{Memory, MemoryInput, MemoryFilters};
 use repositories::{memory_repository, vector_memory_repository};
@@ -45,14 +44,12 @@ impl AgentMemory {
         collection_name: String,
         database_settings: DatabaseSettings,
     ) -> Result<Self, CustomError> {
-        // Create the embedding repository using provided settings.
+        // Create the embedding repository using provided settings
         let embed_repo = Box::new(OpenAIEmbeddingRepository::new(&settings)?);
-        // Create the vector database using the provided settings.
-        let vector_db = database_settings.create_database().await?;
-        // Configure the vector memory repository.
+
+        // Configure and create the vector memory repository
         let vector_config = database_settings.create_vector_memory_config(collection_name.clone());
-        // Create the vector memory repository with the abstracted vector database.
-        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_db, vector_config));
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::from_config(vector_config)?);
         // Assemble the high-level MemoryRepository.
         let memory_repo = memory_repository::MemoryRepository::new(embed_repo, vector_repo);
 

@@ -1,5 +1,6 @@
 use thiserror::Error;
 use qdrant_client::QdrantError;
+use serde_json;
 
 #[derive(Error, Debug)]
 pub enum CustomError {
@@ -32,4 +33,7 @@ pub enum CustomError {
 
     #[error("Embedding generation error: {0}")]
     EmbeddingGenerationError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
