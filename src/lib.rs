@@ -10,8 +10,10 @@ use databases::database_settings::DatabaseSettings;
 use errors::custom::CustomError;
 use models::{Memory, MemoryInput, MemoryFilters};
 use repositories::{memory_repository, vector_memory_repository};
-use infrastructures::external_services::openai_embedding_repository::OpenAIEmbeddingRepository;
-use databases::vector_database::VectorDatabase;
+use infrastructures::external_services::{
+    openai_embedding_repository::OpenAIEmbeddingRepository,
+    qdrant_vector_memory_repository::QdrantVectorMemoryRepository,
+};
 
 /// Initialize the library with externally supplied settings.
 #[allow(unused_variables)]
@@ -46,14 +48,11 @@ impl AgentMemory {
         // Create the embedding repository using provided settings.
         let embed_repo = Box::new(OpenAIEmbeddingRepository::new(&settings)?);
         // Create the vector database using the provided settings.
-        let vector_db = Box::new(database_settings.create_database().await?);
-        // Configure the vector memory repository. Adjust dimensions as needed.
-        let vector_config = vector_memory_repository::VectorMemoryConfig::text_embedding_3_large(
-            settings.get_qdrant_connection().to_string(),
-            collection_name.clone(),
-        );
+        let vector_db = database_settings.create_database().await?;
+        // Configure the vector memory repository.
+        let vector_config = database_settings.create_vector_memory_config(collection_name.clone());
         // Create the vector memory repository with the abstracted vector database.
-        let vector_repo = vector_memory_repository::VectorMemoryRepository::new(vector_db, vector_config);
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_db, vector_config));
         // Assemble the high-level MemoryRepository.
         let memory_repo = memory_repository::MemoryRepository::new(embed_repo, vector_repo);
 

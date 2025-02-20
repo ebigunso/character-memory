@@ -3,7 +3,6 @@ use crate::models::internal::MemoryEntry;
 use crate::errors::custom::CustomError;
 use crate::repositories::embedding_repository::EmbeddingRepository;
 use crate::repositories::vector_memory_repository::VectorMemoryRepository;
-use crate::databases::vector_database::VectorDatabase;
 use uuid::Uuid;
 
 /// Provides high-level operations for managing memory entries.
@@ -12,7 +11,7 @@ use uuid::Uuid;
 /// VectorMemoryRepository. All dependencies are injected as arguments.
 pub(crate) struct MemoryRepository {
     pub embed_repo: Box<dyn EmbeddingRepository>,
-    pub vector_repo: VectorMemoryRepository<Box<dyn VectorDatabase + Send + Sync + 'static>>,
+    pub vector_repo: Box<dyn VectorMemoryRepository>,
 }
 
 impl MemoryRepository
@@ -22,7 +21,7 @@ impl MemoryRepository
     /// # Arguments
     /// * `embed_repo` - The embedding repository to generate embeddings.
     /// * `vector_repo` - The vector memory repository for storing memory entries.
-    pub fn new(embed_repo: Box<dyn EmbeddingRepository>, vector_repo: VectorMemoryRepository<Box<dyn VectorDatabase + Send + Sync + 'static>>) -> Self {
+    pub fn new(embed_repo: Box<dyn EmbeddingRepository>, vector_repo: Box<dyn VectorMemoryRepository>) -> Self {
         Self { embed_repo, vector_repo }
     }
 
