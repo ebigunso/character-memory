@@ -3,8 +3,8 @@ use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use crate::errors::custom::CustomError;
-use crate::config::config_loader::{ConfigLoader, DefaultConfigLoader};
-use crate::config::env_loader::{EnvLoader, DefaultEnvLoader};
+use crate::config::loaders::config_loader::{ConfigLoader, DefaultConfigLoader};
+use crate::config::loaders::env_loader::{EnvLoader, DefaultEnvLoader};
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -94,8 +94,8 @@ mod tests {
     use super::*;
     use crate::errors::custom::CustomError;
     use config::ConfigError;
-    use crate::config::config_loader::MockConfigLoader;
-    use crate::config::env_loader::MockEnvLoader;
+    use crate::config::loaders::config_loader::MockConfigLoader;
+    use crate::config::loaders::env_loader::MockEnvLoader;
 
     #[test]
     fn test_settings_load_success() {

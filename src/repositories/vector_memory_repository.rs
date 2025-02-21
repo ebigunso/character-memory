@@ -1,6 +1,5 @@
 use uuid::Uuid;
 use async_trait::async_trait;
-use crate::config::vector_memory_config::VectorMemoryConfig;
 use crate::errors::custom::CustomError;
 use crate::models::internal::memory_entry::MemoryEntry;
 use crate::models::public::memory_filters::MemoryFilters;

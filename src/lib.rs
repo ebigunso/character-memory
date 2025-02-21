@@ -4,8 +4,8 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::Settings;
-use config::database_settings::DatabaseSettings;
+use config::settings::settings::Settings;
+use config::settings::database_settings::DatabaseSettings;
 use errors::custom::CustomError;
 use models::public::memory::Memory;
 use models::public::memory_input::MemoryInput;
