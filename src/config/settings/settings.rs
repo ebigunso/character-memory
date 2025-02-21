@@ -69,7 +69,6 @@ impl Settings {
         self.oxigraph_connection_string.expose_secret()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_openai_api_key(&self) -> &str {
         self.openai_api_key.expose_secret()
     }

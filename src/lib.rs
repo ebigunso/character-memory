@@ -12,26 +12,8 @@ use models::public::MemoryFilters;
 use repositories::MemoryRepository;
 use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
 
-/// Initialize the library with externally supplied settings.
-#[allow(unused_variables)]
-pub fn init(settings: Settings) -> Result<(), CustomError> {
-    // Initialization logic here.
-    Ok(())
-}
-
-/// Initialize the library by loading settings from the environment.
-/// This function is primarily intended for integration tests.
-#[allow(dead_code)]
-pub(crate) fn init_from_env() -> Result<(), CustomError> {
-    let settings = Settings::load()?;
-    init(settings)
-}
-
 /// AgentMemory provides a high-level API for memory operations.
-/// The public API no longer exposes any Qdrant-specific types.
 pub struct AgentMemory {
-    settings: Settings,
-    collection_name: String,
     memory_repo: MemoryRepository,
 }
 
@@ -51,11 +33,7 @@ impl AgentMemory {
         // Assemble the high-level MemoryRepository.
         let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
 
-        Ok(Self {
-            settings,
-            collection_name,
-            memory_repo,
-        })
+        Ok(Self { memory_repo })
     }
 
     /// Creates a new memory entry.
