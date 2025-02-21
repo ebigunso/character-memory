@@ -5,12 +5,11 @@ use qdrant_client::qdrant::{
     SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig
 };
 use qdrant_client::Qdrant;
-use serde_json::{Value, Map};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::errors::custom::CustomError;
 use crate::models::internal::point::Point;
-use crate::models::internal::search_query::SearchQuery;
 use crate::models::internal::search_result::SearchResult;
 use crate::models::internal::memory_entry::MemoryEntry;
 use crate::models::public::memory_filters::MemoryFilters;

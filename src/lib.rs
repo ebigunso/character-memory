@@ -10,7 +10,7 @@ use errors::custom::CustomError;
 use models::public::memory::Memory;
 use models::public::memory_input::MemoryInput;
 use models::public::memory_filters::MemoryFilters;
-use repositories::{memory_repository, vector_memory_repository};
+use repositories::memory_repository;
 use infrastructures::external_services::{
     openai_embedding_repository::OpenAIEmbeddingRepository,
     qdrant_vector_memory_repository::QdrantVectorMemoryRepository,
