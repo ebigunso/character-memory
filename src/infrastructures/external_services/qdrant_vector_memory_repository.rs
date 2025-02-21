@@ -9,9 +9,11 @@ use serde_json::{Value, Map};
 use uuid::Uuid;
 
 use crate::errors::custom::CustomError;
-use crate::models::domain::{Point, SearchQuery, SearchResult};
-use crate::models::internal::MemoryEntry;
-use crate::models::public::MemoryFilters;
+use crate::models::internal::point::Point;
+use crate::models::internal::search_query::SearchQuery;
+use crate::models::internal::search_result::SearchResult;
+use crate::models::internal::memory_entry::MemoryEntry;
+use crate::models::public::memory_filters::MemoryFilters;
 use crate::repositories::vector_memory_repository::{VectorMemoryConfig, VectorMemoryRepository};
 
 pub struct QdrantVectorMemoryRepository {

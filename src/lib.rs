@@ -7,7 +7,9 @@ mod infrastructures;
 use config::settings::Settings;
 use config::database_settings::DatabaseSettings;
 use errors::custom::CustomError;
-use models::{Memory, MemoryInput, MemoryFilters};
+use models::public::memory::Memory;
+use models::public::memory_input::MemoryInput;
+use models::public::memory_filters::MemoryFilters;
 use repositories::{memory_repository, vector_memory_repository};
 use infrastructures::external_services::{
     openai_embedding_repository::OpenAIEmbeddingRepository,

@@ -1,5 +1,6 @@
-use crate::models::public::{MemoryInput, MemoryFilters};
-use crate::models::internal::MemoryEntry;
+use crate::models::public::memory_input::MemoryInput;
+use crate::models::public::memory_filters::MemoryFilters;
+use crate::models::internal::memory_entry::MemoryEntry;
 use crate::errors::custom::CustomError;
 use crate::repositories::embedding_repository::EmbeddingRepository;
 use crate::repositories::vector_memory_repository::VectorMemoryRepository;
