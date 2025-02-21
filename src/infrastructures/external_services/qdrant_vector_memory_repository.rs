@@ -21,15 +21,11 @@ pub struct QdrantVectorMemoryRepository {
 }
 
 impl QdrantVectorMemoryRepository {
-    pub(crate) fn from_config(config: VectorMemoryConfig) -> Result<Self, CustomError> {
+    pub(crate) fn new(config: VectorMemoryConfig) -> Result<Self, CustomError> {
         let client = Qdrant::new(
             qdrant_client::config::QdrantConfig::from_url(&config.url)
         )?;
         Ok(Self { client, config })
-    }
-
-    fn new(client: Qdrant, config: VectorMemoryConfig) -> Self {
-        Self { client, config }
     }
 
     // Helper: Convert a Point to a Qdrant PointStruct.

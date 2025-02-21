@@ -51,7 +51,7 @@ impl AgentMemory {
 
         // Configure and create the vector memory repository
         let vector_config = database_settings.create_vector_memory_config(collection_name.clone());
-        let vector_repo = Box::new(QdrantVectorMemoryRepository::from_config(vector_config)?);
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_config)?);
         // Assemble the high-level MemoryRepository.
         let memory_repo = memory_repository::MemoryRepository::new(embed_repo, vector_repo);
 
