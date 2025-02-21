@@ -13,7 +13,8 @@ use crate::models::internal::point::Point;
 use crate::models::internal::search_result::SearchResult;
 use crate::models::internal::memory_entry::MemoryEntry;
 use crate::models::public::memory_filters::MemoryFilters;
-use crate::repositories::vector_memory_repository::{VectorMemoryConfig, VectorMemoryRepository};
+use crate::config::vector_memory_config::VectorMemoryConfig;
+use crate::repositories::vector_memory_repository::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
     client: Qdrant,

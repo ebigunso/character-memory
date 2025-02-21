@@ -1,44 +1,10 @@
 use std::path::PathBuf;
-use config::{Config, ConfigError};
-use mockall::automock;
+use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use crate::errors::custom::CustomError;
-
-#[automock]
-pub(crate) trait ConfigLoader {
-    fn build_config(&self) -> Result<Config, ConfigError>;
-}
-
-pub(crate) struct DefaultConfigLoader;
-
-impl ConfigLoader for DefaultConfigLoader {
-    fn build_config(&self) -> Result<Config, ConfigError> {
-        Config::builder()
-            .add_source(config::Environment::default())
-            .build()
-    }
-}
-
-#[automock]
-pub(crate) trait EnvLoader {
-    fn load_from_path(&self, path: PathBuf) -> Result<(), std::io::Error>;
-    fn exists(&self, path: PathBuf) -> bool;
-}
-
-#[derive(Default)]
-pub(crate) struct DefaultEnvLoader;
-
-impl EnvLoader for DefaultEnvLoader {
-    fn load_from_path(&self, path: PathBuf) -> Result<(), std::io::Error> {
-        dotenvy::from_path(&path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-    }
-
-    fn exists(&self, path: PathBuf) -> bool {
-        path.exists()
-    }
-}
+use crate::config::config_loader::{ConfigLoader, DefaultConfigLoader};
+use crate::config::env_loader::{EnvLoader, DefaultEnvLoader};
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -127,6 +93,9 @@ impl Settings {
 mod tests {
     use super::*;
     use crate::errors::custom::CustomError;
+    use config::ConfigError;
+    use crate::config::config_loader::MockConfigLoader;
+    use crate::config::env_loader::MockEnvLoader;
 
     #[test]
     fn test_settings_load_success() {
