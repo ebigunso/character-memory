@@ -3,8 +3,8 @@ use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use crate::errors::custom::CustomError;
-use crate::config::loaders::config_loader::{ConfigLoader, DefaultConfigLoader};
-use crate::config::loaders::env_loader::{EnvLoader, DefaultEnvLoader};
+use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
+use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

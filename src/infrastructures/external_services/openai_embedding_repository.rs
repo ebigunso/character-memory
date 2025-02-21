@@ -1,5 +1,5 @@
 use crate::errors::custom::CustomError;
-use crate::config::settings::settings::Settings;
+use crate::config::settings::Settings;
 use crate::repositories::embedding_repository::EmbeddingRepository;
 use reqwest::blocking::Client;
 use serde_json::json;

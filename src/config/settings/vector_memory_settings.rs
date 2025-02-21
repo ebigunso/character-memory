@@ -1,4 +1,4 @@
-use crate::config::enums::embedding_model::EmbeddingModel;
+use crate::config::enums::EmbeddingModel;
 
 /// Configuration for VectorMemoryRepository
 ///

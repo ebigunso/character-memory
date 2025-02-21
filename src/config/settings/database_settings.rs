@@ -1,6 +1,6 @@
 use crate::errors::custom::CustomError;
-use crate::config::enums::embedding_model::EmbeddingModel;
-use crate::config::settings::vector_memory_settings::VectorMemorySettings;
+use crate::config::enums::EmbeddingModel;
+use crate::config::settings::VectorMemorySettings;
 use qdrant_client::Qdrant;
 
 /// Settings for configuring the vector database.
