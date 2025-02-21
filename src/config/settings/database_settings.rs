@@ -1,6 +1,6 @@
 use crate::errors::custom::CustomError;
 use crate::config::enums::embedding_model::EmbeddingModel;
-use crate::config::settings::vector_memory_config::VectorMemoryConfig;
+use crate::config::settings::vector_memory_settings::VectorMemorySettings;
 use qdrant_client::Qdrant;
 
 /// Settings for configuring the vector database.
@@ -24,10 +24,10 @@ impl DatabaseSettings {
     }
 
     /// Creates the appropriate vector memory configuration based on the database type
-    pub(crate) fn create_vector_memory_config(&self, collection_name: String) -> VectorMemoryConfig {
+    pub(crate) fn create_vector_memory_config(&self, collection_name: String) -> VectorMemorySettings {
         match self {
             DatabaseSettings::Qdrant { url, model } => {
-                VectorMemoryConfig::new(url.clone(), collection_name, *model)
+                VectorMemorySettings::new(url.clone(), collection_name, *model)
             }
         }
     }

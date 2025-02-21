@@ -1,7 +1,7 @@
 // Module declarations
 pub mod settings {
     pub mod database_settings;
-    pub mod vector_memory_config;
+    pub mod vector_memory_settings;
     pub mod settings;
 }
 

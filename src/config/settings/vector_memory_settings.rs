@@ -6,13 +6,13 @@ use crate::config::enums::embedding_model::EmbeddingModel;
 /// * `collection_name` - Name of the collection to store memories
 /// * `vector_size` - Size of the embedding vectors
 #[derive(Debug, Clone)]
-pub struct VectorMemoryConfig {
+pub struct VectorMemorySettings {
     pub url: String,
     pub collection_name: String,
     pub vector_size: u64,
 }
 
-impl VectorMemoryConfig {
+impl VectorMemorySettings {
     pub fn new(url: String, collection_name: String, model: EmbeddingModel) -> Self {
         let vector_size = match model {
             EmbeddingModel::TextEmbedding3Small => 1536,
