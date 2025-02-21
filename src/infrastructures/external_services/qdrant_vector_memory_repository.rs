@@ -8,13 +8,13 @@ use qdrant_client::Qdrant;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::errors::custom::CustomError;
-use crate::models::internal::point::Point;
-use crate::models::internal::search_result::SearchResult;
-use crate::models::internal::memory_entry::MemoryEntry;
-use crate::models::public::memory_filters::MemoryFilters;
+use crate::errors::CustomError;
+use crate::models::internal::Point;
+use crate::models::internal::SearchResult;
+use crate::models::internal::MemoryEntry;
+use crate::models::public::MemoryFilters;
 use crate::config::settings::VectorMemorySettings;
-use crate::repositories::vector_memory_repository::VectorMemoryRepository;
+use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
     client: Qdrant,

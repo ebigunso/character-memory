@@ -1,7 +1,8 @@
-use crate::errors::custom::CustomError;
+use qdrant_client::Qdrant;
+
+use crate::errors::CustomError;
 use crate::config::enums::EmbeddingModel;
 use crate::config::settings::VectorMemorySettings;
-use qdrant_client::Qdrant;
 
 /// Settings for configuring the vector database.
 /// Currently only supports Qdrant, but designed to be extensible

@@ -1,8 +1,9 @@
-use crate::errors::custom::CustomError;
-use crate::config::settings::Settings;
-use crate::repositories::embedding_repository::EmbeddingRepository;
 use reqwest::blocking::Client;
 use serde_json::json;
+
+use crate::errors::CustomError;
+use crate::config::settings::Settings;
+use crate::repositories::EmbeddingRepository;
 
 /// OpenAI-based implementation of the EmbeddingRepository trait.
 /// This implementation uses the OpenAI text-embedding-3-large model to generate embeddings.

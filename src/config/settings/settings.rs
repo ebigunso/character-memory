@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use crate::errors::custom::CustomError;
+
+use crate::errors::CustomError;
 use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
 use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
 

@@ -4,17 +4,13 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::Settings;
-use config::settings::DatabaseSettings;
-use errors::custom::CustomError;
-use models::public::memory::Memory;
-use models::public::memory_input::MemoryInput;
-use models::public::memory_filters::MemoryFilters;
-use repositories::memory_repository;
-use infrastructures::external_services::{
-    openai_embedding_repository::OpenAIEmbeddingRepository,
-    qdrant_vector_memory_repository::QdrantVectorMemoryRepository,
-};
+use config::settings::{Settings, DatabaseSettings};
+use errors::CustomError;
+use models::public::Memory;
+use models::public::MemoryInput;
+use models::public::MemoryFilters;
+use repositories::MemoryRepository;
+use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
 
 /// Initialize the library with externally supplied settings.
 #[allow(unused_variables)]
@@ -36,7 +32,7 @@ pub(crate) fn init_from_env() -> Result<(), CustomError> {
 pub struct AgentMemory {
     settings: Settings,
     collection_name: String,
-    memory_repo: memory_repository::MemoryRepository,
+    memory_repo: MemoryRepository,
 }
 
 impl AgentMemory {
@@ -53,7 +49,7 @@ impl AgentMemory {
         let vector_config = database_settings.create_vector_memory_config(collection_name.clone());
         let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_config)?);
         // Assemble the high-level MemoryRepository.
-        let memory_repo = memory_repository::MemoryRepository::new(embed_repo, vector_repo);
+        let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
 
         Ok(Self {
             settings,

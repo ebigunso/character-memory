@@ -2,10 +2,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::errors::custom::CustomError;
-use crate::models::public::memory_input::MemoryInput;
-use crate::models::public::memory::Memory;
-use crate::models::internal::memory_type::MemoryType;
+use crate::errors::CustomError;
+use crate::models::internal::MemoryType;
+use crate::models::public::{Memory, MemoryInput};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {

@@ -1,4 +1,4 @@
-use crate::errors::custom::CustomError;
+use crate::errors::CustomError;
 
 /// Repository trait for converting text into vector embeddings.
 /// This trait defines the interface for embedding generation services.
