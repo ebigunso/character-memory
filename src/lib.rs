@@ -4,7 +4,7 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::{Settings, VectorMemoryRepositorySettings};
+use config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
 use errors::CustomError;
 use models::public::Memory;
 use models::public::MemoryInput;
@@ -41,8 +41,12 @@ impl AgentMemory {
         settings: Settings,
         collection_name: String,
     ) -> Result<Self, CustomError> {
-        // Create the embedding repository using provided settings
-        let embed_repo = Box::new(OpenAIEmbeddingRepository::new(&settings)?);
+        // Configure and create the embedding repository
+        let embedding_settings = EmbeddingRepositorySettings::new(
+            settings.get_openai_api_key().to_string(),
+            settings.get_embedding_model()?
+        );
+        let embed_repo = Box::new(OpenAIEmbeddingRepository::new(embedding_settings)?);
 
         // Configure and create the vector memory repository
         let vector_memory_settings = VectorMemoryRepositorySettings::new(

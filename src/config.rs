@@ -2,9 +2,11 @@
 pub mod settings {
     pub mod settings;
     pub(crate) mod vector_memory_repository_settings;
+    pub(crate) mod embedding_repository_settings;
 
     pub use settings::Settings;
     pub(crate) use vector_memory_repository_settings::VectorMemoryRepositorySettings;
+    pub(crate) use embedding_repository_settings::EmbeddingRepositorySettings;
 }
 
 pub mod enums {
