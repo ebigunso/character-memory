@@ -1,15 +1,40 @@
 use crate::errors::CustomError;
 
 /// Repository trait for converting text into vector embeddings.
+///
+/// # Description
+///
 /// This trait defines the interface for embedding generation services.
+/// Implementations of this trait are responsible for converting text into
+/// numerical vector representations suitable for semantic operations.
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait EmbeddingRepository: Send + Sync {
     /// Generates a vector embedding for the provided text.
-    /// Returns a vector of f32 values representing the embedding, or an error if generation fails.
+    ///
+    /// # Parameters
+    ///
+    /// - `text`: The input text to generate an embedding for
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A vector of f32 values representing the embedding
+    /// - `Err`: A `CustomError` if generation fails
     fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError>;
 
     /// Generates embeddings for a batch of texts.
-    /// Returns a vector of embeddings, one for each input text.
+    ///
+    /// # Parameters
+    ///
+    /// - `texts`: A slice of text strings to generate embeddings for
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A vector of embeddings, where each embedding is a vector of f32 values
+    /// - `Err`: A `CustomError` if generation fails for any text in the batch
     fn bulk_generate_embeddings<'a>(&self, texts: &'a [&'a str]) -> Result<Vec<Vec<f32>>, CustomError>;
 }
 

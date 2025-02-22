@@ -6,7 +6,16 @@ use crate::config::settings::Settings;
 use crate::repositories::EmbeddingRepository;
 
 /// OpenAI-based implementation of the EmbeddingRepository trait.
+///
+/// # Description
+///
 /// This implementation uses the OpenAI text-embedding-3-large model to generate embeddings.
+/// It handles the communication with OpenAI's API to convert text into vector embeddings.
+///
+/// # See also
+///
+/// - [`EmbeddingRepository`]
+/// - [OpenAI Embeddings API](https://platform.openai.com/docs/api-reference/embeddings)
 pub(crate) struct OpenAIEmbeddingRepository {
     api_key: String,
     client: Client,
@@ -14,6 +23,17 @@ pub(crate) struct OpenAIEmbeddingRepository {
 
 impl OpenAIEmbeddingRepository {
     /// Creates a new OpenAIEmbeddingRepository instance.
+    ///
+    /// # Parameters
+    ///
+    /// - `settings`: Configuration settings containing the OpenAI API key
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A new `OpenAIEmbeddingRepository` instance
+    /// - `Err`: A `CustomError` if initialization fails (e.g., missing API key)
     pub fn new(settings: &Settings) -> Result<Self, CustomError> {
         let api_key = settings.get_openai_api_key().to_string();
         if api_key.trim().is_empty() {

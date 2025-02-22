@@ -16,6 +16,31 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Creates a new Settings instance.
+    ///
+    /// # Description
+    ///
+    /// Primary constructor for creating a Settings instance. Takes a pre-configured Config object that defines all required settings. This allows for flexible configuration sourcing while maintaining a clean initialization interface.
+    ///
+    /// # Parameters
+    ///
+    /// - `config`: A `config::Config` instance containing all required settings:
+    ///     - `qdrant_connection_string`: Connection string for Qdrant database
+    ///     - `oxigraph_connection_string`: Connection string for Oxigraph database
+    ///     - `openai_api_key`: API key for OpenAI services
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A new `Settings` instance with the provided configuration
+    /// - `Err`: A `CustomError` if any required settings are missing or invalid
+    pub fn new(config: Config) -> Result<Self, CustomError> {
+        config.try_deserialize().map_err(|e| {
+            CustomError::ConfigParseError(format!("Failed to parse external configuration: {}", e))
+        })
+    }
+
     pub(crate) fn load() -> Result<Self, CustomError> {
         Self::load_with_loaders(DefaultEnvLoader, DefaultConfigLoader)
     }
@@ -48,14 +73,6 @@ impl Settings {
         // Try to convert into Settings struct
         settings.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse configuration: {}", e))
-        })
-    }
-
-    /// Creates a Settings instance from an externally provided `config::Config`.
-    /// This method is intended for consumers who wish to build their configuration using custom sources (files, command-line, etc.) and inject it.
-    pub fn from_config(config: Config) -> Result<Self, CustomError> {
-        config.try_deserialize().map_err(|e| {
-            CustomError::ConfigParseError(format!("Failed to parse external configuration: {}", e))
         })
     }
 
@@ -159,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_from_config_success() {
+    fn test_settings_new_success() {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
@@ -170,7 +187,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = Settings::from_config(external_config);
+        let result = Settings::new(external_config);
         assert!(result.is_ok());
 
         let settings = result.unwrap();
@@ -179,14 +196,14 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_from_config_error() {
+    fn test_settings_new_error() {
         let incomplete_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
             .build()
             .unwrap();
 
-        let result = Settings::from_config(incomplete_config);
+        let result = Settings::new(incomplete_config);
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
     }
 }
