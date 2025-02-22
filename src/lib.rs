@@ -42,6 +42,18 @@ impl AgentMemory {
         Ok(mem_entry.into_public())
     }
 
+    /// Creates multiple memory entries in a batch.
+    ///
+    /// # Arguments
+    /// * `inputs` - A slice of MemoryInput structs containing the data for each memory entry.
+    ///
+    /// # Returns
+    /// A Result containing a vector of created Memory entries or a CustomError if the operation fails.
+    pub async fn bulk_create_memories(&self, inputs: &[MemoryInput]) -> Result<Vec<Memory>, CustomError> {
+        let entries = self.memory_repo.bulk_create_memories(inputs).await?;
+        Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
+    }
+
     /// Retrieves a memory entry by its unique identifier.
     pub async fn get_memory_by_id(&self, id: uuid::Uuid) -> Result<Memory, CustomError> {
         let mem_entry = self.memory_repo.get_memory_by_id(id).await?;
