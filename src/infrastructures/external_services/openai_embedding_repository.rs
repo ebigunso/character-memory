@@ -98,7 +98,8 @@ mod tests {
         Settings::new_for_tests(
             SecretString::new("dummy".into()),
             SecretString::new("dummy".into()),
-            SecretString::new(api.into())
+            SecretString::new(api.into()),
+            SecretString::new("text-embedding-3-large".into())
         )
     }
 

@@ -4,7 +4,7 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::{Settings, DatabaseSettings};
+use config::settings::{Settings, VectorMemorySettings};
 use errors::CustomError;
 use models::public::Memory;
 use models::public::MemoryInput;
@@ -30,7 +30,6 @@ impl AgentMemory {
     ///
     /// - `settings`: Configuration settings for the memory system
     /// - `collection_name`: Name of the vector collection to use
-    /// - `database_settings`: Database-specific configuration settings
     ///
     /// # Returns
     ///
@@ -41,14 +40,17 @@ impl AgentMemory {
     pub async fn new(
         settings: Settings,
         collection_name: String,
-        database_settings: DatabaseSettings,
     ) -> Result<Self, CustomError> {
         // Create the embedding repository using provided settings
         let embed_repo = Box::new(OpenAIEmbeddingRepository::new(&settings)?);
 
         // Configure and create the vector memory repository
-        let vector_config = database_settings.create_vector_memory_config(collection_name.clone());
-        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_config)?);
+        let vector_memory_settings = VectorMemorySettings::new(
+            settings.get_qdrant_connection().to_string(),
+            collection_name.clone(),
+            settings.get_embedding_model()?
+        );
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
         // Assemble the high-level MemoryRepository.
         let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
 

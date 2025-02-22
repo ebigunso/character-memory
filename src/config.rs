@@ -1,11 +1,9 @@
 // Module declarations
 pub mod settings {
-    pub mod database_settings;
-    pub mod vector_memory_settings;
     pub mod settings;
+    pub mod vector_memory_settings;
 
     pub use settings::Settings;
-    pub use database_settings::DatabaseSettings;
     pub use vector_memory_settings::VectorMemorySettings;
 }
 

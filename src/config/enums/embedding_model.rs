@@ -1,3 +1,7 @@
+use std::str::FromStr;
+use serde::{Serialize, Deserialize};
+use crate::errors::CustomError;
+
 /// Available embedding models and their corresponding vector sizes.
 ///
 /// # Description
@@ -8,7 +12,7 @@
 /// # See also
 ///
 /// - [OpenAI Embeddings Guide](https://platform.openai.com/docs/guides/embeddings)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum EmbeddingModel {
     /// OpenAI text-embedding-3-small model.
     ///
@@ -30,4 +34,48 @@ pub enum EmbeddingModel {
     ///
     /// Legacy model with 1536-dimensional embeddings
     TextEmbeddingAda002,
+}
+
+impl FromStr for EmbeddingModel {
+    type Err = CustomError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "text-embedding-3-small" => Ok(Self::TextEmbedding3Small),
+            "text-embedding-3-large" => Ok(Self::TextEmbedding3Large),
+            "text-embedding-ada-002" => Ok(Self::TextEmbeddingAda002),
+            _ => Err(CustomError::ConfigParseError(
+                format!("Invalid embedding model: {}", s)
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_str_valid_models() {
+        assert!(matches!(
+            "text-embedding-3-small".parse::<EmbeddingModel>(),
+            Ok(EmbeddingModel::TextEmbedding3Small)
+        ));
+        assert!(matches!(
+            "text-embedding-3-large".parse::<EmbeddingModel>(),
+            Ok(EmbeddingModel::TextEmbedding3Large)
+        ));
+        assert!(matches!(
+            "text-embedding-ada-002".parse::<EmbeddingModel>(),
+            Ok(EmbeddingModel::TextEmbeddingAda002)
+        ));
+    }
+
+    #[test]
+    fn test_from_str_invalid_model() {
+        assert!(matches!(
+            "invalid-model".parse::<EmbeddingModel>(),
+            Err(CustomError::ConfigParseError(_))
+        ));
+    }
 }

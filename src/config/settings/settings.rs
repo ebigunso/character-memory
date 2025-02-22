@@ -3,9 +3,10 @@ use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
-use crate::errors::CustomError;
+use crate::config::enums::EmbeddingModel;
 use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
 use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
+use crate::errors::CustomError;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -13,6 +14,7 @@ pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_connection_string: SecretString,
     openai_api_key: SecretString,
+    embedding_model: SecretString,
 }
 
 impl Settings {
@@ -113,6 +115,10 @@ impl Settings {
     pub(crate) fn get_openai_api_key(&self) -> &str {
         self.openai_api_key.expose_secret()
     }
+
+    pub(crate) fn get_embedding_model(&self) -> Result<EmbeddingModel, CustomError> {
+        self.embedding_model.expose_secret().parse()
+    }
 }
 
 #[cfg(test)]
@@ -121,11 +127,13 @@ impl Settings {
         qdrant_connection_string: SecretString,
         oxigraph_connection_string: SecretString,
         openai_api_key: SecretString,
+        embedding_model: SecretString,
     ) -> Self {
         Settings {
             qdrant_connection_string,
             oxigraph_connection_string,
             openai_api_key,
+            embedding_model,
         }
     }
 }
@@ -152,6 +160,8 @@ mod tests {
                 .set_override("oxigraph_connection_string", "test_oxigraph")
                 .unwrap()
                 .set_override("openai_api_key", "test_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
                 .unwrap()
                 .build()
                 .unwrap())
@@ -207,6 +217,8 @@ mod tests {
             .set_override("oxigraph_connection_string", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
             .unwrap()
             .build()
             .unwrap();
