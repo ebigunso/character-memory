@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
     DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
@@ -6,13 +7,12 @@ use qdrant_client::qdrant::{
     Value as QdrantValue, Filter, Condition, vectors_config, vectors_output,
 };
 use qdrant_client::{Qdrant, config::QdrantConfig};
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
 use crate::models::internal::{Point, MemoryEntry, VectorMetadata};
-use crate::models::public::{MemoryFilters, MemoryInput};
+use crate::models::public::MemoryFilters;
 use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
@@ -47,6 +47,7 @@ impl QdrantVectorMemoryRepository {
 
     // Helper: Convert a Qdrant ScoredPoint to a MemoryEntry.
     fn scored_point_to_memory_entry(&self, point: ScoredPoint) -> Result<MemoryEntry, CustomError> {
+        // Extract ID
         let id = point.id.ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
         let id_str = match id.point_id_options {
             Some(PointIdOptions::Uuid(ref s)) => s.clone(),
@@ -55,32 +56,55 @@ impl QdrantVectorMemoryRepository {
         let uuid = Uuid::parse_str(&id_str)
             .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
 
+        // Extract vector
         let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
         let vector = match vectors_output.vectors_options {
             Some(vectors_output::VectorsOptions::Vector(vo)) => vo.data,
             _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
         };
 
-        let memory_value = Value::Object(point.payload.into_iter().map(|(k, v)| {
-            (k, serde_json::Value::String(v.to_string()))
-        }).collect());
+        // Extract required fields from payload
+        let memory_type = point.payload.get("memory_type")
+            .ok_or_else(|| CustomError::DatabaseError("Missing memory_type in payload".to_string()))?
+            .to_string()
+            .trim_matches('"')
+            .to_lowercase();
 
-        let memory_input: MemoryInput = serde_json::from_value(memory_value)?;
+        let content = point.payload.get("content")
+            .ok_or_else(|| CustomError::DatabaseError("Missing content in payload".to_string()))?
+            .to_string()
+            .trim_matches('"')
+            .to_string();
 
-        // Convert MemoryInput to VectorMetadata
-        let metadata = if memory_input.memory_type.to_lowercase() == "semantic" {
-            VectorMetadata::new_semantic(
-                memory_input.id.unwrap_or(uuid),
-                memory_input.content
-            )
+        // Create metadata based on memory type
+        let metadata = if memory_type == "semantic" {
+            VectorMetadata::new_semantic(uuid, content)
         } else {
-            VectorMetadata::new_episodic(
-                memory_input.id.unwrap_or(uuid),
-                memory_input.content,
-                memory_input.timestamp.ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?,
-                memory_input.location_text.ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?,
-                memory_input.participants.ok_or_else(|| CustomError::MissingEpisodicField("participants"))?,
-            )
+            // Extract and parse timestamp
+            let timestamp_str = point.payload.get("timestamp")
+                .ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?
+                .to_string()
+                .trim_matches('"')
+                .to_string();
+            let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
+                .map_err(|e| CustomError::DatabaseError(format!("Invalid timestamp format: {}", e)))?
+                .with_timezone(&Utc);
+
+            // Extract location
+            let location_text = point.payload.get("location_text")
+                .ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?
+                .to_string()
+                .trim_matches('"')
+                .to_string();
+
+            // Extract and parse participants
+            let participants_str = point.payload.get("participants")
+                .ok_or_else(|| CustomError::MissingEpisodicField("participants"))?
+                .to_string();
+            let participants: Vec<String> = serde_json::from_str(&participants_str)
+                .map_err(|e| CustomError::DatabaseError(format!("Invalid participants format: {}", e)))?;
+
+            VectorMetadata::new_episodic(uuid, content, timestamp, location_text, participants)
         };
 
         MemoryEntry::new(metadata, vector)
