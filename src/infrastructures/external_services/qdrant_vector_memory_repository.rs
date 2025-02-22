@@ -4,14 +4,14 @@ use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
     DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
     SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig, PointId,
-    Value as QdrantValue, Filter, Condition, vectors_config, vectors_output,
+    Filter, Condition, vectors_config, vectors_output,
 };
 use qdrant_client::{Qdrant, config::QdrantConfig};
 use uuid::Uuid;
 
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
-use crate::models::internal::{Point, MemoryEntry, VectorMetadata};
+use crate::models::internal::{MemoryEntry, VectorMetadata};
 use crate::models::public::MemoryFilters;
 use crate::repositories::VectorMemoryRepository;
 
@@ -26,23 +26,6 @@ impl QdrantVectorMemoryRepository {
             QdrantConfig::from_url(&config.url)
         )?;
         Ok(Self { client, config })
-    }
-
-    // Helper: Convert a Point to a Qdrant PointStruct.
-    fn convert_point(&self, point: Point) -> PointStruct {
-        let q_id = point.id.map(|s| {
-            PointId {
-                point_id_options: Some(PointIdOptions::Uuid(s)),
-            }
-        });
-        let payload = point.payload.into_iter().map(|(k, v)| {
-            (k, QdrantValue::from(v.to_string()))
-        }).collect();
-        PointStruct {
-            id: q_id,
-            payload,
-            vectors: Some(point.vector.into()),
-        }
     }
 
     // Helper: Convert a Qdrant ScoredPoint to a MemoryEntry.
@@ -167,13 +150,12 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
             .ok_or_else(|| CustomError::DatabaseError("Failed to convert memory to object".to_string()))?
             .clone();
 
-        let point = Point {
-            id: Some(memory.id.to_string()),
-            payload: payload.into_iter().collect(),
-            vector: memory.embedding.clone(),
-        };
-        let q_point = self.convert_point(point);
-        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, vec![q_point]).build();
+        let point = PointStruct::new(
+            memory.id.to_string(),
+            memory.embedding.clone(),
+            payload,
+        );
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, vec![point]).build();
         self.client.upsert_points(upsert_req).await?;
         Ok(())
     }
@@ -224,7 +206,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     }
 
     async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
-        let points: Vec<Point> = memories
+        let points: Vec<PointStruct> = memories
             .iter()
             .map(|memory| {
                 let memory_value = serde_json::to_value(memory)?;
@@ -232,16 +214,15 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
                     .ok_or_else(|| CustomError::DatabaseError("Failed to convert memory to object".to_string()))?
                     .clone();
 
-                Ok(Point {
-                    id: Some(memory.id.to_string()),
-                    payload: payload.into_iter().collect(),
-                    vector: memory.embedding.clone(),
-                })
+                Ok(PointStruct::new(
+                    memory.id.to_string(),
+                    memory.embedding.clone(),
+                    payload,
+                ))
             })
             .collect::<Result<_, CustomError>>()?;
 
-        let q_points: Vec<PointStruct> = points.into_iter().map(|p| self.convert_point(p)).collect();
-        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, q_points).build();
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, points).build();
         self.client.upsert_points(upsert_req).await?;
         Ok(())
     }
