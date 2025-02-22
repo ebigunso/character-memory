@@ -2,18 +2,17 @@ use async_trait::async_trait;
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
     DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
-    SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig
+    SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig, PointId,
+    Value as QdrantValue, Filter, Condition, vectors_config, vectors_output,
 };
-use qdrant_client::Qdrant;
+use qdrant_client::{Qdrant, config::QdrantConfig};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::errors::CustomError;
-use crate::models::internal::Point;
-use crate::models::internal::SearchResult;
-use crate::models::internal::MemoryEntry;
-use crate::models::public::MemoryFilters;
 use crate::config::settings::VectorMemoryRepositorySettings;
+use crate::errors::CustomError;
+use crate::models::internal::{Point, SearchResult, MemoryEntry};
+use crate::models::public::MemoryFilters;
 use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
@@ -24,7 +23,7 @@ pub struct QdrantVectorMemoryRepository {
 impl QdrantVectorMemoryRepository {
     pub(crate) fn new(config: VectorMemoryRepositorySettings) -> Result<Self, CustomError> {
         let client = Qdrant::new(
-            qdrant_client::config::QdrantConfig::from_url(&config.url)
+            QdrantConfig::from_url(&config.url)
         )?;
         Ok(Self { client, config })
     }
@@ -32,12 +31,12 @@ impl QdrantVectorMemoryRepository {
     // Helper: Convert a Point to a Qdrant PointStruct.
     fn convert_point(&self, point: Point) -> PointStruct {
         let q_id = point.id.map(|s| {
-            qdrant_client::qdrant::PointId {
+            PointId {
                 point_id_options: Some(PointIdOptions::Uuid(s)),
             }
         });
         let payload = point.payload.into_iter().map(|(k, v)| {
-            (k, qdrant_client::qdrant::Value::from(v.to_string()))
+            (k, QdrantValue::from(v.to_string()))
         }).collect();
         PointStruct {
             id: q_id,
@@ -58,7 +57,7 @@ impl QdrantVectorMemoryRepository {
         }).collect();
         let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
         let vector = match vectors_output.vectors_options {
-            Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(vo)) => vo.data,
+            Some(vectors_output::VectorsOptions::Vector(vo)) => vo.data,
             _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
         };
         Ok(SearchResult {
@@ -70,14 +69,14 @@ impl QdrantVectorMemoryRepository {
     }
 
     // Helper: Parse filter conditions from a JSON object.
-    fn parse_filter_conditions(&self, filter_json: &serde_json::Value) -> Option<Vec<qdrant_client::qdrant::Condition>> {
+    fn parse_filter_conditions(&self, filter_json: &serde_json::Value) -> Option<Vec<Condition>> {
         filter_json.get("must").and_then(|v| v.as_array()).map(|must_array| {
             let mut conditions = Vec::new();
             for cond in must_array {
                 if let Some(key) = cond.get("key").and_then(|v| v.as_str()) {
                     if let Some(match_obj) = cond.get("match") {
                         if let Some(value_str) = match_obj.get("value").and_then(|v| v.as_str()) {
-                            conditions.push(qdrant_client::qdrant::Condition::matches(key, value_str.to_string()));
+                            conditions.push(Condition::matches(key, value_str.to_string()));
                         }
                     } else if let Some(range_obj) = cond.get("range") {
                         let gte = range_obj.get("gte").and_then(|v| v.as_f64());
@@ -88,7 +87,7 @@ impl QdrantVectorMemoryRepository {
                             lt: None,
                             lte,
                         };
-                        conditions.push(qdrant_client::qdrant::Condition::range(key, range));
+                        conditions.push(Condition::range(key, range));
                     }
                 }
             }
@@ -104,7 +103,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         if !collections.collections.iter().any(|c| c.name == self.config.collection_name) {
             let vectors_config = VectorsConfig {
                 config: Some(
-                    qdrant_client::qdrant::vectors_config::Config::Params(VectorParams {
+                    vectors_config::Config::Params(VectorParams {
                         size: self.config.model.vector_size(),
                         distance: Distance::Cosine.into(),
                         ..Default::default()
@@ -142,7 +141,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     }
 
     async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-        let q_id = qdrant_client::qdrant::PointId {
+        let q_id = PointId {
             point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
         };
         let selector = PointsSelectorOneOf::Points(PointsIdsList { ids: vec![q_id] });
@@ -164,7 +163,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         if let Some(filters) = filters {
             let filter_json = serde_json::to_value(filters)?;
             if let Some(conditions) = self.parse_filter_conditions(&filter_json) {
-                let filter = qdrant_client::qdrant::Filter {
+                let filter = Filter {
                     must: conditions,
                     should: vec![],
                     must_not: vec![],
