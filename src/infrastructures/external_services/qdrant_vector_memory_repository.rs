@@ -105,7 +105,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
             let vectors_config = VectorsConfig {
                 config: Some(
                     qdrant_client::qdrant::vectors_config::Config::Params(VectorParams {
-                        size: self.config.vector_size,
+                        size: self.config.model.vector_size(),
                         distance: Distance::Cosine.into(),
                         ..Default::default()
                     }),

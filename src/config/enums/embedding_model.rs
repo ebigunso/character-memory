@@ -36,6 +36,21 @@ pub enum EmbeddingModel {
     TextEmbeddingAda002,
 }
 
+impl EmbeddingModel {
+    /// Returns the vector size (dimensions) for this embedding model.
+    ///
+    /// # Returns
+    ///
+    /// The number of dimensions in the embedding vectors produced by this model.
+    pub fn vector_size(&self) -> u64 {
+        match self {
+            Self::TextEmbedding3Small => 1536,
+            Self::TextEmbedding3Large => 3072,
+            Self::TextEmbeddingAda002 => 1536,
+        }
+    }
+}
+
 impl FromStr for EmbeddingModel {
     type Err = CustomError;
 
@@ -77,5 +92,12 @@ mod tests {
             "invalid-model".parse::<EmbeddingModel>(),
             Err(CustomError::ConfigParseError(_))
         ));
+    }
+
+    #[test]
+    fn test_vector_size() {
+        assert_eq!(EmbeddingModel::TextEmbedding3Small.vector_size(), 1536);
+        assert_eq!(EmbeddingModel::TextEmbedding3Large.vector_size(), 3072);
+        assert_eq!(EmbeddingModel::TextEmbeddingAda002.vector_size(), 1536);
     }
 }
