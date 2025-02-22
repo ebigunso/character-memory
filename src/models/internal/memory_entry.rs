@@ -30,7 +30,7 @@ impl MemoryEntry {
         };
 
         let entry = Self {
-            id: Uuid::new_v4(),
+            id: input.id.unwrap_or_else(Uuid::new_v4),
             memory_type,
             content: input.content,
             embedding,
@@ -88,6 +88,7 @@ mod tests {
     #[test]
     fn test_create_valid_episodic_memory() {
         let input = MemoryInput {
+            id: None,
             content: "Discussed plans".to_string(),
             memory_type: "episodic".to_string(),
             timestamp: Some(Utc::now()),
@@ -102,6 +103,7 @@ mod tests {
     #[test]
     fn test_create_valid_semantic_memory() {
         let input = MemoryInput {
+            id: None,
             content: "Alice is a software engineer".to_string(),
             memory_type: "semantic".to_string(),
             timestamp: None,
@@ -116,6 +118,7 @@ mod tests {
     #[test]
     fn test_create_invalid_episodic_memory() {
         let input = MemoryInput {
+            id: None,
             content: "Discussed plans".to_string(),
             memory_type: "episodic".to_string(),
             timestamp: None,
@@ -130,6 +133,7 @@ mod tests {
     #[test]
     fn test_create_invalid_semantic_memory() {
         let input = MemoryInput {
+            id: None,
             content: "Alice is a software engineer".to_string(),
             memory_type: "semantic".to_string(),
             timestamp: Some(Utc::now()),
@@ -144,6 +148,7 @@ mod tests {
     #[test]
     fn test_invalid_memory_type() {
         let input = MemoryInput {
+            id: None,
             content: "Test".to_string(),
             memory_type: "invalid".to_string(),
             timestamp: None,
@@ -153,5 +158,39 @@ mod tests {
 
         let result = MemoryEntry::new(input, vec![0.1, 0.2]);
         assert!(matches!(result, Err(CustomError::MemoryValidation(_))));
+    }
+
+    #[test]
+    fn test_memory_with_provided_id() {
+        let provided_id = Uuid::new_v4();
+        let input = MemoryInput {
+            id: Some(provided_id),
+            content: "Test with provided ID".to_string(),
+            memory_type: "semantic".to_string(),
+            timestamp: None,
+            location_text: None,
+            participants: None,
+        };
+
+        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, provided_id);
+    }
+
+    #[test]
+    fn test_memory_without_id() {
+        let input = MemoryInput {
+            id: None,
+            content: "Test without ID".to_string(),
+            memory_type: "semantic".to_string(),
+            timestamp: None,
+            location_text: None,
+            participants: None,
+        };
+
+        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
+        assert!(result.is_ok());
+        // A new UUID should have been generated
+        assert!(result.unwrap().id.to_string().len() > 0);
     }
 }
