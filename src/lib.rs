@@ -19,6 +19,14 @@ pub struct AgentMemory {
 
 impl AgentMemory {
     /// Constructs a new AgentMemory instance.
+    ///
+    /// # Arguments
+    /// * `settings` - Configuration settings for the memory system
+    /// * `collection_name` - Name of the vector collection to use
+    /// * `database_settings` - Database-specific configuration settings
+    ///
+    /// # Returns
+    /// A Result containing the new AgentMemory instance or a CustomError if initialization fails.
     pub async fn new(
         settings: Settings,
         collection_name: String,
@@ -37,6 +45,12 @@ impl AgentMemory {
     }
 
     /// Creates a new memory entry.
+    ///
+    /// # Arguments
+    /// * `input` - A MemoryInput struct containing the data for the new memory entry
+    ///
+    /// # Returns
+    /// A Result containing the created Memory entry or a CustomError if the operation fails.
     pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
         let mem_entry = self.memory_repo.create_memory(input).await?;
         Ok(mem_entry.into_public())
@@ -55,23 +69,26 @@ impl AgentMemory {
     }
 
     /// Retrieves a memory entry by its unique identifier.
+    ///
+    /// # Arguments
+    /// * `id` - The UUID of the memory entry to retrieve
+    ///
+    /// # Returns
+    /// A Result containing the requested Memory entry or a CustomError if the operation fails.
     pub async fn get_memory_by_id(&self, id: uuid::Uuid) -> Result<Memory, CustomError> {
         let mem_entry = self.memory_repo.get_memory_by_id(id).await?;
         Ok(mem_entry.into_public())
     }
 
-    /// Updates an existing memory entry.
-    pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
-        let mem_entry = self.memory_repo.update_memory(input).await?;
-        Ok(mem_entry.into_public())
-    }
-
-    /// Deletes a memory entry by its unique identifier.
-    pub async fn delete_memory(&self, id: uuid::Uuid) -> Result<(), CustomError> {
-        self.memory_repo.delete_memory(id).await
-    }
-
     /// Searches for memory entries that are semantically similar to the query.
+    ///
+    /// # Arguments
+    /// * `query` - The search query string to find similar memories
+    /// * `top_k` - The maximum number of results to return
+    /// * `filters` - Optional filters to apply to the search results
+    ///
+    /// # Returns
+    /// A Result containing a vector of Memory entries or a CustomError if the operation fails.
     pub async fn search_memories(
         &self,
         query: &str,
@@ -80,5 +97,28 @@ impl AgentMemory {
     ) -> Result<Vec<Memory>, CustomError> {
         let entries = self.memory_repo.search_memories(query, top_k, filters).await?;
         Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
+    }
+
+    /// Updates an existing memory entry.
+    ///
+    /// # Arguments
+    /// * `input` - A MemoryInput struct containing the updated data for the memory entry
+    ///
+    /// # Returns
+    /// A Result containing the updated Memory entry or a CustomError if the operation fails.
+    pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
+        let mem_entry = self.memory_repo.update_memory(input).await?;
+        Ok(mem_entry.into_public())
+    }
+
+    /// Deletes a memory entry by its unique identifier.
+    ///
+    /// # Arguments
+    /// * `id` - The UUID of the memory entry to delete
+    ///
+    /// # Returns
+    /// A Result containing unit type or a CustomError if the operation fails.
+    pub async fn delete_memory(&self, id: uuid::Uuid) -> Result<(), CustomError> {
+        self.memory_repo.delete_memory(id).await
     }
 }
