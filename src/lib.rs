@@ -102,10 +102,13 @@ impl AgentMemory {
     /// Updates an existing memory entry.
     ///
     /// # Arguments
-    /// * `input` - A MemoryInput struct containing the updated data for the memory entry
+    /// * `input` - A MemoryInput struct containing the updated data and ID of the memory entry to update.
+    ///            The ID field must be provided for updates.
     ///
     /// # Returns
-    /// A Result containing the updated Memory entry or a CustomError if the operation fails.
+    /// A Result containing the updated Memory entry or a CustomError if:
+    /// * The input does not contain an ID
+    /// * The update operation fails
     pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
         let mem_entry = self.memory_repo.update_memory(input).await?;
         Ok(mem_entry.into_public())

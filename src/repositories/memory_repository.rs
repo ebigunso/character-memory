@@ -36,6 +36,7 @@ impl MemoryRepository
         let embedding = self.embed_repo.generate_embedding(&input.content)?;
         let entry = MemoryEntry::new(input, embedding)?;
         self.vector_repo.store_memory(&entry).await?;
+
         Ok(entry)
     }
 
@@ -51,12 +52,23 @@ impl MemoryRepository
 
     /// Updates an existing memory entry.
     ///
-    /// Unimplemented due to ambiguity in MemoryInput (e.g., lack of an ID).
+    /// # Arguments
+    /// * `input` - A MemoryInput struct containing the updated data and the ID of the entry to update
     ///
     /// # Errors
-    /// Always returns an error as this operation is not implemented.
-    pub async fn update_memory(&self, _input: MemoryInput) -> Result<MemoryEntry, CustomError> {
-        unimplemented!("Update memory is not implemented because MemoryInput does not include an ID")
+    /// Returns a CustomError if:
+    /// * The input does not contain an ID
+    /// * Embedding generation fails
+    /// * Memory validation fails
+    /// * The update operation fails
+    pub async fn update_memory(&self, input: MemoryInput) -> Result<MemoryEntry, CustomError> {
+        let _id = input.id.ok_or_else(|| CustomError::MemoryValidation("ID is required for update operation".to_string()))?;
+
+        let embedding = self.embed_repo.generate_embedding(&input.content)?;
+        let entry = MemoryEntry::new(input, embedding)?;
+        self.vector_repo.update_memory(&entry).await?;
+
+        Ok(entry)
     }
 
     /// Deletes a memory entry identified by the given UUID.
