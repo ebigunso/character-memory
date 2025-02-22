@@ -4,7 +4,7 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::{Settings, VectorMemorySettings};
+use config::settings::{Settings, VectorMemoryRepositorySettings};
 use errors::CustomError;
 use models::public::Memory;
 use models::public::MemoryInput;
@@ -45,7 +45,7 @@ impl AgentMemory {
         let embed_repo = Box::new(OpenAIEmbeddingRepository::new(&settings)?);
 
         // Configure and create the vector memory repository
-        let vector_memory_settings = VectorMemorySettings::new(
+        let vector_memory_settings = VectorMemoryRepositorySettings::new(
             settings.get_qdrant_connection().to_string(),
             collection_name.clone(),
             settings.get_embedding_model()?

@@ -13,16 +13,16 @@ use crate::models::internal::Point;
 use crate::models::internal::SearchResult;
 use crate::models::internal::MemoryEntry;
 use crate::models::public::MemoryFilters;
-use crate::config::settings::VectorMemorySettings;
+use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
     client: Qdrant,
-    config: VectorMemorySettings,
+    config: VectorMemoryRepositorySettings,
 }
 
 impl QdrantVectorMemoryRepository {
-    pub(crate) fn new(config: VectorMemorySettings) -> Result<Self, CustomError> {
+    pub(crate) fn new(config: VectorMemoryRepositorySettings) -> Result<Self, CustomError> {
         let client = Qdrant::new(
             qdrant_client::config::QdrantConfig::from_url(&config.url)
         )?;

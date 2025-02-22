@@ -13,13 +13,13 @@ use crate::config::enums::EmbeddingModel;
 /// - `collection_name`: Name of the collection to store memories
 /// - `model`: The embedding model to use, which determines vector dimensions
 #[derive(Debug, Clone)]
-pub(crate) struct VectorMemorySettings {
+pub(crate) struct VectorMemoryRepositorySettings {
     pub url: String,
     pub collection_name: String,
     pub model: EmbeddingModel,
 }
 
-impl VectorMemorySettings {
+impl VectorMemoryRepositorySettings {
     pub fn new(url: String, collection_name: String, model: EmbeddingModel) -> Self {
         Self {
             url,
