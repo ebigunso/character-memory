@@ -80,19 +80,29 @@ impl MemoryRepository
 
     /// Creates multiple memory entries in a batch.
     ///
-    /// Iterates over the provided inputs, generates embeddings, constructs MemoryEntry instances,
-    /// and persists each memory entry via the vector repository.
+    /// Generates embeddings for all inputs in bulk, constructs MemoryEntry instances,
+    /// and persists all entries in a single operation via the vector repository.
     ///
     /// # Errors
-    /// Returns a CustomError if any step in processing the batch fails.
+    /// Returns a CustomError if embedding generation, memory validation, or bulk storage fails.
     pub async fn bulk_create_memories(&self, inputs: &[MemoryInput]) -> Result<Vec<MemoryEntry>, CustomError> {
-        let mut entries = Vec::new();
-        for input in inputs {
-            let embedding = self.embed_repo.generate_embedding(&input.content)?;
+        // Extract content strings for bulk embedding generation
+        let contents: Vec<&str> = inputs.iter().map(|input| input.content.as_str()).collect();
+
+        // Generate embeddings in bulk
+        let embeddings = self.embed_repo.bulk_generate_embeddings(&contents)?;
+
+        // Create memory entries from inputs and embeddings
+        let mut entries = Vec::with_capacity(inputs.len());
+        let input_embedding_pairs = inputs.iter().zip(embeddings.into_iter());
+        for (input, embedding) in input_embedding_pairs {
             let entry = MemoryEntry::new(input.clone(), embedding)?;
-            self.vector_repo.store_memory(&entry).await?;
             entries.push(entry);
         }
+
+        // Store all entries in bulk
+        self.vector_repo.bulk_insert(&entries).await?;
+
         Ok(entries)
     }
 }
