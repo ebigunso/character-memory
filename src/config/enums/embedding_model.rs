@@ -49,6 +49,19 @@ impl EmbeddingModel {
             Self::TextEmbeddingAda002 => 1536,
         }
     }
+
+    /// Returns the string representation of this embedding model.
+    ///
+    /// # Returns
+    ///
+    /// The canonical string identifier used by OpenAI's API for this model.
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::TextEmbedding3Small => "text-embedding-3-small",
+            Self::TextEmbedding3Large => "text-embedding-3-large",
+            Self::TextEmbeddingAda002 => "text-embedding-ada-002",
+        }
+    }
 }
 
 impl FromStr for EmbeddingModel {
@@ -99,5 +112,12 @@ mod tests {
         assert_eq!(EmbeddingModel::TextEmbedding3Small.vector_size(), 1536);
         assert_eq!(EmbeddingModel::TextEmbedding3Large.vector_size(), 3072);
         assert_eq!(EmbeddingModel::TextEmbeddingAda002.vector_size(), 1536);
+    }
+
+    #[test]
+    fn test_as_str() {
+        assert_eq!(EmbeddingModel::TextEmbedding3Small.as_str(), "text-embedding-3-small");
+        assert_eq!(EmbeddingModel::TextEmbedding3Large.as_str(), "text-embedding-3-large");
+        assert_eq!(EmbeddingModel::TextEmbeddingAda002.as_str(), "text-embedding-ada-002");
     }
 }
