@@ -12,24 +12,24 @@ use super::memory_type::MemoryType;
 /// This struct encapsulates the metadata associated with memory vectors stored in the database, supporting both episodic (event-based) and semantic (general knowledge) memories.
 /// It maintains a consistent structure while allowing episodic memories to include additional temporal and contextual information.
 #[derive(Debug, Clone)]
-pub struct VectorMetadata {
+pub(crate) struct VectorMetadata {
     /// Unique identifier linking to graph database
-    pub id: Uuid,
+    pub(crate) id: Uuid,
 
     /// Type of memory (episodic or semantic)
-    pub memory_type: MemoryType,
+    pub(crate) memory_type: MemoryType,
 
     /// Raw textual content used for vector generation
-    pub content: String,
+    pub(crate) content: String,
 
     /// Event occurrence time (RFC 3339) - Required only for episodic memories
-    pub timestamp: Option<DateTime<Utc>>,
+    pub(crate) timestamp: Option<DateTime<Utc>>,
 
     /// Textual location description - Required only for episodic memories
-    pub location_text: Option<String>,
+    pub(crate) location_text: Option<String>,
 
     /// Array of involved entities - Required only for episodic memories
-    pub participants: Option<Vec<String>>,
+    pub(crate) participants: Option<Vec<String>>,
 }
 
 impl VectorMetadata {
@@ -44,7 +44,7 @@ impl VectorMetadata {
     /// A Result containing either:
     /// - The converted VectorMetadata instance
     /// - A CustomError if the conversion fails
-    pub fn from_memory_input(input: MemoryInput) -> Result<Self, CustomError> {
+    pub(crate) fn from_memory_input(input: MemoryInput) -> Result<Self, CustomError> {
         if input.memory_type.to_lowercase() == "semantic" {
             Ok(Self::new_semantic(
                 input.id.unwrap_or_else(Uuid::new_v4),
@@ -71,7 +71,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// A new `VectorMetadata` instance configured for semantic memory
-    pub fn new_semantic(id: Uuid, content: String) -> Self {
+    pub(crate) fn new_semantic(id: Uuid, content: String) -> Self {
         Self {
             id,
             memory_type: MemoryType::Semantic,
@@ -95,7 +95,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// A new `VectorMetadata` instance configured for episodic memory
-    pub fn new_episodic(
+    pub(crate) fn new_episodic(
         id: Uuid,
         content: String,
         timestamp: DateTime<Utc>,
@@ -117,7 +117,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// `true` if this is an episodic memory, `false` otherwise
-    pub fn is_episodic(&self) -> bool {
+    pub(crate) fn is_episodic(&self) -> bool {
         matches!(self.memory_type, MemoryType::Episodic)
     }
 
@@ -126,7 +126,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// `true` if this is a semantic memory, `false` otherwise
-    pub fn is_semantic(&self) -> bool {
+    pub(crate) fn is_semantic(&self) -> bool {
         matches!(self.memory_type, MemoryType::Semantic)
     }
 }
