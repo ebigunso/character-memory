@@ -12,11 +12,9 @@ pub mod public {
 pub(crate) mod internal {
     pub(crate) mod memory_entry;
     pub(crate) mod memory_type;
-    pub(crate) mod point;
     pub(crate) mod vector_metadata;
 
     pub(crate) use memory_entry::MemoryEntry;
     pub(crate) use memory_type::MemoryType;
-    pub(crate) use point::Point;
     pub(crate) use vector_metadata::VectorMetadata;
 }
