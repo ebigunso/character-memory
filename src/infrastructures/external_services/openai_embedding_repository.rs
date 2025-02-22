@@ -59,7 +59,7 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
         Ok(vec_embedding)
     }
 
-    fn batch_generate_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
+    fn bulk_generate_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
         let mut embeddings = Vec::with_capacity(texts.len());
         for &text in texts {
             let emb = self.generate_embedding(text)?;
@@ -118,7 +118,7 @@ mod tests {
         let settings = dummy_settings_with_api("valid_api_key");
         let repo = OpenAIEmbeddingRepository::new(&settings).unwrap();
         let texts = ["first test", "second test"];
-        let result = repo.batch_generate_embeddings(&texts);
+        let result = repo.bulk_generate_embeddings(&texts);
         assert!(result.is_err(), "Batch generation should fail with a dummy API key.");
     }
 }
