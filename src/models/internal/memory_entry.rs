@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::internal::MemoryType;
-use crate::models::public::{Memory, MemoryInput};
+use crate::models::internal::{MemoryType, VectorMetadata};
+use crate::models::public::Memory;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {
@@ -18,27 +18,16 @@ pub(crate) struct MemoryEntry {
 }
 
 impl MemoryEntry {
-    pub(crate) fn new(input: MemoryInput, embedding: Vec<f32>) -> Result<Self, CustomError> {
-        let memory_type = match input.memory_type.to_lowercase().as_str() {
-            "episodic" => MemoryType::Episodic,
-            "semantic" => MemoryType::Semantic,
-            _ => {
-                return Err(CustomError::MemoryValidation(
-                    "memory_type must be either 'episodic' or 'semantic'".to_string(),
-                ))
-            }
-        };
-
+    pub(crate) fn new(metadata: VectorMetadata, embedding: Vec<f32>) -> Result<Self, CustomError> {
         let entry = Self {
-            id: input.id.unwrap_or_else(Uuid::new_v4),
-            memory_type,
-            content: input.content,
+            id: metadata.id,
+            memory_type: metadata.memory_type,
+            content: metadata.content,
             embedding,
-            timestamp: input.timestamp,
-            location_text: input.location_text,
-            participants: input.participants,
+            timestamp: metadata.timestamp,
+            location_text: metadata.location_text,
+            participants: metadata.participants,
         };
-
         entry.validate()?;
         Ok(entry)
     }
@@ -86,111 +75,65 @@ mod tests {
     use chrono::Utc;
 
     #[test]
-    fn test_create_valid_episodic_memory() {
-        let input = MemoryInput {
-            id: None,
-            content: "Discussed plans".to_string(),
-            memory_type: "episodic".to_string(),
-            timestamp: Some(Utc::now()),
-            location_text: Some("Café Central".to_string()),
-            participants: Some(vec!["Alice".to_string(), "Bob".to_string()]),
-        };
+    fn test_create_episodic_memory() {
+        let id = Uuid::new_v4();
+        let timestamp = Utc::now();
+        let metadata = VectorMetadata::new_episodic(
+            id,
+            "Discussed plans".to_string(),
+            timestamp,
+            "Café Central".to_string(),
+            vec!["Alice".to_string(), "Bob".to_string()],
+        );
 
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
+        let result = MemoryEntry::new(metadata.clone(), vec![0.1, 0.2]);
         assert!(result.is_ok());
+        let entry = result.unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.content, metadata.content);
+        assert_eq!(entry.timestamp, Some(timestamp));
+        assert_eq!(entry.location_text, Some("Café Central".to_string()));
+        assert_eq!(entry.participants, Some(vec!["Alice".to_string(), "Bob".to_string()]));
     }
 
     #[test]
-    fn test_create_valid_semantic_memory() {
-        let input = MemoryInput {
-            id: None,
-            content: "Alice is a software engineer".to_string(),
-            memory_type: "semantic".to_string(),
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
+    fn test_create_semantic_memory() {
+        let id = Uuid::new_v4();
+        let metadata = VectorMetadata::new_semantic(
+            id,
+            "Alice is a software engineer".to_string(),
+        );
 
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
+        let result = MemoryEntry::new(metadata.clone(), vec![0.1, 0.2]);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_create_invalid_episodic_memory() {
-        let input = MemoryInput {
-            id: None,
-            content: "Discussed plans".to_string(),
-            memory_type: "episodic".to_string(),
-            timestamp: None,
-            location_text: Some("Café Central".to_string()),
-            participants: Some(vec!["Alice".to_string()]),
-        };
-
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
-        assert!(matches!(result, Err(CustomError::MissingEpisodicField("timestamp"))));
+        let entry = result.unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.content, metadata.content);
+        assert!(entry.timestamp.is_none());
+        assert!(entry.location_text.is_none());
+        assert!(entry.participants.is_none());
     }
 
     #[test]
     fn test_create_invalid_semantic_memory() {
-        let input = MemoryInput {
-            id: None,
-            content: "Alice is a software engineer".to_string(),
-            memory_type: "semantic".to_string(),
-            timestamp: Some(Utc::now()),
+        let id = Uuid::new_v4();
+        let timestamp = Utc::now();
+        let metadata = VectorMetadata::new_semantic(
+            id,
+            "Alice is a software engineer".to_string(),
+        );
+
+        // Manually create an invalid semantic memory with timestamp
+        let entry = MemoryEntry {
+            id,
+            memory_type: MemoryType::Semantic,
+            content: metadata.content,
+            embedding: vec![0.1, 0.2],
+            timestamp: Some(timestamp),
             location_text: None,
             participants: None,
         };
 
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
-        assert!(matches!(result, Err(CustomError::InvalidSemanticMemory)));
-    }
-
-    #[test]
-    fn test_invalid_memory_type() {
-        let input = MemoryInput {
-            id: None,
-            content: "Test".to_string(),
-            memory_type: "invalid".to_string(),
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
-
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
-        assert!(matches!(result, Err(CustomError::MemoryValidation(_))));
-    }
-
-    #[test]
-    fn test_memory_with_provided_id() {
-        let provided_id = Uuid::new_v4();
-        let input = MemoryInput {
-            id: Some(provided_id),
-            content: "Test with provided ID".to_string(),
-            memory_type: "semantic".to_string(),
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
-
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().id, provided_id);
-    }
-
-    #[test]
-    fn test_memory_without_id() {
-        let input = MemoryInput {
-            id: None,
-            content: "Test without ID".to_string(),
-            memory_type: "semantic".to_string(),
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
-
-        let result = MemoryEntry::new(input, vec![0.1, 0.2]);
-        assert!(result.is_ok());
-        // A new UUID should have been generated
-        assert!(result.unwrap().id.to_string().len() > 0);
+        assert!(matches!(entry.validate(), Err(CustomError::InvalidSemanticMemory)));
     }
 }

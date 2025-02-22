@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
-use crate::models::internal::{Point, SearchResult, MemoryEntry};
-use crate::models::public::MemoryFilters;
+use crate::models::internal::{Point, MemoryEntry, VectorMetadata};
+use crate::models::public::{MemoryFilters, MemoryInput};
 use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
@@ -45,27 +45,45 @@ impl QdrantVectorMemoryRepository {
         }
     }
 
-    // Helper: Convert a Qdrant ScoredPoint to a SearchResult.
-    fn convert_scored_point(&self, point: ScoredPoint) -> Result<SearchResult, CustomError> {
+    // Helper: Convert a Qdrant ScoredPoint to a MemoryEntry.
+    fn scored_point_to_memory_entry(&self, point: ScoredPoint) -> Result<MemoryEntry, CustomError> {
         let id = point.id.ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
         let id_str = match id.point_id_options {
             Some(PointIdOptions::Uuid(ref s)) => s.clone(),
             _ => return Err(CustomError::DatabaseError("Invalid point id variant".to_string())),
         };
-        let payload = point.payload.into_iter().map(|(k, v)| {
-            (k, serde_json::Value::String(v.to_string()))
-        }).collect();
+        let uuid = Uuid::parse_str(&id_str)
+            .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
+
         let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
         let vector = match vectors_output.vectors_options {
             Some(vectors_output::VectorsOptions::Vector(vo)) => vo.data,
             _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
         };
-        Ok(SearchResult {
-            id: id_str,
-            payload,
-            vector,
-            score: point.score,
-        })
+
+        let memory_value = Value::Object(point.payload.into_iter().map(|(k, v)| {
+            (k, serde_json::Value::String(v.to_string()))
+        }).collect());
+
+        let memory_input: MemoryInput = serde_json::from_value(memory_value)?;
+
+        // Convert MemoryInput to VectorMetadata
+        let metadata = if memory_input.memory_type.to_lowercase() == "semantic" {
+            VectorMetadata::new_semantic(
+                memory_input.id.unwrap_or(uuid),
+                memory_input.content
+            )
+        } else {
+            VectorMetadata::new_episodic(
+                memory_input.id.unwrap_or(uuid),
+                memory_input.content,
+                memory_input.timestamp.ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?,
+                memory_input.location_text.ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?,
+                memory_input.participants.ok_or_else(|| CustomError::MissingEpisodicField("participants"))?,
+            )
+        };
+
+        MemoryEntry::new(metadata, vector)
     }
 
     // Helper: Parse filter conditions from a JSON object.
@@ -175,13 +193,9 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
 
         let search_req = builder.build();
         let response = self.client.search_points(search_req).await?;
-        let mut results = Vec::new();
-        for scored in response.result {
-            let search_result = self.convert_scored_point(scored)?;
-            let memory_value = Value::Object(search_result.payload);
-            let memory: MemoryEntry = serde_json::from_value(memory_value)?;
-            results.push(memory);
-        }
+        let results = response.result.into_iter()
+            .map(|scored| self.scored_point_to_memory_entry(scored))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(results)
     }
 

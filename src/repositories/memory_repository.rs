@@ -1,8 +1,8 @@
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::internal::MemoryEntry;
-use crate::models::public::{MemoryFilters, MemoryInput};
+use crate::models::internal::{MemoryEntry, VectorMetadata};
+use crate::models::public::MemoryFilters;
 use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
 
 /// Provides high-level operations for managing memory entries.
@@ -54,9 +54,9 @@ impl MemoryRepository
     ///
     /// - `Ok`: A `MemoryEntry` containing the created memory
     /// - `Err`: A `CustomError` if embedding generation, memory validation, or storage fails
-    pub async fn create_memory(&self, input: MemoryInput) -> Result<MemoryEntry, CustomError> {
-        let embedding = self.embed_repo.generate_embedding(&input.content)?;
-        let entry = MemoryEntry::new(input, embedding)?;
+    pub async fn create_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
+        let embedding = self.embed_repo.generate_embedding(&metadata.content)?;
+        let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.store_memory(&entry).await?;
 
         Ok(entry)
@@ -98,11 +98,9 @@ impl MemoryRepository
     ///     - Embedding generation fails
     ///     - Memory validation fails
     ///     - The update operation fails
-    pub async fn update_memory(&self, input: MemoryInput) -> Result<MemoryEntry, CustomError> {
-        let _id = input.id.ok_or_else(|| CustomError::MemoryValidation("ID is required for update operation".to_string()))?;
-
-        let embedding = self.embed_repo.generate_embedding(&input.content)?;
-        let entry = MemoryEntry::new(input, embedding)?;
+    pub async fn update_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
+        let embedding = self.embed_repo.generate_embedding(&metadata.content)?;
+        let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.update_memory(&entry).await?;
 
         Ok(entry)
@@ -164,18 +162,18 @@ impl MemoryRepository
     ///
     /// - `Ok`: A vector of `MemoryEntry` containing the created memories
     /// - `Err`: A `CustomError` if embedding generation, memory validation, or bulk storage fails
-    pub async fn bulk_create_memories(&self, inputs: &[MemoryInput]) -> Result<Vec<MemoryEntry>, CustomError> {
+    pub async fn bulk_create_memories(&self, metadata_list: &[VectorMetadata]) -> Result<Vec<MemoryEntry>, CustomError> {
         // Extract content strings for bulk embedding generation
-        let contents: Vec<&str> = inputs.iter().map(|input| input.content.as_str()).collect();
+        let contents: Vec<&str> = metadata_list.iter().map(|metadata| metadata.content.as_str()).collect();
 
         // Generate embeddings in bulk
         let embeddings = self.embed_repo.bulk_generate_embeddings(&contents)?;
 
-        // Create memory entries from inputs and embeddings
-        let mut entries = Vec::with_capacity(inputs.len());
-        let input_embedding_pairs = inputs.iter().zip(embeddings.into_iter());
-        for (input, embedding) in input_embedding_pairs {
-            let entry = MemoryEntry::new(input.clone(), embedding)?;
+        // Create memory entries from metadata and embeddings
+        let mut entries = Vec::with_capacity(metadata_list.len());
+        let metadata_embedding_pairs = metadata_list.iter().zip(embeddings.into_iter());
+        for (metadata, embedding) in metadata_embedding_pairs {
+            let entry = MemoryEntry::new(metadata.clone(), embedding)?;
             entries.push(entry);
         }
 

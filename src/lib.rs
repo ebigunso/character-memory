@@ -6,11 +6,10 @@ mod infrastructures;
 
 use config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
 use errors::CustomError;
-use models::public::Memory;
-use models::public::MemoryInput;
-use models::public::MemoryFilters;
-use repositories::MemoryRepository;
 use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
+use models::internal::VectorMetadata;
+use models::public::{Memory, MemoryFilters, MemoryInput};
+use repositories::MemoryRepository;
 
 /// AgentMemory provides a high-level API for memory operations.
 ///
@@ -74,7 +73,8 @@ impl AgentMemory {
     /// - `Ok`: A `Memory` containing the created entry
     /// - `Err`: A `CustomError` if the operation fails
     pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
-        let mem_entry = self.memory_repo.create_memory(input).await?;
+        let metadata = VectorMetadata::from_memory_input(input)?;
+        let mem_entry = self.memory_repo.create_memory(metadata).await?;
         Ok(mem_entry.into_public())
     }
 
@@ -91,7 +91,12 @@ impl AgentMemory {
     /// - `Ok`: A vector of `Memory` containing the created entries
     /// - `Err`: A `CustomError` if the operation fails
     pub async fn bulk_create_memories(&self, inputs: &[MemoryInput]) -> Result<Vec<Memory>, CustomError> {
-        let entries = self.memory_repo.bulk_create_memories(inputs).await?;
+        let metadata_list: Result<Vec<_>, _> = inputs.iter()
+            .map(|input| VectorMetadata::from_memory_input(input.clone()))
+            .collect();
+        let metadata_list = metadata_list?;
+
+        let entries = self.memory_repo.bulk_create_memories(&metadata_list).await?;
         Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
     }
 
@@ -151,7 +156,8 @@ impl AgentMemory {
     ///     - The input does not contain an ID
     ///     - The update operation fails
     pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
-        let mem_entry = self.memory_repo.update_memory(input).await?;
+        let metadata = VectorMetadata::from_memory_input(input)?;
+        let mem_entry = self.memory_repo.update_memory(metadata).await?;
         Ok(mem_entry.into_public())
     }
 
