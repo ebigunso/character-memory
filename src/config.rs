@@ -1,10 +1,10 @@
 // Module declarations
 pub mod settings {
     pub mod settings;
-    pub mod vector_memory_settings;
+    pub(crate) mod vector_memory_settings;
 
     pub use settings::Settings;
-    pub use vector_memory_settings::VectorMemorySettings;
+    pub(crate) use vector_memory_settings::VectorMemorySettings;
 }
 
 pub mod enums {
