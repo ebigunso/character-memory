@@ -8,9 +8,9 @@ pub mod settings {
 }
 
 pub mod enums {
-    pub mod embedding_model;
+    pub(crate) mod embedding_model;
 
-    pub use embedding_model::EmbeddingModel;
+    pub(crate) use embedding_model::EmbeddingModel;
 }
 
 pub(crate) mod loaders {

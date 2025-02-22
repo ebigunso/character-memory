@@ -13,7 +13,7 @@ use crate::errors::CustomError;
 ///
 /// - [OpenAI Embeddings Guide](https://platform.openai.com/docs/guides/embeddings)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum EmbeddingModel {
+pub(crate) enum EmbeddingModel {
     /// OpenAI text-embedding-3-small model.
     ///
     /// # Description
@@ -42,7 +42,7 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// The number of dimensions in the embedding vectors produced by this model.
-    pub fn vector_size(&self) -> u64 {
+    pub(crate) fn vector_size(&self) -> u64 {
         match self {
             Self::TextEmbedding3Small => 1536,
             Self::TextEmbedding3Large => 3072,
