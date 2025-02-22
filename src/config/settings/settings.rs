@@ -20,7 +20,8 @@ impl Settings {
     ///
     /// # Description
     ///
-    /// Primary constructor for creating a Settings instance. Takes a pre-configured Config object that defines all required settings. This allows for flexible configuration sourcing while maintaining a clean initialization interface.
+    /// Primary constructor for creating a Settings instance. Takes a pre-configured Config object that defines all required settings.
+    /// This allows for flexible configuration sourcing while maintaining a clean initialization interface.
     ///
     /// # Parameters
     ///
@@ -41,11 +42,34 @@ impl Settings {
         })
     }
 
+    /// Loads settings from environment variables and configuration files using default loaders.
+    ///
+    /// # Description
+    ///
+    /// This function provides a convenient way to load settings using the default environment and configuration loaders.
+    /// It expects a `.env` file in the project root directory and will attempt to load configuration values from both environment variables and the configuration system.
+    ///
+    /// # Important
+    ///
+    /// This function is intended ONLY for use in integration tests and should not be used anywhere else in the codebase.
+    /// For production code, use the `Settings::new()` constructor with an explicitly configured `Config` instance.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A new `Settings` instance with configuration loaded from environment and config files
+    /// - `Err`: A `CustomError` if:
+    ///     - The `.env` file is missing
+    ///     - There are errors loading the environment variables
+    ///     - There are errors parsing the configuration
+    ///     - Required settings are missing or invalid
+    ///
     pub(crate) fn load() -> Result<Self, CustomError> {
         Self::load_with_loaders(DefaultEnvLoader, DefaultConfigLoader)
     }
 
-    pub(crate) fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
+    fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
         env_loader: E,
         config_loader: C,
     ) -> Result<Self, CustomError> {
