@@ -8,7 +8,7 @@ use config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingReposi
 use errors::CustomError;
 use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
 use models::internal::VectorMetadata;
-use models::public::{Memory, MemoryFilters, MemoryInput};
+use models::public::{Memory, MemoryFilters, MemoryInput, MemoryType};
 use repositories::MemoryRepository;
 
 /// AgentMemory provides a high-level API for memory operations.

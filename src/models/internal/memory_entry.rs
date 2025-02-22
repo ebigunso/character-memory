@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::internal::{MemoryType, VectorMetadata};
-use crate::models::public::Memory;
+use crate::models::internal::VectorMetadata;
+use crate::models::public::{Memory, MemoryType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {
@@ -58,10 +58,7 @@ impl MemoryEntry {
         Memory {
             id: self.id,
             content: self.content,
-            memory_type: match self.memory_type {
-                MemoryType::Episodic => "episodic".to_string(),
-                MemoryType::Semantic => "semantic".to_string(),
-            },
+            memory_type: self.memory_type,
             timestamp: self.timestamp,
             location_text: self.location_text,
             participants: self.participants,

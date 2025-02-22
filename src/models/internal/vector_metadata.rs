@@ -2,8 +2,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
 use crate::errors::CustomError;
-use crate::models::public::MemoryInput;
-use super::memory_type::MemoryType;
+use crate::models::public::{MemoryInput, MemoryType};
 
 /// Represents the metadata structure of a vector memory entry in the vector database.
 ///
@@ -45,7 +44,7 @@ impl VectorMetadata {
     /// - The converted VectorMetadata instance
     /// - A CustomError if the conversion fails
     pub(crate) fn from_memory_input(input: MemoryInput) -> Result<Self, CustomError> {
-        if input.memory_type.to_lowercase() == "semantic" {
+        if input.memory_type == MemoryType::Semantic {
             Ok(Self::new_semantic(
                 input.id.unwrap_or_else(Uuid::new_v4),
                 input.content,
@@ -143,7 +142,7 @@ mod tests {
         let input = MemoryInput {
             id: Some(id),
             content: content.clone(),
-            memory_type: "semantic".to_string(),
+            memory_type: MemoryType::Semantic,
             timestamp: None,
             location_text: None,
             participants: None,
@@ -171,7 +170,7 @@ mod tests {
         let input = MemoryInput {
             id: Some(id),
             content: content.clone(),
-            memory_type: "episodic".to_string(),
+            memory_type: MemoryType::Episodic,
             timestamp: Some(timestamp),
             location_text: Some(location.clone()),
             participants: Some(participants.clone()),
@@ -193,7 +192,7 @@ mod tests {
         let input = MemoryInput {
             id: None,
             content: "Test content".to_string(),
-            memory_type: "semantic".to_string(),
+            memory_type: MemoryType::Semantic,
             timestamp: None,
             location_text: None,
             participants: None,
@@ -210,7 +209,7 @@ mod tests {
         let input = MemoryInput {
             id: None,
             content: "Test content".to_string(),
-            memory_type: "episodic".to_string(),
+            memory_type: MemoryType::Episodic,
             timestamp: None,
             location_text: Some("Location".to_string()),
             participants: Some(vec!["Alice".to_string()]),
