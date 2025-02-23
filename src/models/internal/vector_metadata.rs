@@ -116,6 +116,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// `true` if this is an episodic memory, `false` otherwise
+    #[allow(dead_code)]
     pub(crate) fn is_episodic(&self) -> bool {
         matches!(self.memory_type, MemoryType::Episodic)
     }
@@ -125,6 +126,7 @@ impl VectorMetadata {
     /// # Returns
     ///
     /// `true` if this is a semantic memory, `false` otherwise
+    #[allow(dead_code)]
     pub(crate) fn is_semantic(&self) -> bool {
         matches!(self.memory_type, MemoryType::Semantic)
     }

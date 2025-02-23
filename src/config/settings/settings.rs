@@ -9,7 +9,6 @@ use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
 use crate::errors::CustomError;
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_connection_string: SecretString,
@@ -102,12 +101,11 @@ impl Settings {
         })
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Remove after implementing Oxigraph
     pub(crate) fn get_oxigraph_connection(&self) -> &str {
         self.oxigraph_connection_string.expose_secret()
     }
