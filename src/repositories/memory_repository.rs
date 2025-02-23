@@ -21,8 +21,7 @@ pub(crate) struct MemoryRepository {
     pub vector_repo: Box<dyn VectorMemoryRepository>,
 }
 
-impl MemoryRepository
-{
+impl MemoryRepository {
     /// Creates a new MemoryRepository instance.
     ///
     /// # Parameters
@@ -35,6 +34,23 @@ impl MemoryRepository
     /// A new `MemoryRepository` instance with the provided repositories
     pub fn new(embed_repo: Box<dyn EmbeddingRepository>, vector_repo: Box<dyn VectorMemoryRepository>) -> Self {
         Self { embed_repo, vector_repo }
+    }
+
+    /// Initializes the underlying storage systems.
+    ///
+    /// # Description
+    ///
+    /// Ensures all required storage systems are properly initialized before any operations are performed.
+    /// This should be called during application startup.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: Empty unit type if initialization succeeds
+    /// - `Err`: A `CustomError` if initialization fails
+    pub async fn init_storage(&self) -> Result<(), CustomError> {
+        self.vector_repo.init_collection().await
     }
 
     /// Creates a new memory entry.
