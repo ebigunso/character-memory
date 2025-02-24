@@ -9,12 +9,6 @@ pub mod settings {
     pub(crate) use embedding_repository_settings::EmbeddingRepositorySettings;
 }
 
-pub mod enums {
-    pub(crate) mod embedding_model;
-
-    pub(crate) use embedding_model::EmbeddingModel;
-}
-
 pub(crate) mod loaders {
     pub(crate) mod config_loader;
     pub(crate) mod env_loader;

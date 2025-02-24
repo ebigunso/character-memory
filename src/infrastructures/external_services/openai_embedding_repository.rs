@@ -93,7 +93,7 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::enums::EmbeddingModel;
+    use crate::models::internal::EmbeddingModel;
 
     fn create_test_settings(api_key: &str) -> EmbeddingRepositorySettings {
         EmbeddingRepositorySettings::new(

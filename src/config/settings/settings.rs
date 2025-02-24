@@ -3,7 +3,7 @@ use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
-use crate::config::enums::EmbeddingModel;
+use crate::models::internal::EmbeddingModel;
 use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
 use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
 use crate::errors::CustomError;

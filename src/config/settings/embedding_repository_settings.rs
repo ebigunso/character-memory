@@ -1,4 +1,4 @@
-use crate::config::enums::embedding_model::EmbeddingModel;
+use crate::models::internal::EmbeddingModel;
 
 /// Settings for configuring the OpenAI Embedding Repository.
 ///
