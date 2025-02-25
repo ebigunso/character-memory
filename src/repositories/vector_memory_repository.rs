@@ -101,6 +101,20 @@ pub(crate) trait VectorMemoryRepository: Send + Sync {
     /// - `Ok`: Empty unit type if bulk insert succeeds
     /// - `Err`: A `CustomError` if bulk insert fails
     async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError>;
+
+    /// Retrieves multiple memories by their IDs.
+    ///
+    /// # Parameters
+    ///
+    /// - `ids`: A slice of UUIDs to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A vector of `MemoryEntry` containing the retrieved memories
+    /// - `Err`: A `CustomError` if retrieval fails
+    async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError>;
 }
 
 // Implement the trait for Box<dyn VectorMemoryRepository>
@@ -133,5 +147,9 @@ impl<T: VectorMemoryRepository + ?Sized> VectorMemoryRepository for Box<T> {
 
     async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
         (**self).bulk_insert(memories).await
+    }
+
+    async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError> {
+        (**self).get_memories_by_ids(ids).await
     }
 }

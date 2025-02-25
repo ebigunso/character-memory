@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
     DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
     SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig, PointId,
-    Filter, Condition, vectors_config, vectors_output,
+    Filter, Condition, vectors_config, vectors_output, VectorsOutput, GetPointsBuilder, RetrievedPoint,
 };
 use qdrant_client::{Qdrant, config::QdrantConfig};
 use uuid::Uuid;
@@ -29,10 +30,18 @@ impl QdrantVectorMemoryRepository {
         Ok(Self { client, config })
     }
 
-    // Helper: Convert a Qdrant ScoredPoint to a MemoryEntry.
-    fn scored_point_to_memory_entry(&self, point: ScoredPoint) -> Result<MemoryEntry, CustomError> {
+    // Helper: Convert a Qdrant point to a MemoryEntry.
+    fn point_to_memory_entry<P>(&self, point: P) -> Result<MemoryEntry, CustomError>
+    where
+        P: Into<PointData>,
+    {
+        self.point_data_to_memory_entry(point.into())
+    }
+
+    // Helper: Convert a PointData to a MemoryEntry.
+    fn point_data_to_memory_entry(&self, point_data: PointData) -> Result<MemoryEntry, CustomError> {
         // Extract ID
-        let id = point.id.ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
+        let id = point_data.id.ok_or_else(|| CustomError::DatabaseError("Missing point ID".to_string()))?;
         let id_str = match id.point_id_options {
             Some(PointIdOptions::Uuid(ref s)) => s.clone(),
             _ => return Err(CustomError::DatabaseError("Invalid point id variant".to_string())),
@@ -41,20 +50,20 @@ impl QdrantVectorMemoryRepository {
             .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
 
         // Extract vector
-        let vectors_output = point.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
+        let vectors_output = point_data.vectors.ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
         let vector = match vectors_output.vectors_options {
             Some(vectors_output::VectorsOptions::Vector(vo)) => vo.data,
             _ => return Err(CustomError::DatabaseError("Unexpected vector type".to_string())),
         };
 
         // Extract required fields from payload
-        let memory_type = point.payload.get("memory_type")
+        let memory_type = point_data.payload.get("memory_type")
             .ok_or_else(|| CustomError::DatabaseError("Missing memory_type in payload".to_string()))?
             .to_string()
             .trim_matches('"')
             .to_lowercase();
 
-        let content = point.payload.get("content")
+        let content = point_data.payload.get("content")
             .ok_or_else(|| CustomError::DatabaseError("Missing content in payload".to_string()))?
             .to_string()
             .trim_matches('"')
@@ -65,7 +74,7 @@ impl QdrantVectorMemoryRepository {
             VectorMetadata::new_semantic(uuid, content)
         } else {
             // Extract and parse timestamp
-            let timestamp_str = point.payload.get("timestamp")
+            let timestamp_str = point_data.payload.get("timestamp")
                 .ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?
                 .to_string()
                 .trim_matches('"')
@@ -75,14 +84,14 @@ impl QdrantVectorMemoryRepository {
                 .with_timezone(&Utc);
 
             // Extract location
-            let location_text = point.payload.get("location_text")
+            let location_text = point_data.payload.get("location_text")
                 .ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?
                 .to_string()
                 .trim_matches('"')
                 .to_string();
 
             // Extract and parse participants
-            let participants_str = point.payload.get("participants")
+            let participants_str = point_data.payload.get("participants")
                 .ok_or_else(|| CustomError::MissingEpisodicField("participants"))?
                 .to_string();
             let participants: Vec<String> = serde_json::from_str(&participants_str)
@@ -201,9 +210,60 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let search_req = builder.build();
         let response = self.client.search_points(search_req).await?;
         let results = response.result.into_iter()
-            .map(|scored| self.scored_point_to_memory_entry(scored))
+            .map(|scored| self.point_to_memory_entry(scored))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(results)
+    }
+
+    async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert UUIDs to Qdrant PointIds
+        let point_ids: Vec<PointId> = ids
+            .iter()
+            .map(|id| PointId {
+                point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
+            })
+            .collect();
+
+        // Build the get points request
+        let get_points_request = GetPointsBuilder::new(&self.config.collection_name, point_ids)
+            .with_payload(true)
+            .with_vectors(true)
+            .build();
+
+        // Execute the request
+        let response = self.client.get_points(get_points_request).await?;
+
+        // Convert the points to MemoryEntry objects
+        let memories = response
+            .result
+            .into_iter()
+            .map(|point| self.point_to_memory_entry(point))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Check if all requested IDs were found
+        if memories.len() < ids.len() {
+            // Find which IDs were not found
+            let found_ids: std::collections::HashSet<Uuid> = memories.iter()
+                .map(|memory| memory.id)
+                .collect();
+
+            let missing_ids: Vec<Uuid> = ids.iter()
+                .filter(|id| !found_ids.contains(id))
+                .cloned()
+                .collect();
+
+            if !missing_ids.is_empty() {
+                return Err(CustomError::DatabaseError(
+                    format!("Memories with IDs {:?} not found", missing_ids)
+                ));
+            }
+        }
+
+        Ok(memories)
     }
 
     async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
@@ -226,5 +286,42 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, points).build();
         self.client.upsert_points(upsert_req).await?;
         Ok(())
+    }
+}
+
+// Helper struct to unify ScoredPoint and RetrievedPoint
+struct PointData {
+    id: Option<PointId>,
+    payload: HashMap<String, qdrant_client::qdrant::Value>,
+    vectors: Option<VectorsOutput>,
+}
+
+impl PointData {
+    fn from_scored_point(point: ScoredPoint) -> Self {
+        Self {
+            id: point.id,
+            payload: point.payload,
+            vectors: point.vectors,
+        }
+    }
+
+    fn from_retrieved_point(point: RetrievedPoint) -> Self {
+        Self {
+            id: point.id,
+            payload: point.payload,
+            vectors: point.vectors,
+        }
+    }
+}
+
+impl From<ScoredPoint> for PointData {
+    fn from(point: ScoredPoint) -> Self {
+        Self::from_scored_point(point)
+    }
+}
+
+impl From<RetrievedPoint> for PointData {
+    fn from(point: RetrievedPoint) -> Self {
+        Self::from_retrieved_point(point)
     }
 }

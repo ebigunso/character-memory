@@ -4,13 +4,15 @@ mod models;
 mod repositories;
 mod infrastructures;
 
-use config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
-use errors::CustomError;
-use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
-use models::vector::VectorMetadata;
-use models::memory::dto::{Memory, MemoryFilters, MemoryInput};
-use models::memory::MemoryType;
-use repositories::MemoryRepository;
+use uuid::Uuid;
+
+use crate::config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
+use crate::errors::CustomError;
+use crate::infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
+use crate::models::vector::VectorMetadata;
+use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
+use crate::models::memory::MemoryType;
+use crate::repositories::MemoryRepository;
 
 /// AgentMemory provides a high-level API for memory operations.
 ///
@@ -130,9 +132,26 @@ impl AgentMemory {
     ///
     /// - `Ok`: A `Memory` containing the requested entry
     /// - `Err`: A `CustomError` if the operation fails
-    pub async fn get_memory_by_id(&self, id: uuid::Uuid) -> Result<Memory, CustomError> {
+    pub async fn get_memory_by_id(&self, id: Uuid) -> Result<Memory, CustomError> {
         let mem_entry = self.memory_repo.get_memory_by_id(id).await?;
         Ok(mem_entry.into_public())
+    }
+
+    /// Retrieves multiple memory entries by their unique identifiers.
+    ///
+    /// # Parameters
+    ///
+    /// - `ids`: A slice of UUIDs of the memory entries to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A vector of `Memory` containing the requested entries
+    /// - `Err`: A `CustomError` if the operation fails
+    pub async fn get_memories_by_ids(&self, ids: &[Uuid]) -> Result<Vec<Memory>, CustomError> {
+        let mem_entries = self.memory_repo.get_memories_by_ids(ids).await?;
+        Ok(mem_entries.into_iter().map(|entry| entry.into_public()).collect())
     }
 
     /// Searches for memory entries that are semantically similar to the query.
@@ -191,7 +210,7 @@ impl AgentMemory {
     ///
     /// - `Ok`: Empty unit type if deletion succeeds
     /// - `Err`: A `CustomError` if the operation fails
-    pub async fn delete_memory(&self, id: uuid::Uuid) -> Result<(), CustomError> {
+    pub async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
         self.memory_repo.delete_memory(id).await
     }
 }

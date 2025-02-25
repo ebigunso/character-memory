@@ -81,22 +81,35 @@ impl MemoryRepository {
 
     /// Retrieves a memory entry by its unique identifier.
     ///
-    /// # Description
-    ///
-    /// Unimplemented because the underlying vector repository does not support direct lookup.
-    ///
     /// # Parameters
     ///
-    /// - `_id`: The UUID of the memory entry to retrieve
+    /// - `id`: The UUID of the memory entry to retrieve
     ///
     /// # Returns
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok`: Never returned as this method is unimplemented
-    /// - `Err`: Always returns a `CustomError` as this method is not implemented
-    pub async fn get_memory_by_id(&self, _id: Uuid) -> Result<MemoryEntry, CustomError> {
-        unimplemented!("get_memory_by_id is not implemented in VectorMemoryRepository")
+    /// - `Ok`: The retrieved `MemoryEntry`
+    /// - `Err`: A `CustomError` if the memory is not found or retrieval fails
+    pub async fn get_memory_by_id(&self, id: Uuid) -> Result<MemoryEntry, CustomError> {
+        let memories = self.vector_repo.get_memories_by_ids(&[id]).await?;
+        Ok(memories.into_iter().next().unwrap())
+    }
+
+    /// Retrieves multiple memory entries by their unique identifiers.
+    ///
+    /// # Parameters
+    ///
+    /// - `ids`: A slice of UUIDs of the memory entries to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A vector of `MemoryEntry` containing the retrieved memories
+    /// - `Err`: A `CustomError` if retrieval fails
+    pub async fn get_memories_by_ids(&self, ids: &[Uuid]) -> Result<Vec<MemoryEntry>, CustomError> {
+        self.vector_repo.get_memories_by_ids(ids).await
     }
 
     /// Updates an existing memory entry.
