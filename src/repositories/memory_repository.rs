@@ -1,8 +1,9 @@
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::internal::{MemoryEntry, VectorMetadata};
-use crate::models::public::MemoryFilters;
+use crate::models::memory::dto::MemoryFilters;
+use crate::models::memory::MemoryEntry;
+use crate::models::vector::VectorMetadata;
 use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
 
 /// Provides high-level operations for managing memory entries.

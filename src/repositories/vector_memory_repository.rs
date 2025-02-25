@@ -2,8 +2,8 @@ use uuid::Uuid;
 use async_trait::async_trait;
 
 use crate::errors::CustomError;
-use crate::models::internal::MemoryEntry;
-use crate::models::public::MemoryFilters;
+use crate::models::memory::MemoryEntry;
+use crate::models::memory::dto::MemoryFilters;
 
 /// Repository trait for storing and retrieving memories using a vector database.
 ///

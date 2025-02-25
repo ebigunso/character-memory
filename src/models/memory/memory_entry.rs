@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::internal::VectorMetadata;
-use crate::models::public::{Memory, MemoryType};
+use crate::models::vector::VectorMetadata;
+use crate::models::memory::dto::Memory;
+use crate::models::memory::MemoryType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {

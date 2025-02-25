@@ -1,4 +1,4 @@
-use crate::models::internal::EmbeddingModel;
+use crate::models::vector::EmbeddingModel;
 
 /// Configuration for VectorMemoryRepository.
 ///

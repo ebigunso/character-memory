@@ -7,8 +7,9 @@ mod infrastructures;
 use config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
 use errors::CustomError;
 use infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
-use models::internal::VectorMetadata;
-use models::public::{Memory, MemoryFilters, MemoryInput, MemoryType};
+use models::vector::VectorMetadata;
+use models::memory::dto::{Memory, MemoryFilters, MemoryInput};
+use models::memory::MemoryType;
 use repositories::MemoryRepository;
 
 /// AgentMemory provides a high-level API for memory operations.

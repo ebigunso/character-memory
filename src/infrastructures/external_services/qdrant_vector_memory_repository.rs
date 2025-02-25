@@ -11,8 +11,9 @@ use uuid::Uuid;
 
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
-use crate::models::internal::{MemoryEntry, VectorMetadata};
-use crate::models::public::MemoryFilters;
+use crate::models::memory::MemoryEntry;
+use crate::models::vector::VectorMetadata;
+use crate::models::memory::dto::MemoryFilters;
 use crate::repositories::VectorMemoryRepository;
 
 pub struct QdrantVectorMemoryRepository {
