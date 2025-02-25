@@ -1,7 +1,7 @@
 // Module declarations
-pub(crate) mod embedding_repository;
-pub(crate) mod memory_repository;
-pub(crate) mod vector_memory_repository;
+mod embedding_repository;
+mod memory_repository;
+mod vector_memory_repository;
 
 pub(crate) use embedding_repository::EmbeddingRepository;
 pub(crate) use memory_repository::MemoryRepository;

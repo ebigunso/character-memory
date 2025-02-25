@@ -139,7 +139,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::custom::CustomError;
+    use crate::errors::CustomError;
     use config::ConfigError;
     use crate::config::loaders::config_loader::MockConfigLoader;
     use crate::config::loaders::env_loader::MockEnvLoader;
