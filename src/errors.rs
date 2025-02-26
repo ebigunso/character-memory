@@ -1,4 +1,4 @@
 // Module declarations
 mod custom;
 
-pub(crate) use custom::CustomError;
+pub use custom::CustomError;

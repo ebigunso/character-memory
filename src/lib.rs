@@ -6,13 +6,39 @@ mod infrastructures;
 
 use uuid::Uuid;
 
-use crate::config::settings::{Settings, VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
-use crate::errors::CustomError;
+use crate::config::settings::{VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
 use crate::infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
 use crate::models::vector::VectorMetadata;
-use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
-use crate::models::memory::MemoryType;
 use crate::repositories::MemoryRepository;
+
+// Re-export types for public use
+pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
+pub use crate::models::memory::MemoryType;
+pub use crate::config::settings::Settings;
+pub use crate::errors::CustomError;
+
+// Re-export for integration tests
+pub mod test_utils {
+    use crate::config::settings::Settings;
+    use crate::errors::CustomError;
+
+    /// Loads settings from environment variables for integration tests.
+    ///
+    /// # Important
+    ///
+    /// This function is intended ONLY for use in integration tests and should not be used in production code.
+    /// It expects a `.env` file in the project root directory.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok`: A new `Settings` instance with configuration loaded from environment
+    /// - `Err`: A `CustomError` if loading fails
+    pub fn load_test_settings() -> Result<Settings, CustomError> {
+        Settings::load()
+    }
+}
 
 /// AgentMemory provides a high-level API for memory operations.
 ///

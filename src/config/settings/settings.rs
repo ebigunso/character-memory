@@ -101,16 +101,16 @@ impl Settings {
         })
     }
 
-    pub(crate) fn get_qdrant_connection(&self) -> &str {
+    pub fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
     }
 
     #[allow(dead_code)] // Remove after implementing Oxigraph
-    pub(crate) fn get_oxigraph_connection(&self) -> &str {
+    pub fn get_oxigraph_connection(&self) -> &str {
         self.oxigraph_connection_string.expose_secret()
     }
 
-    pub(crate) fn get_openai_api_key(&self) -> &str {
+    pub fn get_openai_api_key(&self) -> &str {
         self.openai_api_key.expose_secret()
     }
 
