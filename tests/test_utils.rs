@@ -54,15 +54,3 @@ pub async fn cleanup_collection(collection_name: &str) {
     // We don't assert on the result because the collection might not exist
     // if the test failed before creating it
 }
-
-// Helper to create test memory entries
-pub fn create_test_memory_input(memory_type: MemoryType, content: &str) -> MemoryInput {
-    MemoryInput {
-        id: None,
-        content: content.to_string(),
-        memory_type,
-        timestamp: Some(Utc::now()),
-        location_text: Some("Test Location".to_string()),
-        participants: Some(vec!["Test User".to_string()]),
-    }
-}
