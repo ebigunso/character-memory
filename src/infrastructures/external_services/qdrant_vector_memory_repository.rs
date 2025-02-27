@@ -103,31 +103,42 @@ impl QdrantVectorMemoryRepository {
         MemoryEntry::new(metadata, vector)
     }
 
-    // Helper: Parse filter conditions from a JSON object.
-    fn parse_filter_conditions(&self, filter_json: &serde_json::Value) -> Option<Vec<Condition>> {
-        filter_json.get("must").and_then(|v| v.as_array()).map(|must_array| {
-            let mut conditions = Vec::new();
-            for cond in must_array {
-                if let Some(key) = cond.get("key").and_then(|v| v.as_str()) {
-                    if let Some(match_obj) = cond.get("match") {
-                        if let Some(value_str) = match_obj.get("value").and_then(|v| v.as_str()) {
-                            conditions.push(Condition::matches(key, value_str.to_string()));
-                        }
-                    } else if let Some(range_obj) = cond.get("range") {
-                        let gte = range_obj.get("gte").and_then(|v| v.as_f64());
-                        let lte = range_obj.get("lte").and_then(|v| v.as_f64());
-                        let range = Range {
-                            gt: None,
-                            gte,
-                            lt: None,
-                            lte,
-                        };
-                        conditions.push(Condition::range(key, range));
-                    }
-                }
+    // Helper: Parse filter conditions from MemoryFilters.
+    fn parse_filter_conditions(&self, filters: &MemoryFilters) -> Vec<Condition> {
+        let mut conditions = Vec::new();
+
+        // Add memory_type filter if present
+        if let Some(memory_type) = &filters.memory_type {
+            conditions.push(Condition::matches("memory_type", memory_type.to_string()));
+        }
+
+        // Add date range filter if start_date is present
+        if let Some(start_date) = filters.start_date {
+            let timestamp_field = "timestamp";
+            let start_date_str = start_date.to_rfc3339();
+            conditions.push(Condition::matches_text(timestamp_field, format!(">={}", start_date_str)));
+        }
+
+        // Add date range filter if end_date is present
+        if let Some(end_date) = filters.end_date {
+            let timestamp_field = "timestamp";
+            let end_date_str = end_date.to_rfc3339();
+            conditions.push(Condition::matches_text(timestamp_field, format!("<={}", end_date_str)));
+        }
+
+        // Add location_text filter if present
+        if let Some(location) = &filters.location_text {
+            conditions.push(Condition::matches("location_text", location.to_string()));
+        }
+
+        // Add participants filter if present
+        if let Some(participants) = &filters.participants {
+            for participant in participants {
+                conditions.push(Condition::matches("participants", format!("*{}*", participant)));
             }
-            conditions
-        })
+        }
+
+        conditions
     }
 }
 
@@ -202,8 +213,8 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
 
         // Apply filters if present
         if let Some(filters) = filters {
-            let filter_json = serde_json::to_value(filters)?;
-            if let Some(conditions) = self.parse_filter_conditions(&filter_json) {
+            let conditions = self.parse_filter_conditions(filters);
+            if !conditions.is_empty() {
                 let filter = Filter {
                     must: conditions,
                     should: vec![],
