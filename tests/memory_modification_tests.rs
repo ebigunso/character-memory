@@ -140,8 +140,8 @@ async fn test_delete_memory() {
         content: "Memory to delete".to_string(),
         memory_type: MemoryType::Episodic,
         timestamp: Some(Utc::now()),
-        location_text: None,
-        participants: None,
+        location_text: Some("Test location".to_string()),
+        participants: Some(vec!["Test participant".to_string()]),
     };
 
     // Create the memory and get its ID
