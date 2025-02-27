@@ -1,5 +1,6 @@
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde_json::json;
+use async_trait::async_trait;
 
 use crate::errors::CustomError;
 use crate::config::settings::EmbeddingRepositorySettings;
@@ -48,8 +49,9 @@ impl OpenAIEmbeddingRepository {
     }
 }
 
+#[async_trait]
 impl EmbeddingRepository for OpenAIEmbeddingRepository {
-    fn generate_embedding(&self, text: &str) -> Result<Vec<f32>, CustomError> {
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         if text.trim().is_empty() {
             return Err(CustomError::EmbeddingGenerationError("Input text is empty.".into()));
         }
@@ -61,6 +63,7 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
             .bearer_auth(&self.api_key)
             .json(&payload)
             .send()
+            .await
             .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
         if !response.status().is_success() {
             return Err(CustomError::EmbeddingGenerationError(
@@ -68,6 +71,7 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
             ));
         }
         let resp_json: serde_json::Value = response.json()
+            .await
             .map_err(|e| CustomError::EmbeddingGenerationError(e.to_string()))?;
         let embedding = resp_json.get("data")
             .and_then(|data| data.get(0))
@@ -80,10 +84,10 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
         Ok(vec_embedding)
     }
 
-    fn bulk_generate_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
+    async fn bulk_generate_embeddings<'a>(&self, texts: &'a [&'a str]) -> Result<Vec<Vec<f32>>, CustomError> {
         let mut embeddings = Vec::with_capacity(texts.len());
         for &text in texts {
-            let emb = self.generate_embedding(text)?;
+            let emb = self.generate_embedding(text).await?;
             embeddings.push(emb);
         }
         Ok(embeddings)
@@ -116,29 +120,29 @@ mod tests {
         assert!(repo.is_err(), "OpenAIEmbeddingRepository initialization should fail with empty API key.");
     }
 
-    #[test]
-    fn test_generate_embedding_with_empty_text() {
+    #[tokio::test]
+    async fn test_generate_embedding_with_empty_text() {
         let settings = create_test_settings("valid_key");
         let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
-        let result = repo.generate_embedding("  ");
+        let result = repo.generate_embedding("  ").await;
         assert!(result.is_err(), "Empty text should return an error.");
     }
 
-    #[test]
-    fn test_generate_embedding_with_valid_text() {
+    #[tokio::test]
+    async fn test_generate_embedding_with_valid_text() {
         let text = "hello, world";
         let settings = create_test_settings("valid_api_key");
         let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
-        let result = repo.generate_embedding(text);
+        let result = repo.generate_embedding(text).await;
         assert!(result.is_err(), "Valid text with a dummy API key should produce an error during API call.");
     }
 
-    #[test]
-    fn test_batch_generate_embeddings() {
+    #[tokio::test]
+    async fn test_batch_generate_embeddings() {
         let settings = create_test_settings("valid_api_key");
         let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
         let texts = ["first test", "second test"];
-        let result = repo.bulk_generate_embeddings(&texts);
+        let result = repo.bulk_generate_embeddings(&texts).await;
         assert!(result.is_err(), "Batch generation should fail with a dummy API key.");
     }
 }

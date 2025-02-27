@@ -72,7 +72,7 @@ impl MemoryRepository {
     /// - `Ok`: A `MemoryEntry` containing the created memory
     /// - `Err`: A `CustomError` if embedding generation, memory validation, or storage fails
     pub async fn create_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
-        let embedding = self.embed_repo.generate_embedding(&metadata.content)?;
+        let embedding = self.embed_repo.generate_embedding(&metadata.content).await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.store_memory(&entry).await?;
 
@@ -129,7 +129,7 @@ impl MemoryRepository {
     ///     - Memory validation fails
     ///     - The update operation fails
     pub async fn update_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
-        let embedding = self.embed_repo.generate_embedding(&metadata.content)?;
+        let embedding = self.embed_repo.generate_embedding(&metadata.content).await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.update_memory(&entry).await?;
 
@@ -171,7 +171,7 @@ impl MemoryRepository {
     /// - `Ok`: A vector of `MemoryEntry` containing the search results
     /// - `Err`: A `CustomError` if embedding generation or search fails
     pub async fn search_memories(&self, query: &str, top_k: usize, filters: Option<MemoryFilters>) -> Result<Vec<MemoryEntry>, CustomError> {
-        let query_embedding = self.embed_repo.generate_embedding(query)?;
+        let query_embedding = self.embed_repo.generate_embedding(query).await?;
         self.vector_repo.search_memory(&query_embedding, top_k, filters.as_ref()).await
     }
 
@@ -197,7 +197,7 @@ impl MemoryRepository {
         let contents: Vec<&str> = metadata_list.iter().map(|metadata| metadata.content.as_str()).collect();
 
         // Generate embeddings in bulk
-        let embeddings = self.embed_repo.bulk_generate_embeddings(&contents)?;
+        let embeddings = self.embed_repo.bulk_generate_embeddings(&contents).await?;
 
         // Create memory entries from metadata and embeddings
         let mut entries = Vec::with_capacity(metadata_list.len());

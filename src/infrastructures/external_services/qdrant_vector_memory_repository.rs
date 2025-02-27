@@ -175,6 +175,12 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     }
 
     async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
+        // First check if the memory exists
+        let memories = self.get_memories_by_ids(&[id]).await;
+        if memories.is_err() {
+            return Err(CustomError::DatabaseError(format!("Memory with ID {} not found", id)));
+        }
+
         let q_id = PointId {
             point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
         };
