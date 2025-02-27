@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, CreateCollectionBuilder,
-    DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
+    DeletePointsBuilder, Distance, PointStruct, PointsIdsList, ScoredPoint,
     SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig, PointId,
     Filter, Condition, vectors_config, vectors_output, VectorsOutput, GetPointsBuilder, RetrievedPoint,
     DatetimeRange, Timestamp,
