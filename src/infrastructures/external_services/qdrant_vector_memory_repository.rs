@@ -6,6 +6,7 @@ use qdrant_client::qdrant::{
     DeletePointsBuilder, Distance, PointStruct, PointsIdsList, Range, ScoredPoint,
     SearchPointsBuilder, UpsertPointsBuilder, VectorParams, VectorsConfig, PointId,
     Filter, Condition, vectors_config, vectors_output, VectorsOutput, GetPointsBuilder, RetrievedPoint,
+    DatetimeRange, Timestamp,
 };
 use qdrant_client::{Qdrant, config::QdrantConfig};
 use uuid::Uuid;
@@ -112,18 +113,40 @@ impl QdrantVectorMemoryRepository {
             conditions.push(Condition::matches("memory_type", memory_type.to_string()));
         }
 
-        // Add date range filter if start_date is present
-        if let Some(start_date) = filters.start_date {
+        // Add date range filter if start_date or end_date is present
+        if filters.start_date.is_some() || filters.end_date.is_some() {
             let timestamp_field = "timestamp";
-            let start_date_str = start_date.to_rfc3339();
-            conditions.push(Condition::matches_text(timestamp_field, format!(">={}", start_date_str)));
-        }
 
-        // Add date range filter if end_date is present
-        if let Some(end_date) = filters.end_date {
-            let timestamp_field = "timestamp";
-            let end_date_str = end_date.to_rfc3339();
-            conditions.push(Condition::matches_text(timestamp_field, format!("<={}", end_date_str)));
+            // Create a DatetimeRange with appropriate bounds
+            let mut datetime_range = DatetimeRange::default();
+
+            // Set lower bound if start_date is present
+            if let Some(start_date) = filters.start_date {
+                // Convert chrono DateTime to Timestamp
+                // Timestamp expects seconds since epoch
+                let seconds = start_date.timestamp();
+                let nanos = start_date.timestamp_subsec_nanos();
+
+                datetime_range.gte = Some(Timestamp {
+                    seconds,
+                    nanos: nanos as i32,
+                });
+            }
+
+            // Set upper bound if end_date is present
+            if let Some(end_date) = filters.end_date {
+                // Convert chrono DateTime to Timestamp
+                let seconds = end_date.timestamp();
+                let nanos = end_date.timestamp_subsec_nanos();
+
+                datetime_range.lte = Some(Timestamp {
+                    seconds,
+                    nanos: nanos as i32,
+                });
+            }
+
+            // Add the datetime range condition
+            conditions.push(Condition::datetime_range(timestamp_field, datetime_range));
         }
 
         // Add location_text filter if present
