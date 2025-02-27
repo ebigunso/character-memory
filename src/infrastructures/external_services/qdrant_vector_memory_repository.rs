@@ -198,6 +198,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     ) -> Result<Vec<MemoryEntry>, CustomError> {
         let mut builder = SearchPointsBuilder::new(&self.config.collection_name, query_vector.to_vec(), top_k as u64);
         builder = builder.with_payload(true);
+        builder = builder.with_vectors(true);
 
         // Apply filters if present
         if let Some(filters) = filters {
