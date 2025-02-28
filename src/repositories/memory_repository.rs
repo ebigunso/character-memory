@@ -93,7 +93,8 @@ impl MemoryRepository {
     /// - `Err`: A `CustomError` if the memory is not found or retrieval fails
     pub async fn get_memory_by_id(&self, id: Uuid) -> Result<MemoryEntry, CustomError> {
         let memories = self.vector_repo.get_memories_by_ids(&[id]).await?;
-        Ok(memories.into_iter().next().unwrap())
+        memories.into_iter().next()
+            .ok_or_else(|| CustomError::DatabaseError(format!("Memory with ID {} not found", id)))
     }
 
     /// Retrieves multiple memory entries by their unique identifiers.

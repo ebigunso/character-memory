@@ -112,7 +112,8 @@ pub(crate) trait VectorMemoryRepository: Send + Sync {
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok`: A vector of `MemoryEntry` containing the retrieved memories
+    /// - `Ok`: A vector of `MemoryEntry` containing the retrieved memories.
+    ///   If any requested ID is not found, implementations should return an error rather than an empty or partial result.
     /// - `Err`: A `CustomError` if retrieval fails
     async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError>;
 }
