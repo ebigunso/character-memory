@@ -7,15 +7,17 @@ on:
     branches: [ main ]
 
 jobs:
-  format:
+  check_formatting:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Install Rust toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
-        toolchain: stable
-        override: true
-        components: fmt
+        components: rustfmt
+
     - name: Check formatting
-      run: cargo fmt --check
+      uses: actions-rust-lang/rustfmt@v1
