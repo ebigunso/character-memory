@@ -1,21 +1,29 @@
-# Overview
-<!-- Purpose of the changes -->
+### Motivation and Context
+<!--
+1. Why is this change required?
+2. What problem does it solve / scenario it enables?
+3. If it fixes or closes an issue, add “Fixes #<num>”.
+-->
 
-# Changes
-<!-- Description of functionality -->
+### Description
+<!--
+High-level overview of the approach and design.
+If helpful, point to relevant modules / files / data flow.
+-->
 
-# Scope of Impact
-<!-- e.g., "Changes to this function affect these features..." -->
+### Checklist
+<!-- Tick all that apply before requesting review -->
 
-# Testing
-## Test Status
-Tests are <!-- completed/not yet done/in need of assistance -->
+- [ ] Code builds with **no errors or warnings**
+      `cargo check --all-targets`
+- [ ] **Unit tests pass**
+      `cargo test --verbose`
+- [ ] **Clippy** passes with warnings denied
+      `cargo clippy --all-targets -- -D warnings`
+- [ ] `cargo fmt` has been run
+- [ ] Documentation updated where needed
+- [ ] BREAKING CHANGE? **No** / _describe impact_
+- [ ] I didn’t break anyone 😊
 
-## Already Completed Tests
-<!-- Describe tests here -->
-
-## Required Environment Variables / Dependencies
-<!-- Describe requirements here -->
-
-# Additional Notes
-<!-- Points to focus on during review, notes for local testing, etc. -->
+### Additional Notes (optional)
+<!-- Logs, screenshots, things reviewers should focus on, etc. -->
