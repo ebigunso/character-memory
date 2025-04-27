@@ -15,8 +15,8 @@ pub mod memory {
     }
 
     mod memory_entry;
-    pub(crate) use memory_entry::MemoryEntry;
     pub use enums::memory_type::MemoryType;
+    pub(crate) use memory_entry::MemoryEntry;
 }
 
 pub(crate) mod vector {
@@ -25,6 +25,6 @@ pub(crate) mod vector {
         pub(super) mod embedding_model;
     }
 
-    pub(crate) use vector_metadata::VectorMetadata;
     pub(crate) use enums::embedding_model::EmbeddingModel;
+    pub(crate) use vector_metadata::VectorMetadata;
 }

@@ -1,21 +1,23 @@
 mod config;
 mod errors;
+mod infrastructures;
 mod models;
 mod repositories;
-mod infrastructures;
 
 use uuid::Uuid;
 
-use crate::config::settings::{VectorMemoryRepositorySettings, EmbeddingRepositorySettings};
-use crate::infrastructures::external_services::{OpenAIEmbeddingRepository, QdrantVectorMemoryRepository};
+use crate::config::settings::{EmbeddingRepositorySettings, VectorMemoryRepositorySettings};
+use crate::infrastructures::external_services::{
+    OpenAIEmbeddingRepository, QdrantVectorMemoryRepository,
+};
 use crate::models::vector::VectorMetadata;
 use crate::repositories::MemoryRepository;
 
 // Re-export types for public use
-pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
-pub use crate::models::memory::MemoryType;
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
+pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
+pub use crate::models::memory::MemoryType;
 
 // Re-export for integration tests
 pub mod test_utils {
@@ -65,14 +67,11 @@ impl AgentMemory {
     ///
     /// - `Ok`: A new `AgentMemory` instance
     /// - `Err`: A `CustomError` if initialization fails
-    pub async fn new(
-        settings: Settings,
-        collection_name: String,
-    ) -> Result<Self, CustomError> {
+    pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
         // Configure and create the embedding repository
         let embedding_settings = EmbeddingRepositorySettings::new(
             settings.get_openai_api_key().to_string(),
-            settings.get_embedding_model()?
+            settings.get_embedding_model()?,
         );
         let embed_repo = Box::new(OpenAIEmbeddingRepository::new(embedding_settings)?);
 
@@ -80,7 +79,7 @@ impl AgentMemory {
         let vector_memory_settings = VectorMemoryRepositorySettings::new(
             settings.get_qdrant_connection().to_string(),
             collection_name.clone(),
-            settings.get_embedding_model()?
+            settings.get_embedding_model()?,
         );
         let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
         // Assemble the high-level MemoryRepository.
@@ -136,14 +135,24 @@ impl AgentMemory {
     ///
     /// - `Ok`: A vector of `Memory` containing the created entries
     /// - `Err`: A `CustomError` if the operation fails
-    pub async fn bulk_create_memories(&self, inputs: &[MemoryInput]) -> Result<Vec<Memory>, CustomError> {
-        let metadata_list: Result<Vec<_>, _> = inputs.iter()
+    pub async fn bulk_create_memories(
+        &self,
+        inputs: &[MemoryInput],
+    ) -> Result<Vec<Memory>, CustomError> {
+        let metadata_list: Result<Vec<_>, _> = inputs
+            .iter()
             .map(|input| VectorMetadata::from_memory_input(input.clone()))
             .collect();
         let metadata_list = metadata_list?;
 
-        let entries = self.memory_repo.bulk_create_memories(&metadata_list).await?;
-        Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
+        let entries = self
+            .memory_repo
+            .bulk_create_memories(&metadata_list)
+            .await?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| entry.into_public())
+            .collect())
     }
 
     /// Retrieves a memory entry by its unique identifier.
@@ -177,7 +186,10 @@ impl AgentMemory {
     /// - `Err`: A `CustomError` if the operation fails
     pub async fn get_memories_by_ids(&self, ids: &[Uuid]) -> Result<Vec<Memory>, CustomError> {
         let mem_entries = self.memory_repo.get_memories_by_ids(ids).await?;
-        Ok(mem_entries.into_iter().map(|entry| entry.into_public()).collect())
+        Ok(mem_entries
+            .into_iter()
+            .map(|entry| entry.into_public())
+            .collect())
     }
 
     /// Searches for memory entries that are semantically similar to the query.
@@ -200,8 +212,14 @@ impl AgentMemory {
         top_k: usize,
         filters: Option<MemoryFilters>,
     ) -> Result<Vec<Memory>, CustomError> {
-        let entries = self.memory_repo.search_memories(query, top_k, filters).await?;
-        Ok(entries.into_iter().map(|entry| entry.into_public()).collect())
+        let entries = self
+            .memory_repo
+            .search_memories(query, top_k, filters)
+            .await?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| entry.into_public())
+            .collect())
     }
 
     /// Updates an existing memory entry.

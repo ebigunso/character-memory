@@ -1,5 +1,5 @@
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use crate::errors::CustomError;
 use crate::models::memory::dto::MemoryInput;
@@ -54,9 +54,15 @@ impl VectorMetadata {
             Ok(Self::new_episodic(
                 input.id.unwrap_or_else(Uuid::new_v4),
                 input.content,
-                input.timestamp.ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?,
-                input.location_text.ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?,
-                input.participants.ok_or_else(|| CustomError::MissingEpisodicField("participants"))?,
+                input
+                    .timestamp
+                    .ok_or_else(|| CustomError::MissingEpisodicField("timestamp"))?,
+                input
+                    .location_text
+                    .ok_or_else(|| CustomError::MissingEpisodicField("location_text"))?,
+                input
+                    .participants
+                    .ok_or_else(|| CustomError::MissingEpisodicField("participants"))?,
             ))
         }
     }
@@ -220,9 +226,11 @@ mod tests {
 
         let result = VectorMetadata::from_memory_input(input);
         assert!(result.is_err());
-        assert!(matches!(result, Err(CustomError::MissingEpisodicField("timestamp"))));
+        assert!(matches!(
+            result,
+            Err(CustomError::MissingEpisodicField("timestamp"))
+        ));
     }
-
 
     #[test]
     fn test_new_semantic() {

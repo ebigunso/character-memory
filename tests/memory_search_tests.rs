@@ -1,4 +1,4 @@
-use agent_memory::{MemoryInput, MemoryType, MemoryFilters};
+use agent_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::{Duration, Utc};
 mod test_utils;
 
@@ -36,7 +36,10 @@ async fn test_basic_search() {
     ];
 
     // Create the memories
-    agent_memory.bulk_create_memories(&memory_inputs).await.unwrap();
+    agent_memory
+        .bulk_create_memories(&memory_inputs)
+        .await
+        .unwrap();
 
     // Search for memories related to "fox"
     let result = agent_memory.search_memories("fox", 10, None).await;
@@ -45,10 +48,16 @@ async fn test_basic_search() {
     assert!(result.is_ok(), "Failed to search memories");
 
     let memories = result.unwrap();
-    assert!(!memories.is_empty(), "Should have found at least one memory");
+    assert!(
+        !memories.is_empty(),
+        "Should have found at least one memory"
+    );
 
     // The first result should be the one with "fox" in it
-    assert!(memories[0].content.contains("fox"), "First result should contain 'fox'");
+    assert!(
+        memories[0].content.contains("fox"),
+        "First result should contain 'fox'"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;
@@ -88,7 +97,10 @@ async fn test_search_with_memory_type_filter() {
     ];
 
     // Create the memories
-    agent_memory.bulk_create_memories(&memory_inputs).await.unwrap();
+    agent_memory
+        .bulk_create_memories(&memory_inputs)
+        .await
+        .unwrap();
 
     // Create a filter for episodic memories
     let filters = MemoryFilters {
@@ -100,22 +112,34 @@ async fn test_search_with_memory_type_filter() {
     };
 
     // Search for memories related to "vacation" with episodic filter
-    let result = agent_memory.search_memories("vacation", 10, Some(filters)).await;
+    let result = agent_memory
+        .search_memories("vacation", 10, Some(filters))
+        .await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to search memories with filter");
 
     let memories = result.unwrap();
-    assert!(!memories.is_empty(), "Should have found at least one memory");
+    assert!(
+        !memories.is_empty(),
+        "Should have found at least one memory"
+    );
 
     // All results should be episodic memories
     for memory in &memories {
-        assert_eq!(memory.memory_type, MemoryType::Episodic, "All results should be episodic memories");
+        assert_eq!(
+            memory.memory_type,
+            MemoryType::Episodic,
+            "All results should be episodic memories"
+        );
     }
 
     // The result should contain the episodic memory about vacation, not the semantic one
     let has_episodic_vacation = memories.iter().any(|m| m.content.contains("vacation"));
-    assert!(has_episodic_vacation, "Results should include episodic memory about vacation");
+    assert!(
+        has_episodic_vacation,
+        "Results should include episodic memory about vacation"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;
@@ -159,7 +183,10 @@ async fn test_search_with_date_filter() {
     ];
 
     // Create the memories
-    agent_memory.bulk_create_memories(&memory_inputs).await.unwrap();
+    agent_memory
+        .bulk_create_memories(&memory_inputs)
+        .await
+        .unwrap();
 
     // Create a filter for memories from the last 2 days
     let two_days_ago = now - Duration::days(2);
@@ -172,13 +199,18 @@ async fn test_search_with_date_filter() {
     };
 
     // Search for memories with date filter
-    let result = agent_memory.search_memories("memory", 10, Some(filters)).await;
+    let result = agent_memory
+        .search_memories("memory", 10, Some(filters))
+        .await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to search memories with date filter");
 
     let memories = result.unwrap();
-    assert!(!memories.is_empty(), "Should have found at least one memory");
+    assert!(
+        !memories.is_empty(),
+        "Should have found at least one memory"
+    );
 
     // Results should only include memories from the last 2 days
     let has_recent = memories.iter().any(|m| m.content.contains("today"));

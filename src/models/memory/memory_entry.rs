@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::vector::VectorMetadata;
 use crate::models::memory::dto::Memory;
 use crate::models::memory::MemoryType;
+use crate::models::vector::VectorMetadata;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {
@@ -47,7 +47,10 @@ impl MemoryEntry {
                 }
             }
             MemoryType::Semantic => {
-                if self.timestamp.is_some() || self.location_text.is_some() || self.participants.is_some() {
+                if self.timestamp.is_some()
+                    || self.location_text.is_some()
+                    || self.participants.is_some()
+                {
                     return Err(CustomError::InvalidSemanticMemory);
                 }
             }
@@ -91,16 +94,16 @@ mod tests {
         assert_eq!(entry.content, metadata.content);
         assert_eq!(entry.timestamp, Some(timestamp));
         assert_eq!(entry.location_text, Some("Café Central".to_string()));
-        assert_eq!(entry.participants, Some(vec!["Alice".to_string(), "Bob".to_string()]));
+        assert_eq!(
+            entry.participants,
+            Some(vec!["Alice".to_string(), "Bob".to_string()])
+        );
     }
 
     #[test]
     fn test_create_semantic_memory() {
         let id = Uuid::new_v4();
-        let metadata = VectorMetadata::new_semantic(
-            id,
-            "Alice is a software engineer".to_string(),
-        );
+        let metadata = VectorMetadata::new_semantic(id, "Alice is a software engineer".to_string());
 
         let result = MemoryEntry::new(metadata.clone(), vec![0.1, 0.2]);
         assert!(result.is_ok());
@@ -116,10 +119,7 @@ mod tests {
     fn test_create_invalid_semantic_memory() {
         let id = Uuid::new_v4();
         let timestamp = Utc::now();
-        let metadata = VectorMetadata::new_semantic(
-            id,
-            "Alice is a software engineer".to_string(),
-        );
+        let metadata = VectorMetadata::new_semantic(id, "Alice is a software engineer".to_string());
 
         // Manually create an invalid semantic memory with timestamp
         let entry = MemoryEntry {
@@ -132,6 +132,9 @@ mod tests {
             participants: None,
         };
 
-        assert!(matches!(entry.validate(), Err(CustomError::InvalidSemanticMemory)));
+        assert!(matches!(
+            entry.validate(),
+            Err(CustomError::InvalidSemanticMemory)
+        ));
     }
 }

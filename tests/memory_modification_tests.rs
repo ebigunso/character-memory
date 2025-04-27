@@ -45,7 +45,10 @@ async fn test_update_memory() {
     assert!(updated_memory.location_text.is_some());
     assert_eq!(updated_memory.location_text.unwrap(), "Updated location");
     assert!(updated_memory.participants.is_some());
-    assert_eq!(updated_memory.participants.unwrap(), vec!["Updated participant".to_string()]);
+    assert_eq!(
+        updated_memory.participants.unwrap(),
+        vec!["Updated participant".to_string()]
+    );
 
     // Verify the update by retrieving the memory
     let retrieved = agent_memory.get_memory_by_id(memory_id).await.unwrap();
@@ -123,7 +126,10 @@ async fn test_update_nonexistent_memory() {
     let result = agent_memory.update_memory(update_input).await;
 
     // Verify the result is an error
-    assert!(result.is_err(), "Expected error when updating nonexistent memory");
+    assert!(
+        result.is_err(),
+        "Expected error when updating nonexistent memory"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;
@@ -158,7 +164,10 @@ async fn test_delete_memory() {
     let retrieve_result = agent_memory.get_memory_by_id(memory_id).await;
 
     // Verify the memory no longer exists
-    assert!(retrieve_result.is_err(), "Memory should no longer exist after deletion");
+    assert!(
+        retrieve_result.is_err(),
+        "Memory should no longer exist after deletion"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;
@@ -176,7 +185,10 @@ async fn test_delete_nonexistent_memory() {
     let result = agent_memory.delete_memory(nonexistent_id).await;
 
     // Verify the result is an error
-    assert!(result.is_err(), "Expected error when deleting nonexistent memory");
+    assert!(
+        result.is_err(),
+        "Expected error when deleting nonexistent memory"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;

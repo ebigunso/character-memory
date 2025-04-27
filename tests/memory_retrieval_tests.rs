@@ -49,7 +49,10 @@ async fn test_get_memory_by_nonexistent_id() {
     let result = agent_memory.get_memory_by_id(nonexistent_id).await;
 
     // Verify the result is an error
-    assert!(result.is_err(), "Expected error when retrieving nonexistent memory");
+    assert!(
+        result.is_err(),
+        "Expected error when retrieving nonexistent memory"
+    );
 
     // Cleanup
     test_utils::cleanup_collection(&collection_name).await;
@@ -81,7 +84,10 @@ async fn test_get_memories_by_ids() {
     ];
 
     // Create the memories and collect their IDs
-    let created_memories = agent_memory.bulk_create_memories(&memory_inputs).await.unwrap();
+    let created_memories = agent_memory
+        .bulk_create_memories(&memory_inputs)
+        .await
+        .unwrap();
     let memory_ids: Vec<Uuid> = created_memories.iter().map(|m| m.id).collect();
 
     // Retrieve the memories by IDs
@@ -91,7 +97,11 @@ async fn test_get_memories_by_ids() {
     assert!(result.is_ok(), "Failed to retrieve memories by IDs");
 
     let retrieved_memories = result.unwrap();
-    assert_eq!(retrieved_memories.len(), 2, "Should have retrieved 2 memories");
+    assert_eq!(
+        retrieved_memories.len(),
+        2,
+        "Should have retrieved 2 memories"
+    );
 
     // Verify the memories were retrieved in the same order as the IDs
     assert_eq!(retrieved_memories[0].id, memory_ids[0]);

@@ -1,9 +1,9 @@
-use uuid::Uuid;
 use async_trait::async_trait;
+use uuid::Uuid;
 
 use crate::errors::CustomError;
-use crate::models::memory::MemoryEntry;
 use crate::models::memory::dto::MemoryFilters;
+use crate::models::memory::MemoryEntry;
 
 /// Repository trait for storing and retrieving memories using a vector database.
 ///
@@ -115,7 +115,10 @@ pub(crate) trait VectorMemoryRepository: Send + Sync {
     /// - `Ok`: A vector of `MemoryEntry` containing the retrieved memories.
     ///   If any requested ID is not found, implementations should return an error rather than an empty or partial result.
     /// - `Err`: A `CustomError` if retrieval fails
-    async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError>;
+    async fn get_memories_by_ids<'a>(
+        &'a self,
+        ids: &'a [Uuid],
+    ) -> Result<Vec<MemoryEntry>, CustomError>;
 }
 
 // Implement the trait for Box<dyn VectorMemoryRepository>
@@ -150,7 +153,10 @@ impl<T: VectorMemoryRepository + ?Sized> VectorMemoryRepository for Box<T> {
         (**self).bulk_insert(memories).await
     }
 
-    async fn get_memories_by_ids<'a>(&'a self, ids: &'a [Uuid]) -> Result<Vec<MemoryEntry>, CustomError> {
+    async fn get_memories_by_ids<'a>(
+        &'a self,
+        ids: &'a [Uuid],
+    ) -> Result<Vec<MemoryEntry>, CustomError> {
         (**self).get_memories_by_ids(ids).await
     }
 }

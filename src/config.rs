@@ -1,12 +1,12 @@
 // Module declarations
 pub mod settings {
+    mod embedding_repository_settings;
     mod settings;
     mod vector_memory_repository_settings;
-    mod embedding_repository_settings;
 
+    pub(crate) use embedding_repository_settings::EmbeddingRepositorySettings;
     pub use settings::Settings;
     pub(crate) use vector_memory_repository_settings::VectorMemoryRepositorySettings;
-    pub(crate) use embedding_repository_settings::EmbeddingRepositorySettings;
 }
 
 pub(crate) mod loaders {
@@ -23,6 +23,6 @@ pub(crate) mod loaders {
 
     pub(crate) use config_loader::ConfigLoader;
     pub(crate) use config_loader::DefaultConfigLoader;
-    pub(crate) use env_loader::EnvLoader;
     pub(crate) use env_loader::DefaultEnvLoader;
+    pub(crate) use env_loader::EnvLoader;
 }

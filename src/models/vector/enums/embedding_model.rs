@@ -1,6 +1,6 @@
-use std::str::FromStr;
-use serde::{Serialize, Deserialize};
 use crate::errors::CustomError;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Available embedding models and their corresponding vector sizes.
 ///
@@ -72,9 +72,10 @@ impl FromStr for EmbeddingModel {
             "text-embedding-3-small" => Ok(Self::TextEmbedding3Small),
             "text-embedding-3-large" => Ok(Self::TextEmbedding3Large),
             "text-embedding-ada-002" => Ok(Self::TextEmbeddingAda002),
-            _ => Err(CustomError::ConfigParseError(
-                format!("Invalid embedding model: {}", s)
-            )),
+            _ => Err(CustomError::ConfigParseError(format!(
+                "Invalid embedding model: {}",
+                s
+            ))),
         }
     }
 }
@@ -116,8 +117,17 @@ mod tests {
 
     #[test]
     fn test_as_str() {
-        assert_eq!(EmbeddingModel::TextEmbedding3Small.as_str(), "text-embedding-3-small");
-        assert_eq!(EmbeddingModel::TextEmbedding3Large.as_str(), "text-embedding-3-large");
-        assert_eq!(EmbeddingModel::TextEmbeddingAda002.as_str(), "text-embedding-ada-002");
+        assert_eq!(
+            EmbeddingModel::TextEmbedding3Small.as_str(),
+            "text-embedding-3-small"
+        );
+        assert_eq!(
+            EmbeddingModel::TextEmbedding3Large.as_str(),
+            "text-embedding-3-large"
+        );
+        assert_eq!(
+            EmbeddingModel::TextEmbeddingAda002.as_str(),
+            "text-embedding-ada-002"
+        );
     }
 }

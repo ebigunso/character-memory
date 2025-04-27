@@ -33,8 +33,14 @@ impl MemoryRepository {
     /// # Returns
     ///
     /// A new `MemoryRepository` instance with the provided repositories
-    pub fn new(embed_repo: Box<dyn EmbeddingRepository>, vector_repo: Box<dyn VectorMemoryRepository>) -> Self {
-        Self { embed_repo, vector_repo }
+    pub fn new(
+        embed_repo: Box<dyn EmbeddingRepository>,
+        vector_repo: Box<dyn VectorMemoryRepository>,
+    ) -> Self {
+        Self {
+            embed_repo,
+            vector_repo,
+        }
     }
 
     /// Initializes the underlying storage systems.
@@ -71,8 +77,14 @@ impl MemoryRepository {
     ///
     /// - `Ok`: A `MemoryEntry` containing the created memory
     /// - `Err`: A `CustomError` if embedding generation, memory validation, or storage fails
-    pub async fn create_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
-        let embedding = self.embed_repo.generate_embedding(&metadata.content).await?;
+    pub async fn create_memory(
+        &self,
+        metadata: VectorMetadata,
+    ) -> Result<MemoryEntry, CustomError> {
+        let embedding = self
+            .embed_repo
+            .generate_embedding(&metadata.content)
+            .await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.store_memory(&entry).await?;
 
@@ -93,7 +105,9 @@ impl MemoryRepository {
     /// - `Err`: A `CustomError` if the memory is not found or retrieval fails
     pub async fn get_memory_by_id(&self, id: Uuid) -> Result<MemoryEntry, CustomError> {
         let memories = self.vector_repo.get_memories_by_ids(&[id]).await?;
-        memories.into_iter().next()
+        memories
+            .into_iter()
+            .next()
             .ok_or_else(|| CustomError::DatabaseError(format!("Memory with ID {} not found", id)))
     }
 
@@ -129,8 +143,14 @@ impl MemoryRepository {
     ///     - Embedding generation fails
     ///     - Memory validation fails
     ///     - The update operation fails
-    pub async fn update_memory(&self, metadata: VectorMetadata) -> Result<MemoryEntry, CustomError> {
-        let embedding = self.embed_repo.generate_embedding(&metadata.content).await?;
+    pub async fn update_memory(
+        &self,
+        metadata: VectorMetadata,
+    ) -> Result<MemoryEntry, CustomError> {
+        let embedding = self
+            .embed_repo
+            .generate_embedding(&metadata.content)
+            .await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
         self.vector_repo.update_memory(&entry).await?;
 
@@ -171,9 +191,16 @@ impl MemoryRepository {
     ///
     /// - `Ok`: A vector of `MemoryEntry` containing the search results
     /// - `Err`: A `CustomError` if embedding generation or search fails
-    pub async fn search_memories(&self, query: &str, top_k: usize, filters: Option<MemoryFilters>) -> Result<Vec<MemoryEntry>, CustomError> {
+    pub async fn search_memories(
+        &self,
+        query: &str,
+        top_k: usize,
+        filters: Option<MemoryFilters>,
+    ) -> Result<Vec<MemoryEntry>, CustomError> {
         let query_embedding = self.embed_repo.generate_embedding(query).await?;
-        self.vector_repo.search_memory(&query_embedding, top_k, filters.as_ref()).await
+        self.vector_repo
+            .search_memory(&query_embedding, top_k, filters.as_ref())
+            .await
     }
 
     /// Creates multiple memory entries in a batch.
@@ -193,9 +220,15 @@ impl MemoryRepository {
     ///
     /// - `Ok`: A vector of `MemoryEntry` containing the created memories
     /// - `Err`: A `CustomError` if embedding generation, memory validation, or bulk storage fails
-    pub async fn bulk_create_memories(&self, metadata_list: &[VectorMetadata]) -> Result<Vec<MemoryEntry>, CustomError> {
+    pub async fn bulk_create_memories(
+        &self,
+        metadata_list: &[VectorMetadata],
+    ) -> Result<Vec<MemoryEntry>, CustomError> {
         // Extract content strings for bulk embedding generation
-        let contents: Vec<&str> = metadata_list.iter().map(|metadata| metadata.content.as_str()).collect();
+        let contents: Vec<&str> = metadata_list
+            .iter()
+            .map(|metadata| metadata.content.as_str())
+            .collect();
 
         // Generate embeddings in bulk
         let embeddings = self.embed_repo.bulk_generate_embeddings(&contents).await?;

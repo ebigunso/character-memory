@@ -1,8 +1,8 @@
-use agent_memory::AgentMemory;
 use agent_memory::test_utils::load_test_settings;
+use agent_memory::AgentMemory;
+use qdrant_client::Qdrant;
 use std::sync::Once;
 use uuid::Uuid;
-use qdrant_client::Qdrant;
 
 static INIT: Once = Once::new();
 
@@ -25,22 +25,23 @@ pub async fn setup_agent_memory() -> (AgentMemory, String) {
     let collection_name = unique_collection_name();
 
     // Use the load_test_settings function from the test_utils module
-    let settings = load_test_settings()
-        .expect("Failed to load settings from environment");
+    let settings = load_test_settings().expect("Failed to load settings from environment");
 
     let agent_memory = AgentMemory::new(settings, collection_name.clone())
         .await
         .expect("Failed to create AgentMemory");
 
-    agent_memory.init_storage().await.expect("Failed to initialize storage");
+    agent_memory
+        .init_storage()
+        .await
+        .expect("Failed to initialize storage");
 
     (agent_memory, collection_name)
 }
 
 // Cleanup after tests by deleting the collection
 pub async fn cleanup_collection(collection_name: &str) {
-    let settings = load_test_settings()
-        .expect("Failed to load settings from environment");
+    let settings = load_test_settings().expect("Failed to load settings from environment");
 
     let qdrant_url = settings.get_qdrant_connection().to_string();
     let client = Qdrant::from_url(&qdrant_url)
