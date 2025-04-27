@@ -37,7 +37,10 @@ pub(crate) trait EmbeddingRepository: Send + Sync {
     ///
     /// - `Ok`: A vector of embeddings, where each embedding is a vector of f32 values
     /// - `Err`: A `CustomError` if generation fails for any text in the batch
-    async fn bulk_generate_embeddings<'a>(&self, texts: &'a [&'a str]) -> Result<Vec<Vec<f32>>, CustomError>;
+    async fn bulk_generate_embeddings<'a>(
+        &self,
+        texts: &'a [&'a str],
+    ) -> Result<Vec<Vec<f32>>, CustomError>;
 }
 
 // Implement the trait for Box<dyn EmbeddingRepository> to allow using boxed trait objects
@@ -47,7 +50,10 @@ impl<T: EmbeddingRepository + ?Sized> EmbeddingRepository for Box<T> {
         (**self).generate_embedding(text).await
     }
 
-    async fn bulk_generate_embeddings<'a>(&self, texts: &'a [&'a str]) -> Result<Vec<Vec<f32>>, CustomError> {
+    async fn bulk_generate_embeddings<'a>(
+        &self,
+        texts: &'a [&'a str],
+    ) -> Result<Vec<Vec<f32>>, CustomError> {
         (**self).bulk_generate_embeddings(texts).await
     }
 }

@@ -1,12 +1,12 @@
-use std::path::PathBuf;
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
+use std::path::PathBuf;
 
-use crate::models::vector::EmbeddingModel;
 use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
-use crate::config::loaders::{EnvLoader, DefaultEnvLoader};
+use crate::config::loaders::{DefaultEnvLoader, EnvLoader};
 use crate::errors::CustomError;
+use crate::models::vector::EmbeddingModel;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
@@ -86,9 +86,9 @@ impl Settings {
         }
 
         // Load .env file from project root
-        env_loader.load_from_path(env_path).map_err(|e| {
-            CustomError::EnvLoadError(format!("Failed to load .env file: {}", e))
-        })?;
+        env_loader
+            .load_from_path(env_path)
+            .map_err(|e| CustomError::EnvLoadError(format!("Failed to load .env file: {}", e)))?;
 
         // Build configuration
         let settings = config_loader.build_config().map_err(|e| {
@@ -139,10 +139,10 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::CustomError;
-    use config::ConfigError;
     use crate::config::loaders::config_loader::MockConfigLoader;
     use crate::config::loaders::env_loader::MockEnvLoader;
+    use crate::errors::CustomError;
+    use config::ConfigError;
 
     #[test]
     fn test_settings_load_success() {
@@ -187,7 +187,10 @@ mod tests {
         let mut mock_env = MockEnvLoader::new();
         mock_env.expect_exists().return_const(true);
         mock_env.expect_load_from_path().returning(|_| {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "Mock env load error"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Mock env load error",
+            ))
         });
         let mock_config = MockConfigLoader::new();
         let result = Settings::load_with_loaders(mock_env, mock_config);
@@ -201,7 +204,9 @@ mod tests {
         mock_env.expect_load_from_path().returning(|_| Ok(()));
 
         let mut mock_config = MockConfigLoader::new();
-        mock_config.expect_build_config().returning(|| Err(ConfigError::NotFound("test".to_string())));
+        mock_config
+            .expect_build_config()
+            .returning(|| Err(ConfigError::NotFound("test".to_string())));
 
         let result = Settings::load_with_loaders(mock_env, mock_config);
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));

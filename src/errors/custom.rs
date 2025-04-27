@@ -1,6 +1,6 @@
-use thiserror::Error;
 use qdrant_client::QdrantError;
 use serde_json;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CustomError {
