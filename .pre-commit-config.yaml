@@ -35,3 +35,11 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      # 5) Format Rust code using cargo fmt
+      - id: rust-fmt
+        name: Rust Format (cargo fmt)
+        language: system
+        entry: cargo fmt --
+        types: [rust]
+        stages: [pre-commit]
