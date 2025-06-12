@@ -64,12 +64,12 @@ impl MemoryRepository {
     ///
     /// # Description
     ///
-    /// Generates an embedding for the input content, validates and constructs a MemoryEntry,
+    /// Generates an embedding for the memory content, validates and constructs a MemoryEntry,
     /// and persists the memory entry via the vector repository.
     ///
     /// # Parameters
     ///
-    /// - `input`: A `MemoryInput` containing the data for the new memory entry
+    /// - `metadata`: `VectorMetadata` containing the data for the new memory entry
     ///
     /// # Returns
     ///
@@ -207,7 +207,7 @@ impl MemoryRepository {
     ///
     /// # Description
     ///
-    /// Generates embeddings for all inputs in bulk, constructs MemoryEntry instances,
+    /// Generates embeddings for all metadata entries in bulk, constructs MemoryEntry instances,
     /// and persists all entries in a single operation via the vector repository.
     ///
     /// # Parameters
