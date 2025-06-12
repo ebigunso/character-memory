@@ -64,12 +64,12 @@ impl MemoryRepository {
     ///
     /// # Description
     ///
-    /// Generates an embedding for the input content, validates and constructs a MemoryEntry,
+    /// Generates an embedding for the memory content, validates and constructs a MemoryEntry,
     /// and persists the memory entry via the vector repository.
     ///
     /// # Parameters
     ///
-    /// - `input`: A `MemoryInput` containing the data for the new memory entry
+    /// - `metadata`: `VectorMetadata` containing the data for the new memory entry
     ///
     /// # Returns
     ///
@@ -131,7 +131,7 @@ impl MemoryRepository {
     ///
     /// # Parameters
     ///
-    /// - `input`: A `MemoryInput` containing the updated data and ID of the entry to update
+    /// - `metadata`: `VectorMetadata` containing the updated memory data, including the entry's ID
     ///
     /// # Returns
     ///
@@ -139,7 +139,7 @@ impl MemoryRepository {
     ///
     /// - `Ok`: A `MemoryEntry` containing the updated memory
     /// - `Err`: A `CustomError` if:
-    ///     - The input does not contain an ID
+    ///     - The metadata does not contain an ID
     ///     - Embedding generation fails
     ///     - Memory validation fails
     ///     - The update operation fails
@@ -207,12 +207,12 @@ impl MemoryRepository {
     ///
     /// # Description
     ///
-    /// Generates embeddings for all inputs in bulk, constructs MemoryEntry instances,
+    /// Generates embeddings for all metadata entries in bulk, constructs MemoryEntry instances,
     /// and persists all entries in a single operation via the vector repository.
     ///
     /// # Parameters
     ///
-    /// - `inputs`: A slice of `MemoryInput` containing the data for each memory entry
+    /// - `metadata_list`: A slice of `VectorMetadata` describing each memory entry to create
     ///
     /// # Returns
     ///
