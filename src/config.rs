@@ -9,20 +9,3 @@ pub mod settings {
     pub(crate) use vector_memory_repository_settings::VectorMemoryRepositorySettings;
 }
 
-pub(crate) mod loaders {
-    // Make modules public only for testing
-    #[cfg(test)]
-    pub(crate) mod config_loader;
-    #[cfg(test)]
-    pub(crate) mod env_loader;
-
-    #[cfg(not(test))]
-    mod config_loader;
-    #[cfg(not(test))]
-    mod env_loader;
-
-    pub(crate) use config_loader::ConfigLoader;
-    pub(crate) use config_loader::DefaultConfigLoader;
-    pub(crate) use env_loader::DefaultEnvLoader;
-    pub(crate) use env_loader::EnvLoader;
-}

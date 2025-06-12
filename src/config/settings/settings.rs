@@ -1,10 +1,8 @@
-use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::env;
+use config::Config;
 
-use crate::config::loaders::{ConfigLoader, DefaultConfigLoader};
-use crate::config::loaders::{DefaultEnvLoader, EnvLoader};
 use crate::errors::CustomError;
 use crate::models::vector::EmbeddingModel;
 
@@ -67,37 +65,26 @@ impl Settings {
     ///     - Required settings are missing or invalid
     ///
     pub(crate) fn load() -> Result<Self, CustomError> {
-        Self::load_with_loaders(DefaultEnvLoader, DefaultConfigLoader)
-    }
+        dotenvy::dotenv().ok();
 
-    fn load_with_loaders<E: EnvLoader, C: ConfigLoader>(
-        env_loader: E,
-        config_loader: C,
-    ) -> Result<Self, CustomError> {
-        // Get project root directory from CARGO_MANIFEST_DIR
-        let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let env_path = project_root.join(".env");
-
-        // Check if .env exists in project root
-        if !env_loader.exists(env_path.clone()) {
-            return Err(CustomError::EnvFileNotFound(
-                "Please create .env file with required secrets in the project root.".to_string(),
-            ));
-        }
-
-        // Load .env file from project root
-        env_loader
-            .load_from_path(env_path)
-            .map_err(|e| CustomError::EnvLoadError(format!("Failed to load .env file: {}", e)))?;
-
-        // Build configuration
-        let settings = config_loader.build_config().map_err(|e| {
-            CustomError::ConfigParseError(format!("Failed to build configuration: {}", e))
+        let qdrant_connection_string = env::var("QDRANT_CONNECTION_STRING").map_err(|e| {
+            CustomError::ConfigParseError(format!("QDRANT_CONNECTION_STRING: {}", e))
+        })?;
+        let oxigraph_connection_string = env::var("OXIGRAPH_CONNECTION_STRING").map_err(|e| {
+            CustomError::ConfigParseError(format!("OXIGRAPH_CONNECTION_STRING: {}", e))
+        })?;
+        let openai_api_key = env::var("OPENAI_API_KEY").map_err(|e| {
+            CustomError::ConfigParseError(format!("OPENAI_API_KEY: {}", e))
+        })?;
+        let embedding_model = env::var("EMBEDDING_MODEL").map_err(|e| {
+            CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {}", e))
         })?;
 
-        // Try to convert into Settings struct
-        settings.try_deserialize().map_err(|e| {
-            CustomError::ConfigParseError(format!("Failed to parse configuration: {}", e))
+        Ok(Self {
+            qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
+            oxigraph_connection_string: SecretString::new(oxigraph_connection_string.into()),
+            openai_api_key: SecretString::new(openai_api_key.into()),
+            embedding_model: SecretString::new(embedding_model.into()),
         })
     }
 
@@ -137,79 +124,65 @@ impl Settings {
 }
 
 #[cfg(test)]
+
 mod tests {
     use super::*;
-    use crate::config::loaders::config_loader::MockConfigLoader;
-    use crate::config::loaders::env_loader::MockEnvLoader;
     use crate::errors::CustomError;
-    use config::ConfigError;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn set_env(key: &str, value: &str) -> Option<String> {
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        prev
+    }
+
+    fn restore_env(key: &str, prev: Option<String>) {
+        match prev {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
 
     #[test]
     fn test_settings_load_success() {
-        let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists().return_const(true);
-        mock_env.expect_load_from_path().returning(|_| Ok(()));
+        let _guard = ENV_LOCK.lock().unwrap();
 
-        let mut mock_config = MockConfigLoader::new();
-        mock_config.expect_build_config().returning(|| {
-            Ok(Config::builder()
-                .set_override("qdrant_connection_string", "test_qdrant")
-                .unwrap()
-                .set_override("oxigraph_connection_string", "test_oxigraph")
-                .unwrap()
-                .set_override("openai_api_key", "test_openai")
-                .unwrap()
-                .set_override("embedding_model", "TextEmbedding3Small")
-                .unwrap()
-                .build()
-                .unwrap())
-        });
+        let prev_qdrant = set_env("QDRANT_CONNECTION_STRING", "test_qdrant");
+        let prev_oxigraph = set_env("OXIGRAPH_CONNECTION_STRING", "test_oxigraph");
+        let prev_openai = set_env("OPENAI_API_KEY", "test_openai");
+        let prev_model = set_env("EMBEDDING_MODEL", "text-embedding-3-small");
 
-        let result = Settings::load_with_loaders(mock_env, mock_config);
+        let result = Settings::load();
         assert!(result.is_ok());
-
         let settings = result.unwrap();
         assert_eq!(settings.get_qdrant_connection(), "test_qdrant");
         assert_eq!(settings.get_oxigraph_connection(), "test_oxigraph");
+
+        restore_env("QDRANT_CONNECTION_STRING", prev_qdrant);
+        restore_env("OXIGRAPH_CONNECTION_STRING", prev_oxigraph);
+        restore_env("OPENAI_API_KEY", prev_openai);
+        restore_env("EMBEDDING_MODEL", prev_model);
     }
 
     #[test]
-    fn test_settings_load_env_missing() {
-        let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists().return_const(false);
-        let mock_config = MockConfigLoader::new();
-        let result = Settings::load_with_loaders(mock_env, mock_config);
-        assert!(matches!(result, Err(CustomError::EnvFileNotFound(_))));
-    }
+    fn test_settings_load_missing_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
 
-    #[test]
-    fn test_settings_load_env_error() {
-        let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists().return_const(true);
-        mock_env.expect_load_from_path().returning(|_| {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Mock env load error",
-            ))
-        });
-        let mock_config = MockConfigLoader::new();
-        let result = Settings::load_with_loaders(mock_env, mock_config);
-        assert!(matches!(result, Err(CustomError::EnvLoadError(_))));
-    }
+        let prev_qdrant = std::env::var("QDRANT_CONNECTION_STRING").ok();
+        std::env::remove_var("QDRANT_CONNECTION_STRING");
+        std::env::set_var("OXIGRAPH_CONNECTION_STRING", "test_oxigraph");
+        std::env::set_var("OPENAI_API_KEY", "test_openai");
+        std::env::set_var("EMBEDDING_MODEL", "text-embedding-3-small");
 
-    #[test]
-    fn test_settings_load_config_error() {
-        let mut mock_env = MockEnvLoader::new();
-        mock_env.expect_exists().return_const(true);
-        mock_env.expect_load_from_path().returning(|_| Ok(()));
-
-        let mut mock_config = MockConfigLoader::new();
-        mock_config
-            .expect_build_config()
-            .returning(|| Err(ConfigError::NotFound("test".to_string())));
-
-        let result = Settings::load_with_loaders(mock_env, mock_config);
+        let result = Settings::load();
         assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
+
+        restore_env("QDRANT_CONNECTION_STRING", prev_qdrant);
+        std::env::remove_var("OXIGRAPH_CONNECTION_STRING");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("EMBEDDING_MODEL");
     }
 
     #[test]
