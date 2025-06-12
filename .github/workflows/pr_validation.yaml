@@ -7,6 +7,11 @@ on:
 jobs:
   validate_pr:
     runs-on: ubuntu-latest
+    env:
+      QDRANT_CONNECTION_STRING: ${{ secrets.CI_QDRANT_URL }}
+      OXIGRAPH_CONNECTION_STRING: ${{ secrets.CI_OXIGRAPH_URL }}
+      OPENAI_API_KEY: ${{ secrets.CI_OPENAI_API_KEY }}
+      EMBEDDING_MODEL: ${{ secrets.CI_EMBEDDING_MODEL }}
 
     steps:
       - name: Checkout repository

@@ -1,7 +1,7 @@
+use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::env;
-use config::Config;
 
 use crate::errors::CustomError;
 use crate::models::vector::EmbeddingModel;
@@ -46,7 +46,8 @@ impl Settings {
     /// # Description
     ///
     /// This function provides a convenient way to load settings using the default environment and configuration loaders.
-    /// It expects a `.env` file in the project root directory and will attempt to load configuration values from both environment variables and the configuration system.
+    /// If a `.env` file exists in the project root it will be loaded automatically.
+    /// When the file is absent the function relies solely on the current environment variables.
     ///
     /// # Important
     ///
@@ -59,10 +60,8 @@ impl Settings {
     ///
     /// - `Ok`: A new `Settings` instance with configuration loaded from environment and config files
     /// - `Err`: A `CustomError` if:
-    ///     - The `.env` file is missing
-    ///     - There are errors loading the environment variables
+    ///     - Environment variables are missing or invalid
     ///     - There are errors parsing the configuration
-    ///     - Required settings are missing or invalid
     ///
     pub(crate) fn load() -> Result<Self, CustomError> {
         dotenvy::dotenv().ok();
@@ -73,12 +72,10 @@ impl Settings {
         let oxigraph_connection_string = env::var("OXIGRAPH_CONNECTION_STRING").map_err(|e| {
             CustomError::ConfigParseError(format!("OXIGRAPH_CONNECTION_STRING: {}", e))
         })?;
-        let openai_api_key = env::var("OPENAI_API_KEY").map_err(|e| {
-            CustomError::ConfigParseError(format!("OPENAI_API_KEY: {}", e))
-        })?;
-        let embedding_model = env::var("EMBEDDING_MODEL").map_err(|e| {
-            CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {}", e))
-        })?;
+        let openai_api_key = env::var("OPENAI_API_KEY")
+            .map_err(|e| CustomError::ConfigParseError(format!("OPENAI_API_KEY: {}", e)))?;
+        let embedding_model = env::var("EMBEDDING_MODEL")
+            .map_err(|e| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {}", e)))?;
 
         Ok(Self {
             qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
