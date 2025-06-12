@@ -131,7 +131,7 @@ impl MemoryRepository {
     ///
     /// # Parameters
     ///
-    /// - `input`: A `MemoryInput` containing the updated data and ID of the entry to update
+    /// - `metadata`: `VectorMetadata` containing the updated memory data, including the entry's ID
     ///
     /// # Returns
     ///
@@ -139,7 +139,7 @@ impl MemoryRepository {
     ///
     /// - `Ok`: A `MemoryEntry` containing the updated memory
     /// - `Err`: A `CustomError` if:
-    ///     - The input does not contain an ID
+    ///     - The metadata does not contain an ID
     ///     - Embedding generation fails
     ///     - Memory validation fails
     ///     - The update operation fails
@@ -212,7 +212,7 @@ impl MemoryRepository {
     ///
     /// # Parameters
     ///
-    /// - `inputs`: A slice of `MemoryInput` containing the data for each memory entry
+    /// - `metadata_list`: A slice of `VectorMetadata` describing each memory entry to create
     ///
     /// # Returns
     ///
