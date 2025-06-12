@@ -8,4 +8,3 @@ pub mod settings {
     pub use settings::Settings;
     pub(crate) use vector_memory_repository_settings::VectorMemoryRepositorySettings;
 }
-

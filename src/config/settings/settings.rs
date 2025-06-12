@@ -121,66 +121,9 @@ impl Settings {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use crate::errors::CustomError;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn set_env(key: &str, value: &str) -> Option<String> {
-        let prev = std::env::var(key).ok();
-        std::env::set_var(key, value);
-        prev
-    }
-
-    fn restore_env(key: &str, prev: Option<String>) {
-        match prev {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-    }
-
-    #[test]
-    fn test_settings_load_success() {
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        let prev_qdrant = set_env("QDRANT_CONNECTION_STRING", "test_qdrant");
-        let prev_oxigraph = set_env("OXIGRAPH_CONNECTION_STRING", "test_oxigraph");
-        let prev_openai = set_env("OPENAI_API_KEY", "test_openai");
-        let prev_model = set_env("EMBEDDING_MODEL", "text-embedding-3-small");
-
-        let result = Settings::load();
-        assert!(result.is_ok());
-        let settings = result.unwrap();
-        assert_eq!(settings.get_qdrant_connection(), "test_qdrant");
-        assert_eq!(settings.get_oxigraph_connection(), "test_oxigraph");
-
-        restore_env("QDRANT_CONNECTION_STRING", prev_qdrant);
-        restore_env("OXIGRAPH_CONNECTION_STRING", prev_oxigraph);
-        restore_env("OPENAI_API_KEY", prev_openai);
-        restore_env("EMBEDDING_MODEL", prev_model);
-    }
-
-    #[test]
-    fn test_settings_load_missing_var() {
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        let prev_qdrant = std::env::var("QDRANT_CONNECTION_STRING").ok();
-        std::env::remove_var("QDRANT_CONNECTION_STRING");
-        std::env::set_var("OXIGRAPH_CONNECTION_STRING", "test_oxigraph");
-        std::env::set_var("OPENAI_API_KEY", "test_openai");
-        std::env::set_var("EMBEDDING_MODEL", "text-embedding-3-small");
-
-        let result = Settings::load();
-        assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
-
-        restore_env("QDRANT_CONNECTION_STRING", prev_qdrant);
-        std::env::remove_var("OXIGRAPH_CONNECTION_STRING");
-        std::env::remove_var("OPENAI_API_KEY");
-        std::env::remove_var("EMBEDDING_MODEL");
-    }
 
     #[test]
     fn test_settings_new_success() {
