@@ -7,11 +7,18 @@ on:
 jobs:
   validate_pr:
     runs-on: ubuntu-latest
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1
+        ports:
+          - 6333:6333
+          - 6334:6334
     env:
-      QDRANT_CONNECTION_STRING: ${{ secrets.CI_QDRANT_URL }}
-      OXIGRAPH_CONNECTION_STRING: ${{ secrets.CI_OXIGRAPH_URL }}
-      OPENAI_API_KEY: ${{ secrets.CI_OPENAI_API_KEY }}
-      EMBEDDING_MODEL: ${{ secrets.CI_EMBEDDING_MODEL }}
+      QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
+      OXIGRAPH_CONNECTION_STRING: ${{ vars.OXIGRAPH_CONNECTION_STRING }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
 
     steps:
       - name: Checkout repository
@@ -23,6 +30,21 @@ jobs:
           toolchain: stable
           override: true
           components: clippy
+
+      - name: Wait for Qdrant readiness
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:6333/readyz >/dev/null; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            echo "Waiting for Qdrant..."
+            sleep 2
+          done
+          echo "Qdrant not ready in time" >&2
+          curl -v http://127.0.0.1:6333/ -m 2 || true
+          exit 1
 
       - name: Cargo Check
         run: cargo check --all-targets
