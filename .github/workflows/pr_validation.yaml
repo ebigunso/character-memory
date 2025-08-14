@@ -24,6 +24,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: clippy
+
       - name: Wait for Qdrant readiness
         shell: bash
         run: |
@@ -38,13 +45,6 @@ jobs:
           echo "Qdrant not ready in time" >&2
           curl -v http://127.0.0.1:6333/ -m 2 || true
           exit 1
-
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          components: clippy
 
       - name: Cargo Check
         run: cargo check --all-targets
