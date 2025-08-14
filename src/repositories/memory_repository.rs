@@ -108,7 +108,7 @@ impl MemoryRepository {
         memories
             .into_iter()
             .next()
-            .ok_or_else(|| CustomError::DatabaseError(format!("Memory with ID {} not found", id)))
+            .ok_or_else(|| CustomError::DatabaseError(format!("Memory with ID {id} not found")))
     }
 
     /// Retrieves multiple memory entries by their unique identifiers.
