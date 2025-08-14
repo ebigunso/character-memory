@@ -55,7 +55,7 @@ impl QdrantVectorMemoryRepository {
             }
         };
         let uuid = Uuid::parse_str(&id_str)
-            .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {}", e)))?;
+            .map_err(|e| CustomError::DatabaseError(format!("Invalid UUID format: {e}")))?;
 
         // Extract vector
         let vectors_output = point_data
@@ -102,9 +102,7 @@ impl QdrantVectorMemoryRepository {
                 .trim_matches('"')
                 .to_string();
             let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
-                .map_err(|e| {
-                    CustomError::DatabaseError(format!("Invalid timestamp format: {}", e))
-                })?
+                .map_err(|e| CustomError::DatabaseError(format!("Invalid timestamp format: {e}")))?
                 .with_timezone(&Utc);
 
             // Extract location
@@ -124,7 +122,7 @@ impl QdrantVectorMemoryRepository {
                 .to_string();
             let participants: Vec<String> =
                 serde_json::from_str(&participants_str).map_err(|e| {
-                    CustomError::DatabaseError(format!("Invalid participants format: {}", e))
+                    CustomError::DatabaseError(format!("Invalid participants format: {e}"))
                 })?;
 
             VectorMetadata::new_episodic(uuid, content, timestamp, location_text, participants)
@@ -188,7 +186,7 @@ impl QdrantVectorMemoryRepository {
             for participant in participants {
                 conditions.push(Condition::matches(
                     "participants",
-                    format!("*{}*", participant),
+                    format!("*{participant}*"),
                 ));
             }
         }
@@ -247,8 +245,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let memories = self.get_memories_by_ids(&[id]).await;
         if memories.is_err() {
             return Err(CustomError::DatabaseError(format!(
-                "Memory with ID {} not found",
-                id
+                "Memory with ID {id} not found",
             )));
         }
 
@@ -347,8 +344,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
 
             if !missing_ids.is_empty() {
                 return Err(CustomError::DatabaseError(format!(
-                    "Memories with IDs {:?} not found",
-                    missing_ids
+                    "Memories with IDs {missing_ids:?} not found",
                 )));
             }
         }

@@ -73,8 +73,7 @@ impl FromStr for EmbeddingModel {
             "text-embedding-3-large" => Ok(Self::TextEmbedding3Large),
             "text-embedding-ada-002" => Ok(Self::TextEmbeddingAda002),
             _ => Err(CustomError::ConfigParseError(format!(
-                "Invalid embedding model: {}",
-                s
+                "Invalid embedding model: {s}",
             ))),
         }
     }

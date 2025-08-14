@@ -1,5 +1,4 @@
 use qdrant_client::QdrantError;
-use serde_json;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -26,7 +25,7 @@ pub enum CustomError {
     DatabaseError(String),
 
     #[error("Vector database error: {0}")]
-    QdrantError(#[from] QdrantError),
+    QdrantError(#[source] Box<QdrantError>),
 
     #[error("Embedding initialization error: {0}")]
     EmbeddingInitializationError(String),
@@ -36,4 +35,10 @@ pub enum CustomError {
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+}
+
+impl From<QdrantError> for CustomError {
+    fn from(err: QdrantError) -> Self {
+        CustomError::QdrantError(Box::new(err))
+    }
 }
