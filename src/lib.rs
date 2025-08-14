@@ -29,7 +29,8 @@ pub mod test_utils {
     /// # Important
     ///
     /// This function is intended ONLY for use in integration tests and should not be used in production code.
-    /// It expects a `.env` file in the project root directory.
+    /// A `.env` file in the project root directory will be loaded if present,
+    /// otherwise existing environment variables are used.
     ///
     /// # Returns
     ///
