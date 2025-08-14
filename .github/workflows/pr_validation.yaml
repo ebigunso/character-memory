@@ -13,6 +13,7 @@ jobs:
         image: qdrant/qdrant:v1
         ports:
           - 6333:6333
+          - 6334:6334
     env:
       QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
       OXIGRAPH_CONNECTION_STRING: ${{ vars.OXIGRAPH_CONNECTION_STRING }}
