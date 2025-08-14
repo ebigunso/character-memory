@@ -15,11 +15,11 @@ jobs:
 
     env:
       # Consumed by Settings::load()
-      QDRANT_CONNECTION_STRING: http://127.0.0.1:6333
-      OXIGRAPH_CONNECTION_STRING: http://127.0.0.1:7878
+      QDRANT_CONNECTION_STRING: 'http://127.0.0.1:6333'
+      OXIGRAPH_CONNECTION_STRING: 'http://127.0.0.1:7878'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EMBEDDING_MODEL: text-embedding-3-small
-      CARGO_TERM_COLOR: always
+      EMBEDDING_MODEL: 'text-embedding-3-small'
+      CARGO_TERM_COLOR: 'always'
 
     steps:
       - name: Checkout
