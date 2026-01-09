@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::{
     point_id::PointIdOptions, points_selector::PointsSelectorOneOf, vectors_config, vectors_output,
-    Condition, CreateCollectionBuilder, DatetimeRange, DeletePointsBuilder, Distance, Filter,
-    GetPointsBuilder, PointId, PointStruct, PointsIdsList, RetrievedPoint, ScoredPoint,
-    SearchPointsBuilder, Timestamp, UpsertPointsBuilder, VectorParams, VectorsConfig,
-    VectorsOutput,
+    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DatetimeRange,
+    DeletePointsBuilder, Distance, FieldType, Filter, GetPointsBuilder, PointId, PointStruct,
+    PointsIdsList, RetrievedPoint, ScoredPoint, SearchPointsBuilder, TextIndexParamsBuilder,
+    Timestamp, TokenizerType, UpsertPointsBuilder, VectorParams, VectorsConfig, VectorsOutput,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant};
 use std::collections::HashMap;
@@ -27,6 +27,54 @@ impl QdrantVectorMemoryRepository {
     pub(crate) fn new(config: VectorMemoryRepositorySettings) -> Result<Self, CustomError> {
         let client = Qdrant::new(QdrantConfig::from_url(&config.url))?;
         Ok(Self { client, config })
+    }
+
+    async fn ensure_full_text_indexes(&self) -> Result<(), CustomError> {
+        let info = self
+            .client
+            .collection_info(&self.config.collection_name)
+            .await?;
+
+        let empty_payload_schema: HashMap<String, qdrant_client::qdrant::PayloadSchemaInfo> =
+            HashMap::new();
+        let payload_schema = info
+            .result
+            .as_ref()
+            .map(|r| &r.payload_schema)
+            .unwrap_or(&empty_payload_schema);
+
+        let mut missing_fields: Vec<&str> = Vec::new();
+        if !payload_schema.contains_key("location_text") {
+            missing_fields.push("location_text");
+        }
+        if !payload_schema.contains_key("participants") {
+            missing_fields.push("participants");
+        }
+
+        if missing_fields.is_empty() {
+            return Ok(());
+        }
+
+        let text_index_params = TextIndexParamsBuilder::new(TokenizerType::Multilingual)
+            .min_token_len(2)
+            .max_token_len(10)
+            .lowercase(true)
+            .build();
+
+        for field_name in missing_fields {
+            self.client
+                .create_field_index(
+                    CreateFieldIndexCollectionBuilder::new(
+                        &self.config.collection_name,
+                        field_name,
+                        FieldType::Text,
+                    )
+                    .field_index_params(text_index_params.clone()),
+                )
+                .await?;
+        }
+
+        Ok(())
     }
 
     // Helper: Convert a Qdrant point to a MemoryEntry.
@@ -178,15 +226,18 @@ impl QdrantVectorMemoryRepository {
 
         // Add location_text filter if present
         if let Some(location) = &filters.location_text {
-            conditions.push(Condition::matches("location_text", location.to_string()));
+            conditions.push(Condition::matches_text(
+                "location_text",
+                location.to_string(),
+            ));
         }
 
         // Add participants filter if present
         if let Some(participants) = &filters.participants {
             for participant in participants {
-                conditions.push(Condition::matches(
+                conditions.push(Condition::matches_text(
                     "participants",
-                    format!("*{participant}*"),
+                    participant.to_string(),
                 ));
             }
         }
@@ -217,6 +268,8 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
                 .build();
             self.client.create_collection(create_req).await?;
         }
+
+        self.ensure_full_text_indexes().await?;
         Ok(())
     }
 
