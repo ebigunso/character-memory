@@ -35,11 +35,13 @@ impl QdrantVectorMemoryRepository {
             .collection_info(&self.config.collection_name)
             .await?;
 
+        let empty_payload_schema: HashMap<String, qdrant_client::qdrant::PayloadSchemaInfo> =
+            HashMap::new();
         let payload_schema = info
             .result
             .as_ref()
             .map(|r| &r.payload_schema)
-            .unwrap_or(&HashMap::new());
+            .unwrap_or(&empty_payload_schema);
 
         let mut missing_fields: Vec<&str> = Vec::new();
         if !payload_schema.contains_key("location_text") {
