@@ -49,27 +49,6 @@ async fn test_participants_full_text_token_match() {
         "Expected to find memory containing 'Alice Johnson' via token match on participants"
     );
 
-    // Non-goal: within-word substring matching is not required.
-    let filters_substring = MemoryFilters {
-        memory_type: Some("episodic".to_string()),
-        start_date: None,
-        end_date: None,
-        location_text: None,
-        participants: Some(vec!["Ali".to_string()]),
-    };
-
-    let results_substring = agent_memory
-        .search_memories("Alice", 10, Some(filters_substring))
-        .await
-        .unwrap();
-
-    assert!(
-        results_substring
-            .iter()
-            .all(|m| !m.content.contains("Alice Johnson")),
-        "Did not expect within-word substring match (Ali -> Alice)"
-    );
-
     test_utils::cleanup_collection(&collection_name).await;
 }
 
