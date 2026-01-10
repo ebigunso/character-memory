@@ -15,8 +15,35 @@ use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
 use crate::models::memory::dto::MemoryFilters;
 use crate::models::memory::MemoryEntry;
+use crate::models::memory::MemoryType;
 use crate::models::vector::VectorMetadata;
 use crate::repositories::VectorMemoryRepository;
+
+#[derive(serde::Serialize)]
+struct QdrantMemoryPayload {
+    id: Uuid,
+    memory_type: MemoryType,
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timestamp: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    participants: Option<Vec<String>>,
+}
+
+impl From<&MemoryEntry> for QdrantMemoryPayload {
+    fn from(memory: &MemoryEntry) -> Self {
+        Self {
+            id: memory.id,
+            memory_type: memory.memory_type.clone(),
+            content: memory.content.clone(),
+            timestamp: memory.timestamp,
+            location_text: memory.location_text.clone(),
+            participants: memory.participants.clone(),
+        }
+    }
+}
 
 pub struct QdrantVectorMemoryRepository {
     client: Qdrant,
@@ -27,6 +54,18 @@ impl QdrantVectorMemoryRepository {
     pub(crate) fn new(config: VectorMemoryRepositorySettings) -> Result<Self, CustomError> {
         let client = Qdrant::new(QdrantConfig::from_url(&config.url))?;
         Ok(Self { client, config })
+    }
+
+    fn build_qdrant_payload(
+        memory: &MemoryEntry,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, CustomError> {
+        let payload_value = serde_json::to_value(QdrantMemoryPayload::from(memory))?;
+        payload_value
+            .as_object()
+            .ok_or_else(|| {
+                CustomError::DatabaseError("Failed to convert Qdrant payload to object".to_string())
+            })
+            .cloned()
     }
 
     async fn ensure_full_text_indexes(&self) -> Result<(), CustomError> {
@@ -274,13 +313,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
     }
 
     async fn store_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
-        let memory_value = serde_json::to_value(memory)?;
-        let payload = memory_value
-            .as_object()
-            .ok_or_else(|| {
-                CustomError::DatabaseError("Failed to convert memory to object".to_string())
-            })?
-            .clone();
+        let payload = Self::build_qdrant_payload(memory)?;
 
         let point = PointStruct::new(memory.id.to_string(), memory.embedding.clone(), payload);
         let upsert_req =
@@ -409,13 +442,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let points: Vec<PointStruct> = memories
             .iter()
             .map(|memory| {
-                let memory_value = serde_json::to_value(memory)?;
-                let payload = memory_value
-                    .as_object()
-                    .ok_or_else(|| {
-                        CustomError::DatabaseError("Failed to convert memory to object".to_string())
-                    })?
-                    .clone();
+                let payload = Self::build_qdrant_payload(memory)?;
 
                 Ok(PointStruct::new(
                     memory.id.to_string(),
@@ -465,5 +492,56 @@ impl From<ScoredPoint> for PointData {
 impl From<RetrievedPoint> for PointData {
     fn from(point: RetrievedPoint) -> Self {
         Self::from_retrieved_point(point)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn qdrant_payload_excludes_embedding_semantic() {
+        let id = Uuid::new_v4();
+        let metadata = VectorMetadata::new_semantic(id, "Alice is a software engineer".to_string());
+        let entry = MemoryEntry::new(metadata, vec![0.1, 0.2]).expect("valid semantic memory");
+
+        let payload =
+            QdrantVectorMemoryRepository::build_qdrant_payload(&entry).expect("payload builds");
+
+        assert!(payload.get("embedding").is_none());
+        assert!(payload.get("id").is_some());
+        assert!(payload.get("memory_type").is_some());
+        assert!(payload.get("content").is_some());
+
+        assert!(payload.get("timestamp").is_none());
+        assert!(payload.get("location_text").is_none());
+        assert!(payload.get("participants").is_none());
+    }
+
+    #[test]
+    fn qdrant_payload_excludes_embedding_episodic() {
+        let id = Uuid::new_v4();
+        let timestamp = Utc.with_ymd_and_hms(2025, 2, 2, 14, 0, 0).unwrap();
+        let metadata = VectorMetadata::new_episodic(
+            id,
+            "Discussed weekend plans".to_string(),
+            timestamp,
+            "Café Central".to_string(),
+            vec!["Alice".to_string(), "Bob".to_string()],
+        );
+        let entry = MemoryEntry::new(metadata, vec![0.1, 0.2]).expect("valid episodic memory");
+
+        let payload =
+            QdrantVectorMemoryRepository::build_qdrant_payload(&entry).expect("payload builds");
+
+        assert!(payload.get("embedding").is_none());
+        assert!(payload.get("id").is_some());
+        assert!(payload.get("memory_type").is_some());
+        assert!(payload.get("content").is_some());
+
+        assert!(payload.get("timestamp").is_some());
+        assert!(payload.get("location_text").is_some());
+        assert!(payload.get("participants").is_some());
     }
 }
