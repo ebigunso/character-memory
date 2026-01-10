@@ -92,6 +92,11 @@ Recommended IRI schemes (example):
 
 Callers should integrate against a small, stable set of interfaces.
 
+Design principle:
+
+* **Usability first:** callers should use a single, high-level hybrid retrieval API (`hybrid_search`) rather than composing vector-only and graph-only stages.
+* **Traceability separately:** internal stage outputs (vector candidates/scores, graph expansions, merge decisions) can be exposed as an *optional* retrieval trace for debugging and provenance, without requiring callers to implement selection logic.
+
 ### 5.1 Core types
 
 * `MemoryRecord`
