@@ -92,6 +92,11 @@ Recommended IRI schemes (example):
 
 Callers should integrate against a small, stable set of interfaces.
 
+Design principle:
+
+* **Usability first:** callers should use a single, high-level hybrid retrieval API (`hybrid_search`) rather than composing vector-only and graph-only stages.
+* **Traceability separately:** internal stage outputs (vector candidates/scores, graph expansions, merge decisions) can be exposed as an *optional* retrieval trace for debugging and provenance, without requiring callers to implement selection logic.
+
 ### 5.1 Core types
 
 * `MemoryRecord`
@@ -106,18 +111,24 @@ Callers should integrate against a small, stable set of interfaces.
 * `RetrievalBundle`
 
   * `query`
-  * `candidates[]`: `{ id, score?, content_excerpt, payload_metadata, graph_context }`
+  * `results[]`: `{ id, content_excerpt, payload_metadata, graph_context }`
   * `entities[]`, `locations[]`, `time_anchors[]` (normalized aggregates)
   * `provenance`: stable IDs suitable for caller-side citations
+
+  Optional trace (debug/provenance aid; not required for callers):
+
+  * `trace?`: includes internal stage diagnostics such as vector candidate ids + scores, graph expansion summary, and merge/ranking rationale.
 
 ### 5.2 Core operations (shape, not exact signatures)
 
 * `upsert(record) -> id`
 * `get_by_id(id) -> record + graph_context`
-* `vector_search(query, filters) -> [candidate ids + scores]`
-* `graph_expand(ids, policy) -> context per id`
 * `hybrid_search(query, filters, policy) -> RetrievalBundle`
 * Optional: `graph_query_*` helpers (by entity, location, time range, etc.)
+
+Implementation note:
+
+* The hybrid flow may internally perform vector search and graph expansion. These are not necessarily exposed as stable, user-facing APIs.
 
 ### 5.3 Caller responsibility
 
