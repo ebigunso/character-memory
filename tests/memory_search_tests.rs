@@ -53,9 +53,18 @@ async fn test_basic_search() {
         "Should have found at least one memory"
     );
 
+    assert!(
+        memories.iter().all(|m| m.score.is_finite()),
+        "All results should have finite scores"
+    );
+    assert!(
+        memories.windows(2).all(|w| w[0].score >= w[1].score),
+        "Results should be ordered by descending score"
+    );
+
     // The first result should be the one with "fox" in it
     assert!(
-        memories[0].content.contains("fox"),
+        memories[0].memory.content.contains("fox"),
         "First result should contain 'fox'"
     );
 
@@ -125,17 +134,28 @@ async fn test_search_with_memory_type_filter() {
         "Should have found at least one memory"
     );
 
+    assert!(
+        memories.iter().all(|m| m.score.is_finite()),
+        "All results should have finite scores"
+    );
+    assert!(
+        memories.windows(2).all(|w| w[0].score >= w[1].score),
+        "Results should be ordered by descending score"
+    );
+
     // All results should be episodic memories
     for memory in &memories {
         assert_eq!(
-            memory.memory_type,
+            memory.memory.memory_type,
             MemoryType::Episodic,
             "All results should be episodic memories"
         );
     }
 
     // The result should contain the episodic memory about vacation, not the semantic one
-    let has_episodic_vacation = memories.iter().any(|m| m.content.contains("vacation"));
+    let has_episodic_vacation = memories
+        .iter()
+        .any(|m| m.memory.content.contains("vacation"));
     assert!(
         has_episodic_vacation,
         "Results should include episodic memory about vacation"
@@ -212,10 +232,21 @@ async fn test_search_with_date_filter() {
         "Should have found at least one memory"
     );
 
+    assert!(
+        memories.iter().all(|m| m.score.is_finite()),
+        "All results should have finite scores"
+    );
+    assert!(
+        memories.windows(2).all(|w| w[0].score >= w[1].score),
+        "Results should be ordered by descending score"
+    );
+
     // Results should only include memories from the last 2 days
-    let has_recent = memories.iter().any(|m| m.content.contains("today"));
-    let has_yesterday = memories.iter().any(|m| m.content.contains("yesterday"));
-    let has_old = memories.iter().any(|m| m.content.contains("last week"));
+    let has_recent = memories.iter().any(|m| m.memory.content.contains("today"));
+    let has_yesterday = memories
+        .iter()
+        .any(|m| m.memory.content.contains("yesterday"));
+    let has_old = memories.iter().any(|m| m.memory.content.contains("last week"));
 
     assert!(has_recent, "Results should include today's memory");
     assert!(has_yesterday, "Results should include yesterday's memory");
