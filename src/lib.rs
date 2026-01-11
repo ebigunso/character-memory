@@ -57,6 +57,26 @@ pub struct AgentMemory {
 }
 
 impl AgentMemory {
+    /// Constructs a new AgentMemory instance from caller-provided repositories.
+    ///
+    /// # Description
+    ///
+    /// This constructor allows callers to inject custom embedding generation and vector storage
+    /// implementations. This is useful for deterministic tests and for plugging in alternative
+    /// backends.
+    ///
+    /// # Parameters
+    ///
+    /// - `embed_repo`: Embedding generator implementation
+    /// - `vector_repo`: Vector memory storage implementation
+    pub fn new_with_repositories(
+        embed_repo: Box<dyn EmbeddingRepository>,
+        vector_repo: Box<dyn VectorMemoryRepository>,
+    ) -> Self {
+        let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
+        Self { memory_repo }
+    }
+
     /// Constructs a new AgentMemory instance.
     ///
     /// # Parameters
