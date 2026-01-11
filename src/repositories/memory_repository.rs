@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use crate::errors::CustomError;
 use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::MemoryEntry;
+use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 use crate::models::vector::VectorMetadata;
 use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
 
@@ -196,7 +196,7 @@ impl MemoryRepository {
         query: &str,
         top_k: usize,
         filters: Option<MemoryFilters>,
-    ) -> Result<Vec<MemoryEntry>, CustomError> {
+    ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
         let query_embedding = self.embed_repo.generate_embedding(query).await?;
         self.vector_repo
             .search_memory(&query_embedding, top_k, filters.as_ref())

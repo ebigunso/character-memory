@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::errors::CustomError;
 use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::MemoryEntry;
+use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 
 /// Repository trait for storing and retrieving memories using a vector database.
 ///
@@ -86,7 +86,7 @@ pub(crate) trait VectorMemoryRepository: Send + Sync {
         query_vector: &'a [f32],
         top_k: usize,
         filters: Option<&'a MemoryFilters>,
-    ) -> Result<Vec<MemoryEntry>, CustomError>;
+    ) -> Result<Vec<ScoredMemoryEntry>, CustomError>;
 
     /// Inserts multiple memories in a single operation.
     ///
@@ -145,7 +145,7 @@ impl<T: VectorMemoryRepository + ?Sized> VectorMemoryRepository for Box<T> {
         query_vector: &'a [f32],
         top_k: usize,
         filters: Option<&'a MemoryFilters>,
-    ) -> Result<Vec<MemoryEntry>, CustomError> {
+    ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
         (**self).search_memory(query_vector, top_k, filters).await
     }
 
