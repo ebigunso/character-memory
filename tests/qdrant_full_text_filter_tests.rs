@@ -115,7 +115,9 @@ async fn test_location_text_full_text_token_match() {
     );
 
     assert!(
-        results.iter().any(|m| m.memory.content.contains("Manhattan")),
+        results
+            .iter()
+            .any(|m| m.memory.content.contains("Manhattan")),
         "Expected to find memory in 'New York City' when filtering by 'New York'"
     );
 

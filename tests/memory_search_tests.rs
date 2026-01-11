@@ -246,7 +246,9 @@ async fn test_search_with_date_filter() {
     let has_yesterday = memories
         .iter()
         .any(|m| m.memory.content.contains("yesterday"));
-    let has_old = memories.iter().any(|m| m.memory.content.contains("last week"));
+    let has_old = memories
+        .iter()
+        .any(|m| m.memory.content.contains("last week"));
 
     assert!(has_recent, "Results should include today's memory");
     assert!(has_yesterday, "Results should include yesterday's memory");
