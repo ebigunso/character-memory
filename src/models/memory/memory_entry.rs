@@ -4,7 +4,6 @@ use uuid::Uuid;
 
 use crate::errors::CustomError;
 use crate::models::memory::dto::Memory;
-use crate::models::memory::dto::ScoredMemory;
 use crate::models::memory::MemoryType;
 use crate::models::vector::VectorMetadata;
 
@@ -17,12 +16,6 @@ pub(crate) struct MemoryEntry {
     pub(crate) timestamp: Option<DateTime<Utc>>,
     pub(crate) location_text: Option<String>,
     pub(crate) participants: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ScoredMemoryEntry {
-    pub(crate) entry: MemoryEntry,
-    pub(crate) score: f32,
 }
 
 impl MemoryEntry {
@@ -73,15 +66,6 @@ impl MemoryEntry {
             timestamp: self.timestamp,
             location_text: self.location_text,
             participants: self.participants,
-        }
-    }
-}
-
-impl ScoredMemoryEntry {
-    pub(crate) fn into_public(self) -> ScoredMemory {
-        ScoredMemory {
-            memory: self.entry.into_public(),
-            score: self.score,
         }
     }
 }
