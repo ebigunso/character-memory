@@ -247,3 +247,145 @@ impl MemoryRepository {
         Ok(entries)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct CapturingVectorRepo {
+        last_stored_embedding: Arc<Mutex<Option<Vec<f32>>>>,
+        last_query_vector: Arc<Mutex<Option<Vec<f32>>>>,
+    }
+
+    impl CapturingVectorRepo {
+        fn take_last_stored_embedding(&self) -> Option<Vec<f32>> {
+            self.last_stored_embedding.lock().expect("lock").take()
+        }
+
+        fn take_last_query_vector(&self) -> Option<Vec<f32>> {
+            self.last_query_vector.lock().expect("lock").take()
+        }
+    }
+
+    #[async_trait]
+    impl VectorMemoryRepository for CapturingVectorRepo {
+        async fn init_collection(&self) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn store_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
+            *self.last_stored_embedding.lock().expect("lock") = Some(memory.embedding.clone());
+            Ok(())
+        }
+
+        async fn update_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
+            self.store_memory(memory).await
+        }
+
+        async fn delete_memory(&self, _id: Uuid) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn search_memory<'a>(
+            &'a self,
+            query_vector: &'a [f32],
+            _top_k: usize,
+            _filters: Option<&'a MemoryFilters>,
+        ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
+            *self.last_query_vector.lock().expect("lock") = Some(query_vector.to_vec());
+            Ok(Vec::new())
+        }
+
+        async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
+            let last = memories
+                .last()
+                .ok_or_else(|| CustomError::DatabaseError("No memories provided".to_string()))?;
+            self.store_memory(last).await
+        }
+
+        async fn get_memories_by_ids<'a>(
+            &'a self,
+            _ids: &'a [Uuid],
+        ) -> Result<Vec<MemoryEntry>, CustomError> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct FakeEmbeddingRepo;
+
+    impl FakeEmbeddingRepo {
+        fn embed(text: &str) -> Vec<f32> {
+            vec![text.len() as f32, 1.0, 0.0]
+        }
+    }
+
+    #[async_trait]
+    impl EmbeddingRepository for FakeEmbeddingRepo {
+        async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
+            Ok(Self::embed(text))
+        }
+
+        async fn bulk_generate_embeddings<'a>(
+            &self,
+            texts: &'a [&'a str],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            Ok(texts.iter().map(|t| Self::embed(t)).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn create_memory_uses_injected_embedder() {
+        let vector_repo = CapturingVectorRepo::default();
+        let vector_repo_handle = vector_repo.clone();
+        let repo = MemoryRepository::new(Box::new(FakeEmbeddingRepo), Box::new(vector_repo));
+
+        let id = Uuid::new_v4();
+        let metadata = VectorMetadata::new_semantic(id, "hello".to_string());
+
+        let created = repo.create_memory(metadata).await.expect("create succeeds");
+        assert_eq!(created.id, id);
+
+        let stored_embedding = vector_repo_handle
+            .take_last_stored_embedding()
+            .expect("expected stored embedding");
+        assert_eq!(stored_embedding, FakeEmbeddingRepo::embed("hello"));
+    }
+
+    #[tokio::test]
+    async fn search_memories_uses_injected_embedder_for_query() {
+        let vector_repo = CapturingVectorRepo::default();
+        let vector_repo_handle = vector_repo.clone();
+        let repo = MemoryRepository::new(Box::new(FakeEmbeddingRepo), Box::new(vector_repo));
+
+        repo.search_memories("query", 5, None)
+            .await
+            .expect("search succeeds");
+
+        let query_vector = vector_repo_handle
+            .take_last_query_vector()
+            .expect("expected captured query vector");
+        assert_eq!(query_vector, FakeEmbeddingRepo::embed("query"));
+    }
+
+    #[tokio::test]
+    async fn bulk_create_memories_uses_bulk_embedding() {
+        let vector_repo = CapturingVectorRepo::default();
+        let vector_repo_handle = vector_repo.clone();
+        let repo = MemoryRepository::new(Box::new(FakeEmbeddingRepo), Box::new(vector_repo));
+
+        let a = VectorMetadata::new_semantic(Uuid::new_v4(), "a".to_string());
+        let b = VectorMetadata::new_semantic(Uuid::new_v4(), "bbbb".to_string());
+        let _ = repo
+            .bulk_create_memories(&[a, b])
+            .await
+            .expect("bulk create succeeds");
+
+        let stored_embedding = vector_repo_handle
+            .take_last_stored_embedding()
+            .expect("expected stored embedding");
+        assert_eq!(stored_embedding, FakeEmbeddingRepo::embed("bbbb"));
+    }
+}
