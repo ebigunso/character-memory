@@ -8,39 +8,17 @@ use crate::models::memory::MemoryType;
 use crate::models::vector::VectorMetadata;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryEntry {
-    pub id: Uuid,
-    pub memory_type: MemoryType,
-    pub content: String,
-    pub embedding: Vec<f32>,
-    pub timestamp: Option<DateTime<Utc>>,
-    pub location_text: Option<String>,
-    pub participants: Option<Vec<String>>,
+pub(crate) struct MemoryEntry {
+    pub(crate) id: Uuid,
+    pub(crate) memory_type: MemoryType,
+    pub(crate) content: String,
+    pub(crate) embedding: Vec<f32>,
+    pub(crate) timestamp: Option<DateTime<Utc>>,
+    pub(crate) location_text: Option<String>,
+    pub(crate) participants: Option<Vec<String>>,
 }
 
 impl MemoryEntry {
-    pub fn try_new(
-        id: Uuid,
-        memory_type: MemoryType,
-        content: String,
-        embedding: Vec<f32>,
-        timestamp: Option<DateTime<Utc>>,
-        location_text: Option<String>,
-        participants: Option<Vec<String>>,
-    ) -> Result<Self, CustomError> {
-        let entry = Self {
-            id,
-            memory_type,
-            content,
-            embedding,
-            timestamp,
-            location_text,
-            participants,
-        };
-        entry.validate()?;
-        Ok(entry)
-    }
-
     pub(crate) fn new(metadata: VectorMetadata, embedding: Vec<f32>) -> Result<Self, CustomError> {
         let entry = Self {
             id: metadata.id,
@@ -55,7 +33,7 @@ impl MemoryEntry {
         Ok(entry)
     }
 
-    pub fn validate(&self) -> Result<(), CustomError> {
+    pub(crate) fn validate(&self) -> Result<(), CustomError> {
         match self.memory_type {
             MemoryType::Episodic => {
                 if self.timestamp.is_none() {
@@ -80,7 +58,7 @@ impl MemoryEntry {
         Ok(())
     }
 
-    pub fn into_public(self) -> Memory {
+    pub(crate) fn into_public(self) -> Memory {
         Memory {
             id: self.id,
             content: self.content,

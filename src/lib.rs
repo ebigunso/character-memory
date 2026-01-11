@@ -18,8 +18,7 @@ pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
 pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput, ScoredMemory};
 pub use crate::models::memory::MemoryType;
-pub use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
-pub use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
+pub use crate::repositories::EmbeddingRepository;
 
 // Re-export for integration tests
 pub mod test_utils {
@@ -57,24 +56,25 @@ pub struct AgentMemory {
 }
 
 impl AgentMemory {
-    /// Constructs a new AgentMemory instance from caller-provided repositories.
+    /// Constructs a new AgentMemory instance using a caller-provided embedding repository.
     ///
     /// # Description
     ///
-    /// This constructor allows callers to inject custom embedding generation and vector storage
-    /// implementations. This is useful for deterministic tests and for plugging in alternative
-    /// backends.
-    ///
-    /// # Parameters
-    ///
-    /// - `embed_repo`: Embedding generator implementation
-    /// - `vector_repo`: Vector memory storage implementation
-    pub fn new_with_repositories(
+    /// This constructor allows callers to inject custom embedding generation, while keeping
+    /// vector storage on the default Qdrant backend.
+    pub async fn new_with_embedding_repository(
+        settings: Settings,
+        collection_name: String,
         embed_repo: Box<dyn EmbeddingRepository>,
-        vector_repo: Box<dyn VectorMemoryRepository>,
-    ) -> Self {
+    ) -> Result<Self, CustomError> {
+        let vector_memory_settings = VectorMemoryRepositorySettings::new(
+            settings.get_qdrant_connection().to_string(),
+            collection_name,
+            settings.get_embedding_model()?,
+        );
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
         let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
-        Self { memory_repo }
+        Ok(Self { memory_repo })
     }
 
     /// Constructs a new AgentMemory instance.
@@ -280,220 +280,5 @@ impl AgentMemory {
     /// - `Err`: A `CustomError` if the operation fails
     pub async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
         self.memory_repo.delete_memory(id).await
-    }
-}
-
-#[cfg(test)]
-mod injection_tests {
-    use super::*;
-    use async_trait::async_trait;
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
-
-    struct FakeEmbeddingRepository;
-
-    impl FakeEmbeddingRepository {
-        fn embed_for(text: &str) -> Vec<f32> {
-            // Deterministic, fixed-size embedding for unit tests.
-            vec![text.len() as f32, 1.0, 0.0]
-        }
-    }
-
-    #[async_trait]
-    impl EmbeddingRepository for FakeEmbeddingRepository {
-        async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
-            Ok(Self::embed_for(text))
-        }
-
-        async fn bulk_generate_embeddings<'a>(
-            &self,
-            texts: &'a [&'a str],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            Ok(texts.iter().map(|t| Self::embed_for(t)).collect())
-        }
-    }
-
-    #[derive(Clone, Default)]
-    struct InMemoryVectorRepository {
-        entries: Arc<Mutex<HashMap<Uuid, MemoryEntry>>>,
-    }
-
-    impl InMemoryVectorRepository {
-        fn new() -> Self {
-            Self::default()
-        }
-    }
-
-    fn dot(a: &[f32], b: &[f32]) -> Result<f32, CustomError> {
-        if a.len() != b.len() {
-            return Err(CustomError::DatabaseError(
-                "Vector length mismatch".to_string(),
-            ));
-        }
-        Ok(a.iter().zip(b.iter()).map(|(x, y)| x * y).sum())
-    }
-
-    #[async_trait]
-    impl VectorMemoryRepository for InMemoryVectorRepository {
-        async fn init_collection(&self) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn store_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
-            let mut guard = self
-                .entries
-                .lock()
-                .map_err(|_| CustomError::DatabaseError("Lock poisoned".to_string()))?;
-            guard.insert(memory.id, memory.clone());
-            Ok(())
-        }
-
-        async fn update_memory<'a>(&'a self, memory: &'a MemoryEntry) -> Result<(), CustomError> {
-            self.store_memory(memory).await
-        }
-
-        async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-            let mut guard = self
-                .entries
-                .lock()
-                .map_err(|_| CustomError::DatabaseError("Lock poisoned".to_string()))?;
-            guard.remove(&id);
-            Ok(())
-        }
-
-        async fn search_memory<'a>(
-            &'a self,
-            query_vector: &'a [f32],
-            top_k: usize,
-            _filters: Option<&'a MemoryFilters>,
-        ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
-            let guard = self
-                .entries
-                .lock()
-                .map_err(|_| CustomError::DatabaseError("Lock poisoned".to_string()))?;
-
-            let mut scored: Vec<ScoredMemoryEntry> = guard
-                .values()
-                .map(|entry| {
-                    let score = dot(query_vector, &entry.embedding)?;
-                    Ok::<ScoredMemoryEntry, CustomError>(ScoredMemoryEntry {
-                        entry: entry.clone(),
-                        score,
-                    })
-                })
-                .collect::<Result<_, _>>()?;
-
-            scored.sort_by(|a, b| b.score.total_cmp(&a.score));
-            scored.truncate(top_k);
-            Ok(scored)
-        }
-
-        async fn bulk_insert<'a>(&'a self, memories: &'a [MemoryEntry]) -> Result<(), CustomError> {
-            for memory in memories {
-                self.store_memory(memory).await?;
-            }
-            Ok(())
-        }
-
-        async fn get_memories_by_ids<'a>(
-            &'a self,
-            ids: &'a [Uuid],
-        ) -> Result<Vec<MemoryEntry>, CustomError> {
-            let guard = self
-                .entries
-                .lock()
-                .map_err(|_| CustomError::DatabaseError("Lock poisoned".to_string()))?;
-
-            let mut out = Vec::with_capacity(ids.len());
-            for id in ids {
-                let entry = guard.get(id).ok_or_else(|| {
-                    CustomError::DatabaseError(format!("Memory with ID {id} not found"))
-                })?;
-                out.push(entry.clone());
-            }
-            Ok(out)
-        }
-    }
-
-    #[tokio::test]
-    async fn injected_repositories_create_and_store_memory_deterministically() {
-        let vector_repo = InMemoryVectorRepository::new();
-        let store_handle = vector_repo.entries.clone();
-
-        let agent = AgentMemory::new_with_repositories(
-            Box::new(FakeEmbeddingRepository),
-            Box::new(vector_repo),
-        );
-
-        let id = Uuid::new_v4();
-        let input = MemoryInput {
-            id: Some(id),
-            content: "hello".to_string(),
-            memory_type: MemoryType::Semantic,
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
-
-        let created = agent.create_memory(input).await.expect("create succeeds");
-        assert_eq!(created.id, id);
-        assert_eq!(created.content, "hello");
-
-        let stored = store_handle
-            .lock()
-            .expect("lock")
-            .get(&id)
-            .cloned()
-            .expect("stored entry exists");
-        assert_eq!(
-            stored.embedding,
-            FakeEmbeddingRepository::embed_for("hello")
-        );
-    }
-
-    #[tokio::test]
-    async fn injected_vector_repo_search_orders_by_score() {
-        let vector_repo = InMemoryVectorRepository::new();
-        let agent = AgentMemory::new_with_repositories(
-            Box::new(FakeEmbeddingRepository),
-            Box::new(vector_repo),
-        );
-
-        let short_id = Uuid::new_v4();
-        let long_id = Uuid::new_v4();
-
-        agent
-            .create_memory(MemoryInput {
-                id: Some(short_id),
-                content: "aaaaa".to_string(),
-                memory_type: MemoryType::Semantic,
-                timestamp: None,
-                location_text: None,
-                participants: None,
-            })
-            .await
-            .expect("create short");
-
-        agent
-            .create_memory(MemoryInput {
-                id: Some(long_id),
-                content: "aaaaaaaaaa".to_string(),
-                memory_type: MemoryType::Semantic,
-                timestamp: None,
-                location_text: None,
-                participants: None,
-            })
-            .await
-            .expect("create long");
-
-        let results = agent
-            .search_memories("aaaaa", 2, None)
-            .await
-            .expect("search succeeds");
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].memory.id, long_id);
-        assert_eq!(results[1].memory.id, short_id);
-        assert!(results[0].score >= results[1].score);
     }
 }

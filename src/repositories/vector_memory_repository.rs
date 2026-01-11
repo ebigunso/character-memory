@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::{CustomError, MemoryEntry, MemoryFilters, ScoredMemoryEntry};
+use crate::errors::CustomError;
+use crate::models::memory::dto::MemoryFilters;
+use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 
 /// Repository trait for storing and retrieving memories using a vector database.
 ///
@@ -12,7 +14,7 @@ use crate::{CustomError, MemoryEntry, MemoryFilters, ScoredMemoryEntry};
 /// in a vector database, supporting semantic search capabilities.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
-pub trait VectorMemoryRepository: Send + Sync {
+pub(crate) trait VectorMemoryRepository: Send + Sync {
     /// Initializes the vector database collection if it doesn't exist.
     ///
     /// # Returns
