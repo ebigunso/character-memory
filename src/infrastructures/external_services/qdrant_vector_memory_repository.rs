@@ -14,8 +14,8 @@ use uuid::Uuid;
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
 use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::MemoryEntry;
 use crate::models::memory::MemoryType;
+use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 use crate::models::vector::VectorMetadata;
 use crate::repositories::VectorMemoryRepository;
 
@@ -351,7 +351,7 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         query_vector: &'a [f32],
         top_k: usize,
         filters: Option<&'a MemoryFilters>,
-    ) -> Result<Vec<MemoryEntry>, CustomError> {
+    ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
         let mut builder = SearchPointsBuilder::new(
             &self.config.collection_name,
             query_vector.to_vec(),
@@ -379,8 +379,13 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let results = response
             .result
             .into_iter()
-            .map(|scored| self.point_to_memory_entry(scored))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|scored| {
+                let score = scored.score;
+                let entry = self.point_to_memory_entry(scored)?;
+                Ok(ScoredMemoryEntry { entry, score })
+            })
+            .collect::<Result<Vec<_>, CustomError>>()?;
+
         Ok(results)
     }
 

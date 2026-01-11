@@ -16,7 +16,7 @@ use crate::repositories::MemoryRepository;
 // Re-export types for public use
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
-pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput};
+pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput, ScoredMemory};
 pub use crate::models::memory::MemoryType;
 
 // Re-export for integration tests
@@ -212,11 +212,12 @@ impl AgentMemory {
         query: &str,
         top_k: usize,
         filters: Option<MemoryFilters>,
-    ) -> Result<Vec<Memory>, CustomError> {
+    ) -> Result<Vec<ScoredMemory>, CustomError> {
         let entries = self
             .memory_repo
             .search_memories(query, top_k, filters)
             .await?;
+
         Ok(entries
             .into_iter()
             .map(|entry| entry.into_public())
