@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
 
-use crate::config::settings::EmbeddingRepositorySettings;
 use crate::errors::CustomError;
+use crate::internal::config::settings::EmbeddingRepositorySettings;
 use crate::EmbeddingRepository;
 
 /// OpenAI-based implementation of the EmbeddingRepository trait.
@@ -117,7 +117,7 @@ impl EmbeddingRepository for OpenAIEmbeddingRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::vector::EmbeddingModel;
+    use crate::internal::models::vector::EmbeddingModel;
 
     fn create_test_settings(api_key: &str) -> EmbeddingRepositorySettings {
         EmbeddingRepositorySettings::new(api_key.to_string(), EmbeddingModel::TextEmbedding3Large)

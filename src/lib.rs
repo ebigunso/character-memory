@@ -1,8 +1,6 @@
 mod config;
 mod errors;
-mod infrastructures;
-mod models;
-mod repositories;
+// NOTE: internal implementation code lives under `crate::internal`.
 
 pub mod api;
 mod internal;
@@ -10,11 +8,11 @@ mod internal;
 use uuid::Uuid;
 
 use crate::config::settings::{EmbeddingRepositorySettings, VectorMemoryRepositorySettings};
-use crate::infrastructures::external_services::{
+use crate::internal::infrastructures::external_services::{
     OpenAIEmbeddingRepository, QdrantVectorMemoryRepository,
 };
-use crate::models::vector::VectorMetadata;
-use crate::repositories::MemoryRepository;
+use crate::internal::models::vector::VectorMetadata;
+use crate::internal::repositories::MemoryRepository;
 
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingRepository;

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::api::types::{Memory, MemoryType};
 use crate::errors::CustomError;
-use crate::models::vector::VectorMetadata;
+use crate::internal::models::vector::VectorMetadata;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct MemoryEntry {

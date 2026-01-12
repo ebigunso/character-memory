@@ -1,6 +1,3 @@
-// Module declarations
-mod memory_repository;
-mod vector_memory_repository;
-
-pub(crate) use memory_repository::MemoryRepository;
-pub(crate) use vector_memory_repository::VectorMemoryRepository;
+// Legacy module kept temporarily for transition.
+// Implementation types have moved under `crate::internal::repositories`.
+pub(crate) use crate::internal::repositories::*;
