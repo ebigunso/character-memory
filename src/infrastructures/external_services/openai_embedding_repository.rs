@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::config::settings::EmbeddingRepositorySettings;
 use crate::errors::CustomError;
-use crate::repositories::EmbeddingRepository;
+use crate::EmbeddingRepository;
 
 /// OpenAI-based implementation of the EmbeddingRepository trait.
 ///

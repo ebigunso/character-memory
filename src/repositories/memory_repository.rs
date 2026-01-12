@@ -4,7 +4,8 @@ use crate::api::types::MemoryFilters;
 use crate::errors::CustomError;
 use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 use crate::models::vector::VectorMetadata;
-use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
+use crate::repositories::VectorMemoryRepository;
+use crate::EmbeddingRepository;
 
 /// Provides high-level operations for managing memory entries.
 ///
