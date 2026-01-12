@@ -62,6 +62,24 @@ impl AgentMemory {
     ///
     /// This constructor allows callers to inject custom embedding generation, while keeping
     /// vector storage on the default Qdrant backend.
+    ///
+    /// # Parameters
+    ///
+    /// - `settings`: Global configuration used to derive the Qdrant connection and embedding
+    ///   model settings required to initialize the underlying vector memory repository.
+    /// - `collection_name`: The name of the Qdrant collection where memory vectors will be
+    ///   stored and queried.
+    /// - `embed_repo`: A boxed implementation of [`EmbeddingRepository`] that is responsible
+    ///   for generating embeddings from input data.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok(Self)`: A new [`AgentMemory`] instance backed by the provided embedding repository
+    ///   and a Qdrant-based vector memory repository.
+    /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
+    ///   repository or when resolving configuration from `settings`.
     pub async fn new_with_embedding_repository(
         settings: Settings,
         collection_name: String,
