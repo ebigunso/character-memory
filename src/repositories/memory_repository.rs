@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
+use crate::api::types::MemoryFilters;
 use crate::errors::CustomError;
-use crate::models::memory::dto::MemoryFilters;
 use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 use crate::models::vector::VectorMetadata;
 use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};

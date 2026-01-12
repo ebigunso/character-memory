@@ -1,4 +1,4 @@
-use crate::models::memory::dto::ScoredMemory;
+use crate::api::types::ScoredMemory;
 use crate::models::memory::MemoryEntry;
 
 #[derive(Debug, Clone)]

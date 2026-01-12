@@ -11,10 +11,9 @@ use qdrant_client::{config::QdrantConfig, Qdrant};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::api::types::{MemoryFilters, MemoryType};
 use crate::config::settings::VectorMemoryRepositorySettings;
 use crate::errors::CustomError;
-use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::MemoryType;
 use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
 use crate::models::vector::VectorMetadata;
 use crate::repositories::VectorMemoryRepository;

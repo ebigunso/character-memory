@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::api::types::{MemoryInput, MemoryType};
 use crate::errors::CustomError;
-use crate::models::memory::dto::MemoryInput;
-use crate::models::memory::MemoryType;
 
 /// Represents the metadata structure of a vector memory entry in the vector database.
 ///
