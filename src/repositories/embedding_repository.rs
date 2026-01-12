@@ -10,7 +10,7 @@ use async_trait::async_trait;
 /// numerical vector representations suitable for semantic operations.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
-pub(crate) trait EmbeddingRepository: Send + Sync {
+pub trait EmbeddingRepository: Send + Sync {
     /// Generates a vector embedding for the provided text.
     ///
     /// # Parameters

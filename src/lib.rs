@@ -18,6 +18,7 @@ pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
 pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput, ScoredMemory};
 pub use crate::models::memory::MemoryType;
+pub use crate::repositories::EmbeddingRepository;
 
 // Re-export for integration tests
 pub mod test_utils {
@@ -55,6 +56,45 @@ pub struct AgentMemory {
 }
 
 impl AgentMemory {
+    /// Constructs a new AgentMemory instance using a caller-provided embedding repository.
+    ///
+    /// # Description
+    ///
+    /// This constructor allows callers to inject custom embedding generation, while keeping
+    /// vector storage on the default Qdrant backend.
+    ///
+    /// # Parameters
+    ///
+    /// - `settings`: Global configuration used to derive the Qdrant connection and embedding
+    ///   model settings required to initialize the underlying vector memory repository.
+    /// - `collection_name`: The name of the Qdrant collection where memory vectors will be
+    ///   stored and queried.
+    /// - `embed_repo`: A boxed implementation of [`EmbeddingRepository`] that is responsible
+    ///   for generating embeddings from input data.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    ///
+    /// - `Ok(Self)`: A new [`AgentMemory`] instance backed by the provided embedding repository
+    ///   and a Qdrant-based vector memory repository.
+    /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
+    ///   repository or when resolving configuration from `settings`.
+    pub async fn new_with_embedding_repository(
+        settings: Settings,
+        collection_name: String,
+        embed_repo: Box<dyn EmbeddingRepository>,
+    ) -> Result<Self, CustomError> {
+        let vector_memory_settings = VectorMemoryRepositorySettings::new(
+            settings.get_qdrant_connection().to_string(),
+            collection_name,
+            settings.get_embedding_model()?,
+        );
+        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
+        let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
+        Ok(Self { memory_repo })
+    }
+
     /// Constructs a new AgentMemory instance.
     ///
     /// # Parameters
