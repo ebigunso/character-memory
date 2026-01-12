@@ -4,6 +4,9 @@ mod infrastructures;
 mod models;
 mod repositories;
 
+pub mod api;
+mod internal;
+
 use uuid::Uuid;
 
 use crate::config::settings::{EmbeddingRepositorySettings, VectorMemoryRepositorySettings};
@@ -14,11 +17,10 @@ use crate::models::vector::VectorMetadata;
 use crate::repositories::MemoryRepository;
 
 // Re-export types for public use
+pub use crate::api::embedding::EmbeddingRepository;
+pub use crate::api::types::{Memory, MemoryFilters, MemoryInput, MemoryType, ScoredMemory};
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
-pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput, ScoredMemory};
-pub use crate::models::memory::MemoryType;
-pub use crate::repositories::EmbeddingRepository;
 
 // Re-export for integration tests
 pub mod test_utils {
