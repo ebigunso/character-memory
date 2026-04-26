@@ -3,10 +3,10 @@ use reqwest::Client;
 use serde_json::json;
 
 use crate::errors::CustomError;
-use crate::internal::config::settings::EmbeddingRepositorySettings;
-use crate::EmbeddingRepository;
+use crate::internal::config::settings::EmbeddingProviderSettings;
+use crate::EmbeddingProvider;
 
-/// OpenAI-based implementation of the EmbeddingRepository trait.
+/// OpenAI-based implementation of the EmbeddingProvider trait.
 ///
 /// # Description
 ///
@@ -15,16 +15,16 @@ use crate::EmbeddingRepository;
 ///
 /// # See also
 ///
-/// - [`EmbeddingRepository`]
+/// - [`EmbeddingProvider`]
 /// - [OpenAI Embeddings API](https://platform.openai.com/docs/api-reference/embeddings)
-pub(crate) struct OpenAIEmbeddingRepository {
+pub(crate) struct OpenAIEmbeddingProvider {
     api_key: String,
     model: String,
     client: Client,
 }
 
-impl OpenAIEmbeddingRepository {
-    /// Creates a new OpenAIEmbeddingRepository instance.
+impl OpenAIEmbeddingProvider {
+    /// Creates a new OpenAIEmbeddingProvider instance.
     ///
     /// # Parameters
     ///
@@ -32,21 +32,19 @@ impl OpenAIEmbeddingRepository {
     ///
     /// # Returns
     ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A new `OpenAIEmbeddingRepository` instance
+    /// - `Ok`: A new `OpenAIEmbeddingProvider` instance
     /// - `Err`: A `CustomError` if initialization fails (e.g., missing API key)
-    pub fn new(settings: EmbeddingRepositorySettings) -> Result<Self, CustomError> {
+    pub fn new(settings: EmbeddingProviderSettings) -> Result<Self, CustomError> {
         if settings.api_key.trim().is_empty() {
             return Err(CustomError::EmbeddingInitializationError(
                 "OpenAI API key is not provided.".into(),
             ));
         }
         println!(
-            "OpenAI Embedding Repository: Initialized with {} model.",
+            "OpenAI Embedding Provider: Initialized with {} model.",
             settings.model.as_str()
         );
-        Ok(OpenAIEmbeddingRepository {
+        Ok(OpenAIEmbeddingProvider {
             api_key: settings.api_key,
             model: settings.model.as_str().to_string(),
             client: Client::new(),
@@ -55,7 +53,7 @@ impl OpenAIEmbeddingRepository {
 }
 
 #[async_trait]
-impl EmbeddingRepository for OpenAIEmbeddingRepository {
+impl EmbeddingProvider for OpenAIEmbeddingProvider {
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         if text.trim().is_empty() {
             return Err(CustomError::EmbeddingGenerationError(
@@ -119,35 +117,35 @@ mod tests {
     use super::*;
     use crate::internal::models::vector::EmbeddingModel;
 
-    fn create_test_settings(api_key: &str) -> EmbeddingRepositorySettings {
-        EmbeddingRepositorySettings::new(api_key.to_string(), EmbeddingModel::TextEmbedding3Large)
+    fn create_test_settings(api_key: &str) -> EmbeddingProviderSettings {
+        EmbeddingProviderSettings::new(api_key.to_string(), EmbeddingModel::TextEmbedding3Large)
     }
 
     #[test]
     fn test_new_with_valid_api() {
         let settings = create_test_settings("dummy_key");
-        let repo = OpenAIEmbeddingRepository::new(settings);
+        let provider = OpenAIEmbeddingProvider::new(settings);
         assert!(
-            repo.is_ok(),
-            "OpenAIEmbeddingRepository initialization should succeed with valid API key."
+            provider.is_ok(),
+            "OpenAIEmbeddingProvider initialization should succeed with valid API key."
         );
     }
 
     #[test]
     fn test_new_with_empty_api() {
         let settings = create_test_settings("");
-        let repo = OpenAIEmbeddingRepository::new(settings);
+        let provider = OpenAIEmbeddingProvider::new(settings);
         assert!(
-            repo.is_err(),
-            "OpenAIEmbeddingRepository initialization should fail with empty API key."
+            provider.is_err(),
+            "OpenAIEmbeddingProvider initialization should fail with empty API key."
         );
     }
 
     #[tokio::test]
     async fn test_generate_embedding_with_empty_text() {
         let settings = create_test_settings("valid_key");
-        let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
-        let result = repo.generate_embedding("  ").await;
+        let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
+        let result = provider.generate_embedding("  ").await;
         assert!(result.is_err(), "Empty text should return an error.");
     }
 
@@ -155,8 +153,8 @@ mod tests {
     async fn test_generate_embedding_with_valid_text() {
         let text = "hello, world";
         let settings = create_test_settings("valid_api_key");
-        let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
-        let result = repo.generate_embedding(text).await;
+        let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
+        let result = provider.generate_embedding(text).await;
         assert!(
             result.is_err(),
             "Valid text with a dummy API key should produce an error during API call."
@@ -166,9 +164,9 @@ mod tests {
     #[tokio::test]
     async fn test_batch_generate_embeddings() {
         let settings = create_test_settings("valid_api_key");
-        let repo = OpenAIEmbeddingRepository::new(settings).unwrap();
+        let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
         let texts = ["first test", "second test"];
-        let result = repo.bulk_generate_embeddings(&texts).await;
+        let result = provider.bulk_generate_embeddings(&texts).await;
         assert!(
             result.is_err(),
             "Batch generation should fail with a dummy API key."

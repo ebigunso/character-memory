@@ -106,7 +106,7 @@ Stop discarding Qdrant similarity scores, so later hybrid retrieval can rank/mer
 ## Files likely touched
 - `src/infrastructures/external_services/qdrant_vector_memory_repository.rs`
 - `src/repositories/vector_memory_repository.rs`
-- `src/repositories/memory_repository.rs`
+- `src/internal/repositories/memory_repository.rs`
 - `src/lib.rs`
 - Potentially `src/models/**` for the new public type
 
@@ -135,8 +135,8 @@ Provide a public construction path where callers can inject embedding generation
 - No change in default behavior for existing users unless explicitly desired.
 
 ## Files likely touched
-- `src/repositories/embedding_repository.rs`
-- `src/repositories/memory_repository.rs`
+- `src/api/embedding.rs`
+- `src/internal/repositories/memory_repository.rs`
 - `src/lib.rs`
 
 ## Acceptance criteria
@@ -163,7 +163,7 @@ Make it **obvious from the directory structure** which types/traits are part of 
   - `src/api/**`: public contract surface (DTOs, public traits, public constructors)
   - `src/internal/**`: implementation details (repositories, internal domain structs, infrastructure adapters)
 - Move (or wrap) current public DTOs under `src/api/types/**` (e.g., `Memory`, `MemoryInput`, `MemoryFilters`, `ScoredMemory`).
-- Place the public embedding extension point under `src/api/**` (e.g., `EmbeddingRepository` / `EmbeddingProvider`).
+- Place the public embedding extension point under `src/api/**` (e.g., `EmbeddingProvider`).
 - Keep internal-only structs and traits under `src/internal/**` (e.g., `MemoryEntry`, `ScoredMemoryEntry`, internal vector repository trait, Qdrant/OpenAI adapters).
 - Update all `use` paths and module declarations accordingly.
 - Keep crate-root exports stable where possible by re-exporting from `api` in `src/lib.rs`:
