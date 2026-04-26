@@ -315,8 +315,9 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
         let payload = Self::build_qdrant_payload(memory)?;
 
         let point = PointStruct::new(memory.id.to_string(), memory.embedding.clone(), payload);
-        let upsert_req =
-            UpsertPointsBuilder::new(&self.config.collection_name, vec![point]).build();
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, vec![point])
+            .wait(true)
+            .build();
         self.client.upsert_points(upsert_req).await?;
         Ok(())
     }
@@ -456,7 +457,9 @@ impl VectorMemoryRepository for QdrantVectorMemoryRepository {
             })
             .collect::<Result<_, CustomError>>()?;
 
-        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, points).build();
+        let upsert_req = UpsertPointsBuilder::new(&self.config.collection_name, points)
+            .wait(true)
+            .build();
         self.client.upsert_points(upsert_req).await?;
         Ok(())
     }
