@@ -21,6 +21,7 @@ async fn test_update_memory() {
     // Create the memory and get its ID
     let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
+    test_utils::wait_for_memory(&agent_memory, memory_id).await;
 
     // Create an updated memory input with the same ID
     let updated_input = MemoryInput {
@@ -76,6 +77,7 @@ async fn test_update_memory_type() {
     // Create the memory and get its ID
     let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
+    test_utils::wait_for_memory(&agent_memory, memory_id).await;
 
     // Create an updated memory input with Semantic type
     let updated_input = MemoryInput {
@@ -153,6 +155,7 @@ async fn test_delete_memory() {
     // Create the memory and get its ID
     let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
+    test_utils::wait_for_memory(&agent_memory, memory_id).await;
 
     // Delete the memory
     let result = agent_memory.delete_memory(memory_id).await;

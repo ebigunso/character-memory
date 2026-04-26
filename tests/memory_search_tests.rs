@@ -36,10 +36,13 @@ async fn test_basic_search() {
     ];
 
     // Create the memories
-    agent_memory
+    let created_memories = agent_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
+    for memory in &created_memories {
+        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+    }
 
     // Search for memories related to "fox"
     let result = agent_memory.search_memories("fox", 10, None).await;
@@ -106,10 +109,13 @@ async fn test_search_with_memory_type_filter() {
     ];
 
     // Create the memories
-    agent_memory
+    let created_memories = agent_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
+    for memory in &created_memories {
+        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+    }
 
     // Create a filter for episodic memories
     let filters = MemoryFilters {
@@ -203,10 +209,13 @@ async fn test_search_with_date_filter() {
     ];
 
     // Create the memories
-    agent_memory
+    let created_memories = agent_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
+    for memory in &created_memories {
+        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+    }
 
     // Create a filter for memories from the last 2 days
     let two_days_ago = now - Duration::days(2);

@@ -26,10 +26,13 @@ async fn test_participants_full_text_token_match() {
         },
     ];
 
-    agent_memory
+    let created_memories = agent_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
+    for memory in &created_memories {
+        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+    }
 
     let filters = MemoryFilters {
         memory_type: Some("episodic".to_string()),
@@ -87,10 +90,13 @@ async fn test_location_text_full_text_token_match() {
         },
     ];
 
-    agent_memory
+    let created_memories = agent_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
+    for memory in &created_memories {
+        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+    }
 
     let filters = MemoryFilters {
         memory_type: Some("episodic".to_string()),

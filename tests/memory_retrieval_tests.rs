@@ -23,12 +23,7 @@ async fn test_get_memory_by_id() {
     let memory_id = created_memory.id;
 
     // Retrieve the memory by ID
-    let result = agent_memory.get_memory_by_id(memory_id).await;
-
-    // Verify the result
-    assert!(result.is_ok(), "Failed to retrieve memory by ID");
-
-    let retrieved_memory = result.unwrap();
+    let retrieved_memory = test_utils::wait_for_memory(&agent_memory, memory_id).await;
     assert_eq!(retrieved_memory.id, memory_id);
     assert_eq!(retrieved_memory.content, "Test memory for retrieval");
     assert_eq!(retrieved_memory.memory_type, MemoryType::Episodic);
@@ -89,6 +84,9 @@ async fn test_get_memories_by_ids() {
         .await
         .unwrap();
     let memory_ids: Vec<Uuid> = created_memories.iter().map(|m| m.id).collect();
+    for memory_id in &memory_ids {
+        test_utils::wait_for_memory(&agent_memory, *memory_id).await;
+    }
 
     // Retrieve the memories by IDs
     let result = agent_memory.get_memories_by_ids(&memory_ids).await;
