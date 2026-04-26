@@ -239,7 +239,7 @@ impl MemoryRepository {
 
         // Create memory entries from metadata and embeddings
         let mut entries = Vec::with_capacity(metadata_list.len());
-        let metadata_embedding_pairs = metadata_list.iter().zip(embeddings.into_iter());
+        let metadata_embedding_pairs = metadata_list.iter().zip(embeddings);
         for (metadata, embedding) in metadata_embedding_pairs {
             let entry = MemoryEntry::new(metadata.clone(), embedding)?;
             entries.push(entry);
