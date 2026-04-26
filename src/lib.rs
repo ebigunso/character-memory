@@ -16,7 +16,12 @@ use crate::internal::repositories::MemoryRepository;
 
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
-pub use crate::api::types::{Memory, MemoryFilters, MemoryInput, MemoryType, ScoredMemory};
+pub use crate::api::types::{
+    graph_uri, DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode,
+    Memory, MemoryFilters, MemoryId, MemoryInput, MemoryLink, MemoryObject, MemoryThread,
+    MemoryType, Modality, ObjectType, Observation, RelationType, RetentionState, ScoredMemory,
+    Stability, ThreadStatus, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, SCHEMA_VERSION_V0_1,
+};
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
 
