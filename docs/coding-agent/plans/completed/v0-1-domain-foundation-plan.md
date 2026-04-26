@@ -292,6 +292,10 @@ Interpretation:
   - Summary: Reviewer approved the domain foundation implementation with no findings; remediation mode completed with zero iterations. Drafted the next active plan for store contracts and deterministic test harness.
   - Validation evidence: Final Reviewer status APPROVED; structured remediation appendix had `structured_findings: []` and `highest_severity: NONE`.
   - Notes: Plan moved to completed after all required evidence was recorded.
+- 2026-04-27 Post-completion clarification: legacy compatibility is not a v0.1 goal.
+  - Summary: User clarified after this plan completed that compatibility is not a concern for v0.1.
+  - Validation evidence: Documentation-only clarification.
+  - Notes: Historical entries in this plan may mention temporary coexistence with old flat DTOs as a scope-control choice for the domain-foundation chunk. Future chunks should remove legacy implementations that do not contribute to the new architecture.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -311,6 +315,11 @@ Interpretation:
   - Boundary: Storage/vector-only shapes stay under `src/internal/models`; canonical domain types must not depend on `crate::internal`, repositories, Qdrant payloads, or embedding services.
   - Compatibility scope: Old flat DTOs may temporarily coexist for the existing facade, repository adapters, and tests, but they are legacy compatibility surface during migration and are not the canonical v0.1 model.
   - Tradeoffs considered: Placing canonical types under `src/internal/models` would obscure the public API contract; replacing old flat DTOs immediately would broaden this design gate into migration work. A public `src/api/types` submodule follows existing conventions while isolating v0.1 domain models from storage adapters.
+  - User approval: yes.
+- 2026-04-27 Decision: Do not preserve old flat API compatibility going forward
+  - Trigger / new insight: User clarified after the domain foundation PR that compatibility is not a concern for v0.1.
+  - Plan delta: Treat old flat DTOs, repositories, and facade pieces as removable legacy once replacement architecture exists.
+  - Tradeoffs considered: Keeping shims could reduce short-term churn but would increase architectural drag during the v0.1 rewrite.
   - User approval: yes.
 - 2026-04-27 Decision: Name the canonical foundation module `domain` and schema constant `SCHEMA_VERSION_V0_1`
   - Trigger / new insight: Task_2 needed a concrete module name that does not make legacy `MemoryType` look canonical, plus one pinned schema spelling for tests and later constructors.
