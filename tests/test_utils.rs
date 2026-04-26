@@ -1,6 +1,6 @@
-use agent_memory::test_utils::load_test_settings;
-use agent_memory::{AgentMemory, CustomError, EmbeddingProvider, Memory};
 use async_trait::async_trait;
+use character_memory::test_utils::load_test_settings;
+use character_memory::{CharacterMemory, CustomError, EmbeddingProvider, Memory};
 use qdrant_client::Qdrant;
 use std::env;
 use std::sync::Once;
@@ -84,8 +84,8 @@ fn embedding_vector_size_from_env() -> usize {
     }
 }
 
-// Setup AgentMemory instance with a unique collection
-pub async fn setup_agent_memory() -> (AgentMemory, String) {
+// Setup CharacterMemory instance with a unique collection
+pub async fn setup_character_memory() -> (CharacterMemory, String) {
     initialize();
 
     let collection_name = unique_collection_name();
@@ -96,25 +96,28 @@ pub async fn setup_agent_memory() -> (AgentMemory, String) {
         embedding_vector_size_from_env(),
     ));
 
-    let agent_memory =
-        AgentMemory::new_with_embedding_provider(settings, collection_name.clone(), embed_provider)
-            .await
-            .expect("Failed to create AgentMemory");
+    let character_memory = CharacterMemory::new_with_embedding_provider(
+        settings,
+        collection_name.clone(),
+        embed_provider,
+    )
+    .await
+    .expect("Failed to create CharacterMemory");
 
-    agent_memory
+    character_memory
         .init_storage()
         .await
         .expect("Failed to initialize storage");
 
-    (agent_memory, collection_name)
+    (character_memory, collection_name)
 }
 
 #[allow(dead_code)]
-pub async fn wait_for_memory(agent_memory: &AgentMemory, memory_id: Uuid) -> Memory {
+pub async fn wait_for_memory(character_memory: &CharacterMemory, memory_id: Uuid) -> Memory {
     let mut last_error = None;
 
     for _attempt in 0..20 {
-        match agent_memory.get_memory_by_id(memory_id).await {
+        match character_memory.get_memory_by_id(memory_id).await {
             Ok(memory) => return memory,
             Err(error) => last_error = Some(error),
         }

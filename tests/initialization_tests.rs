@@ -1,10 +1,10 @@
 mod test_utils;
-use test_utils::{cleanup_collection, setup_agent_memory};
+use test_utils::{cleanup_collection, setup_character_memory};
 
 #[tokio::test]
-async fn test_agent_memory_initialization() {
+async fn test_character_memory_initialization() {
     // Setup
-    let (_agent_memory, collection_name) = setup_agent_memory().await;
+    let (_character_memory, collection_name) = setup_character_memory().await;
 
     // The setup function already calls init_storage, so if we got here without errors,
     // it means initialization was successful

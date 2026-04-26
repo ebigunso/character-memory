@@ -1,5 +1,5 @@
 [package]
-name = "agent_memory"
+name = "character_memory"
 version = "0.1.0"
 edition = "2021"
 

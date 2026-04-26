@@ -1,10 +1,10 @@
-use agent_memory::{MemoryFilters, MemoryInput, MemoryType};
+use character_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::Utc;
 mod test_utils;
 
 #[tokio::test]
 async fn test_participants_full_text_token_match() {
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     let now = Utc::now();
     let memory_inputs = vec![
@@ -26,12 +26,12 @@ async fn test_participants_full_text_token_match() {
         },
     ];
 
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     for memory in &created_memories {
-        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+        test_utils::wait_for_memory(&character_memory, memory.id).await;
     }
 
     let filters = MemoryFilters {
@@ -42,7 +42,7 @@ async fn test_participants_full_text_token_match() {
         participants: Some(vec!["Alice".to_string()]),
     };
 
-    let results = agent_memory
+    let results = character_memory
         .search_memories("Alice", 10, Some(filters))
         .await
         .unwrap();
@@ -68,7 +68,7 @@ async fn test_participants_full_text_token_match() {
 
 #[tokio::test]
 async fn test_location_text_full_text_token_match() {
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     let now = Utc::now();
     let memory_inputs = vec![
@@ -90,12 +90,12 @@ async fn test_location_text_full_text_token_match() {
         },
     ];
 
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     for memory in &created_memories {
-        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+        test_utils::wait_for_memory(&character_memory, memory.id).await;
     }
 
     let filters = MemoryFilters {
@@ -106,7 +106,7 @@ async fn test_location_text_full_text_token_match() {
         participants: None,
     };
 
-    let results = agent_memory
+    let results = character_memory
         .search_memories("Manhattan", 10, Some(filters))
         .await
         .unwrap();

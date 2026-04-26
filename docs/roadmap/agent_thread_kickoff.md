@@ -127,9 +127,9 @@ Provide a public construction path where callers can inject embedding generation
 ## Scope
 - Make the embedding provider interface public (or expose a public builder).
 - Add a constructor like:
-  - `AgentMemory::new_with_repositories(embed_repo, vector_repo)` OR
-  - `AgentMemoryBuilder` with `.embedding_provider(...)` / `.vector_store(...)`.
-- Keep the existing convenience path (`AgentMemory::new(settings, collection_name)`) as a default.
+  - `CharacterMemory::new_with_repositories(embed_repo, vector_repo)` OR
+  - `CharacterMemoryBuilder` with `.embedding_provider(...)` / `.vector_store(...)`.
+- Keep the existing convenience path (`CharacterMemory::new(settings, collection_name)`) as a default.
 
 ## Non-goals
 - No change in default behavior for existing users unless explicitly desired.

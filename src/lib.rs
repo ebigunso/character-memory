@@ -44,19 +44,19 @@ pub mod test_utils {
     }
 }
 
-/// AgentMemory provides a high-level API for memory operations.
+/// CharacterMemory provides a high-level API for memory operations.
 ///
 /// # Description
 ///
 /// This struct serves as the main entry point for memory operations,
 /// providing a high-level interface for storing, retrieving, and
 /// searching memory entries.
-pub struct AgentMemory {
+pub struct CharacterMemory {
     memory_repo: MemoryRepository,
 }
 
-impl AgentMemory {
-    /// Constructs a new AgentMemory instance using a caller-provided embedding provider.
+impl CharacterMemory {
+    /// Constructs a new CharacterMemory instance using a caller-provided embedding provider.
     ///
     /// # Description
     ///
@@ -76,7 +76,7 @@ impl AgentMemory {
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok(Self)`: A new [`AgentMemory`] instance backed by the provided embedding provider
+    /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by the provided embedding provider
     ///   and a Qdrant-based vector memory repository.
     /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
     ///   repository or when resolving configuration from `settings`.
@@ -95,7 +95,7 @@ impl AgentMemory {
         Ok(Self { memory_repo })
     }
 
-    /// Constructs a new AgentMemory instance.
+    /// Constructs a new CharacterMemory instance.
     ///
     /// # Parameters
     ///
@@ -106,7 +106,7 @@ impl AgentMemory {
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok`: A new `AgentMemory` instance
+    /// - `Ok`: A new `CharacterMemory` instance
     /// - `Err`: A `CustomError` if initialization fails
     pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
         // Configure and create the embedding provider

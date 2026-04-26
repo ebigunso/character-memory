@@ -4,16 +4,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'agent_memory'",
+            "name": "Debug unit tests in library 'character_memory'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=agent_memory"
+                    "--package=character_memory"
                 ],
                 "filter": {
-                    "name": "agent_memory",
+                    "name": "character_memory",
                     "kind": "lib"
                 }
             },

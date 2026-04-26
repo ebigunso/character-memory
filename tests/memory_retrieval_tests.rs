@@ -1,4 +1,4 @@
-use agent_memory::{MemoryInput, MemoryType};
+use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 use uuid::Uuid;
 mod test_utils;
@@ -6,7 +6,7 @@ mod test_utils;
 #[tokio::test]
 async fn test_get_memory_by_id() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create a test memory
     let memory_input = MemoryInput {
@@ -19,11 +19,11 @@ async fn test_get_memory_by_id() {
     };
 
     // Create the memory and get its ID
-    let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
+    let created_memory = character_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
 
     // Retrieve the memory by ID
-    let retrieved_memory = test_utils::wait_for_memory(&agent_memory, memory_id).await;
+    let retrieved_memory = test_utils::wait_for_memory(&character_memory, memory_id).await;
     assert_eq!(retrieved_memory.id, memory_id);
     assert_eq!(retrieved_memory.content, "Test memory for retrieval");
     assert_eq!(retrieved_memory.memory_type, MemoryType::Episodic);
@@ -35,13 +35,13 @@ async fn test_get_memory_by_id() {
 #[tokio::test]
 async fn test_get_memory_by_nonexistent_id() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Generate a random UUID that doesn't exist in the database
     let nonexistent_id = Uuid::new_v4();
 
     // Try to retrieve a memory with a nonexistent ID
-    let result = agent_memory.get_memory_by_id(nonexistent_id).await;
+    let result = character_memory.get_memory_by_id(nonexistent_id).await;
 
     // Verify the result is an error
     assert!(
@@ -56,7 +56,7 @@ async fn test_get_memory_by_nonexistent_id() {
 #[tokio::test]
 async fn test_get_memories_by_ids() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create multiple test memories
     let memory_inputs = vec![
@@ -79,17 +79,17 @@ async fn test_get_memories_by_ids() {
     ];
 
     // Create the memories and collect their IDs
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     let memory_ids: Vec<Uuid> = created_memories.iter().map(|m| m.id).collect();
     for memory_id in &memory_ids {
-        test_utils::wait_for_memory(&agent_memory, *memory_id).await;
+        test_utils::wait_for_memory(&character_memory, *memory_id).await;
     }
 
     // Retrieve the memories by IDs
-    let result = agent_memory.get_memories_by_ids(&memory_ids).await;
+    let result = character_memory.get_memories_by_ids(&memory_ids).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to retrieve memories by IDs");

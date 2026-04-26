@@ -1,11 +1,11 @@
-use agent_memory::{MemoryFilters, MemoryInput, MemoryType};
+use character_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::{Duration, Utc};
 mod test_utils;
 
 #[tokio::test]
 async fn test_basic_search() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create test memories with different content
     let memory_inputs = vec![
@@ -36,16 +36,16 @@ async fn test_basic_search() {
     ];
 
     // Create the memories
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     for memory in &created_memories {
-        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+        test_utils::wait_for_memory(&character_memory, memory.id).await;
     }
 
     // Search for memories related to "fox"
-    let result = agent_memory.search_memories("fox", 10, None).await;
+    let result = character_memory.search_memories("fox", 10, None).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to search memories");
@@ -78,7 +78,7 @@ async fn test_basic_search() {
 #[tokio::test]
 async fn test_search_with_memory_type_filter() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create test memories with different types
     let memory_inputs = vec![
@@ -109,12 +109,12 @@ async fn test_search_with_memory_type_filter() {
     ];
 
     // Create the memories
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     for memory in &created_memories {
-        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+        test_utils::wait_for_memory(&character_memory, memory.id).await;
     }
 
     // Create a filter for episodic memories
@@ -127,7 +127,7 @@ async fn test_search_with_memory_type_filter() {
     };
 
     // Search for memories related to "vacation" with episodic filter
-    let result = agent_memory
+    let result = character_memory
         .search_memories("vacation", 10, Some(filters))
         .await;
 
@@ -174,7 +174,7 @@ async fn test_search_with_memory_type_filter() {
 #[tokio::test]
 async fn test_search_with_date_filter() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create test memories with different timestamps
     let now = Utc::now();
@@ -209,12 +209,12 @@ async fn test_search_with_date_filter() {
     ];
 
     // Create the memories
-    let created_memories = agent_memory
+    let created_memories = character_memory
         .bulk_create_memories(&memory_inputs)
         .await
         .unwrap();
     for memory in &created_memories {
-        test_utils::wait_for_memory(&agent_memory, memory.id).await;
+        test_utils::wait_for_memory(&character_memory, memory.id).await;
     }
 
     // Create a filter for memories from the last 2 days
@@ -228,7 +228,7 @@ async fn test_search_with_date_filter() {
     };
 
     // Search for memories with date filter
-    let result = agent_memory
+    let result = character_memory
         .search_memories("memory", 10, Some(filters))
         .await;
 
