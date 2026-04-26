@@ -1,328 +1,466 @@
-# High-Level Design & Development Roadmap
+# Character Memory Development Roadmap
 
-## 1. Overview
+## One-line thesis
 
-This repository implements a **memory storage + retrieval library** built on:
+```text
+Character Memory is an episode-backed continuity substrate for persistent AI assistants.
+```
 
-* **Qdrant** for vector embeddings and lightweight payload filtering.
-* **Oxigraph** (RDF/SPARQL) for explicit relationships and structured queries.
-* A stable cross-store join key: the same **UUID `id`** exists in Qdrant payloads and the RDF graph (as a deterministic IRI).
-
-The library’s job is to reliably **ingest**, **index**, **query**, and **return structured retrieval results**. **LLM integration is intentionally not implemented here** and is handled by callers.
+The roadmap should build the system in layers. The starter must be useful for chat-native memory without pretending to support every future modality or every epistemic feature.
 
 ---
 
-## 2. Scope and Non-Goals
+# 1. Design north star
 
-### 2.1 Library scope
+A persona can be assigned in a prompt. Character is accumulated through remembered experience.
 
-This repository provides:
+Therefore the system should optimize for:
 
-* Memory ingest/upsert into **Qdrant** (vectors + payload schema).
-* Memory graph modeling and upsert into **Oxigraph** (RDF triples).
-* Hybrid retrieval APIs (vector-first, graph-first, and combined) producing a **RetrievalBundle**.
-* Deterministic ID/IRI strategy, schema/versioning conventions, and regression tests for Qdrant filters and SPARQL queries.
-* Performance controls for graph expansion (breadth/depth limits, caching hooks, hub-entity handling).
+```text
+temporal continuity
+relationship continuity
+project/thread continuity
+correction and revision
+retrieval rationale
+provenance from derived memory back to episodes
+```
 
-### 2.2 Non-goals (explicit boundary)
-
-This repository does **not** provide:
-
-* LLM calls, prompt templates, agent orchestration, or tool-calling loops.
-* “Planning” and “iterative retrieval” driven by LLM outputs.
-* UI/UX, chat endpoints, or product-level assistant behavior.
-
-**Callers** (apps/services) own LLM selection, prompting, iterative reasoning, and rendering—using this library’s retrieval outputs.
+The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether the assistant can behave as the same continuing participant over time.
 
 ---
 
-## 3. System Invariants (Non-Negotiables)
+# 2. Cross-version invariants
 
-1. **Shared ID discipline**
+These should remain stable even as the library evolves.
 
-   * Every memory has a UUID `id`.
-   * Qdrant payload stores `id`; Oxigraph uses a deterministic `memory_iri(id)` resource.
+## 2.1 Episodes are primary
 
-2. **Qdrant payload schema is canonical for the vector layer**
+Every behavior-influencing derived memory should trace back to at least one episode or observation.
 
-   * Always: `id`, `memory_type`, `content`
-   * Episodic-only: `timestamp`, `location_text`, `participants`
+```text
+DerivedMemory → Episode / Observation
+```
 
-  Notes:
+## 2.2 Stable IDs are mandatory
 
-  * Payload stores metadata only (no embedding vectors in payload).
+Every durable memory object has a stable ID and graph URI.
 
-  Filtering notes:
+```text
+object_id
+object_type
+graph_uri
+schema_version
+```
 
-  * `participants` and `location_text` should support word-level full-text matching (Qdrant text index + text match conditions).
+Vector points must reference graph objects; graph objects must be retrievable by ID.
 
-3. **Graph layer tolerates partial information**
+## 2.3 Threads are soft overlays
 
-  * Missing fields simply mean “missing triples,” never ingest failures.
-  * This does not override vector-layer requirements for episodic memories: episodic records must include timestamp/location/participants (use explicit placeholders like "unknown" instead of null).
+A `MemoryThread` is a continuity pattern, not a chat container.
 
-4. **Hybrid retrieval is an API contract**
+```text
+Episode may belong to zero, one, or many threads.
+Thread membership has confidence and rationale.
+Thread assignment can be revised.
+```
 
-   * Typical library flow: vector search → candidate ids → graph expansion → merged bundle.
+## 2.4 Current usable context is derived
 
----
+Do not confuse raw historical memory with current context.
 
-## 4. Technology Stack (Library)
+Current views may include:
 
-* **Vector DB:** Qdrant
-* **Graph DB:** Oxigraph (RDF store; queried via SPARQL)
-* **Embeddings:** caller-provided embedding function or pluggable provider interface (the library defines the interface; implementation can be bundled or injected depending on your packaging preference)
+```text
+active threads
+current preferences
+active commitments
+active open loops
+current character signals
+current relationship state
+current factual beliefs
+```
 
-### 4.1 Oxigraph modeling implications
+## 2.5 Correction should usually supersede, not erase
 
-* “Nodes” are RDF resources; “edges” are RDF triples.
-* “Node types” are RDF classes; properties are predicates.
-* Queries are **SPARQL**; core SPARQL must be regression-tested.
+Most corrections should create new memory and links:
 
-Recommended IRI schemes (example):
+```text
+new memory supersedes old memory
+correction episode explains why
+old memory remains historical unless suppressed/deleted
+```
 
-* Memory: `urn:am:memory:<uuid>`
-* Entity: `urn:am:entity:<normalized-or-hash>`
-* Location: `urn:am:location:<normalized-or-hash>`
-* Date: `urn:am:date:<YYYY-MM-DD>` (optional)
+## 2.6 Retrieval should be explainable
 
----
+The system should expose why a memory was retrieved:
 
-## 5. Public API Contract (Library → Caller)
-
-Callers should integrate against a small, stable set of interfaces.
-
-Design principle:
-
-* **Usability first:** callers should use a single, high-level hybrid retrieval API (`hybrid_search`) rather than composing vector-only and graph-only stages.
-* **Traceability separately:** internal stage outputs (vector candidates/scores, graph expansions, merge decisions) can be exposed as an *optional* retrieval trace for debugging and provenance, without requiring callers to implement selection logic.
-
-### 5.1 Core types
-
-* `MemoryRecord`
-
-  * `id: UUID`
-  * `memory_type: episodic | semantic`
-  * `content: string`
-  * episodic-only (required): `timestamp`, `location_text`, `participants[]`
-
-    * Use explicit placeholder values (e.g., `location_text = "unknown"`) instead of null when the value is not known.
-
-* `RetrievalBundle`
-
-  * `query`
-  * `results[]`: `{ id, content_excerpt, payload_metadata, graph_context }`
-  * `entities[]`, `locations[]`, `time_anchors[]` (normalized aggregates)
-  * `provenance`: stable IDs suitable for caller-side citations
-
-  Optional trace (debug/provenance aid; not required for callers):
-
-  * `trace?`: includes internal stage diagnostics such as vector candidate ids + scores, graph expansion summary, and merge/ranking rationale.
-
-### 5.2 Core operations (shape, not exact signatures)
-
-* `upsert(record) -> id`
-* `get_by_id(id) -> record + graph_context`
-* `hybrid_search(query, filters, policy) -> RetrievalBundle`
-* Optional: `graph_query_*` helpers (by entity, location, time range, etc.)
-
-Implementation note:
-
-* The hybrid flow may internally perform vector search and graph expansion. These are not necessarily exposed as stable, user-facing APIs.
-
-### 5.3 Caller responsibility
-
-* Construct prompts / plans using `RetrievalBundle`.
-* Call any LLM and manage iterative loops.
-* Render results, maintain chat state, decide UX.
+```text
+semantic similarity
+same thread
+same entity
+recent event
+open commitment
+preference relevance
+correction relevance
+high salience
+```
 
 ---
 
-## 6. Repository Layout Guidance (to prevent scope creep)
+# 3. Version overview
 
-* `/src` (or library crate): storage, retrieval, schemas, query builders, tests
-* `/docs`: library docs + system context (no executable LLM integration)
-* `/examples` (optional): **non-core** demonstration of caller integration (can include LLM calls, but must not be required for library build/test)
-
----
-
-# Roadmap A: Library Roadmap (In-Repository)
-
-## Phase L0: Foundations (Contracts, IDs, Schema Versioning, Test Harness)
-
-**Deliverables**
-
-* Canonical domain model: `MemoryRecord`, `MemoryType`, `RetrievalBundle`
-* UUID minting strategy + idempotent upsert semantics
-* Deterministic IRI generation utilities (`memory_iri`, `entity_iri`, `location_iri`, optional `date_iri`)
-* Schema/versioning conventions (Qdrant collection, RDF namespace)
-* Golden fixtures: episodic full, episodic (with explicit "unknown" placeholders), semantic
-
-**Acceptance criteria**
-
-* Stable IRIs for same inputs; round-trip payload validity tests
-* Fixtures validate optionality rules without special casing
-* CI includes unit tests for ID/IRI + schema validation
+| Version | Theme | Outcome |
+|---|---|---|
+| v0.1 | Starter episodic memory | Chat-native memory substrate with episodes, observations, entities, soft threads, derived memories, and continuity retrieval. |
+| v0.1 backend | Storage contracts | Qdrant/Oxigraph defaults, stable IDs, vector metadata, graph triples, migrations, and tests. |
+| v0.2 | Continuity and reflection | Relationship state, character signals, open-loop/commitment lifecycle, scheduled reflection, current continuity views. |
+| v0.3 | Factual rigor | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, current-belief view. |
+| v0.4 | Advanced recall and governance | Associations, episode clusters, retention governance, retrieval traces, validation, context subgraph construction. |
+| v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
 
 ---
 
-## Phase L1: Qdrant Vector Layer MVP (Payload + Filters + Search)
+# 4. Phase 0: repository and architecture foundation
 
-**Deliverables**
+## Intent
 
-* Qdrant collection setup with payload schema:
+Set up the project so v0.1 can remain lean but future versions do not require breaking the memory structure.
 
-  * required: `id`, `memory_type`, `content`
-  * episodic-only: `timestamp`, `location_text`, `participants`
-* Payload excludes embedding vectors (vectors are stored only in the Qdrant vector field)
-* Text indexes for word-level partial match filtering:
+## Deliverables
 
-  * `participants` (multilingual text index)
-  * `location_text` (multilingual text index)
-* Upsert + vector search (top-k) + filter combinations
-* Minimal operational tooling: create collection, basic health check
+```text
+Core model package
+Storage interfaces
+Default Qdrant adapter
+Default Oxigraph adapter
+Raw store interface
+Schema/versioning utilities
+Stable ID/IRI utilities
+Test fixtures
+Migration hooks
+```
 
-**Acceptance criteria**
+## Suggested modules
 
-* Controlled dataset yields deterministic expected top-k
-* Filter correctness: memory_type + time range + participants + location_text
+```text
+src/
+  lib.rs
+  api/
+    mod.rs
+    embedding.rs
+    types/
+      memory.rs
+      memory_input.rs
+      memory_filters.rs
+      memory_type.rs
+      scored_memory.rs
+  internal/
+    models/
+      memory/
+        mod.rs
+      vector/
+        mod.rs
+    repositories/
+      memory_repository.rs
+      vector_memory_repository.rs
+      mod.rs
+    infrastructures/
+      external_services/
+        mod.rs
+      mod.rs
+  repositories.rs
+  models.rs
+  config/
+    settings.rs
+    settings/
+      app_settings.rs
+  errors.rs
+tests/
+```
 
-  * Participants/location filtering supports word-level full-text matching (not within-word substring matching unless explicitly added later).
+## Design boundary
 
----
+The core library should not be a full agent framework.
 
-## Phase L2: Oxigraph Graph Layer MVP (RDF Vocabulary + Upsert + Core Queries)
+But it may define processor interfaces for:
 
-**Deliverables**
+```text
+entity extraction
+salience scoring
+summarization
+reflection
+thread linking
+correction detection
+```
 
-* RDF vocabulary (`am:`) with minimal classes/predicates:
-
-  * Classes: `am:EpisodicMemory`, `am:SemanticMemory`, `am:Entity`, `am:Location`, optional `am:Date`
-  * Predicates: `am:involves`, `am:happenedAt`, optional `am:recordedIn` or literal `am:timestamp`, `am:mentions`
-* Deterministic mapping: `MemoryRecord` → RDF triples
-* SPARQL query helpers (core):
-
-  * context by memory id
-  * by entity
-  * by location
-  * by time range (depending on timestamp modeling)
-
-**Acceptance criteria**
-
-* For each fixture, graph lookups return correct bindings
-* SPARQL regression tests lock query semantics
-
----
-
-## Phase L3: Hybrid Retrieval (Vector → Graph Expansion → RetrievalBundle)
-
-**Deliverables**
-
-* Hybrid flow:
-
-  1. vector search → candidate ids
-  2. graph expansion around ids (entities/location/time)
-  3. merge into RetrievalBundle with stable ordering rules
-* Graph-first structured retrieval APIs:
-
-  * “memories involving entity X”
-  * “memories at location Y”
-  * “memories between dates”
-  * composable constraints where feasible
-
-**Acceptance criteria**
-
-* End-to-end tests confirm RetrievalBundle contains:
-
-  * candidate memories with provenance
-  * graph-enriched context
-  * deterministic merge behavior (de-dupe + ordering)
-
----
-
-## Phase L4: Performance and Operational Hardening
-
-**Deliverables**
-
-* Graph expansion policy controls:
-
-  * max breadth/depth, pagination, timeouts
-  * hub-entity handling (bounded fan-out)
-* Caching hooks (optional) for hot SPARQL patterns
-* Indexing/optimization guidance for common predicates and time queries (as supported by Oxigraph)
-
-**Acceptance criteria**
-
-* Stress tests show bounded runtime on “hub entity” scenarios
-* No unbounded expansions; predictable worst-case behavior
+Concrete LLM providers should be adapters or examples, not hard dependencies.
 
 ---
 
-## Phase L5: Extensions (Schema Evolution Without LLM Dependency)
+# 5. v0.1: starter episodic memory
 
-**Deliverables (choose as needed)**
+Detailed draft: [`v0_1_starter_episodic_memory.md`](../design/roadmap-phases/v0_1_starter_episodic_memory.md)
 
-* Memory consolidation primitives (storage-level):
+## Core concepts
 
-  * store summary memories as `semantic` with links to source ids in graph
-* Prospective memory primitives (storage-level):
+```text
+Episode
+Observation
+Entity
+MemoryThread
+DerivedMemory
+MemoryLink
+ContinuityContextPack
+```
 
-  * task/reminder records as memory subtype or dedicated schema extension (still retrieval-only)
-* Multimodal hooks (storage-level only):
+## Goals
 
-  * store media references (URI + metadata) and graph predicates (no embedding/LLM logic required)
+```text
+remember chat sessions or meaningful segments
+extract salient observations
+link entities and soft threads
+store derived memories with provenance
+retrieve continuity context instead of generic top-k snippets
+support basic correction, supersession, and suppression
+```
 
-**Acceptance criteria**
+## Acceptance criteria
 
-* Backward-compatible migrations or explicit version bumps
-* Existing queries continue to function or fail loudly with clear migration steps
-
----
-
-## Phase L6: Optional Examples (Caller Integration Demonstrations, Non-Core)
-
-**Deliverables**
-
-* Examples that show how a caller can:
-
-  * call `hybrid_search`
-  * turn RetrievalBundle into a prompt
-  * perform an external LLM call
-* These examples must be isolated and not required for core build/test.
-
-**Acceptance criteria**
-
-* Examples compile/run independently
-* Core library remains LLM-free and deterministic in CI
-
----
-
-# Roadmap B: Application / Caller Roadmap (Out of Repository, Context Only)
-
-These phases are **not implemented** in this library. They are included to clarify how the library is intended to be used.
-
-## Phase C1: LLM Answering (Single-Step Grounded Responses)
-
-* Caller uses `RetrievalBundle` as the grounding substrate.
-* Caller owns prompt design, citations, and response formatting.
-
-## Phase C2: Iterative Retrieval & Planning
-
-* Caller uses an LLM (or other logic) to produce structured constraints (entities/time/location).
-* Caller re-invokes library APIs with refined filters and graph expansions.
-
-## Phase C3: UI/UX and Product Features
-
-* Timeline views, memory browsing, media rendering, notifications/reminders, etc.
+```text
+Episodes can be stored and retrieved by ID.
+Derived memories trace back to source episodes/observations.
+Thread membership is optional and confidence-scored.
+Retrieval returns a ContinuityContextPack with rationale.
+Suppressed memories are not used for generation.
+Corrections can supersede older derived memories.
+```
 
 ---
 
-## 7. Documentation Notes
+# 6. v0.1 backend contracts
 
-* All “assistant behavior” is described only as **integration context**.
-* The library documentation should emphasize:
+Detailed draft: [`v0_1_storage_and_backend_contracts.md`](../design/roadmap-phases/v0_1_storage_and_backend_contracts.md)
 
-  * stable storage/retrieval semantics,
-  * deterministic IDs and query behavior,
-  * explicit contracts (`MemoryRecord`, `RetrievalBundle`),
-  * and clear integration points for callers.
+## Goals
+
+Incorporate the useful engineering discipline from the old roadmap:
+
+```text
+shared IDs
+Qdrant payload/index conventions
+Oxigraph IRI/triple conventions
+schema versioning
+regression tests
+bounded graph expansion
+backend abstraction
+```
+
+## Acceptance criteria
+
+```text
+same object can be joined across raw store, vector store, and graph store
+Qdrant filters work for record_type, entity_ids, thread_ids, time, currentness, retention
+SPARQL queries return episode/entity/thread/provenance context
+retrieval behavior is deterministic under fixed fixtures
+```
+
+---
+
+# 7. v0.2: continuity and reflection
+
+Detailed draft: [`v0_2_continuity_reflection.md`](../design/roadmap-phases/v0_2_continuity_reflection.md)
+
+## New concepts
+
+```text
+RelationshipState
+CharacterSignal
+OpenLoop
+Commitment
+ReflectionJob
+CurrentContinuityView
+```
+
+## Goals
+
+```text
+make memory shape future behavior more explicitly
+track active commitments and unresolved threads
+derive relationship/project-specific character signals
+separate current continuity context from raw historical memories
+```
+
+---
+
+# 8. v0.3: factual rigor and belief tracking
+
+Detailed draft: [`v0_3_factual_rigor_belief_tracking.md`](../design/roadmap-phases/v0_3_factual_rigor_belief_tracking.md)
+
+## New concepts
+
+```text
+Assertion
+Claim
+EvidenceLink
+BeliefAssessment
+SourceAssessment
+TemporalValidity
+CurrentBeliefView
+```
+
+## Goals
+
+```text
+distinguish source reports from truth
+support contradictions and updates
+track temporal validity and volatility
+show why factual beliefs are accepted or rejected
+```
+
+This is important, but it should not block the starter because Character Memory's first value is continuity, not full truth maintenance.
+
+---
+
+# 9. v0.4: advanced recall and governance
+
+Detailed draft: [`v0_4_advanced_recall_governance.md`](../design/roadmap-phases/v0_4_advanced_recall_governance.md)
+
+## New concepts
+
+```text
+Association
+EpisodeCluster
+RetentionAssessment
+RetrievalTrace
+ContextSubgraph
+ValidationRules
+```
+
+## Goals
+
+```text
+improve associative recall
+support retention/downranking/deletion policies
+explain retrieval decisions
+bound graph expansion
+validate invariants
+```
+
+---
+
+# 10. v1.0+: multimodal and embodied expansion
+
+Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
+
+## New concepts
+
+```text
+SituationFrame
+MultimodalObservation
+ObjectMemory
+PlaceMemory
+ActionTrace
+OutcomeObservation
+```
+
+## Goals
+
+```text
+support voice beyond transcripts
+support image/video/screen observations
+support object/place/action memory
+support embodied context when practical
+```
+
+This is a future path, not starter scope.
+
+---
+
+# 11. Public API evolution
+
+## v0.1 API
+
+```rust
+let memory = CharacterMemory::new(settings)?;
+
+let stored = memory.remember(input).await?;
+let context = memory.retrieve(filters).await?;
+memory.correct(target_id, correction).await?;
+memory.forget(target_id, ForgetMode::Suppress).await?;
+memory.link(from_id, to_id, relation).await?;
+```
+
+## v0.2 API additions
+
+```rust
+let reflection_scope: Option<ReflectionScope> = None;
+memory.reflect(reflection_scope).await?;
+
+let signal: Option<CharacterSignal> = None;
+memory.reinforce(target_id, signal).await?;
+
+let continuity_scope: Option<ContinuityScope> = None;
+let open_loops = memory.get_open_loops(continuity_scope).await?;
+
+let evidence: Option<EvidenceLink> = None;
+memory
+  .resolve_commitment(commitment_id, evidence)
+  .await?;
+```
+
+## v0.3 API additions
+
+```rust
+let assessment = memory.assess_claim(claim_id).await?;
+
+let belief_scope: Option<BeliefScope> = None;
+let beliefs = memory
+  .get_current_beliefs(belief_scope)
+  .await?;
+
+let reviewed = memory.review_stale_beliefs().await?;
+```
+
+## v0.4 API additions
+
+```rust
+let explanation = memory.explain_retrieval(trace_id).await?;
+memory.associate(from_id, to_id, association_type).await?;
+
+let retention_scope: Option<RetentionScope> = None;
+let retention_result = memory
+  .apply_retention_policy(retention_scope)
+  .await?;
+```
+
+---
+
+# 12. YAGNI rules
+
+Do not implement in v0.1:
+
+```text
+true hypergraphs
+full OWL reasoning
+continuous multimodal segmentation
+robotic situation frames
+full evidence-backed belief subsystem
+source reliability scoring
+learned admission control
+complex spreading activation
+```
+
+Do design for:
+
+```text
+stable IDs
+extensible object types
+typed links
+raw_ref pointers
+schema versions
+provenance links
+modality fields
+backend adapters
+```
+
+This keeps the starter small while avoiding structural dead ends.
