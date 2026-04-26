@@ -51,7 +51,13 @@
   - `docs/decisions/implementation/ADR-I-0006-bounded-graph-expansion.md`
 
 ## Open Questions
-- Q1: Should fake graph expansion live entirely in tests, or should an in-memory graph implementation live under internal test-support modules for reuse by later pipeline tests?
+- None for Task_1. Q1 resolved: reusable fake graph expansion and reusable fake stores/fixtures should live under internal `cfg(test)` test-support modules when later pipeline tests need to share them; module-local `tests.rs` files remain acceptable for tests that are not reusable.
+
+## Review Mode
+- mode: remediation
+- scope: final-plan-review
+- max_iterations: 2
+- status: completed
 
 ## Assumptions
 - A1: Store contracts may live under `src/internal/repositories` or a new internal store module, but must depend on canonical public domain types rather than old flat DTOs.
@@ -204,6 +210,48 @@
   - Validation evidence: Pending approval and execution.
   - Notes: Drafted from the landed domain foundation model shape.
 
+- 2026-04-27 Task_1 completed: selected store contract/test-support boundary.
+  - Summary: Inspected the current internal repository and model layout, confirmed the existing `MemoryRepository`, `VectorMemoryRepository`, `MemoryEntry`, `VectorMetadata`, and `ScoredMemoryEntry` stack is legacy flat API infrastructure, and recorded the v0.1 boundary before implementation.
+  - Validation evidence: Manual review of `src/api/types/domain.rs`, `src/api/types/domain/tests.rs`, `src/internal/repositories.rs`, `src/internal/repositories/memory_repository.rs`, `src/internal/repositories/vector_memory_repository.rs`, `src/internal/models.rs`, `src/internal/models/memory/**`, `src/internal/models/vector/**`, `src/internal.rs`, and `tests/test_utils.rs`.
+  - Notes: No Rust code or live Qdrant/Oxigraph adapter behavior was changed; cargo commands were not required for this docs/design-only task.
+
+- 2026-04-27 Task_1 reviewer gate approved.
+  - Summary: Reviewer approved the selected production/test-support/legacy boundary with no findings.
+  - Validation evidence: Reviewer confirmed the decision is recorded in the Progress Log and Decision Log, keeps v0.1 contracts tied to canonical domain types and IDs, scopes old flat repository/model pieces as replacement-target legacy, separates production contracts from `cfg(test)` support, and resolves Q1.
+  - Notes: Residual risk is limited to Task_3 deciding whether later integration tests need a public test-helper route or should stay source-module-local.
+
+- 2026-04-27 Task_2 complete: defined v0.1 store and embedder contracts.
+  - Summary: Added provider-neutral contracts for vector candidate storage, graph authority storage, deterministic embedding, and raw reference resolution. Added vector candidate/search/match and embedding input model types under the internal vector model boundary.
+  - Validation evidence: Worker ran `cargo fmt --check`, `cargo check`, and `cargo test --no-run`; all passed after formatting the new Rust modules.
+  - Notes: Contracts use canonical v0.1 `MemoryId`, `ObjectType`, `MemoryObject`, and `MemoryLink` types and do not add live Qdrant/Oxigraph adapters, production raw storage, or pipeline behavior.
+
+- 2026-04-27 Task_3 complete: added deterministic fake stores and fixtures.
+  - Summary: Added `cfg(test)` repository test support with in-memory fake vector, graph, embedder, and raw reference resolver implementations plus representative v0.1 fixtures covering episode, observation, entities, soft thread link, derived reflection, user preference, open loop, commitment, correction/suppression, and hub entity seeds.
+  - Validation evidence: Worker ran final `cargo fmt --check`, `cargo check`, `cargo test --no-run`, and targeted `cargo test internal::repositories::test_support`; all passed. Targeted tests covered fake vector upsert/search/delete, fake graph object/link/lifecycle/raw-ref preservation, deterministic embedding, file-backed raw reference resolution, and fixture scenario coverage.
+  - Notes: Initial formatting and `cfg(test)` compile issues were fixed before final validation; no service-backed tests or live adapters were introduced.
+
+- 2026-04-27 Task_4 complete: final review approved and adapter-foundation plan drafted.
+  - Summary: Final Reviewer approved the store contracts and deterministic test harness with no findings, and remediation mode completed with zero follow-up iterations. Drafted the next active plan for vector and graph adapter foundations.
+  - Validation evidence: Reviewer reviewed changed code and validation evidence, reran `cargo fmt --check`, `cargo check`, `cargo test --no-run`, and `cargo test internal::repositories::test_support`; all passed. Structured remediation appendix reported `structured_findings: []`, `status: APPROVED`, and `highest_severity: NONE`.
+  - Notes: The next plan is independent and keeps remember/retrieve/link/correct/forget pipeline behavior out of scope.
+
+## Review Remediation Log
+
+### Iteration 0 Result
+- Reviewer status: APPROVED
+- Highest severity: NONE
+- Kept findings: none
+- Discarded findings: none
+- Directives: none
+- Follow-up task: none
+- Validation result after follow-up: not applicable; post-review PR-template validation also passed `cargo fmt`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --verbose` after a small clippy cleanup.
+- Stop reason: approved
+
+### Final Cleanup Review Result
+- Reviewer status after clippy cleanup: APPROVED
+- Remaining findings: none
+- Stop reason: approved
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-04-27 Decision: Draft store contracts plan from landed domain model
@@ -211,6 +259,16 @@
   - Plan delta: Created `v0-1-store-contracts-test-harness-plan.md` as the next concrete plan.
   - Tradeoffs considered: Defining contracts and fakes before live adapters keeps later Qdrant/Oxigraph work testable without external services.
   - User approval: pending.
+
+- 2026-04-27 Decision: Place v0.1 store contracts in internal repositories with test-only reusable support
+  - Trigger / new insight: Task_1 review found the current repository/model stack is organized around legacy flat `MemoryInput`/`MemoryType` DTOs and vector database concerns rather than the canonical v0.1 object model.
+  - Production boundary: Add v0.1 contract traits under direct files in `src/internal/repositories/` and re-export them from `src/internal/repositories.rs`. These contracts must depend on canonical domain types and IDs from `src/api/types/domain.rs`; do not duplicate `Episode`, `Observation`, `Entity`, `MemoryThread`, `DerivedMemory`, or `MemoryLink` under `src/internal/models`.
+  - Vector candidate boundary: If Task_2 needs a vector candidate record that is not itself a canonical domain object, place it under `src/internal/models/vector/` using a direct filename and re-export it through `src/internal/models/vector.rs`.
+  - Test-support boundary: Put reusable deterministic fakes, fixture builders, and fake graph expansion support in `src/internal/repositories/test_support.rs` behind `cfg(test)` when they need reuse across later pipeline tests. Keep one-off assertions in module-local `tests.rs` files when they are not reusable.
+  - Legacy boundary: Treat `MemoryRepository`, `VectorMemoryRepository`, `MemoryEntry`, `VectorMetadata`, `ScoredMemoryEntry`, and the current Qdrant adapter as replacement targets for v0.1. Keep them only while needed for current compilation during replacement, and do not add compatibility wrappers for the old flat API.
+  - Non-goals preserved: This decision does not implement live Qdrant/Oxigraph adapters, remember/retrieve/link/correct/forget pipelines, or production raw storage.
+  - Tradeoffs considered: Keeping reusable fakes under internal `cfg(test)` support avoids service dependencies and duplication in later pipeline tests, while keeping production contracts in repository modules preserves a narrow internal boundary for adapter work.
+  - User approval: directed by Task_1 objective.
 
 ## Notes
 - Risks:
