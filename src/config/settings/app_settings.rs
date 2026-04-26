@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::env;
 
 use crate::errors::CustomError;
-use crate::models::vector::EmbeddingModel;
+use crate::internal::models::vector::EmbeddingModel;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {

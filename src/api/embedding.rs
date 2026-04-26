@@ -1,7 +1,7 @@
 use crate::errors::CustomError;
 use async_trait::async_trait;
 
-/// Repository trait for converting text into vector embeddings.
+/// Provider trait for converting text into vector embeddings.
 ///
 /// # Description
 ///
@@ -10,7 +10,7 @@ use async_trait::async_trait;
 /// numerical vector representations suitable for semantic operations.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
-pub trait EmbeddingRepository: Send + Sync {
+pub trait EmbeddingProvider: Send + Sync {
     /// Generates a vector embedding for the provided text.
     ///
     /// # Parameters
@@ -43,9 +43,9 @@ pub trait EmbeddingRepository: Send + Sync {
     ) -> Result<Vec<Vec<f32>>, CustomError>;
 }
 
-// Implement the trait for Box<dyn EmbeddingRepository> to allow using boxed trait objects
+// Implement the trait for Box<dyn EmbeddingProvider> to allow using boxed trait objects
 #[async_trait]
-impl<T: EmbeddingRepository + ?Sized> EmbeddingRepository for Box<T> {
+impl<T: EmbeddingProvider + ?Sized> EmbeddingProvider for Box<T> {
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         (**self).generate_embedding(text).await
     }

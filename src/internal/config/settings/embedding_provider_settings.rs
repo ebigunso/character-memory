@@ -1,21 +1,21 @@
-use crate::models::vector::EmbeddingModel;
+use crate::internal::models::vector::EmbeddingModel;
 
-/// Settings for configuring the OpenAI Embedding Repository.
+/// Settings for configuring the OpenAI embedding provider.
 ///
 /// # Description
 ///
 /// This struct contains the necessary configuration settings for
-/// initializing and using the OpenAI Embedding Repository.
+/// initializing and using the OpenAI embedding provider.
 #[derive(Clone)]
-pub(crate) struct EmbeddingRepositorySettings {
+pub(crate) struct EmbeddingProviderSettings {
     /// The API key for authenticating with OpenAI's API
     pub(crate) api_key: String,
     /// The embedding model to use for generating embeddings
     pub(crate) model: EmbeddingModel,
 }
 
-impl EmbeddingRepositorySettings {
-    /// Creates a new instance of EmbeddingRepositorySettings.
+impl EmbeddingProviderSettings {
+    /// Creates a new instance of EmbeddingProviderSettings.
     ///
     /// # Parameters
     ///
@@ -24,7 +24,7 @@ impl EmbeddingRepositorySettings {
     ///
     /// # Returns
     ///
-    /// A new `EmbeddingRepositorySettings` instance
+    /// A new `EmbeddingProviderSettings` instance
     pub(crate) fn new(api_key: String, model: EmbeddingModel) -> Self {
         Self { api_key, model }
     }

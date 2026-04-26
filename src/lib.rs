@@ -1,24 +1,24 @@
 mod config;
 mod errors;
-mod infrastructures;
-mod models;
-mod repositories;
+// NOTE: internal implementation code lives under `crate::internal`.
+
+pub mod api;
+mod internal;
 
 use uuid::Uuid;
 
-use crate::config::settings::{EmbeddingRepositorySettings, VectorMemoryRepositorySettings};
-use crate::infrastructures::external_services::{
-    OpenAIEmbeddingRepository, QdrantVectorMemoryRepository,
+use crate::config::settings::{EmbeddingProviderSettings, VectorMemoryRepositorySettings};
+use crate::internal::infrastructures::external_services::{
+    OpenAIEmbeddingProvider, QdrantVectorMemoryRepository,
 };
-use crate::models::vector::VectorMetadata;
-use crate::repositories::MemoryRepository;
+use crate::internal::models::vector::VectorMetadata;
+use crate::internal::repositories::MemoryRepository;
 
 // Re-export types for public use
+pub use crate::api::embedding::EmbeddingProvider;
+pub use crate::api::types::{Memory, MemoryFilters, MemoryInput, MemoryType, ScoredMemory};
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
-pub use crate::models::memory::dto::{Memory, MemoryFilters, MemoryInput, ScoredMemory};
-pub use crate::models::memory::MemoryType;
-pub use crate::repositories::EmbeddingRepository;
 
 // Re-export for integration tests
 pub mod test_utils {
@@ -56,7 +56,7 @@ pub struct AgentMemory {
 }
 
 impl AgentMemory {
-    /// Constructs a new AgentMemory instance using a caller-provided embedding repository.
+    /// Constructs a new AgentMemory instance using a caller-provided embedding provider.
     ///
     /// # Description
     ///
@@ -69,21 +69,21 @@ impl AgentMemory {
     ///   model settings required to initialize the underlying vector memory repository.
     /// - `collection_name`: The name of the Qdrant collection where memory vectors will be
     ///   stored and queried.
-    /// - `embed_repo`: A boxed implementation of [`EmbeddingRepository`] that is responsible
+    /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
     ///   for generating embeddings from input data.
     ///
     /// # Returns
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok(Self)`: A new [`AgentMemory`] instance backed by the provided embedding repository
+    /// - `Ok(Self)`: A new [`AgentMemory`] instance backed by the provided embedding provider
     ///   and a Qdrant-based vector memory repository.
     /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
     ///   repository or when resolving configuration from `settings`.
-    pub async fn new_with_embedding_repository(
+    pub async fn new_with_embedding_provider(
         settings: Settings,
         collection_name: String,
-        embed_repo: Box<dyn EmbeddingRepository>,
+        embed_provider: Box<dyn EmbeddingProvider>,
     ) -> Result<Self, CustomError> {
         let vector_memory_settings = VectorMemoryRepositorySettings::new(
             settings.get_qdrant_connection().to_string(),
@@ -91,7 +91,7 @@ impl AgentMemory {
             settings.get_embedding_model()?,
         );
         let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
-        let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
+        let memory_repo = MemoryRepository::new(embed_provider, vector_repo);
         Ok(Self { memory_repo })
     }
 
@@ -109,12 +109,12 @@ impl AgentMemory {
     /// - `Ok`: A new `AgentMemory` instance
     /// - `Err`: A `CustomError` if initialization fails
     pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
-        // Configure and create the embedding repository
-        let embedding_settings = EmbeddingRepositorySettings::new(
+        // Configure and create the embedding provider
+        let embedding_settings = EmbeddingProviderSettings::new(
             settings.get_openai_api_key().to_string(),
             settings.get_embedding_model()?,
         );
-        let embed_repo = Box::new(OpenAIEmbeddingRepository::new(embedding_settings)?);
+        let embed_provider = Box::new(OpenAIEmbeddingProvider::new(embedding_settings)?);
 
         // Configure and create the vector memory repository
         let vector_memory_settings = VectorMemoryRepositorySettings::new(
@@ -124,7 +124,7 @@ impl AgentMemory {
         );
         let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
         // Assemble the high-level MemoryRepository.
-        let memory_repo = MemoryRepository::new(embed_repo, vector_repo);
+        let memory_repo = MemoryRepository::new(embed_provider, vector_repo);
 
         Ok(Self { memory_repo })
     }

@@ -1,24 +1,25 @@
 use uuid::Uuid;
 
+use crate::api::types::MemoryFilters;
 use crate::errors::CustomError;
-use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
-use crate::models::vector::VectorMetadata;
-use crate::repositories::{EmbeddingRepository, VectorMemoryRepository};
+use crate::internal::models::memory::{MemoryEntry, ScoredMemoryEntry};
+use crate::internal::models::vector::VectorMetadata;
+use crate::internal::repositories::VectorMemoryRepository;
+use crate::EmbeddingProvider;
 
 /// Provides high-level operations for managing memory entries.
 ///
 /// # Description
 ///
-/// Delegates embedding generation to an EmbeddingRepository and storage/retrieval to a
+/// Delegates embedding generation to an EmbeddingProvider and storage/retrieval to a
 /// VectorMemoryRepository. All dependencies are injected as arguments.
 ///
 /// # See also
 ///
-/// - [`EmbeddingRepository`]
+/// - [`EmbeddingProvider`]
 /// - [`VectorMemoryRepository`]
 pub(crate) struct MemoryRepository {
-    pub embed_repo: Box<dyn EmbeddingRepository>,
+    pub embed_provider: Box<dyn EmbeddingProvider>,
     pub vector_repo: Box<dyn VectorMemoryRepository>,
 }
 
@@ -27,18 +28,18 @@ impl MemoryRepository {
     ///
     /// # Parameters
     ///
-    /// - `embed_repo`: The embedding repository to generate embeddings
+    /// - `embed_provider`: The embedding provider to generate embeddings
     /// - `vector_repo`: The vector memory repository for storing memory entries
     ///
     /// # Returns
     ///
     /// A new `MemoryRepository` instance with the provided repositories
     pub fn new(
-        embed_repo: Box<dyn EmbeddingRepository>,
+        embed_provider: Box<dyn EmbeddingProvider>,
         vector_repo: Box<dyn VectorMemoryRepository>,
     ) -> Self {
         Self {
-            embed_repo,
+            embed_provider,
             vector_repo,
         }
     }
@@ -82,7 +83,7 @@ impl MemoryRepository {
         metadata: VectorMetadata,
     ) -> Result<MemoryEntry, CustomError> {
         let embedding = self
-            .embed_repo
+            .embed_provider
             .generate_embedding(&metadata.content)
             .await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
@@ -148,7 +149,7 @@ impl MemoryRepository {
         metadata: VectorMetadata,
     ) -> Result<MemoryEntry, CustomError> {
         let embedding = self
-            .embed_repo
+            .embed_provider
             .generate_embedding(&metadata.content)
             .await?;
         let entry = MemoryEntry::new(metadata, embedding)?;
@@ -197,7 +198,7 @@ impl MemoryRepository {
         top_k: usize,
         filters: Option<MemoryFilters>,
     ) -> Result<Vec<ScoredMemoryEntry>, CustomError> {
-        let query_embedding = self.embed_repo.generate_embedding(query).await?;
+        let query_embedding = self.embed_provider.generate_embedding(query).await?;
         self.vector_repo
             .search_memory(&query_embedding, top_k, filters.as_ref())
             .await
@@ -231,11 +232,14 @@ impl MemoryRepository {
             .collect();
 
         // Generate embeddings in bulk
-        let embeddings = self.embed_repo.bulk_generate_embeddings(&contents).await?;
+        let embeddings = self
+            .embed_provider
+            .bulk_generate_embeddings(&contents)
+            .await?;
 
         // Create memory entries from metadata and embeddings
         let mut entries = Vec::with_capacity(metadata_list.len());
-        let metadata_embedding_pairs = metadata_list.iter().zip(embeddings.into_iter());
+        let metadata_embedding_pairs = metadata_list.iter().zip(embeddings);
         for (metadata, embedding) in metadata_embedding_pairs {
             let entry = MemoryEntry::new(metadata.clone(), embedding)?;
             entries.push(entry);
@@ -323,7 +327,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl EmbeddingRepository for FakeEmbeddingRepo {
+    impl EmbeddingProvider for FakeEmbeddingRepo {
         async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
             Ok(Self::embed(text))
         }

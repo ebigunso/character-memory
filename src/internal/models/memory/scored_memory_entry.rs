@@ -1,5 +1,5 @@
-use crate::models::memory::dto::ScoredMemory;
-use crate::models::memory::MemoryEntry;
+use crate::api::types::ScoredMemory;
+use crate::internal::models::memory::MemoryEntry;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScoredMemoryEntry {

@@ -11,13 +11,12 @@ use qdrant_client::{config::QdrantConfig, Qdrant};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::config::settings::VectorMemoryRepositorySettings;
+use crate::api::types::{MemoryFilters, MemoryType};
 use crate::errors::CustomError;
-use crate::models::memory::dto::MemoryFilters;
-use crate::models::memory::MemoryType;
-use crate::models::memory::{MemoryEntry, ScoredMemoryEntry};
-use crate::models::vector::VectorMetadata;
-use crate::repositories::VectorMemoryRepository;
+use crate::internal::config::settings::VectorMemoryRepositorySettings;
+use crate::internal::models::memory::{MemoryEntry, ScoredMemoryEntry};
+use crate::internal::models::vector::VectorMetadata;
+use crate::internal::repositories::VectorMemoryRepository;
 
 #[derive(serde::Serialize)]
 struct QdrantMemoryPayload {
