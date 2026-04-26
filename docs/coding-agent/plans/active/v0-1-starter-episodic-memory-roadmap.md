@@ -22,7 +22,7 @@
 - `Cargo.toml` already includes core async/serde/uuid/chrono/qdrant dependencies, but Oxigraph/RDF support still needs an explicit dependency and adapter decision in a later chunk.
 
 ## Resolved Decisions
-- Breaking changes are acceptable for v0.1. The old flat API does not need deprecated compatibility wrappers unless a later implementation chunk discovers a very low-cost adapter worth keeping.
+- Breaking changes are acceptable for v0.1. Compatibility with the old flat API is not a goal; legacy implementations that do not contribute to the new v0.1 architecture can and should be removed as replacement chunks land.
 - Raw inputs should remain consumer-owned. Core objects should store only a `raw_ref` or equivalent reference ID.
 - For tests in this first version, raw text may be stored in a temporary file fixture and linked through a reference ID.
 - Graph validation phasing is accepted: use trait-backed graph fakes for pipeline tests, embedded/in-memory Oxigraph tests for RDF/SPARQL behavior where practical, and service-backed Oxigraph checks later as gated integration validation.
@@ -31,12 +31,12 @@
 
 ### Domain Foundation And Breaking API Direction
 - Purpose: establish the v0.1 object vocabulary, ID strategy, schema versioning, lifecycle enums, raw reference policy, and validation invariants.
-- Expected outcome: typed model foundation and deterministic tests, with old flat memory concepts no longer treated as canonical.
+- Expected outcome: typed model foundation and deterministic tests, with old flat memory concepts no longer treated as canonical and no compatibility promise for legacy flat APIs.
 - Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-domain-foundation-plan.md](../completed/v0-1-domain-foundation-plan.md)
 
 ### Store Contracts And Deterministic Test Harness
 - Purpose: define vector, graph, raw-reference, and embedder contracts around the v0.1 objects.
-- Expected outcome: fake/in-memory stores and fixtures that support remember/retrieve/lifecycle tests without Qdrant, Oxigraph, OpenAI, or network services.
+- Expected outcome: fake/in-memory stores and fixtures that support remember/retrieve/lifecycle tests without Qdrant, Oxigraph, OpenAI, or network services, while identifying legacy repository/model pieces that should be removed once replaced.
 - Concrete plan: [docs/coding-agent/plans/active/v0-1-store-contracts-test-harness-plan.md](v0-1-store-contracts-test-harness-plan.md)
 
 ### Vector And Graph Adapter Foundations
@@ -60,8 +60,8 @@
 - Concrete plan: draft after retrieval filtering semantics are stable.
 
 ### Documentation, Migration Cleanup, And Release Validation
-- Purpose: update README and roadmap docs, remove or rewrite old flat memory examples, and run final deterministic plus gated integration validation.
-- Expected outcome: v0.1 is documented as chat-native episodic continuity memory, with Qdrant/Oxigraph responsibilities and old flat concepts clearly retired or migrated.
+- Purpose: update README and roadmap docs, remove or rewrite old flat memory examples, remove non-contributing legacy implementations, and run final deterministic plus gated integration validation.
+- Expected outcome: v0.1 is documented as chat-native episodic continuity memory, with Qdrant/Oxigraph responsibilities and old flat concepts clearly retired or removed.
 - Concrete plan: draft after implementation behavior is substantially complete.
 
 ## Cross-Cutting Validation Expectations
@@ -73,7 +73,7 @@
 ## Rollback / Safety
 - Keep future chunk plans independent so individual chunks can be completed, paused, revised, or moved to completed plans without rewriting the whole roadmap.
 - Draft each next concrete plan from the code and decisions that actually landed in prior chunks.
-- Avoid reviving compatibility wrappers unless a later chunk finds a compelling low-cost reason.
+- Do not add compatibility wrappers for the old flat API; remove legacy implementations when they no longer serve the v0.1 architecture.
 - Keep raw input storage consumer-owned; tests may use files only to prove reference preservation.
 
 ## Progress Log
@@ -86,6 +86,10 @@
   - Summary: Domain foundation plan completed and moved to completed plans. Drafted the next concrete plan for store contracts and deterministic test harness.
   - Validation evidence: Domain foundation final Reviewer approved with no findings; required Rust checks and targeted domain tests passed.
   - Notes: The roadmap now links to the completed domain foundation plan and active store-contracts plan.
+- 2026-04-27 Compatibility direction clarified.
+  - Summary: Recorded that legacy compatibility is not a v0.1 goal and that legacy implementations which do not contribute to the new architecture should be removed as replacement chunks land.
+  - Validation evidence: Documentation-only roadmap update.
+  - Notes: Future concrete plans should not preserve old flat API behavior unless it directly serves the new architecture.
 
 ## Decision Log
 
@@ -98,6 +102,11 @@
   - Trigger / new insight: User accepted the recommendation for graph validation phasing.
   - Plan delta: Marked trait-backed graph fakes, embedded/in-memory Oxigraph tests, and later gated service checks as the v0.1 validation direction.
   - Tradeoffs considered: Fake-only graph tests would be fast but too weak; service-only graph tests would slow early development and increase local setup friction.
+  - User approval: yes.
+- 2026-04-27 Decision: Remove non-contributing legacy implementations
+  - Trigger / new insight: User clarified that compatibility is not a concern for v0.1.
+  - Plan delta: Explicitly direct future chunks to remove legacy flat API implementations that do not contribute to the new v0.1 architecture.
+  - Tradeoffs considered: Keeping compatibility shims may reduce short-term disruption but increases architectural drag and test burden during the v0.1 rewrite.
   - User approval: yes.
 
 ## Notes

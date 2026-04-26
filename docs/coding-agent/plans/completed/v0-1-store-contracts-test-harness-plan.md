@@ -1,6 +1,6 @@
 # Plan: v0.1 Store Contracts And Deterministic Test Harness
 
-- status: draft
+- status: done
 - generated: 2026-04-27
 - last_updated: 2026-04-27
 - work_type: mixed
@@ -28,7 +28,7 @@
   - Oxigraph dependency, RDF triple generation, SPARQL query builders, or live graph adapter behavior.
   - `remember`, `retrieve`, `link`, `correct`, or `forget` public pipeline implementation.
   - Production raw input storage.
-  - Compatibility wrappers for old flat APIs.
+  - Compatibility wrappers or compatibility preservation for old flat APIs.
 
 ## Context (workspace)
 - Related files/areas:
@@ -41,7 +41,7 @@
   - `docs/coding-agent/plans/completed/v0-1-domain-foundation-plan.md`
 - Existing patterns or references:
   - Canonical v0.1 domain types are public under `src/api/types/domain` and re-exported from `src/lib.rs`.
-  - Existing flat vector repository traits live under `src/internal/repositories/**` and are still legacy-oriented.
+  - Existing flat vector repository traits live under `src/internal/repositories/**` and are legacy-oriented; preserve them only where they directly support the new v0.1 architecture or current compilation during replacement.
   - Integration tests already use deterministic embeddings, but this chunk should keep new tests service-free.
 - Repo reference docs consulted:
   - `docs/design/roadmap-phases/v0_1_starter_episodic_memory.md`
@@ -70,11 +70,11 @@
   - `docs/coding-agent/plans/active/v0-1-store-contracts-test-harness-plan.md`
 - depends_on: []
 - description: |
-  Inspect the existing repository traits and choose where v0.1 store contracts and test fakes should live without disrupting the legacy flat vector repository path.
+  Inspect the existing repository traits and choose where v0.1 store contracts and test fakes should live, including which legacy flat repository/model pieces can be removed once replaced.
 - acceptance:
   - Contract placement is recorded in the plan's Decision Log or Progress Log.
   - Decision keeps canonical domain types as inputs/outputs for v0.1 contracts.
-  - Decision scopes old flat repository traits as legacy until later migration.
+  - Decision scopes old flat repository traits as removable legacy unless needed for the new v0.1 architecture or current compilation during replacement.
   - Decision identifies what belongs in production internal modules vs test-only support.
 - validation:
   - kind: review
@@ -185,13 +185,13 @@
 - Keep this chunk away from live Qdrant/Oxigraph adapter behavior.
 - Keep fake implementations clearly scoped as test/support infrastructure.
 - Do not introduce production raw input storage.
-- Preserve the old flat repository path until a later migration plan intentionally changes it.
+- Do not preserve old flat repository paths for compatibility alone; remove or replace legacy pieces when this chunk makes them unnecessary.
 
 ## Quality Routing Note
 - Routing level: L2
 - In-scope docs: Rust internal architecture, test harness design, validation evidence, data-integrity boundaries.
 - Out-of-scope docs: live Qdrant/Oxigraph adapter details, UI/E2E, auth/security, production raw storage.
-- Top risks: data-integrity, contract/API compatibility, external dependency/integration if scope leaks into live adapters.
+- Top risks: data-integrity, architectural drift from legacy compatibility, external dependency/integration if scope leaks into live adapters.
 - Risk profile: medium; this chunk shapes later pipeline tests but should remain deterministic and service-free.
 - Required checks: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, targeted fake-store/fixture tests, Reviewer gate.
 - Optional recommended checks: none for this chunk.
@@ -216,7 +216,7 @@
 - Risks:
   - Fake stores can accidentally become alternate production semantics if placed ambiguously.
   - Graph expansion behavior may be tempting to overbuild here; keep only enough structure for later tests.
-  - Existing legacy repository traits still serve the old flat API and should not be broadly migrated in this chunk.
+  - Existing legacy repository traits serve the old flat API and should be removed or replaced when they no longer contribute to the v0.1 architecture.
 - Edge cases:
   - Hub entity fixtures should seed high-fanout scenarios but do not need full retrieval behavior yet.
   - Suppression/correction fixtures should seed lifecycle states and supersession links without implementing lifecycle pipelines.

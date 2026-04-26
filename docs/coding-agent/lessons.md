@@ -149,3 +149,53 @@ Prevention:
 
 Evidence:
 - Repo rules now record the module layout and test placement convention.
+
+## 2026-04-27 - No Legacy Compatibility Goal For v0.1  [tags: planning, scope-owns, architecture]
+
+Context:
+- Plan: v0.1 starter episodic memory roadmap and store contracts planning
+- Task/Wave: roadmap correction before next implementation chunk
+- Roles involved: Orchestrator
+
+Symptom:
+- Roadmap and store-contracts planning still implied that old flat API compatibility or legacy repository paths might be preserved if cheap.
+- User clarified that compatibility is not a concern and legacy implementations that do not contribute to the new architecture should be removed.
+
+Root cause:
+- Treated the old flat API as a temporary compatibility surface rather than as removable migration residue for the v0.1 rewrite.
+
+Fix applied:
+- Updated the roadmap and store-contracts plan context to make legacy compatibility a non-goal for v0.1 work.
+- Removed the bounded v0.1 compatibility guidance from repo-wide common rules after user correction.
+
+Prevention:
+- Future v0.1 plans should identify legacy pieces that can be removed or replaced, not preserve them for compatibility alone.
+- Do not add compatibility wrappers for old flat APIs unless they directly serve the new v0.1 architecture.
+
+Evidence:
+- Roadmap resolved decisions now state that legacy implementations which do not contribute to v0.1 should be removed as replacement chunks land.
+
+## 2026-04-27 - Keep Bounded Guidance Out Of Common Rules  [tags: rulebook, scope-owns, planning]
+
+Context:
+- Plan: v0.1 roadmap and store-contracts planning correction
+- Task/Wave: repo rule cleanup
+- Roles involved: Orchestrator
+
+Symptom:
+- A v0.1-specific compatibility direction was added to `docs/coding-agent/rules/common.md`.
+- User clarified common rules should contain repo-wide rules that always apply, not bounded task or phase guidance.
+
+Root cause:
+- Promoted a useful but phase-scoped planning constraint into the repo-wide rulebook instead of keeping it in the roadmap and relevant plans.
+
+Fix applied:
+- Removed the v0.1 compatibility bullet from `common.md`.
+- Left the bounded guidance in the roadmap and store-contracts plan where it belongs.
+
+Prevention:
+- Before editing common rules, check whether the guidance is always repo-wide or only applies to a bounded plan, task, phase, or migration.
+- Keep bounded guidance in plans/roadmaps/lessons unless it truly applies across the repository indefinitely.
+
+Evidence:
+- `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
