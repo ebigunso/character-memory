@@ -18,25 +18,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent_memory"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "config",
- "dotenvy",
- "mockall",
- "qdrant-client",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror 2.0.14",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -238,6 +219,25 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "character_memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "config",
+ "dotenvy",
+ "mockall",
+ "qdrant-client",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.14",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "chrono"

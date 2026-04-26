@@ -1,11 +1,11 @@
-use agent_memory::{MemoryInput, MemoryType};
+use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 mod test_utils;
 
 #[tokio::test]
 async fn test_create_episodic_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     let memory_input = MemoryInput {
         id: None,
@@ -17,7 +17,7 @@ async fn test_create_episodic_memory() {
     };
 
     // Create the memory
-    let result = agent_memory.create_memory(memory_input).await;
+    let result = character_memory.create_memory(memory_input).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to create episodic memory");
@@ -37,7 +37,7 @@ async fn test_create_episodic_memory() {
 #[tokio::test]
 async fn test_create_semantic_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     let memory_input = MemoryInput {
         id: None,
@@ -49,7 +49,7 @@ async fn test_create_semantic_memory() {
     };
 
     // Create the memory
-    let result = agent_memory.create_memory(memory_input).await;
+    let result = character_memory.create_memory(memory_input).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to create semantic memory");
@@ -65,7 +65,7 @@ async fn test_create_semantic_memory() {
 #[tokio::test]
 async fn test_bulk_create_memories() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     let memory_inputs = vec![
         MemoryInput {
@@ -95,7 +95,7 @@ async fn test_bulk_create_memories() {
     ];
 
     // Bulk create memories
-    let result = agent_memory.bulk_create_memories(&memory_inputs).await;
+    let result = character_memory.bulk_create_memories(&memory_inputs).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to bulk create memories");

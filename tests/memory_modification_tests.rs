@@ -1,4 +1,4 @@
-use agent_memory::{MemoryInput, MemoryType};
+use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 use uuid::Uuid;
 mod test_utils;
@@ -6,7 +6,7 @@ mod test_utils;
 #[tokio::test]
 async fn test_update_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create a test memory
     let memory_input = MemoryInput {
@@ -19,9 +19,9 @@ async fn test_update_memory() {
     };
 
     // Create the memory and get its ID
-    let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
+    let created_memory = character_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
-    test_utils::wait_for_memory(&agent_memory, memory_id).await;
+    test_utils::wait_for_memory(&character_memory, memory_id).await;
 
     // Create an updated memory input with the same ID
     let updated_input = MemoryInput {
@@ -34,7 +34,7 @@ async fn test_update_memory() {
     };
 
     // Update the memory
-    let result = agent_memory.update_memory(updated_input).await;
+    let result = character_memory.update_memory(updated_input).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to update memory");
@@ -52,7 +52,7 @@ async fn test_update_memory() {
     );
 
     // Verify the update by retrieving the memory
-    let retrieved = agent_memory.get_memory_by_id(memory_id).await.unwrap();
+    let retrieved = character_memory.get_memory_by_id(memory_id).await.unwrap();
     assert_eq!(retrieved.content, "Updated content");
 
     // Cleanup
@@ -62,7 +62,7 @@ async fn test_update_memory() {
 #[tokio::test]
 async fn test_update_memory_type() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create a test memory with Episodic type
     let memory_input = MemoryInput {
@@ -75,9 +75,9 @@ async fn test_update_memory_type() {
     };
 
     // Create the memory and get its ID
-    let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
+    let created_memory = character_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
-    test_utils::wait_for_memory(&agent_memory, memory_id).await;
+    test_utils::wait_for_memory(&character_memory, memory_id).await;
 
     // Create an updated memory input with Semantic type
     let updated_input = MemoryInput {
@@ -90,7 +90,7 @@ async fn test_update_memory_type() {
     };
 
     // Update the memory
-    let result = agent_memory.update_memory(updated_input).await;
+    let result = character_memory.update_memory(updated_input).await;
 
     // Verify the result
     assert!(result.is_ok(), "Failed to update memory type");
@@ -109,7 +109,7 @@ async fn test_update_memory_type() {
 #[tokio::test]
 async fn test_update_nonexistent_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Generate a random UUID that doesn't exist in the database
     let nonexistent_id = Uuid::new_v4();
@@ -125,7 +125,7 @@ async fn test_update_nonexistent_memory() {
     };
 
     // Try to update a nonexistent memory
-    let result = agent_memory.update_memory(update_input).await;
+    let result = character_memory.update_memory(update_input).await;
 
     // Verify the result is an error
     assert!(
@@ -140,7 +140,7 @@ async fn test_update_nonexistent_memory() {
 #[tokio::test]
 async fn test_delete_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Create a test memory
     let memory_input = MemoryInput {
@@ -153,18 +153,18 @@ async fn test_delete_memory() {
     };
 
     // Create the memory and get its ID
-    let created_memory = agent_memory.create_memory(memory_input).await.unwrap();
+    let created_memory = character_memory.create_memory(memory_input).await.unwrap();
     let memory_id = created_memory.id;
-    test_utils::wait_for_memory(&agent_memory, memory_id).await;
+    test_utils::wait_for_memory(&character_memory, memory_id).await;
 
     // Delete the memory
-    let result = agent_memory.delete_memory(memory_id).await;
+    let result = character_memory.delete_memory(memory_id).await;
 
     // Verify the deletion was successful
     assert!(result.is_ok(), "Failed to delete memory");
 
     // Try to retrieve the deleted memory
-    let retrieve_result = agent_memory.get_memory_by_id(memory_id).await;
+    let retrieve_result = character_memory.get_memory_by_id(memory_id).await;
 
     // Verify the memory no longer exists
     assert!(
@@ -179,13 +179,13 @@ async fn test_delete_memory() {
 #[tokio::test]
 async fn test_delete_nonexistent_memory() {
     // Setup
-    let (agent_memory, collection_name) = test_utils::setup_agent_memory().await;
+    let (character_memory, collection_name) = test_utils::setup_character_memory().await;
 
     // Generate a random UUID that doesn't exist in the database
     let nonexistent_id = Uuid::new_v4();
 
     // Try to delete a nonexistent memory
-    let result = agent_memory.delete_memory(nonexistent_id).await;
+    let result = character_memory.delete_memory(nonexistent_id).await;
 
     // Verify the result is an error
     assert!(

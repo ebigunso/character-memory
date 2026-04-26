@@ -1,10 +1,10 @@
-# AgentMemory
+# CharacterMemory
 
 ## Construction
 
-`AgentMemory::new(settings, collection_name)` constructs the default OpenAI + Qdrant-backed instance.
+`CharacterMemory::new(settings, collection_name)` constructs the default OpenAI + Qdrant-backed instance.
 
-For deterministic tests or custom embedding backends, use `AgentMemory::new_with_embedding_provider(settings, collection_name, embed_provider)` with your own implementation of `EmbeddingProvider`.
+For deterministic tests or custom embedding backends, use `CharacterMemory::new_with_embedding_provider(settings, collection_name, embed_provider)` with your own implementation of `EmbeddingProvider`.
 
 ## Running Tests
 
@@ -15,7 +15,7 @@ These integration tests require a local Qdrant instance reachable over gRPC (def
 Using `docker run`:
 
 ```sh
-docker run -d --name agentmemory-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
+docker run -d --name charactermemory-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
 ```
 
 Or using Compose:
