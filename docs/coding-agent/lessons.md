@@ -21,6 +21,33 @@ Purpose:
 
 ## Entries
 
+## 2026-04-28 - Quote PR Bodies As Literal Input  [tags: tooling, git, output-contract]
+
+Context:
+- Plan: none
+- Task/Wave: PR creation
+- Roles involved: Orchestrator
+
+Symptom:
+- Initial `gh pr create --body "..."` attempt treated markdown backticks in the PR body as shell command substitutions.
+- The shell tried to execute commands and markdown file paths before the PR was created.
+
+Root cause:
+- Passed a markdown PR body containing backticks through a double-quoted shell argument.
+
+Fix applied:
+- Retried PR creation with `gh pr create --body-file -` and a single-quoted heredoc delimiter so the body was passed literally.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: When creating or updating PR bodies from shell, pass markdown through a literal file/stdin path such as `--body-file - <<'EOF'` instead of a double-quoted `--body` argument.
+- Dispatch/plan guardrail:
+  - For PR bodies containing backticks, checkboxes, or command snippets, use literal stdin/file input before running `gh pr create` or `gh pr edit`.
+
+Evidence:
+- Retry created PR #29 successfully: https://github.com/ebigunso/CharacterMemory/pull/29
+
 ## 2026-04-28 - Explain Temporary Suppressions  [tags: review, code-quality, communication]
 
 Context:
