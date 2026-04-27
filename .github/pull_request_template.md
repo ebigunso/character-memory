@@ -14,13 +14,16 @@ If helpful, point to relevant modules / files / data flow.
 ### Checklist
 <!-- Tick all that apply before requesting review -->
 
-- [ ] Code builds with **no errors or warnings**
-      `cargo check --all-targets`
-- [ ] **Unit tests pass**
-      `cargo test --verbose`
+- [ ] Service-free compile check passes
+      `cargo check`
+- [ ] Service-free test target compilation passes
+      `cargo test --no-run`
 - [ ] **Clippy** passes with warnings denied
       `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo fmt` has been run
+- [ ] Rust formatting check passes
+      `cargo fmt --check`
+- [ ] Full Qdrant-backed integration tests pass in trusted same-repository CI or with local service configuration
+      `cargo test --verbose`
 - [ ] Documentation updated where needed
 - [ ] BREAKING CHANGE? **No** / _describe impact_
 - [ ] I didn’t break anyone 😊

@@ -21,6 +21,60 @@ Purpose:
 
 ## Entries
 
+## 2026-04-28 - Avoid Separate Skipped Checks For CI Rationale  [tags: ci, review, communication]
+
+Context:
+- Plan: PR #29 CI trust-gated integration test follow-up
+- Task/Wave: PR review follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- Added a separate `integration_tests_skipped` job to explain why live integration tests do not run for fork/Dependabot PRs.
+- User clarified that surfacing the explanation as its own skipped check is confusing.
+
+Root cause:
+- Treated visible CI explanation as equivalent to a dedicated check, without considering how that extra check appears in the PR status UI.
+
+Fix applied:
+- Removed the separate skipped-check job and moved the rationale into comments on the actual live integration-test job.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: Prefer inline workflow comments or existing job/step logs for CI rationale; do not add separate skipped check jobs solely for explanation unless the user wants that PR checks UI.
+- Dispatch/plan guardrail:
+  - When adding skipped CI jobs, explicitly consider whether the extra check improves or clutters the PR status surface.
+
+Evidence:
+- PR #29 follow-up removed `integration_tests_skipped` and kept the trust-gating rationale near the `integration_tests` job condition.
+
+## 2026-04-28 - Quote PR Bodies As Literal Input  [tags: tooling, git, output-contract]
+
+Context:
+- Plan: none
+- Task/Wave: PR creation
+- Roles involved: Orchestrator
+
+Symptom:
+- Initial `gh pr create --body "..."` attempt treated markdown backticks in the PR body as shell command substitutions.
+- The shell tried to execute commands and markdown file paths before the PR was created.
+
+Root cause:
+- Passed a markdown PR body containing backticks through a double-quoted shell argument.
+
+Fix applied:
+- Retried PR creation with `gh pr create --body-file -` and a single-quoted heredoc delimiter so the body was passed literally.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: When creating or updating PR bodies from shell, pass markdown through a literal file/stdin path such as `--body-file - <<'EOF'` instead of a double-quoted `--body` argument.
+- Dispatch/plan guardrail:
+  - For PR bodies containing backticks, checkboxes, or command snippets, use literal stdin/file input before running `gh pr create` or `gh pr edit`.
+
+Evidence:
+- Retry created PR #29 successfully: https://github.com/ebigunso/CharacterMemory/pull/29
+
 ## 2026-04-28 - Explain Temporary Suppressions  [tags: review, code-quality, communication]
 
 Context:
