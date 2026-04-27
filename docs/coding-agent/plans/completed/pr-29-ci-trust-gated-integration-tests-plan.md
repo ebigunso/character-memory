@@ -133,7 +133,7 @@
   - Notes: Optional `actionlint` was unavailable locally (`command -v actionlint` exited 1 with no output), so it was not treated as required evidence.
 
 - 2026-04-28 Wave 1 completed: [Task_1]
-  - Summary: Added trusted-context gating for Qdrant-backed integration tests, an explanatory skip job for fork/Dependabot PRs, live config preflight, stable rustfmt setup, and matching PR checklist wording.
+  - Summary: Added trusted-context gating for Qdrant-backed integration tests, live config preflight, stable rustfmt setup, and matching PR checklist wording. The initial explanatory skip job was removed by the follow-up cleanup entry above.
   - Validation evidence: `cargo fmt --check` passed; `cargo check` passed; `cargo test --no-run` passed; `cargo clippy --all-targets -- -D warnings` passed.
   - Notes: Service-free jobs remain ungated and no job-level condition references secrets directly.
 
