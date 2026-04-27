@@ -22,7 +22,7 @@ If helpful, point to relevant modules / files / data flow.
       `cargo clippy --all-targets -- -D warnings`
 - [ ] Rust formatting check passes
       `cargo fmt --check`
-- [ ] Full Qdrant-backed integration tests pass where service credentials are available
+- [ ] Full Qdrant-backed integration tests pass in trusted same-repository CI or with local service configuration
       `cargo test --verbose`
 - [ ] Documentation updated where needed
 - [ ] BREAKING CHANGE? **No** / _describe impact_

@@ -60,6 +60,7 @@ jobs:
   integration_tests:
     name: Qdrant-backed integration tests
     runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
 
     services:
       qdrant:
@@ -83,6 +84,18 @@ jobs:
           toolchain: 1.95.0
           override: true
 
+      - name: Validate live integration configuration
+        shell: bash
+        run: |
+          missing=0
+          for name in QDRANT_CONNECTION_STRING OXIGRAPH_CONNECTION_STRING OPENAI_API_KEY EMBEDDING_MODEL; do
+            if [[ -z "${!name}" ]]; then
+              echo "$name is required for live Qdrant-backed integration tests" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Wait for Qdrant readiness
         shell: bash
         run: |
@@ -100,3 +113,14 @@ jobs:
 
       - name: Run integration tests
         run: cargo test --verbose
+
+  integration_tests_skipped:
+    name: Qdrant-backed integration tests skipped
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]'
+
+    steps:
+      - name: Explain skipped live integration tests
+        run: |
+          echo "Live Qdrant-backed integration tests are skipped for fork and Dependabot PRs."
+          echo "Service-free compile, test target compilation, and clippy jobs still run on every PR."
