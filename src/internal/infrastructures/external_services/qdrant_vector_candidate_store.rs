@@ -1,5 +1,7 @@
 // Transitional v0.1 Qdrant candidate-store scaffold: downstream storage
 // pipeline chunks will consume the concrete adapter after graph authority lands.
+// Remove once remember/link production wiring or tests consume the adapter, or
+// prune any remaining unused surface then.
 #![allow(dead_code)]
 
 use std::collections::HashMap;

@@ -1,6 +1,7 @@
 // Transitional v0.1 Qdrant mapping surface: downstream adapter/pipeline chunks
 // will consume all constants and helpers once live candidate storage is wired
-// into remember/retrieve flows.
+// into remember/retrieve flows. Remove once those production paths consume the
+// mapping surface directly or unused helpers can be pruned.
 #![allow(dead_code)]
 
 use chrono::{DateTime, SecondsFormat, Utc};

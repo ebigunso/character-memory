@@ -1,5 +1,6 @@
 // Transitional v0.1 record surface: downstream adapter chunks will consume all
-// fields and conversions after this provider-neutral foundation lands.
+// fields and conversions after this provider-neutral foundation lands. Remove
+// once remember/link wiring consumes this surface, or prune unused fields then.
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};

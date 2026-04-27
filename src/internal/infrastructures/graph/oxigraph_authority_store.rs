@@ -1,5 +1,7 @@
 // Transitional v0.1 Oxigraph authority store: preserves canonical domain
 // objects for contract reads while materializing RDF triples into Oxigraph.
+// Remove once remember/link production wiring or tests consume the store, or
+// prune any remaining unused surface then.
 #![allow(dead_code)]
 
 use std::collections::HashMap;

@@ -110,7 +110,6 @@
   - `src/api/types.rs`
   - `src/api/types/**`
   - `src/lib.rs`
-  - `tests/**`
 - depends_on: [Task_1]
 - description: |
   Add draft input types/builders and conversion into canonical v0.1 domain objects and links without backend-specific fields.
@@ -146,7 +145,6 @@
   - `src/internal/models/vector.rs`
   - `src/internal/models/vector/**`
   - `src/internal.rs`
-  - `tests/**`
 - depends_on: [Task_2]
 - description: |
   Add an internal remember pipeline that validates drafts, writes graph objects and links, embeds selected vector records, and upserts vector records in deterministic order.
@@ -172,7 +170,7 @@
   - kind: command
     required: true
     owner: worker
-    detail: "Run targeted fake-store remember pipeline tests added by this task."
+    detail: "Run targeted module-local fake-store remember pipeline tests added by this task."
 
 ### Task_4: Add typed link pipeline
 - type: impl
@@ -182,7 +180,6 @@
   - `src/internal/repositories.rs`
   - `src/internal/repositories/**`
   - `src/lib.rs`
-  - `tests/**`
 - depends_on: [Task_2]
 - description: |
   Add typed link behavior that persists canonical `MemoryLink` records as graph-authoritative relationships without vector indexing.
@@ -208,7 +205,7 @@
   - kind: command
     required: true
     owner: worker
-    detail: "Run targeted typed-link pipeline tests added by this task."
+    detail: "Run targeted module-local typed-link pipeline tests added by this task."
 
 ### Task_5: Wire transitional facade and isolate legacy flat API
 - type: impl
@@ -218,7 +215,7 @@
   - `src/api/types/**`
   - `src/internal/repositories.rs`
   - `src/internal/repositories/**`
-  - `tests/**`
+  - `tests/**` # public facade/integration tests only; unit tests stay beside source modules
   - `README.md`
 - depends_on: [Task_3, Task_4]
 - description: |
@@ -226,7 +223,7 @@
 - acceptance:
   - Public or crate-visible construction path can inject graph store, vector store, and embedder for deterministic tests.
   - `CharacterMemory` exposes the selected `remember`/`link` surface or a clearly scoped transitional equivalent.
-  - Old flat `create_memory` path is isolated, deprecated, or removed only according to Task_1 and only if checks stay focused and pass.
+  - Old flat `create_memory` path is removed or replaced when the v0.1 surface supersedes it; isolation/deprecation is allowed only with an explicit architecture or validation-scope justification from Task_1.
   - README examples are updated only if public surface changes require it.
   - No retrieve/correct/forget behavior is introduced.
 - validation:
