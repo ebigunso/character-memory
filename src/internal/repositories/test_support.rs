@@ -261,11 +261,16 @@ impl FixtureRawReferenceResolver {
         Self::default()
     }
 
-    pub(crate) fn insert(&self, reference: impl Into<String>, text: impl Into<String>) {
+    pub(crate) fn insert(
+        &self,
+        reference: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<(), CustomError> {
         let raw_reference = RawReference::new(reference, text);
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = lock(&self.entries)?;
         entries.retain(|entry| entry.reference != raw_reference.reference);
         entries.push(raw_reference);
+        Ok(())
     }
 
     pub(crate) fn insert_file(
@@ -275,8 +280,7 @@ impl FixtureRawReferenceResolver {
     ) -> Result<(), CustomError> {
         let text = fs::read_to_string(path)
             .map_err(|error| CustomError::DatabaseError(error.to_string()))?;
-        self.insert(reference, text);
-        Ok(())
+        self.insert(reference, text)
     }
 }
 
@@ -687,6 +691,10 @@ fn surface_rank(surface: VectorSurface) -> u8 {
 }
 
 fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.len() != right.len() {
+        return 0.0;
+    }
+
     let dot_product: f32 = left
         .iter()
         .zip(right.iter())
@@ -906,5 +914,10 @@ mod tests {
             .hub_links
             .iter()
             .any(|link| link.from_id == fixtures.hub_entity.id));
+    }
+
+    #[test]
+    fn cosine_similarity_rejects_mismatched_dimensions() {
+        assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0, 0.0]), 0.0);
     }
 }
