@@ -2,7 +2,7 @@
 
 - status: draft
 - generated: 2026-04-27
-- last_updated: 2026-04-27
+- last_updated: 2026-04-28
 - work_type: mixed
 - roadmap_scope: full v0.1 implementation phase
 - concrete_plan_policy: draft one separate implementation plan per chunk when that chunk is reached
@@ -15,11 +15,11 @@
 ## Current State Assessment
 - The current public facade is `CharacterMemory` in `src/lib.rs`, with flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory`; this is now legacy surface for the v0.1 rewrite rather than the canonical model.
 - Canonical v0.1 domain objects now live under `src/api/types/domain.rs`, with store/embedder contracts and deterministic fake-store fixtures under `src/internal/repositories/**`.
-- The current live persistence adapter is still vector-only and legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and the concrete live adapter is Qdrant.
-- Qdrant currently stores flat payload fields such as `id`, `memory_type`, `content`, `timestamp`, `location_text`, and `participants`; it does not store v0.1 object types, graph URIs, lifecycle/currentness, derived types, or schema versions.
-- There are v0.1 graph authority contracts and deterministic fake graph expansion support, but no current Oxigraph adapter, RDF vocabulary, SPARQL query layer, or authoritative persisted provenance graph.
-- The current tests cover Qdrant-backed legacy create/read/update/delete/search/filter behavior, v0.1 domain model behavior, and deterministic store/fake-store support, but not live v0.1 Qdrant payloads, RDF/Oxigraph persistence, grouped retrieval, correction supersession pipelines, or live bounded graph expansion.
-- `Cargo.toml` already includes core async/serde/uuid/chrono/qdrant dependencies; the adapter-foundation chunk is expected to add Oxigraph/RDF support and an embedded/in-memory graph-store foundation.
+- The old flat live persistence path remains legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and `QdrantVectorMemoryRepository` still serves the old flat facade.
+- The v0.1 vector foundation now has provider-neutral `VectorRecord` and natural-language embedding surfaces, plus Qdrant v0.1 payload mapping and `VectorCandidateStore::upsert_vector_records` support for full record payloads.
+- The v0.1 graph foundation now has RDF vocabulary/mapping and an embedded/in-memory `OxigraphGraphAuthorityStore` implementing `GraphAuthorityStore` for canonical objects, typed links, query, and bounded expansion foundation.
+- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph smoke, and bounded graph expansion. Grouped retrieval, correction supersession pipelines, and public remember/link behavior remain future chunks.
+- `Cargo.toml` includes the selected Qdrant and Oxigraph dependencies for the adapter foundation.
 
 ## Resolved Decisions
 - Breaking changes are acceptable for v0.1. Compatibility with the old flat API is not a goal; legacy implementations that do not contribute to the new v0.1 architecture can and should be removed as replacement chunks land.
@@ -95,11 +95,15 @@
 - 2026-04-28 Vector and graph adapter foundations plan drafted.
   - Summary: Drafted the active concrete plan for Qdrant v0.1 vector payloads, natural-language embedding surfaces, RDF/Oxigraph graph mapping, and bounded graph expansion adapter behavior.
   - Validation evidence: Documentation-only roadmap update after Researcher context gathering and direct source inspection.
-  - Notes: The current source tree still needs adapter-foundation implementation despite a stale completed plan artifact; the active plan includes reconciliation work.
+  - Notes: Historical planning entry; adapter-foundation implementation has since landed and the plan has moved to completed.
 - 2026-04-28 Adapter validation and Oxigraph scope clarified.
   - Summary: Recorded that the adapter-foundation chunk should add the Oxigraph crate and that live Qdrant/Oxigraph smoke checks should run in CI before merge or locally before PR creation.
   - Validation evidence: Documentation-only roadmap update from user guidance.
-  - Notes: Concrete smoke-check commands/jobs remain to be selected during adapter implementation.
+  - Notes: Historical planning entry; concrete adapter validation evidence is recorded in the completed adapter-foundation plan.
+- 2026-04-28 Vector and graph adapter foundations completed; remember/link plan drafted.
+  - Summary: Completed the adapter-foundation plan, moved it to completed plans, and drafted the next active remember/link pipeline plan from the landed vector/Qdrant/RDF/Oxigraph code shape.
+  - Validation evidence: Final structural review approved code organization, lesson-regression checks, and ADR adherence; required Rust checks and Problems diagnostics were clean.
+  - Notes: The active roadmap now reflects adapter-foundation code as landed state rather than future work.
 
 ## Decision Log
 
@@ -128,7 +132,7 @@
 ## Notes
 - Risks:
   - Qdrant payload hints can drift from Oxigraph graph truth unless correction/forget flows update both sides predictably in later chunks.
-  - Adding Oxigraph may require dependency/config/test-environment decisions before adapter work can proceed.
+  - Production Oxigraph configuration remains future work; the current adapter foundation is embedded/in-memory.
   - Hub entities such as primary user/assistant can create unbounded graph expansion without strict fanout/depth tests.
   - Existing integration tests may fail without local services even when compile/unit checks pass.
 - Edge cases:
