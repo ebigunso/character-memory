@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
+use std::collections::{HashSet, VecDeque};
 
 use crate::api::types::{MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
@@ -73,6 +74,85 @@ pub(crate) struct GraphExpansion {
 impl GraphExpansion {
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self { objects, links }
+    }
+}
+
+pub(crate) fn bounded_expansion_node_set(
+    query: &GraphExpansionQuery,
+    root_exists: bool,
+    links: impl IntoIterator<Item = MemoryLink>,
+) -> Result<HashSet<(MemoryId, ObjectType)>, CustomError> {
+    if query.root_type == ObjectType::MemoryLink {
+        return Err(CustomError::MemoryValidation(
+            "bounded graph expansion does not support MemoryLink roots".to_owned(),
+        ));
+    }
+
+    if query.max_nodes == 0 {
+        return Ok(HashSet::new());
+    }
+
+    if !root_exists {
+        return Err(CustomError::DatabaseError(format!(
+            "Graph expansion root not found: {:?} {}",
+            query.root_type, query.root_id
+        )));
+    }
+
+    let links = links.into_iter().collect::<Vec<_>>();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::from([(query.root_id, query.root_type, 0_u8)]);
+
+    while let Some((object_id, object_type, depth)) = queue.pop_front() {
+        if visited.len() >= query.max_nodes || !visited.insert((object_id, object_type)) {
+            continue;
+        }
+
+        if depth >= query.max_depth {
+            continue;
+        }
+
+        let mut neighbors: Vec<_> = links
+            .iter()
+            .filter_map(|link| {
+                if link.from_id == object_id && link.from_type == object_type {
+                    Some((link.to_id, link.to_type))
+                } else if link.to_id == object_id && link.to_type == object_type {
+                    Some((link.from_id, link.from_type))
+                } else {
+                    None
+                }
+            })
+            .filter(|(_, neighbor_type)| {
+                query.allowed_object_types.is_empty()
+                    || query.allowed_object_types.contains(neighbor_type)
+            })
+            .collect();
+        neighbors.sort_by_key(|node| stable_node_key(*node));
+
+        for neighbor in neighbors {
+            if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
+                continue;
+            }
+            queue.push_back((neighbor.0, neighbor.1, depth + 1));
+        }
+    }
+
+    Ok(visited)
+}
+
+fn stable_node_key(node: (MemoryId, ObjectType)) -> (MemoryId, u8) {
+    (node.0, object_type_rank(node.1))
+}
+
+fn object_type_rank(object_type: ObjectType) -> u8 {
+    match object_type {
+        ObjectType::Episode => 0,
+        ObjectType::Observation => 1,
+        ObjectType::Entity => 2,
+        ObjectType::MemoryThread => 3,
+        ObjectType::DerivedMemory => 4,
+        ObjectType::MemoryLink => 5,
     }
 }
 

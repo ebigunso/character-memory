@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::{
-    point_id::PointIdOptions, points_selector::PointsSelectorOneOf, vectors_config, vectors_output,
-    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DatetimeRange,
-    DeletePointsBuilder, Distance, FieldType, Filter, GetPointsBuilder, PointId, PointStruct,
-    PointsIdsList, RetrievedPoint, ScoredPoint, SearchPointsBuilder, TextIndexParamsBuilder,
-    Timestamp, TokenizerType, UpsertPointsBuilder, VectorParams, VectorsConfig, VectorsOutput,
+    point_id::PointIdOptions, points_selector::PointsSelectorOneOf, vector_output, vectors_config,
+    vectors_output, Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder,
+    DatetimeRange, DeletePointsBuilder, Distance, FieldType, Filter, GetPointsBuilder, PointId,
+    PointStruct, PointsIdsList, RetrievedPoint, ScoredPoint, SearchPointsBuilder,
+    TextIndexParamsBuilder, Timestamp, TokenizerType, UpsertPointsBuilder, VectorParams,
+    VectorsConfig, VectorsOutput,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant};
 use std::collections::HashMap;
@@ -148,7 +149,14 @@ impl QdrantVectorMemoryRepository {
             .vectors
             .ok_or_else(|| CustomError::DatabaseError("Missing vector in point".to_string()))?;
         let vector = match vectors_output.vectors_options {
-            Some(vectors_output::VectorsOptions::Vector(vo)) => vo.data,
+            Some(vectors_output::VectorsOptions::Vector(vo)) => match vo.into_vector() {
+                vector_output::Vector::Dense(vector) => vector.data,
+                _ => {
+                    return Err(CustomError::DatabaseError(
+                        "Unexpected vector output type".to_string(),
+                    ))
+                }
+            },
             _ => {
                 return Err(CustomError::DatabaseError(
                     "Unexpected vector type".to_string(),

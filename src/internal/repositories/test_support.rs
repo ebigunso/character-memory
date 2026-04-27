@@ -3,7 +3,7 @@
 // downstream tests consume the full support surface, or prune unused helpers.
 #![allow(dead_code)]
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -20,11 +20,11 @@ use crate::api::types::{
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
     EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
-    VectorSurface,
+    VectorRecordEmbedding, VectorSurface,
 };
 use crate::internal::repositories::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder,
-    RawReference, RawReferenceResolver, VectorCandidateStore,
+    bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery,
+    GraphObjectQuery, MemoryEmbedder, RawReference, RawReferenceResolver, VectorCandidateStore,
 };
 
 #[derive(Debug, Default)]
@@ -36,14 +36,15 @@ impl FakeVectorCandidateStore {
     pub(crate) fn new() -> Self {
         Self::default()
     }
-}
 
-#[async_trait]
-impl VectorCandidateStore for FakeVectorCandidateStore {
-    async fn upsert_candidates(
+    pub(crate) async fn upsert_candidates(
         &self,
         candidates: &[VectorCandidateRecord],
     ) -> Result<(), CustomError> {
+        self.replace_candidates(candidates)
+    }
+
+    fn replace_candidates(&self, candidates: &[VectorCandidateRecord]) -> Result<(), CustomError> {
         let mut records = lock(&self.records)?;
 
         for candidate in candidates {
@@ -54,6 +55,20 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VectorCandidateStore for FakeVectorCandidateStore {
+    async fn upsert_vector_records(
+        &self,
+        records: &[VectorRecordEmbedding<'_>],
+    ) -> Result<(), CustomError> {
+        let candidates = records
+            .iter()
+            .map(|record| record.to_candidate_record())
+            .collect::<Vec<_>>();
+        self.replace_candidates(&candidates)
     }
 
     async fn search_candidates(
@@ -161,49 +176,12 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
-        if query.max_nodes == 0 {
-            return Ok(GraphExpansion::new(Vec::new(), Vec::new()));
-        }
-
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::from([(query.root_id, query.root_type, 0_u8)]);
-
-        while let Some((object_id, object_type, depth)) = queue.pop_front() {
-            if visited.len() >= query.max_nodes || !visited.insert((object_id, object_type)) {
-                continue;
-            }
-
-            if depth >= query.max_depth {
-                continue;
-            }
-
-            let mut neighbors: Vec<_> = links
-                .iter()
-                .filter_map(|link| {
-                    if link.from_id == object_id && link.from_type == object_type {
-                        Some((link.to_id, link.to_type))
-                    } else if link.to_id == object_id && link.to_type == object_type {
-                        Some((link.from_id, link.from_type))
-                    } else {
-                        None
-                    }
-                })
-                .filter(|(_, neighbor_type)| {
-                    query.allowed_object_types.is_empty()
-                        || query.allowed_object_types.contains(neighbor_type)
-                })
-                .collect();
-            neighbors.sort_by_key(|node| stable_node_key(*node));
-
-            for neighbor in neighbors {
-                if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
-                    continue;
-                }
-                queue.push_back((neighbor.0, neighbor.1, depth + 1));
-            }
-        }
+        let root_exists = objects
+            .iter()
+            .any(|object| object_identity(object) == (query.root_id, query.root_type));
+        let visited = bounded_expansion_node_set(query, root_exists, links.clone())?;
 
         let mut expanded_objects: Vec<_> = objects
             .into_iter()
@@ -311,6 +289,32 @@ pub(crate) struct RepresentativeFixtures {
     pub(crate) suppressed_seed: DerivedMemory,
     pub(crate) soft_thread_link: MemoryLink,
     pub(crate) hub_links: Vec<MemoryLink>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HighFanoutGraphFixture {
+    pub(crate) hub_entity: Entity,
+    pub(crate) episode: Episode,
+    pub(crate) observation: Observation,
+    pub(crate) derived_memories: Vec<DerivedMemory>,
+    pub(crate) links: Vec<MemoryLink>,
+}
+
+impl HighFanoutGraphFixture {
+    pub(crate) fn objects(&self) -> Vec<MemoryObject> {
+        let mut objects = vec![
+            MemoryObject::Entity(self.hub_entity.clone()),
+            MemoryObject::Episode(self.episode.clone()),
+            MemoryObject::Observation(self.observation.clone()),
+        ];
+        objects.extend(
+            self.derived_memories
+                .iter()
+                .cloned()
+                .map(MemoryObject::DerivedMemory),
+        );
+        objects
+    }
 }
 
 impl RepresentativeFixtures {
@@ -498,6 +502,75 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         suppressed_seed,
         soft_thread_link,
         hub_links,
+    }
+}
+
+pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
+    let episode = simple_episode();
+    let observation = salient_observation(episode.id, fixture_id(1));
+    let hub_entity = entity(
+        fixture_id(90),
+        EntityType::Concept,
+        "high fanout hub",
+        Some("concept:high-fanout-hub"),
+    );
+    let derived_memories = (0_u128..12)
+        .map(|offset| {
+            derived_memory(
+                fixture_id(100 + offset),
+                DerivedType::ProjectNote,
+                format!("High fanout derived memory {offset}."),
+                episode.id,
+                observation.id,
+                Vec::new(),
+                vec![hub_entity.id],
+                true,
+                Vec::new(),
+                RetentionState::Active,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut links = vec![
+        link(
+            fixture_id(190),
+            hub_entity.id,
+            ObjectType::Entity,
+            episode.id,
+            ObjectType::Episode,
+            RelationType::Involves,
+        ),
+        link(
+            fixture_id(191),
+            hub_entity.id,
+            ObjectType::Entity,
+            observation.id,
+            ObjectType::Observation,
+            RelationType::Mentions,
+        ),
+    ];
+    links.extend(
+        derived_memories
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(index, memory)| {
+                link(
+                    fixture_id(200 + index as u128),
+                    hub_entity.id,
+                    ObjectType::Entity,
+                    memory.id,
+                    ObjectType::DerivedMemory,
+                    RelationType::About,
+                )
+            }),
+    );
+
+    HighFanoutGraphFixture {
+        hub_entity,
+        episode,
+        observation,
+        derived_memories,
+        links,
     }
 }
 
@@ -781,6 +854,26 @@ mod tests {
 
         assert_eq!(after_delete.len(), 1);
         assert_eq!(after_delete[0].object_id, fixtures.salient_observation.id);
+    }
+
+    #[tokio::test]
+    async fn vector_fake_upserts_full_records_through_store_contract() {
+        let store = FakeVectorCandidateStore::new();
+        let fixtures = representative_fixtures();
+        let record = crate::internal::models::vector::episode_vector_record(&fixtures.episode);
+        let records = vec![VectorRecordEmbedding::new(&record, &[1.0, 0.0])];
+
+        store.upsert_vector_records(&records).await.unwrap();
+
+        let matches = store
+            .search_candidates(&VectorCandidateSearch::new(vec![1.0, 0.0], 10))
+            .await
+            .unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].object_id, fixtures.episode.id);
+        assert_eq!(matches[0].object_type, ObjectType::Episode);
+        assert_eq!(matches[0].surface, VectorSurface::Summary);
     }
 
     #[tokio::test]
