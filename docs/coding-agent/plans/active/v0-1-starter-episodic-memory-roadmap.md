@@ -13,19 +13,21 @@
 - Preserve the handoff's constraints: Rust library crate, chat/voice-transcript scope, Qdrant for vector candidate recall, Oxigraph for graph authority, stable cross-store IDs, deterministic tests, and no required LLM dependency in core.
 
 ## Current State Assessment
-- The current public facade is `CharacterMemory` in `src/lib.rs`, with flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory`.
-- The current public DTOs are flat memory records under `src/api/types`, centered on `Memory`, `MemoryInput`, `MemoryType::{Episodic, Semantic}`, and `ScoredMemory`.
-- The current persistence contract is vector-only: `MemoryRepository` delegates to `VectorMemoryRepository`, and the concrete adapter is Qdrant.
+- The current public facade is `CharacterMemory` in `src/lib.rs`, with flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory`; this is now legacy surface for the v0.1 rewrite rather than the canonical model.
+- Canonical v0.1 domain objects now live under `src/api/types/domain.rs`, with store/embedder contracts and deterministic fake-store fixtures under `src/internal/repositories/**`.
+- The current live persistence adapter is still vector-only and legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and the concrete live adapter is Qdrant.
 - Qdrant currently stores flat payload fields such as `id`, `memory_type`, `content`, `timestamp`, `location_text`, and `participants`; it does not store v0.1 object types, graph URIs, lifecycle/currentness, derived types, or schema versions.
-- There is no current `GraphStore`, Oxigraph adapter, RDF vocabulary, SPARQL query layer, graph expansion policy, or authoritative provenance graph.
-- The current tests cover Qdrant-backed create/read/update/delete/search/filter behavior with deterministic embeddings, but not the v0.1 typed model, graph provenance, lifecycle filtering, grouped retrieval, correction supersession, or bounded graph expansion.
-- `Cargo.toml` already includes core async/serde/uuid/chrono/qdrant dependencies, but Oxigraph/RDF support still needs an explicit dependency and adapter decision in a later chunk.
+- There are v0.1 graph authority contracts and deterministic fake graph expansion support, but no current Oxigraph adapter, RDF vocabulary, SPARQL query layer, or authoritative persisted provenance graph.
+- The current tests cover Qdrant-backed legacy create/read/update/delete/search/filter behavior, v0.1 domain model behavior, and deterministic store/fake-store support, but not live v0.1 Qdrant payloads, RDF/Oxigraph persistence, grouped retrieval, correction supersession pipelines, or live bounded graph expansion.
+- `Cargo.toml` already includes core async/serde/uuid/chrono/qdrant dependencies; the adapter-foundation chunk is expected to add Oxigraph/RDF support and an embedded/in-memory graph-store foundation.
 
 ## Resolved Decisions
 - Breaking changes are acceptable for v0.1. Compatibility with the old flat API is not a goal; legacy implementations that do not contribute to the new v0.1 architecture can and should be removed as replacement chunks land.
 - Raw inputs should remain consumer-owned. Core objects should store only a `raw_ref` or equivalent reference ID.
 - For tests in this first version, raw text may be stored in a temporary file fixture and linked through a reference ID.
-- Graph validation phasing is accepted: use trait-backed graph fakes for pipeline tests, embedded/in-memory Oxigraph tests for RDF/SPARQL behavior where practical, and service-backed Oxigraph checks later as gated integration validation.
+- Graph validation phasing is accepted: use trait-backed graph fakes for pipeline tests, embedded/in-memory Oxigraph tests for RDF/SPARQL behavior where practical, and prerequisite-gated service-backed Oxigraph checks for adapter PR evidence.
+- The vector/graph adapter-foundation chunk should add the Oxigraph crate with the other adapter code.
+- Live Qdrant/Oxigraph smoke checks should run in CI before merge or locally before PR creation; they are not optional merge evidence.
 
 ## Roadmap Chunks
 
@@ -37,12 +39,12 @@
 ### Store Contracts And Deterministic Test Harness
 - Purpose: define vector, graph, raw-reference, and embedder contracts around the v0.1 objects.
 - Expected outcome: fake/in-memory stores and fixtures that support remember/retrieve/lifecycle tests without Qdrant, Oxigraph, OpenAI, or network services, while identifying legacy repository/model pieces that should be removed once replaced.
-- Concrete plan: [docs/coding-agent/plans/active/v0-1-store-contracts-test-harness-plan.md](v0-1-store-contracts-test-harness-plan.md)
+- Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-store-contracts-test-harness-plan.md](../completed/v0-1-store-contracts-test-harness-plan.md)
 
 ### Vector And Graph Adapter Foundations
 - Purpose: migrate Qdrant payloads to `VectorRecord`, add natural-language embedding surfaces, and introduce RDF/Oxigraph graph authority behavior.
 - Expected outcome: Qdrant remains candidate/filter infrastructure while Oxigraph becomes authoritative for relationships, provenance, lifecycle, currentness, supersession, and bounded graph expansion.
-- Concrete plan: draft after store contracts and fixture shape are known.
+- Concrete plan: [docs/coding-agent/plans/active/v0-1-vector-graph-adapter-foundations-plan.md](v0-1-vector-graph-adapter-foundations-plan.md)
 
 ### Remember And Link Pipelines
 - Purpose: implement caller-supplied draft inputs and persistence ordering for entities, episodes, observations, links, derived memories, and selected vector records.
@@ -67,7 +69,7 @@
 ## Cross-Cutting Validation Expectations
 - Every concrete implementation plan should include `cargo fmt --check`, `cargo check`, and `cargo test --no-run` unless explicitly waived.
 - Deterministic unit/fake-store tests are required before relying on service-backed integration tests.
-- Qdrant and Oxigraph live-service checks should be gated and documented with prerequisites.
+- Qdrant and Oxigraph live-service checks should be prerequisite-gated and documented, but required before PR merge through CI or locally before PR creation.
 - Reviewer gates are required for non-trivial implementation chunks before marking a plan complete.
 
 ## Rollback / Safety
@@ -90,6 +92,14 @@
   - Summary: Recorded that legacy compatibility is not a v0.1 goal and that legacy implementations which do not contribute to the new architecture should be removed as replacement chunks land.
   - Validation evidence: Documentation-only roadmap update.
   - Notes: Future concrete plans should not preserve old flat API behavior unless it directly serves the new architecture.
+- 2026-04-28 Vector and graph adapter foundations plan drafted.
+  - Summary: Drafted the active concrete plan for Qdrant v0.1 vector payloads, natural-language embedding surfaces, RDF/Oxigraph graph mapping, and bounded graph expansion adapter behavior.
+  - Validation evidence: Documentation-only roadmap update after Researcher context gathering and direct source inspection.
+  - Notes: The current source tree still needs adapter-foundation implementation despite a stale completed plan artifact; the active plan includes reconciliation work.
+- 2026-04-28 Adapter validation and Oxigraph scope clarified.
+  - Summary: Recorded that the adapter-foundation chunk should add the Oxigraph crate and that live Qdrant/Oxigraph smoke checks should run in CI before merge or locally before PR creation.
+  - Validation evidence: Documentation-only roadmap update from user guidance.
+  - Notes: Concrete smoke-check commands/jobs remain to be selected during adapter implementation.
 
 ## Decision Log
 
@@ -107,6 +117,12 @@
   - Trigger / new insight: User clarified that compatibility is not a concern for v0.1.
   - Plan delta: Explicitly direct future chunks to remove legacy flat API implementations that do not contribute to the new v0.1 architecture.
   - Tradeoffs considered: Keeping compatibility shims may reduce short-term disruption but increases architectural drag and test burden during the v0.1 rewrite.
+  - User approval: yes.
+
+- 2026-04-28 Decision: Include Oxigraph and require live smoke evidence for adapter PRs
+  - Trigger / new insight: User answered the open adapter-foundation planning questions.
+  - Plan delta: The adapter-foundation chunk should add Oxigraph/RDF support directly, and live Qdrant/Oxigraph smoke checks should be run before PR merge in CI or locally before PR creation.
+  - Tradeoffs considered: Requiring live smoke evidence increases setup burden but keeps storage adapter PRs from merging with only deterministic mapping tests.
   - User approval: yes.
 
 ## Notes
