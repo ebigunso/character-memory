@@ -1,3 +1,6 @@
+// Transitional v0.1 repository contract: implemented before the live graph
+// adapter and retrieval pipeline. Remove once those chunks consume the full
+// contract surface, or prune unused query shapes.
 #![allow(dead_code)]
 
 use async_trait::async_trait;

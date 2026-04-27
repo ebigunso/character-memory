@@ -1,3 +1,6 @@
+// Transitional v0.1 contract model surface: some fields/builders are reserved
+// for adapter and pipeline chunks. Remove once those chunks consume the record
+// types directly, or prune unused members.
 #![allow(dead_code)]
 
 use crate::api::types::{MemoryId, ObjectType};

@@ -21,6 +21,33 @@ Purpose:
 
 ## Entries
 
+## 2026-04-28 - Explain Temporary Suppressions  [tags: review, code-quality, communication]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-store-contracts-test-harness-plan.md`
+- Task/Wave: PR review follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- Added `allow` suppressions for transitional v0.1 contract/test-support code without explaining why they exist or when they can be removed.
+- User clarified that code should not just work without context when the safe revision point is not obvious.
+
+Root cause:
+- Treated the suppression as self-explanatory implementation scaffolding instead of documenting the temporary boundary it protects.
+
+Fix applied:
+- Added concise rationale and removal-condition comments for the transitional `dead_code` and `unused_imports` suppressions.
+
+Prevention:
+- Repo rule candidate:
+  - audience: common
+  - proposed rule: Temporary lint suppressions should explain why they exist and when they can be safely removed, unless the reason is obvious from nearby code.
+- Dispatch/plan guardrail:
+  - During review follow-up, inspect newly added `allow` attributes for rationale and removal conditions before marking comments resolved.
+
+Evidence:
+- Suppression comments added to v0.1 store contract and test-support modules.
+
 ## 2026-04-27 - Hidden PR Template Discovery  [tags: tooling, output-contract]
 
 Context:

@@ -1,3 +1,6 @@
+// Transitional v0.1 test harness: exposes reusable fakes and fixtures for
+// downstream adapter/pipeline tests before every helper is used. Remove once
+// downstream tests consume the full support surface, or prune unused helpers.
 #![allow(dead_code)]
 
 use std::collections::{HashSet, VecDeque};
