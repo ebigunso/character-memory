@@ -5,7 +5,60 @@ on:
     branches: [ "main", "develop" ]
 
 jobs:
-  validate_pr:
+  compile_check:
+    name: Compile check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Run cargo check
+        run: cargo check
+
+  test_compilation:
+    name: Test target compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Compile tests without running them
+        run: cargo test --no-run
+
+  clippy:
+    name: Clippy lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain with clippy
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: clippy
+
+      - name: Run clippy with warnings denied
+        run: cargo clippy --all-targets -- -D warnings
+
+  integration_tests:
+    name: Qdrant-backed integration tests
     runs-on: ubuntu-latest
 
     services:
@@ -29,7 +82,6 @@ jobs:
         with:
           toolchain: 1.95.0
           override: true
-          components: clippy
 
       - name: Wait for Qdrant readiness
         shell: bash
@@ -46,11 +98,5 @@ jobs:
           curl -v http://127.0.0.1:6333/ -m 2 || true
           exit 1
 
-      - name: Cargo Check
-        run: cargo check --all-targets
-
-      - name: Cargo Test
+      - name: Run integration tests
         run: cargo test --verbose
-
-      - name: Clippy Check
-        run: cargo clippy --all-targets -- -D warnings
