@@ -505,7 +505,7 @@ mod tests {
 
         store.upsert_objects(&fixtures.objects()).await.unwrap();
         store
-            .upsert_links(&[fixtures.soft_thread_link.clone()])
+            .upsert_links(std::slice::from_ref(&fixtures.soft_thread_link))
             .await
             .unwrap();
         assert!(store.contains_triple(&stale_relation_literal).unwrap());
@@ -546,7 +546,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .upsert_links(&[fixtures.soft_thread_link.clone()])
+            .upsert_links(std::slice::from_ref(&fixtures.soft_thread_link))
             .await
             .unwrap();
 

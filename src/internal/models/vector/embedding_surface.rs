@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn memory_object_builder_covers_vector_indexed_domain_objects_and_skips_links() {
-        let objects = vec![
+        let objects = [
             MemoryObject::Episode(episode_fixture()),
             MemoryObject::Observation(observation_fixture()),
             MemoryObject::DerivedMemory(derived_memory_fixture()),
