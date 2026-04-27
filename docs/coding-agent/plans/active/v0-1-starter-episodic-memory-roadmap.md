@@ -54,11 +54,13 @@
 ### Retrieve And ContinuityContextPack
 - Purpose: implement vector-to-graph retrieval, bounded expansion, lifecycle/currentness filtering, deterministic reranking, grouped context pack assembly, rationale, and optional trace.
 - Expected outcome: `retrieve` returns `ContinuityContextPack` and excludes suppressed/deleted and superseded/non-current memories by default.
+- Deferred review findings to carry forward: the current `GraphExpansionQuery` only covers depth, node count, and object-type constraints. The retrieve plan should add relation-type allowlists, fanout or hub limits, lifecycle/currentness filters, and timeout/failure policy before retrieval assembly depends on graph expansion.
 - Concrete plan: draft after remember/link and graph expansion behavior are stable.
 
 ### Correction And Forget Lifecycle
 - Purpose: implement non-destructive correction through supersession and lifecycle updates, plus `forget` with suppression as the default.
 - Expected outcome: corrections preserve provenance, old derived memories become non-current, and suppressed memories are hidden from normal retrieval.
+- Deferred review findings to carry forward: hard delete/update behavior in the legacy flat facade conflicts with the v0.1 lifecycle direction. Correction/forget work should preserve supersession/suppression as default behavior and reserve hard deletion for explicit redaction/delete semantics.
 - Concrete plan: draft after retrieval filtering semantics are stable.
 
 ### Documentation, Migration Cleanup, And Release Validation
@@ -135,6 +137,11 @@
   - Production Oxigraph configuration remains future work; the current adapter foundation is embedded/in-memory.
   - Hub entities such as primary user/assistant can create unbounded graph expansion without strict fanout/depth tests.
   - Existing integration tests may fail without local services even when compile/unit checks pass.
+- Deferred review findings:
+  - Replace or remove the legacy flat public facade as the v0.1 `remember`/`link`/`retrieve` surface lands; do not preserve it for compatibility alone.
+  - Retire or clearly split the old `QdrantVectorMemoryRepository` legacy mapping/I/O path when the v0.1 Qdrant candidate store becomes the active persistence path.
+  - Split broad shared test support into narrower fake/fixture/embedder/raw-reference modules as new pipeline tests make stable ownership clearer.
+  - Resolve the `assistant_preference` derived-type naming question before public draft DTOs harden serialized names.
 - Edge cases:
   - Observations should be salient excerpts, not every turn by default.
   - Threads must remain optional, many-to-many, and confidence-scored.

@@ -69,12 +69,19 @@
 - Q1: Should public draft DTOs generate IDs/timestamps when omitted, or should callers supply all durable IDs/timestamps for this first pipeline chunk?
 - Q2: Should this chunk redesign `CharacterMemory::new` for v0.1 production stores, or add a test-first injectable constructor and defer default production wiring?
 - Q3: On vector upsert failure after graph success, should the pipeline return a hard error only, or return persisted graph IDs plus an indexing failure status?
+- Q4: Should `DerivedType::AssistantBehaviorNote` be renamed or aliased to the ADR-listed `assistant_preference` before draft DTOs become public, so behavior-influencing assistant preferences are not split across names?
 
 ## Assumptions
 - A1: Draft types may be public if Task_1 selects a public `remember`/`link` facade, but they must stay canonical-domain-aligned and backend-free.
 - A2: Persistence ordering should be validate all drafts, upsert graph objects, upsert graph links, embed selected vector records, then upsert vectors.
 - A3: This chunk should fail closed on validation or store errors and explicitly document any non-atomic multi-store behavior.
 - A4: Live Qdrant smoke evidence remains required before PR creation/merge; embedded Oxigraph smoke has no external service prerequisite.
+
+## Deferred Review Findings To Address In This Plan
+- Public flat facade replacement: the strict ADR review found that `CharacterMemory::{create_memory, search_memories, update_memory, delete_memory}` still makes the old `MemoryInput`/`MemoryType` and flat `Memory`/`ScoredMemory` model the practical public entry point. Task_1 and Task_5 must decide and implement removal or replacement when `remember`/`link` supersede it; isolation/deprecation is acceptable only with an explicit short-lived architecture or validation-scope reason.
+- Legacy Qdrant repository retirement: `QdrantVectorMemoryRepository` still mixes old flat payload mapping, filter/index policy, point deserialization, and Qdrant I/O. Prefer retiring it with the flat facade. If it must survive temporarily, split legacy mapping helpers from I/O so it cannot be mistaken for the v0.1 Qdrant candidate adapter.
+- Test-support split: `src/internal/repositories/test_support.rs` is a broad shared harness containing fakes, fixtures, raw-reference resolution, deterministic embedding, helper algorithms, and tests. As remember/link tests are added, split reusable test support by responsibility or keep new helpers module-local so the monolithic file does not become permanent debt.
+- Derived type naming: resolve whether the ADR-listed `assistant_preference` should be represented directly before public draft DTOs harden serialized names.
 
 ## Tasks
 
@@ -92,6 +99,7 @@
 - acceptance:
   - Decision records whether draft DTOs live in `src/api/types/domain.rs` or new direct files under `src/api/types/`.
   - Decision records public facade shape for `CharacterMemory::remember` and `CharacterMemory::link`, including how old flat methods remain isolated or are retired.
+  - Decision records how the deferred review findings in this plan are handled, explicitly including legacy facade replacement, legacy Qdrant repository retirement/split, test-support split boundaries, and `assistant_preference` naming.
   - Decision records persistence ordering and partial-failure policy.
   - Decision keeps draft and pipeline contracts backend-free.
 - validation:
@@ -117,6 +125,7 @@
   - Draft types represent entities, episodes, observations, memory threads, derived memories, and memory links.
   - Draft conversion produces canonical `MemoryObject`/`MemoryLink` values with stable IDs, schema version, raw refs, lifecycle/currentness fields where applicable, and validation.
   - Derived memory drafts require at least one source episode or observation.
+  - Derived memory draft type names align with ADR vocabulary, including resolving the `assistant_preference` naming question before the draft surface becomes public.
   - Drafts preserve raw references without introducing raw transcript storage.
   - Drafts do not expose Qdrant, Oxigraph, RDF, or SPARQL types.
 - validation:
@@ -154,6 +163,7 @@
   - Vector indexing uses `memory_object_vector_record` and indexes only `Episode`, `Observation`, `DerivedMemory`, `MemoryThread`, and `Entity`.
   - Embeddings use `MemoryEmbedder::embed_batch` or an equivalent deterministic-test-friendly path before `VectorCandidateStore::upsert_vector_records`.
   - Tests assert ordering and no vector write when graph object/link write fails.
+  - New fake-store and fixture helpers are module-local or placed in narrower test-support modules rather than expanding the existing monolithic `test_support.rs` without a split plan.
 - validation:
   - kind: command
     required: true
@@ -224,6 +234,7 @@
   - Public or crate-visible construction path can inject graph store, vector store, and embedder for deterministic tests.
   - `CharacterMemory` exposes the selected `remember`/`link` surface or a clearly scoped transitional equivalent.
   - Old flat `create_memory` path is removed or replaced when the v0.1 surface supersedes it; isolation/deprecation is allowed only with an explicit architecture or validation-scope justification from Task_1.
+  - The legacy `QdrantVectorMemoryRepository` path is retired with the flat facade when possible; if retained, its legacy mapping responsibilities are split or clearly namespaced so it cannot be confused with the v0.1 `VectorCandidateStore` adapter.
   - README examples are updated only if public surface changes require it.
   - No retrieve/correct/forget behavior is introduced.
 - validation:
