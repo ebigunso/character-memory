@@ -58,8 +58,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
   integration_tests:
-    name: Qdrant-backed integration tests
+    name: Live service integration tests
     runs-on: ubuntu-latest
+    # Live service-backed tests need repository-controlled configuration and secrets.
+    # Fork and Dependabot PRs still run the service-free checks above, but skip this job.
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
 
     services:
@@ -113,14 +115,3 @@ jobs:
 
       - name: Run integration tests
         run: cargo test --verbose
-
-  integration_tests_skipped:
-    name: Qdrant-backed integration tests skipped
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]'
-
-    steps:
-      - name: Explain skipped live integration tests
-        run: |
-          echo "Live Qdrant-backed integration tests are skipped for fork and Dependabot PRs."
-          echo "Service-free compile, test target compilation, and clippy jobs still run on every PR."

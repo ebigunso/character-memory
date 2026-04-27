@@ -21,6 +21,33 @@ Purpose:
 
 ## Entries
 
+## 2026-04-28 - Avoid Separate Skipped Checks For CI Rationale  [tags: ci, review, communication]
+
+Context:
+- Plan: PR #29 CI trust-gated integration test follow-up
+- Task/Wave: PR review follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- Added a separate `integration_tests_skipped` job to explain why live integration tests do not run for fork/Dependabot PRs.
+- User clarified that surfacing the explanation as its own skipped check is confusing.
+
+Root cause:
+- Treated visible CI explanation as equivalent to a dedicated check, without considering how that extra check appears in the PR status UI.
+
+Fix applied:
+- Removed the separate skipped-check job and moved the rationale into comments on the actual live integration-test job.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: Prefer inline workflow comments or existing job/step logs for CI rationale; do not add separate skipped check jobs solely for explanation unless the user wants that PR checks UI.
+- Dispatch/plan guardrail:
+  - When adding skipped CI jobs, explicitly consider whether the extra check improves or clutters the PR status surface.
+
+Evidence:
+- PR #29 follow-up removed `integration_tests_skipped` and kept the trust-gating rationale near the `integration_tests` job condition.
+
 ## 2026-04-28 - Quote PR Bodies As Literal Input  [tags: tooling, git, output-contract]
 
 Context:
