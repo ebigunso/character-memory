@@ -215,7 +215,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
                     && visited.contains(&(link.to_id, link.to_type))
             })
             .collect();
-        expanded_links.sort_by(|left, right| left.id.cmp(&right.id));
+        expanded_links.sort_by_key(|link| link.id);
 
         Ok(GraphExpansion::new(expanded_objects, expanded_links))
     }
