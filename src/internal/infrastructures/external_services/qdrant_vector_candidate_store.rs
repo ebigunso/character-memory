@@ -8,10 +8,10 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    point_id::PointIdOptions, points_selector::PointsSelectorOneOf, value::Kind, vectors_config,
-    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
-    Distance, Filter, PointId, PointStruct, PointsIdsList, ScoredPoint, SearchPointsBuilder,
-    UpsertPointsBuilder, VectorParams, VectorsConfig,
+    points_selector::PointsSelectorOneOf, value::Kind, vectors_config, Condition,
+    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
+    Filter, PointStruct, ScoredPoint, SearchPointsBuilder, UpsertPointsBuilder, VectorParams,
+    VectorsConfig,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant};
 
@@ -23,7 +23,8 @@ use crate::internal::models::vector::{
 use crate::internal::repositories::VectorCandidateStore;
 
 use super::qdrant_payload::{
-    qdrant_payload_index_fields, qdrant_payload_map, OBJECT_TYPE_FIELD, SURFACE_FIELD,
+    qdrant_payload_index_fields, qdrant_payload_map, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
+    SURFACE_FIELD,
 };
 
 pub(crate) struct QdrantVectorCandidateStore {
@@ -155,13 +156,11 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             return Ok(());
         }
 
-        let ids = object_ids
+        let conditions: Vec<_> = object_ids
             .iter()
-            .map(|id| PointId {
-                point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
-            })
+            .map(|id| Condition::matches(OBJECT_ID_FIELD, id.to_string()))
             .collect();
-        let selector = PointsSelectorOneOf::Points(PointsIdsList { ids });
+        let selector = PointsSelectorOneOf::Filter(Filter::should(conditions));
         let request = DeletePointsBuilder::new(&self.collection_name)
             .points(selector)
             .wait(true)
@@ -179,7 +178,7 @@ fn qdrant_point_structs(
         .map(|record| {
             let payload = qdrant_payload_map(record.record)?;
             Ok(PointStruct::new(
-                record.record.object_id.to_string(),
+                qdrant_point_id(record.record).to_string(),
                 record.embedding.to_vec(),
                 payload,
             ))
@@ -188,17 +187,9 @@ fn qdrant_point_structs(
 }
 
 fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, CustomError> {
-    let object_id = point
-        .id
-        .as_ref()
-        .and_then(|id| id.point_id_options.as_ref())
-        .and_then(|options| match options {
-            PointIdOptions::Uuid(value) => Some(value.as_str()),
-            _ => None,
-        })
-        .ok_or_else(|| CustomError::DatabaseError("Missing Qdrant point UUID".to_owned()))?;
-    let object_id = uuid::Uuid::parse_str(object_id).map_err(|error| {
-        CustomError::DatabaseError(format!("Invalid Qdrant point UUID: {error}"))
+    let object_id = payload_string(&point.payload, OBJECT_ID_FIELD)?;
+    let object_id = uuid::Uuid::parse_str(&object_id).map_err(|error| {
+        CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
     })?;
 
     let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
@@ -210,6 +201,31 @@ fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, Cus
         surface,
         point.score,
     ))
+}
+
+fn qdrant_point_id(record: &crate::internal::models::vector::VectorRecord) -> uuid::Uuid {
+    let mut first = 0xcbf29ce484222325_u64;
+    let mut second = 0x9e3779b97f4a7c15_u64;
+
+    for byte in record
+        .object_id
+        .as_bytes()
+        .iter()
+        .copied()
+        .chain(surface_name(record.surface).as_bytes().iter().copied())
+    {
+        first ^= u64::from(byte);
+        first = first.wrapping_mul(0x100000001b3);
+        second ^= u64::from(byte).wrapping_add(0x9e3779b97f4a7c15);
+        second = second.rotate_left(5).wrapping_mul(0x517cc1b727220a95);
+    }
+
+    let mut bytes = [0_u8; 16];
+    bytes[..8].copy_from_slice(&first.to_be_bytes());
+    bytes[8..].copy_from_slice(&second.to_be_bytes());
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
 }
 
 fn payload_string(
@@ -232,6 +248,16 @@ fn object_type_name(object_type: ObjectType) -> &'static str {
         ObjectType::MemoryThread => "memory_thread",
         ObjectType::DerivedMemory => "derived_memory",
         ObjectType::MemoryLink => "memory_link",
+    }
+}
+
+fn surface_name(surface: VectorSurface) -> &'static str {
+    match surface {
+        VectorSurface::Summary => "summary",
+        VectorSurface::Text => "text",
+        VectorSurface::Name => "name",
+        VectorSurface::DerivedText => "derived_text",
+        VectorSurface::Query => "query",
     }
 }
 
@@ -271,18 +297,25 @@ mod tests {
         VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
         VectorSurface,
     };
-    use qdrant_client::qdrant::{value::Kind, vector, vectors, Value};
+    use qdrant_client::qdrant::{
+        point_id::PointIdOptions, value::Kind, vector, vectors, PointId, Value,
+    };
     use std::env;
     use uuid::Uuid;
 
     #[test]
     fn search_result_mapping_reads_v0_1_payload_identity_and_surface() {
         let object_id = Uuid::new_v4();
+        let point_id = Uuid::new_v4();
         let point = ScoredPoint {
             id: Some(PointId {
-                point_id_options: Some(PointIdOptions::Uuid(object_id.to_string())),
+                point_id_options: Some(PointIdOptions::Uuid(point_id.to_string())),
             }),
             payload: HashMap::from([
+                (
+                    OBJECT_ID_FIELD.to_owned(),
+                    string_value(&object_id.to_string()),
+                ),
                 (OBJECT_TYPE_FIELD.to_owned(), string_value("derived_memory")),
                 (SURFACE_FIELD.to_owned(), string_value("derived_text")),
             ]),
@@ -296,6 +329,53 @@ mod tests {
         assert_eq!(matched.object_type, ObjectType::DerivedMemory);
         assert_eq!(matched.surface, VectorSurface::DerivedText);
         assert_eq!(matched.score, 0.75);
+    }
+
+    #[test]
+    fn point_ids_are_unique_per_object_surface_and_identity_stays_in_payload() {
+        let object_id = Uuid::new_v4();
+        let summary = VectorRecord::new(
+            object_id,
+            ObjectType::Episode,
+            graph_uri(ObjectType::Episode, object_id),
+            VectorSurface::Summary,
+            "Episode summary.",
+            "Episode summary.",
+            DEFAULT_SCHEMA_VERSION,
+            None,
+            None,
+            VectorRelationshipHints::default(),
+            None,
+        );
+        let text = VectorRecord::new(
+            object_id,
+            ObjectType::Episode,
+            graph_uri(ObjectType::Episode, object_id),
+            VectorSurface::Text,
+            "Episode text.",
+            "Episode text.",
+            DEFAULT_SCHEMA_VERSION,
+            None,
+            None,
+            VectorRelationshipHints::default(),
+            None,
+        );
+
+        let points = qdrant_point_structs(&[
+            VectorRecordEmbedding::new(&summary, &[1.0, 0.0]),
+            VectorRecordEmbedding::new(&text, &[0.0, 1.0]),
+        ])
+        .expect("points build");
+
+        assert_ne!(points[0].id, points[1].id);
+        assert_eq!(
+            payload_string(&points[0].payload, OBJECT_ID_FIELD).unwrap(),
+            object_id.to_string()
+        );
+        assert_eq!(
+            payload_string(&points[1].payload, OBJECT_ID_FIELD).unwrap(),
+            object_id.to_string()
+        );
     }
 
     #[test]

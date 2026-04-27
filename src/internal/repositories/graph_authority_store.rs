@@ -88,15 +88,15 @@ pub(crate) fn bounded_expansion_node_set(
         ));
     }
 
-    if query.max_nodes == 0 {
-        return Ok(HashSet::new());
-    }
-
     if !root_exists {
         return Err(CustomError::DatabaseError(format!(
             "Graph expansion root not found: {:?} {}",
             query.root_type, query.root_id
         )));
+    }
+
+    if query.max_nodes == 0 {
+        return Ok(HashSet::new());
     }
 
     let links = links.into_iter().collect::<Vec<_>>();
@@ -236,5 +236,15 @@ mod tests {
 
         assert!(expansion.objects.is_empty());
         assert!(expansion.links.is_empty());
+    }
+
+    #[test]
+    fn bounded_expansion_validates_missing_root_before_zero_node_limit() {
+        let query = GraphExpansionQuery::new(MemoryId::new_v4(), ObjectType::Entity, 1, 0);
+
+        let error = bounded_expansion_node_set(&query, false, Vec::new()).unwrap_err();
+
+        assert!(matches!(error, CustomError::DatabaseError(_)));
+        assert!(error.to_string().contains("root not found"));
     }
 }

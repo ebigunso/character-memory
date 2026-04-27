@@ -47,7 +47,7 @@ impl OxigraphGraphAuthorityStore {
         owner_graph_uri: String,
         triples: &[RdfTriple],
     ) -> Result<(), CustomError> {
-        let quads = quads_for_triples(triples)?;
+        let quads = quads_for_triples(&owner_graph_uri, triples)?;
         let mut inserted_quads = lock(&self.inserted_quads)?;
 
         if let Some(previous_quads) = inserted_quads.remove(&owner_graph_uri) {
@@ -75,13 +75,52 @@ impl OxigraphGraphAuthorityStore {
 
     #[cfg(test)]
     fn contains_triple(&self, triple: &RdfTriple) -> Result<bool, CustomError> {
-        let quad = quad_for_triple(triple)?;
-        self.store.contains(&quad).map_err(oxigraph_error)
+        let subject = NamedOrBlankNode::NamedNode(NamedNode::new(triple.subject.as_str())?);
+        let predicate = NamedNode::new(triple.predicate.as_str())?;
+        let object = match &triple.object {
+            RdfObject::Resource(value) => Term::NamedNode(NamedNode::new(value.as_str())?),
+            RdfObject::Literal(value) => Term::Literal(Literal::new_simple_literal(value.as_str())),
+        };
+
+        for quad in self.store.iter() {
+            let quad = quad.map_err(oxigraph_error)?;
+            if quad.subject == subject && quad.predicate == predicate && quad.object == object {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    #[cfg(test)]
+    fn matching_triple_count(&self, triple: &RdfTriple) -> Result<usize, CustomError> {
+        let subject = NamedOrBlankNode::NamedNode(NamedNode::new(triple.subject.as_str())?);
+        let predicate = NamedNode::new(triple.predicate.as_str())?;
+        let object = match &triple.object {
+            RdfObject::Resource(value) => Term::NamedNode(NamedNode::new(value.as_str())?),
+            RdfObject::Literal(value) => Term::Literal(Literal::new_simple_literal(value.as_str())),
+        };
+
+        let mut count = 0;
+        for quad in self.store.iter() {
+            let quad = quad.map_err(oxigraph_error)?;
+            if quad.subject == subject && quad.predicate == predicate && quad.object == object {
+                count += 1;
+            }
+        }
+
+        Ok(count)
     }
 }
 
-fn quads_for_triples(triples: &[RdfTriple]) -> Result<Vec<Quad>, CustomError> {
-    triples.iter().map(quad_for_triple).collect()
+fn quads_for_triples(
+    owner_graph_uri: &str,
+    triples: &[RdfTriple],
+) -> Result<Vec<Quad>, CustomError> {
+    triples
+        .iter()
+        .map(|triple| quad_for_triple(owner_graph_uri, triple))
+        .collect()
 }
 
 #[async_trait]
@@ -167,9 +206,10 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     }
 }
 
-fn quad_for_triple(triple: &RdfTriple) -> Result<Quad, CustomError> {
+fn quad_for_triple(owner_graph_uri: &str, triple: &RdfTriple) -> Result<Quad, CustomError> {
     let subject = NamedNode::new(triple.subject.as_str())?;
     let predicate = NamedNode::new(triple.predicate.as_str())?;
+    let graph_name = NamedNode::new(owner_graph_uri)?;
     let object = match &triple.object {
         RdfObject::Resource(value) => Term::NamedNode(NamedNode::new(value.as_str())?),
         RdfObject::Literal(value) => Term::Literal(Literal::new_simple_literal(value.as_str())),
@@ -179,7 +219,7 @@ fn quad_for_triple(triple: &RdfTriple) -> Result<Quad, CustomError> {
         NamedOrBlankNode::NamedNode(subject),
         predicate,
         object,
-        GraphName::DefaultGraph,
+        GraphName::NamedNode(graph_name),
     ))
 }
 
@@ -531,6 +571,53 @@ mod tests {
             .unwrap();
         assert!(expansion.links.contains(&updated_link));
         assert!(!expansion.links.contains(&fixtures.soft_thread_link));
+    }
+
+    #[tokio::test]
+    async fn oxigraph_store_keeps_duplicate_direct_relation_quads_owned_by_other_links() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut duplicate_link = fixtures.soft_thread_link.clone();
+        duplicate_link.id = MemoryId::new_v4();
+        let mut updated_link = fixtures.soft_thread_link.clone();
+        updated_link.from_id = fixtures.derived_reflection.id;
+        updated_link.from_type = ObjectType::DerivedMemory;
+        updated_link.to_id = fixtures.episode.id;
+        updated_link.to_type = ObjectType::Episode;
+        updated_link.relation = RelationType::DerivedFrom;
+
+        let stale_relation = RdfTriple {
+            subject: graph_uri(
+                fixtures.soft_thread_link.from_type,
+                fixtures.soft_thread_link.from_id,
+            ),
+            predicate: vocab::relation_predicate("part_of_thread"),
+            object: RdfObject::Resource(graph_uri(
+                fixtures.soft_thread_link.to_type,
+                fixtures.soft_thread_link.to_id,
+            )),
+        };
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store
+            .upsert_links(&[fixtures.soft_thread_link.clone(), duplicate_link.clone()])
+            .await
+            .unwrap();
+        assert_eq!(store.matching_triple_count(&stale_relation).unwrap(), 2);
+
+        store.upsert_links(&[updated_link]).await.unwrap();
+
+        assert_eq!(store.matching_triple_count(&stale_relation).unwrap(), 1);
+        let expansion = store
+            .expand_bounded(&GraphExpansionQuery::new(
+                duplicate_link.from_id,
+                duplicate_link.from_type,
+                1,
+                4,
+            ))
+            .await
+            .unwrap();
+        assert!(expansion.links.contains(&duplicate_link));
     }
 
     #[tokio::test]

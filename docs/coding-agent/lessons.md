@@ -21,6 +21,29 @@ Purpose:
 
 ## Entries
 
+## 2026-04-28 - Parallelize Review Loops And Avoid Token-Burning Waits  [tags: delegation, review, tooling]
+
+Context:
+- Plan: PR #31 Copilot review remediation
+- Task/Wave: PR comment triage and re-review loop
+- Roles involved: Orchestrator
+
+Symptom:
+- The user clarified that review/remediation loops should use subagents as much as possible and should wait in ways that do not burn inference tokens.
+
+Root cause:
+- The main thread was carrying too much review/verification work directly and risked treating periodic Copilot polling as an active waiting loop.
+
+Fix applied:
+- Delegated focused remediation review to Reviewer subagents, kept the main thread to orchestration and decisions, and avoided sleep/poll loops.
+
+Prevention:
+- For PR review remediation, split independent review aspects into Reviewer subagents and use main-thread checks only for state transitions, validation evidence, or user/terminal notifications.
+- Do not run token-burning polling loops while waiting for external review; use non-interactive status checks only when prompted by a state change or after returning control.
+
+Evidence:
+- PR #31 Copilot remediation used focused Reviewer subagents for scoped patch review and validation confirmation.
+
 ## 2026-04-28 - Avoid Separate Skipped Checks For CI Rationale  [tags: ci, review, communication]
 
 Context:
