@@ -44,12 +44,12 @@
 ### Vector And Graph Adapter Foundations
 - Purpose: migrate Qdrant payloads to `VectorRecord`, add natural-language embedding surfaces, and introduce RDF/Oxigraph graph authority behavior.
 - Expected outcome: Qdrant remains candidate/filter infrastructure while Oxigraph becomes authoritative for relationships, provenance, lifecycle, currentness, supersession, and bounded graph expansion.
-- Concrete plan: [docs/coding-agent/plans/active/v0-1-vector-graph-adapter-foundations-plan.md](v0-1-vector-graph-adapter-foundations-plan.md)
+- Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-vector-graph-adapter-foundations-plan.md](../completed/v0-1-vector-graph-adapter-foundations-plan.md)
 
 ### Remember And Link Pipelines
 - Purpose: implement caller-supplied draft inputs and persistence ordering for entities, episodes, observations, links, derived memories, and selected vector records.
 - Expected outcome: `remember` and typed `link` behavior can persist v0.1 memory objects with provenance and relationship links.
-- Concrete plan: draft after store contracts and adapter foundations have enough working surface.
+- Concrete plan: [docs/coding-agent/plans/active/v0-1-remember-and-link-pipelines-plan.md](v0-1-remember-and-link-pipelines-plan.md)
 
 ### Retrieve And ContinuityContextPack
 - Purpose: implement vector-to-graph retrieval, bounded expansion, lifecycle/currentness filtering, deterministic reranking, grouped context pack assembly, rationale, and optional trace.

@@ -1,6 +1,6 @@
 # Plan: v0.1 Vector And Graph Adapter Foundations
 
-- status: approved
+- status: done
 - generated: 2026-04-28
 - last_updated: 2026-04-28
 - work_type: mixed
@@ -80,6 +80,12 @@
 ## Resolved Decisions
 - Add the Oxigraph crate in this chunk and implement an embedded/in-memory Oxigraph-backed `GraphAuthorityStore` foundation alongside RDF mapping and deterministic tests.
 - Live Qdrant/Oxigraph smoke checks are required release/PR evidence: run them in CI before merge or locally before creating the PR, with prerequisites and evidence recorded.
+
+## Review Mode
+- mode: remediation
+- scope: final-plan-review
+- max_iterations: 2
+- status: completed
 
 ## Assumptions
 - A1: New adapter code should use the v0.1 `VectorCandidateStore`, `GraphAuthorityStore`, `MemoryEmbedder`, and raw-reference contracts rather than extending the old flat `VectorMemoryRepository` path.
@@ -198,6 +204,7 @@
 - type: impl
 - owns:
   - `Cargo.toml`
+  - `Cargo.lock`
   - `src/internal/infrastructures.rs`
   - `src/internal/infrastructures/**`
   - `src/internal/repositories.rs`
@@ -274,9 +281,11 @@
   - `docs/coding-agent/plans/completed/**`
 - depends_on: [Task_3, Task_5]
 - description: |
-  Review the adapter-foundation diff and validation evidence. If approved, reconcile plan lifecycle artifacts and draft the next concrete remember/link pipeline plan from the landed adapter shape.
+  Review the adapter-foundation diff and validation evidence using the review-remediation-loop structured appendix. If approved, reconcile plan lifecycle artifacts and draft the next concrete remember/link pipeline plan from the landed adapter shape. If final review reports kept MAJOR/CRITICAL findings, run up to two remediation iterations before completion.
 - acceptance:
   - Reviewer approves the adapter-foundation implementation or all blocking findings are resolved/waived.
+  - Final Reviewer output includes the review-remediation-loop structured appendix.
+  - Any kept MAJOR/CRITICAL findings are triaged and remediated through bounded Worker follow-up tasks, or the plan is left blocked with evidence.
   - Required validation evidence from Tasks 1-5 is present.
   - This plan's Progress Log and Decision Log are updated with outcomes.
   - The stale completed adapter-foundation plan artifact is reconciled so plan lifecycle state is not misleading.
@@ -285,7 +294,7 @@
   - kind: review
     required: true
     owner: reviewer
-    detail: "Review adapter-foundation implementation against storage contracts, ADRs, validation evidence, and stale-plan reconciliation."
+    detail: "Review adapter-foundation implementation against storage contracts, ADRs, validation evidence, and stale-plan reconciliation; include review-remediation-loop structured appendix."
   - kind: review
     required: true
     owner: orchestrator
@@ -336,6 +345,50 @@
   - Summary: User directed that the Oxigraph crate and embedded/in-memory Oxigraph-backed graph store foundation should be included in this chunk, and that live Qdrant/Oxigraph smoke checks should run in CI before merge or locally before PR creation.
   - Validation evidence: Documentation-only plan update from user guidance.
   - Notes: The plan now treats service smoke evidence as required pre-PR/pre-merge evidence rather than optional validation.
+- 2026-04-28 Task_1 completed: selected adapter boundary and dependency strategy.
+  - Summary: Recorded the v0.1 adapter module placement, Oxigraph dependency/version strategy, Qdrant/Oxigraph smoke-check route, stale completed-plan reconciliation, and legacy flat-Qdrant isolation rules before implementation edits.
+  - Validation evidence: Manual review of this plan, the v0.1 roadmap, completed domain/store-contract plans, storage ADRs, `Cargo.toml`, `src/api/types/domain.rs`, `src/internal/models/vector/**`, `src/internal/repositories/**`, `src/internal/infrastructures/**`, `.github/workflows/pr_validation.yaml`, `docker-compose.qdrant.yml`, and current plan artifact search results.
+  - Notes: No Rust implementation files were changed and no cargo commands were required for this docs/design gate.
+- 2026-04-28 Task_1 reviewer gate approved.
+  - Summary: Reviewer approved the recorded adapter boundary and dependency strategy with no findings.
+  - Validation evidence: Reviewer confirmed Task_1 acceptance coverage, boundary consistency, validation route, and implementation risk are acceptable.
+  - Notes: Proceed to Task_2. Final review remediation mode is active at user request.
+- 2026-04-28 Task_2 complete: added provider-neutral vector records and embedding surfaces.
+  - Summary: Added `VectorRecord`, `VectorRelationshipHints`, conversions to `EmbeddingInput`/`VectorCandidateRecord`, and natural-language surface builders for `Episode`, `Observation`, `DerivedMemory`, `MemoryThread`, and `Entity`. The generic `MemoryObject` helper skips `MemoryLink` so links remain graph-authority objects rather than vector-indexed records.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, and `cargo test internal::models::vector -- --nocapture` passed. Targeted vector tests reported 20 passed, 0 failed.
+  - Notes: No Qdrant, RDF, or Oxigraph types were introduced into provider-neutral vector models or repository contracts.
+- 2026-04-28 Task_3 complete: added Qdrant v0.1 payload mapping and candidate-store foundation.
+  - Summary: Added v0.1 Qdrant payload mapping/index helpers, a Qdrant candidate-store scaffold, and provider-neutral `VectorRecordEmbedding` upsert support so the store contract carries full `VectorRecord` payloads plus embeddings instead of lossy candidate-only records.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, targeted Qdrant payload/index and candidate-store tests, fake-store contract tests, and local Qdrant live smoke passed. Local smoke prerequisites were Docker 29.4.0, `docker compose -f docker-compose.qdrant.yml up -d`, and `QDRANT_CONNECTION_STRING=http://127.0.0.1:6334`.
+  - Notes: Initial Task_3 review found that the Qdrant store implemented `VectorCandidateStore` while rejecting the required upsert method. Follow-up changed the provider-neutral trait to `upsert_vector_records`, updated fake support, and re-ran validation. Legacy flat `QdrantVectorMemoryRepository` remains isolated.
+- 2026-04-28 Task_3 reviewer follow-up approved.
+  - Summary: Reviewer approved the contract-risk follow-up with no remaining findings.
+  - Validation evidence: Reviewer confirmed the previous substitutability risk is resolved, Qdrant upsert uses full v0.1 payload mapping, fake behavior remains deterministic, and backend-specific types remain confined to infrastructure modules.
+  - Notes: Proceed to Task_4.
+- 2026-04-28 Task_4 complete: added RDF/Oxigraph mapping and embedded graph store foundation.
+  - Summary: Added `oxigraph = { version = "0.4.11", default-features = false }`, internal RDF vocabulary/mapping, and an embedded/in-memory `OxigraphGraphAuthorityStore` implementing `GraphAuthorityStore` for canonical objects, links, query, and bounded expansion foundation.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, targeted `cargo test internal::infrastructures::graph -- --nocapture`, and embedded in-memory Oxigraph smoke passed. Orchestrator re-ran the targeted graph test and observed 8 passed, 0 failed.
+  - Notes: Initial Task_4 review found repeated upserts left stale RDF quads. Follow-up now tracks inserted quads by owning graph URI and replaces prior object/link materialization, including direct relation triples owned by links. `Cargo.lock` was added to Task_4 owns because adding a Rust dependency necessarily updates the lockfile.
+- 2026-04-28 Task_4 reviewer follow-up approved.
+  - Summary: Reviewer approved the Oxigraph upsert remediation with no remaining findings.
+  - Validation evidence: Reviewer confirmed stale object/link RDF facts are replaced, provider types remain confined to infrastructure modules, and targeted regressions cover object, link, direct relation, and embedded smoke behavior.
+  - Notes: Proceed to Task_5. Residual non-blocking design risk: duplicate identical direct relation triples owned by multiple distinct links may need revisiting when link uniqueness/upsert semantics are formalized.
+- 2026-04-28 Task_5 complete: added shared bounded graph expansion semantics.
+  - Summary: Added a provider-neutral bounded expansion helper used by both fake graph support and the embedded Oxigraph adapter. Expansion preserves `max_depth`, `max_nodes`, allowed object-type constraints, deterministic traversal, canonical `MemoryObject`/`MemoryLink` return values, and explicit `CustomError` behavior for unsupported or missing roots.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test internal::repositories::test_support -- --nocapture`, and `cargo test internal::infrastructures::graph -- --nocapture` passed. Targeted graph tests reported 11 passed, 0 failed after Task_5.
+  - Notes: No retrieval ranking, context-pack assembly, or public retrieve behavior was introduced.
+- 2026-04-28 Task_5 review result.
+  - Summary: Reviewer found the Task_5 code acceptable and requested only that Task_5 validation evidence be recorded before Task_6.
+  - Validation evidence: Reviewer confirmed the helper is provider-neutral, expansion constraints are preserved, high-fanout deterministic behavior is covered, and diagnostics were clean.
+  - Notes: Evidence recorded; proceed to Task_6 final review with remediation mode active.
+- 2026-04-28 Task_6 final review approved with remediation mode.
+  - Summary: Final Reviewer approved the full adapter-foundation diff with no findings. Review-remediation-loop structured appendix reported `structured_findings: []`, `status: APPROVED`, and `highest_severity: NONE`; no remediation iteration was required.
+  - Validation evidence: Final Orchestrator gates passed: `cargo fmt --check`, `cargo check`, and `cargo test --no-run`. Recorded targeted evidence includes vector model tests, Qdrant payload/candidate/fake-store tests, local Docker Qdrant smoke, RDF/Oxigraph tests, embedded Oxigraph smoke, and bounded graph expansion tests.
+  - Notes: Qdrant smoke service was stopped with `docker compose -f docker-compose.qdrant.yml down` after successful smoke evidence.
+- 2026-04-28 Task_6 lifecycle closeout complete.
+  - Summary: Rechecked stale completed adapter-foundation artifact path and found no existing completed artifact. Drafted the next active plan for v0.1 remember and typed link pipelines, and updated the roadmap link.
+  - Validation evidence: `docs/coding-agent/plans/**/v0-1-vector-graph-adapter-foundations-plan.md` search returned only this active plan before lifecycle move; completed plans listing did not contain a stale adapter-foundation plan.
+  - Notes: This plan is ready to move to completed.
 
 ## Decision Log
 
@@ -349,6 +402,21 @@
   - Plan delta: Oxigraph is now explicitly in scope for this chunk, including an embedded/in-memory Oxigraph-backed `GraphAuthorityStore` foundation. Qdrant/Oxigraph smoke checks are required before PR creation or merge, using local execution or CI evidence.
   - Tradeoffs considered: Adding Oxigraph now increases dependency/build/test surface, but prevents the graph-authority adapter from remaining only a mapping abstraction. Requiring smoke evidence adds setup cost, but better matches the intended merge bar for live storage backends.
   - User approval: yes.
+- 2026-04-28 Decision: Use review remediation loop for final review
+  - Trigger / new insight: User explicitly requested the review remediation loop for final review.
+  - Plan delta: Added Review Mode with remediation active, max two iterations, and updated Task_6 to require the structured appendix and bounded remediation of kept MAJOR/CRITICAL findings.
+  - Tradeoffs considered: The remediation loop adds final-gate overhead, but this chunk is code-focused and storage-boundary-sensitive.
+  - User approval: yes.
+- 2026-04-28 Decision: Keep v0.1 adapters internal, provider-neutral at contracts, and backend-specific only at infrastructure edges
+  - Trigger / new insight: Task_1 source review confirmed the current v0.1 store contracts already use canonical `MemoryId`, `ObjectType`, `MemoryObject`, `MemoryLink`, `VectorCandidateRecord`, and `GraphExpansionQuery` shapes, while the live Qdrant adapter remains legacy flat-memory-shaped and there is no current Oxigraph/RDF module or dependency.
+  - Plan delta: Task_2 should add provider-neutral vector record and natural-language surface builders under `src/internal/models/vector/` with direct module files such as `record.rs` and `embedding_surface.rs`, re-exported through `src/internal/models/vector.rs`. Task_3 should place Qdrant v0.1 payload mapping, index-field helpers, and the `VectorCandidateStore` adapter under `src/internal/infrastructures/external_services/` in new v0.1-named files such as `qdrant_payload.rs` and `qdrant_vector_candidate_store.rs`, re-exported through `src/internal/infrastructures/external_services.rs`. Task_4 should add a new graph infrastructure boundary from `src/internal/infrastructures.rs` such as `pub(crate) mod graph;`, with RDF vocabulary/mapping in `src/internal/infrastructures/graph/rdf_mapping.rs` and `src/internal/infrastructures/graph/vocabulary.rs`, and the embedded/in-memory Oxigraph implementation in `src/internal/infrastructures/graph/oxigraph_authority_store.rs`. Task_5 should keep bounded graph expansion translation/limits at the graph adapter layer, either in `src/internal/infrastructures/graph/bounded_expansion.rs` or as a narrowly factored helper used by `oxigraph_authority_store.rs`, while the provider-neutral query/result contracts remain in `src/internal/repositories/graph_authority_store.rs`.
+  - Dependency strategy: Add `oxigraph = { version = "0.4.11", default-features = false }` in `Cargo.toml` during Task_4 for the embedded/in-memory graph store path. Do not add separate RDF crates unless the implementation proves Oxigraph's exported model/query APIs are insufficient; if the selected crate version is unavailable or incompatible with the pinned Rust toolchain, Task_4 must update this Decision Log with the resolved version before continuing adapter implementation.
+  - Boundary rule: Canonical domain types in `src/api/types/domain.rs` and provider-neutral repository contracts in `src/internal/repositories/**` must not expose `qdrant-client`, `oxigraph`, RDF term, SPARQL query, or backend payload types. Those types are allowed only inside infrastructure mapping/adapter modules and their module-local tests. Cross-store joins continue to use stable domain IDs and `graph_uri(...)` strings.
+  - Live smoke route: Deterministic unit/mapping tests remain the fast required checks before service smoke checks. Before PR creation or merge, Task_3/Task_4 must add and run narrowly named smoke tests for the v0.1 Qdrant candidate adapter and embedded/in-memory Oxigraph graph store, then record command/job evidence. The local route is: start Qdrant with `docker compose -f docker-compose.qdrant.yml up -d`, provide the existing live-test environment required by settings (`QDRANT_CONNECTION_STRING`, `EMBEDDING_MODEL`, and any current settings preflight values), and run the targeted smoke commands that Task_3/Task_4 introduce. The CI route is: extend or use the existing same-repository, non-Dependabot `Live service integration tests` job so it starts Qdrant, runs the targeted Qdrant smoke, runs the embedded/in-memory Oxigraph smoke in process, and updates the current preflight message/variables if Oxigraph no longer needs a network endpoint.
+  - Stale-plan reconciliation: Before this plan is completed, Task_6 must re-check `docs/coding-agent/plans/completed/v0-1-vector-graph-adapter-foundations-plan.md`. If a stale completed artifact exists, do not leave two authoritative completed adapter-foundation plans; replace it with this plan's final completed artifact or explicitly mark/remove the stale artifact in the same lifecycle update. If the artifact is absent, as Task_1 filesystem search found, record the reconciliation as a no-op and update any remaining stale references in this active plan before completion.
+  - Legacy Qdrant isolation: Keep `src/internal/infrastructures/external_services/qdrant_vector_memory_repository.rs`, `src/internal/repositories/vector_memory_repository.rs`, `src/internal/repositories/memory_repository.rs`, `src/internal/models/memory/**`, and `src/internal/models/vector/vector_metadata.rs` isolated as the old flat API path unless a later task replaces them while preserving required checks. New v0.1 code should implement `VectorCandidateStore` and consume the new vector record/payload mapping instead of extending `VectorMemoryRepository`; reusable Qdrant client setup, collection/index creation patterns, and live-test readiness ideas may be copied/adapted, but legacy flat payload structs and flat `MemoryType`/`MemoryEntry` semantics must not become part of the v0.1 adapter surface.
+  - Tradeoffs considered: A separate graph infrastructure module makes the Oxigraph/RDF authority boundary clearer than adding it under `external_services`, while keeping Qdrant under `external_services` matches the existing live-client organization. Pinning Oxigraph with default features disabled keeps the first graph store embedded/in-memory and avoids committing to persistent RocksDB/service configuration in this chunk. Leaving legacy flat Qdrant code in place minimizes unrelated churn, but requires explicit naming so future tasks do not confuse it with canonical v0.1 storage behavior.
+  - User approval: derived from the approved plan plus user direction that Oxigraph belongs in this chunk and live smoke evidence is required before PR creation or merge.
 
 ## Notes
 - Risks:
