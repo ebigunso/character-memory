@@ -1,6 +1,6 @@
 # Plan: v0.1 Vector And Graph Adapter Foundations
 
-- status: draft
+- status: done
 - generated: 2026-04-27
 - last_updated: 2026-04-27
 - work_type: mixed
