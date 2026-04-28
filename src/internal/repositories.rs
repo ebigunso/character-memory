@@ -17,7 +17,8 @@ pub(crate) use embedder::MemoryEmbedder;
 // exports.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery,
+    GraphObjectQuery,
 };
 pub(crate) use memory_repository::MemoryRepository;
 

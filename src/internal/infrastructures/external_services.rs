@@ -1,4 +1,6 @@
 mod openai_embedding_provider;
+mod qdrant_payload;
+mod qdrant_vector_candidate_store;
 mod qdrant_vector_memory_repository;
 
 pub(crate) use openai_embedding_provider::OpenAIEmbeddingProvider;

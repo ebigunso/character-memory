@@ -8,14 +8,14 @@ use async_trait::async_trait;
 use crate::api::types::MemoryId;
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
-    VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
+    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
 };
 
 #[async_trait]
 pub(crate) trait VectorCandidateStore: Send + Sync {
-    async fn upsert_candidates(
+    async fn upsert_vector_records(
         &self,
-        candidates: &[VectorCandidateRecord],
+        records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError>;
 
     async fn search_candidates(
@@ -28,11 +28,11 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
 
 #[async_trait]
 impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
-    async fn upsert_candidates(
+    async fn upsert_vector_records(
         &self,
-        candidates: &[VectorCandidateRecord],
+        records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError> {
-        (**self).upsert_candidates(candidates).await
+        (**self).upsert_vector_records(records).await
     }
 
     async fn search_candidates(

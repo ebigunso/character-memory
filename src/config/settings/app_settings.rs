@@ -88,7 +88,7 @@ impl Settings {
         self.qdrant_connection_string.expose_secret()
     }
 
-    #[allow(dead_code)] // Remove after implementing Oxigraph
+    #[allow(dead_code)] // Remove once production Oxigraph configuration consumes this setting.
     pub fn get_oxigraph_connection(&self) -> &str {
         self.oxigraph_connection_string.expose_secret()
     }
