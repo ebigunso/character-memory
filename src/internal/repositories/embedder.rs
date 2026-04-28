@@ -1,4 +1,4 @@
-// Transitional v0.1 repository contract: implemented first so later adapters
+// Transitional repository contract: implemented first so later adapters
 // and pipelines can target a stable boundary. Remove once production consumers
 // exercise the full contract, or prune unused methods.
 #![allow(dead_code)]

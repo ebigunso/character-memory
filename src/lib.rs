@@ -26,7 +26,7 @@ pub use crate::api::types::{
     MemoryThread, MemoryThreadDraft, MemoryType, Modality, ObjectType, Observation,
     ObservationDraft, RelationType, RememberDraft, RememberOutcome, RetentionState, ScoredMemory,
     Stability, ThreadStatus, VectorIndexingFailure, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION,
-    SCHEMA_VERSION_V0_1,
+    EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
@@ -64,17 +64,17 @@ pub mod test_utils {
 /// searching memory entries.
 pub struct CharacterMemory {
     legacy_memory_repo: Option<MemoryRepository>,
-    v0_1_parts: Option<V0_1Composition>,
+    memory_composition: Option<MemoryComposition>,
 }
 
-struct V0_1Composition {
+struct MemoryComposition {
     graph_store: Box<dyn GraphAuthorityStore>,
     vector_store: Box<dyn VectorCandidateStore>,
     embedder: Box<dyn MemoryEmbedder>,
 }
 
 impl CharacterMemory {
-    /// Builds the v0.1 write facade from provider-neutral graph, vector, and embedder parts.
+    /// Builds CharacterMemory from provider-neutral graph, vector, and embedder parts.
     ///
     /// This is the durable composition boundary for deterministic tests and application-owned
     /// backend wiring. It remains crate-visible until the public graph/vector/embedder trait
@@ -87,7 +87,7 @@ impl CharacterMemory {
     ) -> Self {
         Self {
             legacy_memory_repo: None,
-            v0_1_parts: Some(V0_1Composition {
+            memory_composition: Some(MemoryComposition {
                 graph_store,
                 vector_store,
                 embedder,
@@ -133,7 +133,7 @@ impl CharacterMemory {
         let memory_repo = MemoryRepository::new(embed_provider, vector_repo);
         Ok(Self {
             legacy_memory_repo: Some(memory_repo),
-            v0_1_parts: None,
+            memory_composition: None,
         })
     }
 
@@ -170,7 +170,7 @@ impl CharacterMemory {
 
         Ok(Self {
             legacy_memory_repo: Some(memory_repo),
-            v0_1_parts: None,
+            memory_composition: None,
         })
     }
 
@@ -191,9 +191,9 @@ impl CharacterMemory {
         self.legacy_repo()?.init_storage().await
     }
 
-    /// Persists a v0.1 remember draft through the graph-authoritative write pipeline.
+    /// Persists a remember draft through the graph-authoritative write pipeline.
     pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
-        let parts = self.v0_1_parts()?;
+        let parts = self.memory_composition()?;
         let pipeline = RememberPipeline::new(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
@@ -210,16 +210,16 @@ impl CharacterMemory {
 
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
-        let parts = self.v0_1_parts()?;
+        let parts = self.memory_composition()?;
         LinkPipeline::new(parts.graph_store.as_ref())
             .link(draft)
             .await
     }
 
     /// Legacy flat vector-only create path retained for existing integration coverage until the
-    /// default production constructor is rewired to v0.1 graph/vector composition.
+    /// default production constructor is rewired to graph/vector composition.
     #[deprecated(
-        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the v0.1 facade"
+        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the graph-authoritative facade"
     )]
     pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
         let legacy_repo = self.legacy_repo()?;
@@ -231,9 +231,9 @@ impl CharacterMemory {
     /// Creates multiple memory entries in a batch.
     ///
     /// Legacy flat vector-only batch create path retained for existing integration coverage until
-    /// the default production constructor is rewired to v0.1 graph/vector composition.
+    /// the default production constructor is rewired to graph/vector composition.
     #[deprecated(
-        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the v0.1 facade"
+        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the graph-authoritative facade"
     )]
     pub async fn bulk_create_memories(
         &self,
@@ -305,7 +305,7 @@ impl CharacterMemory {
     /// - `Ok`: A vector of `Memory` containing the search results
     /// - `Err`: A `CustomError` if the operation fails
     #[deprecated(
-        note = "this flat vector retrieval path will be replaced by a dedicated v0.1 retrieve facade"
+        note = "this flat vector retrieval path will be replaced by a dedicated continuity retrieval facade"
     )]
     pub async fn search_memories(
         &self,
@@ -339,7 +339,7 @@ impl CharacterMemory {
     ///     - The input does not contain an ID
     ///     - The update operation fails
     #[deprecated(
-        note = "this flat update path will be replaced deliberately after the v0.1 write facade lands"
+        note = "this flat update path will be replaced deliberately after graph-authoritative write behavior lands"
     )]
     pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
         let legacy_repo = self.legacy_repo()?;
@@ -361,7 +361,7 @@ impl CharacterMemory {
     /// - `Ok`: Empty unit type if deletion succeeds
     /// - `Err`: A `CustomError` if the operation fails
     #[deprecated(
-        note = "this flat delete path will be replaced deliberately after the v0.1 write facade lands"
+        note = "this flat delete path will be replaced deliberately after graph-authoritative write behavior lands"
     )]
     pub async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
         self.legacy_repo()?.delete_memory(id).await
@@ -370,16 +370,16 @@ impl CharacterMemory {
     fn legacy_repo(&self) -> Result<&MemoryRepository, CustomError> {
         self.legacy_memory_repo.as_ref().ok_or_else(|| {
             CustomError::DatabaseError(
-                "legacy flat memory API is not available on v0.1 injected construction".to_owned(),
+                "legacy flat memory API is not available on injected graph/vector construction"
+                    .to_owned(),
             )
         })
     }
 
-    fn v0_1_parts(&self) -> Result<&V0_1Composition, CustomError> {
-        self.v0_1_parts.as_ref().ok_or_else(|| {
+    fn memory_composition(&self) -> Result<&MemoryComposition, CustomError> {
+        self.memory_composition.as_ref().ok_or_else(|| {
             CustomError::DatabaseError(
-                "v0.1 remember/link API requires injected graph, vector, and embedder parts"
-                    .to_owned(),
+                "remember/link requires injected graph, vector, and embedder parts".to_owned(),
             )
         })
     }

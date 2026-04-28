@@ -4,8 +4,8 @@ use thiserror::Error;
 
 pub type MemoryId = uuid::Uuid;
 
-pub const SCHEMA_VERSION_V0_1: &str = "v0.1";
-pub const CURRENT_SCHEMA_VERSION: &str = SCHEMA_VERSION_V0_1;
+pub const EPISODIC_MEMORY_SCHEMA_VERSION: &str = "episodic_memory_initial";
+pub const CURRENT_SCHEMA_VERSION: &str = EPISODIC_MEMORY_SCHEMA_VERSION;
 pub const DEFAULT_SCHEMA_VERSION: &str = CURRENT_SCHEMA_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

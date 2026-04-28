@@ -521,7 +521,7 @@ impl TryFrom<MemoryLinkDraft> for MemoryLink {
     }
 }
 
-/// Backend-free draft for the v0.1 remember write surface.
+/// Backend-free draft for the remember write surface.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberDraft {
     pub object_drafts: Vec<MemoryObjectDraft>,
@@ -547,7 +547,7 @@ impl RememberDraft {
     }
 }
 
-/// Result of a v0.1 remember write.
+/// Result of a remember write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RememberOutcome {
     pub persisted_object_ids: Vec<MemoryId>,
@@ -659,7 +659,7 @@ mod tests {
         draft.raw_ref = Some("raw://conversation/42#episode".to_owned());
         draft.salience_score = 0.8;
         draft.created_at = Some(created_at);
-        draft.schema_version = Some("v0.1-test".to_owned());
+        draft.schema_version = Some("test_schema".to_owned());
 
         let episode = draft.into_domain().unwrap();
 
@@ -669,7 +669,7 @@ mod tests {
             episode.raw_ref.as_deref(),
             Some("raw://conversation/42#episode")
         );
-        assert_eq!(episode.schema_version, "v0.1-test");
+        assert_eq!(episode.schema_version, "test_schema");
         assert_eq!(episode.salience_score, 0.8);
     }
 

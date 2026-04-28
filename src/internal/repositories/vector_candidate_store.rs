@@ -1,4 +1,4 @@
-// Transitional v0.1 repository contract: vector adapters and pipelines will
+// Transitional repository contract: vector adapters and pipelines will
 // consume this after the contract chunk. Remove once production consumers use
 // the full surface, or prune unused methods.
 #![allow(dead_code)]

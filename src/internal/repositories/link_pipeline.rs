@@ -1,4 +1,4 @@
-// Transitional v0.1 link pipeline: later facade wiring will consume this
+// Transitional link pipeline: later facade wiring will consume this
 // internal service directly. Remove this allow once the public link surface
 // exercises the service, or prune unused outcome helpers then.
 #![allow(dead_code)]

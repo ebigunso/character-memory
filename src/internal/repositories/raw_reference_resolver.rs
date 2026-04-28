@@ -1,4 +1,4 @@
-// Transitional v0.1 repository contract: raw references are resolved by later
+// Transitional repository contract: raw references are resolved by later
 // adapters/pipelines while raw storage remains consumer-owned. Remove once the
 // resolver is consumed directly, or prune unused DTO/method surface.
 #![allow(dead_code)]

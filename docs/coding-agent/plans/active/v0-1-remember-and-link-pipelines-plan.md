@@ -379,7 +379,7 @@
 
 - 2026-04-28 Task_6 validation evidence collected.
   - Summary: Ran final smoke evidence and drafted the next active retrieve/context-pack plan from the landed remember/link shape.
-  - Validation evidence: `cargo test embedded_in_memory_oxigraph_smoke_has_no_external_prerequisite --lib` passed. Initial ignored Qdrant smoke failed because `QDRANT_CONNECTION_STRING` was unset; after `docker compose -f docker-compose.qdrant.yml up -d`, `QDRANT_CONNECTION_STRING=http://localhost:6334 cargo test qdrant_v0_1_candidate_store_live_smoke_upserts_searches_and_deletes --lib -- --ignored` passed. Qdrant service was stopped with `docker compose -f docker-compose.qdrant.yml down`.
+  - Validation evidence: `cargo test embedded_in_memory_oxigraph_smoke_has_no_external_prerequisite --lib` passed. Initial ignored Qdrant smoke failed because `QDRANT_CONNECTION_STRING` was unset; after `docker compose -f docker-compose.qdrant.yml up -d`, `QDRANT_CONNECTION_STRING=http://localhost:6334 cargo test qdrant_candidate_store_live_smoke_upserts_searches_and_deletes --lib -- --ignored` passed. Qdrant service was stopped with `docker compose -f docker-compose.qdrant.yml down`.
   - Notes: Drafted `docs/coding-agent/plans/active/v0-1-retrieve-continuity-context-pack-plan.md` as the next independent concrete plan.
 
 - 2026-04-28 Task_6 initial Reviewer gate blocked on plan evidence recording.
