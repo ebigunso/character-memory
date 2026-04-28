@@ -1,10 +1,11 @@
-#![allow(deprecated)]
-
 use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 use uuid::Uuid;
 mod test_utils;
 
+// These tests intentionally exercise the deprecated legacy flat facade until
+// the public graph-authoritative replacement is wired through the default constructor.
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_get_memory_by_id() {
     // Setup
@@ -34,6 +35,7 @@ async fn test_get_memory_by_id() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_get_memory_by_nonexistent_id() {
     // Setup
@@ -55,6 +57,7 @@ async fn test_get_memory_by_nonexistent_id() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_get_memories_by_ids() {
     // Setup

@@ -1,9 +1,10 @@
-#![allow(deprecated)]
-
 use character_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::{Duration, Utc};
 mod test_utils;
 
+// These tests intentionally exercise the deprecated legacy flat facade until
+// the public graph-authoritative replacement is wired through the default constructor.
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_basic_search() {
     // Setup
@@ -77,6 +78,7 @@ async fn test_basic_search() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_search_with_memory_type_filter() {
     // Setup
@@ -173,6 +175,7 @@ async fn test_search_with_memory_type_filter() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_search_with_date_filter() {
     // Setup
