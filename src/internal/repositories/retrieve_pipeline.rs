@@ -86,7 +86,10 @@ where
                     }
                     assembly.absorb_expansion(candidate, expansion);
                 }
-                Err(_) => assembly.omit_missing_candidate(candidate),
+                Err(error) if graph_root_missing_error(&error) => {
+                    assembly.omit_missing_candidate(candidate)
+                }
+                Err(error) => return Err(error),
             }
         }
 
@@ -554,10 +557,39 @@ fn graph_query_for_candidate(
 }
 
 fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
+    let location = failure
+        .at
+        .map(|object_ref| {
+            format!(
+                " at object_type={} object_id={}",
+                object_type_name(object_ref.object_type),
+                object_ref.object_id
+            )
+        })
+        .unwrap_or_default();
+
     CustomError::DatabaseError(format!(
-        "Graph expansion exceeded bounded retrieval limits while degraded results are disabled: {:?}",
-        failure.reason
+        "Graph expansion exceeded bounded retrieval limits while degraded results are disabled: reason={}{}",
+        bounded_failure_reason_name(failure.reason),
+        location
     ))
+}
+
+fn graph_root_missing_error(error: &CustomError) -> bool {
+    matches!(
+        error,
+        CustomError::DatabaseError(message)
+            if message.starts_with("Graph expansion root not found:")
+    )
+}
+
+fn bounded_failure_reason_name(
+    reason: crate::internal::repositories::GraphExpansionBoundedFailureReason,
+) -> &'static str {
+    match reason {
+        crate::internal::repositories::GraphExpansionBoundedFailureReason::Timeout => "timeout",
+        crate::internal::repositories::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
+    }
 }
 
 fn lifecycle_decision(
@@ -809,6 +841,17 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
     }
 }
 
+fn object_type_name(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::Episode => "episode",
+        ObjectType::Observation => "observation",
+        ObjectType::Entity => "entity",
+        ObjectType::MemoryThread => "memory_thread",
+        ObjectType::DerivedMemory => "derived_memory",
+        ObjectType::MemoryLink => "memory_link",
+    }
+}
+
 fn lifecycle_action_rank(action: LifecycleFilterAction) -> u8 {
     match action {
         LifecycleFilterAction::Included => 0,
@@ -983,7 +1026,26 @@ mod tests {
         let error = pipeline.retrieve(context).await.unwrap_err();
 
         assert!(
-            matches!(error, CustomError::DatabaseError(message) if message.contains("degraded results are disabled"))
+            matches!(error, CustomError::DatabaseError(message) if message.contains("reason=timeout") && message.contains("object_type=derived_memory") && message.contains(&fixtures.user_preference.id.to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn non_missing_graph_expansion_errors_are_propagated() {
+        let object_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0050);
+        let graph = ErrorGraphStore::new("graph expansion rejected unsupported root");
+        let vector =
+            RecordingVectorStore::new(vec![candidate(object_id, ObjectType::MemoryLink, 0.99)]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let error = pipeline
+            .retrieve(RetrievalContext::new("propagate graph errors"))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, CustomError::MemoryValidation(message) if message.contains("unsupported root"))
         );
     }
 
@@ -1188,6 +1250,47 @@ mod tests {
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct ErrorGraphStore {
+        message: String,
+    }
+
+    impl ErrorGraphStore {
+        fn new(message: impl Into<String>) -> Self {
+            Self {
+                message: message.into(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl GraphAuthorityStore for ErrorGraphStore {
+        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn upsert_links(
+            &self,
+            _links: &[crate::api::types::MemoryLink],
+        ) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn query_objects(
+            &self,
+            _query: &crate::internal::repositories::GraphObjectQuery,
+        ) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn expand_bounded(
+            &self,
+            _query: &GraphExpansionQuery,
+        ) -> Result<GraphExpansion, CustomError> {
+            Err(CustomError::MemoryValidation(self.message.clone()))
         }
     }
 
