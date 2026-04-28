@@ -21,6 +21,9 @@ pub enum CustomError {
     #[error("Invalid semantic memory: semantic memories should not include episodic fields")]
     InvalidSemanticMemory,
 
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
+
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
 

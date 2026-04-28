@@ -13,7 +13,7 @@
 - Preserve the handoff's constraints: Rust library crate, chat/voice-transcript scope, Qdrant for vector candidate recall, Oxigraph for graph authority, stable cross-store IDs, deterministic tests, and no required LLM dependency in core.
 
 ## Current State Assessment
-- The current public facade is `CharacterMemory` in `src/lib.rs`; `remember` and typed `link` now use the v0.1 injected graph/vector/embedder path, while flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory` are deprecated legacy surface rather than canonical v0.1 model.
+- The current public facade is `CharacterMemory` in `src/lib.rs`; crate-visible `remember` and typed `link` now use the v0.1 injected graph/vector/embedder path, while flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory` are deprecated legacy surface rather than canonical v0.1 model.
 - Canonical v0.1 domain objects now live under `src/api/types/domain.rs`, with store/embedder contracts and deterministic fake-store fixtures under `src/internal/repositories/**`.
 - The old flat live persistence path remains legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and `QdrantVectorMemoryRepository` still serves the old flat facade.
 - The v0.1 vector foundation now has provider-neutral `VectorRecord` and natural-language embedding surfaces, plus Qdrant v0.1 payload mapping and `VectorCandidateStore::upsert_vector_records` support for full record payloads.
@@ -107,7 +107,7 @@
   - Validation evidence: Final structural review approved code organization, lesson-regression checks, and ADR adherence; required Rust checks and Problems diagnostics were clean.
   - Notes: The active roadmap now reflects adapter-foundation code as landed state rather than future work.
 - 2026-04-28 Remember and link pipelines completed; retrieve plan drafted.
-  - Summary: Completed caller-supplied draft DTOs, internal remember/link pipelines, injected `CharacterMemory::remember`/`link` facade wiring, legacy flat facade isolation, and the next active retrieve/context-pack plan.
+  - Summary: Completed caller-supplied draft DTOs, internal remember/link pipelines, crate-visible injected `CharacterMemory::remember`/`link` wiring, legacy flat facade isolation, and the next active retrieve/context-pack plan.
   - Validation evidence: Required Rust checks, targeted draft/remember/link/facade tests, clippy warning gate, embedded Oxigraph smoke, local Qdrant live smoke, and final Reviewer approval passed.
   - Notes: The retrieve plan carries forward graph expansion hardening before context-pack assembly.
 
@@ -136,7 +136,7 @@
   - User approval: yes.
 
 - 2026-04-28 Decision: Move from remember/link to retrieval planning
-  - Trigger / new insight: Remember/link final review approved the write pipeline and injected facade behavior with required deterministic and smoke validation evidence.
+  - Trigger / new insight: Remember/link final review approved the write pipeline and injected composition behavior with required deterministic and smoke validation evidence.
   - Plan delta: Moved the remember/link concrete plan to completed plans and drafted the retrieve/context-pack concrete plan as the next active chunk.
   - Tradeoffs considered: Retrieval should harden graph expansion policy before assembling context packs, rather than relying on depth/node-count bounds alone.
   - User approval: directed by approved roadmap sequence.

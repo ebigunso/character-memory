@@ -64,9 +64,15 @@ pub mod test_utils {
 /// searching memory entries.
 pub struct CharacterMemory {
     legacy_memory_repo: Option<MemoryRepository>,
+    // Remove this allow once public graph/vector construction or internal retrieval wiring
+    // consumes injected composition outside source-module tests.
+    #[allow(dead_code)]
     memory_composition: Option<MemoryComposition>,
 }
 
+// Remove this allow once public graph/vector construction or internal retrieval wiring
+// consumes injected composition outside source-module tests.
+#[allow(dead_code)]
 struct MemoryComposition {
     graph_store: Box<dyn GraphAuthorityStore>,
     vector_store: Box<dyn VectorCandidateStore>,
@@ -192,7 +198,13 @@ impl CharacterMemory {
     }
 
     /// Persists a remember draft through the graph-authoritative write pipeline.
-    pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
+    // Remove this allow once public graph/vector construction or internal retrieval wiring
+    // consumes the injected write path outside source-module tests.
+    #[allow(dead_code)]
+    pub(crate) async fn remember(
+        &self,
+        draft: RememberDraft,
+    ) -> Result<RememberOutcome, CustomError> {
         let parts = self.memory_composition()?;
         let pipeline = RememberPipeline::new(
             parts.graph_store.as_ref(),
@@ -209,7 +221,10 @@ impl CharacterMemory {
     }
 
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
-    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+    // Remove this allow once public graph/vector construction or internal retrieval wiring
+    // consumes the injected write path outside source-module tests.
+    #[allow(dead_code)]
+    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
         let parts = self.memory_composition()?;
         LinkPipeline::new(parts.graph_store.as_ref())
             .link(draft)
@@ -369,16 +384,19 @@ impl CharacterMemory {
 
     fn legacy_repo(&self) -> Result<&MemoryRepository, CustomError> {
         self.legacy_memory_repo.as_ref().ok_or_else(|| {
-            CustomError::DatabaseError(
+            CustomError::UnsupportedOperation(
                 "legacy flat memory API is not available on injected graph/vector construction"
                     .to_owned(),
             )
         })
     }
 
+    // Remove this allow once public graph/vector construction or internal retrieval wiring
+    // consumes injected composition outside source-module tests.
+    #[allow(dead_code)]
     fn memory_composition(&self) -> Result<&MemoryComposition, CustomError> {
         self.memory_composition.as_ref().ok_or_else(|| {
-            CustomError::DatabaseError(
+            CustomError::UnsupportedOperation(
                 "remember/link requires injected graph, vector, and embedder parts".to_owned(),
             )
         })
@@ -472,9 +490,9 @@ mod tests {
 
         let error = memory.create_memory(input).await.unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("legacy flat memory API is not available"));
+        assert!(
+            matches!(error, CustomError::UnsupportedOperation(message) if message.contains("legacy flat memory API is not available"))
+        );
     }
 
     fn injected_memory() -> CharacterMemory {

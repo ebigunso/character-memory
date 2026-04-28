@@ -51,7 +51,7 @@
 - Existing patterns or references:
   - Canonical v0.1 objects and lifecycle/currentness fields live in `src/api/types/domain.rs`.
   - Backend-free write drafts live in `src/api/types/draft.rs`; retrieval DTOs should follow the same public API boundary or a new direct file under `src/api/types/`.
-  - `CharacterMemory::remember` and `CharacterMemory::link` now use injected graph/vector/embedder parts. `CharacterMemory::search_memories` remains deprecated legacy behavior and must not become the v0.1 retrieve path.
+  - Crate-visible `CharacterMemory::remember` and `CharacterMemory::link` now use injected graph/vector/embedder parts. `CharacterMemory::search_memories` remains deprecated legacy behavior and must not become the v0.1 retrieve path.
   - `VectorCandidateStore::search_candidates` currently supports embedding, limit, and object-type filters only.
   - `GraphExpansionQuery` currently supports root, depth, node count, and allowed object types only. The roadmap explicitly carries forward the need for relation allowlists, fanout/hub limits, lifecycle/currentness filters, and timeout/failure policy.
   - Qdrant payload relationship/lifecycle fields are filter hints; graph authority remains the source of truth for relationships, provenance, lifecycle, currentness, supersession, and expansion verification.
