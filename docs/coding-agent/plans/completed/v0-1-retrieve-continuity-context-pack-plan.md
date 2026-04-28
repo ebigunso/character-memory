@@ -1,6 +1,6 @@
 # Plan: v0.1 Retrieve And ContinuityContextPack
 
-- status: draft
+- status: done
 - generated: 2026-04-28
 - last_updated: 2026-04-29
 - work_type: mixed
@@ -377,6 +377,14 @@
   - Summary: Resolved the trace/API boundary in favor of a backend-free `RetrieveOutcome` wrapper containing the final `ContinuityContextPack`, rationale, and optional trace/debug details; recorded default lifecycle/currentness filters, graph expansion policy requirements, stale-candidate/failure reporting, DTO dependency direction, and the design-gate requirement before implementation.
   - Validation evidence: Worker review of roadmap, remember/link plan, provenance/source-reference ADRs, continuity context pack ADR, Qdrant payload authority ADR, and bounded graph expansion ADR; documentation-only Task_1 edit, no Rust checks required.
   - Notes: Open questions are now resolved; implementation tasks remain blocked on reviewer approval of this design gate.
+- 2026-04-29 Retrieve and context-pack implementation completed.
+  - Summary: Added backend-free `RetrievalContext`, `RetrieveOutcome`, `ContinuityContextPack`, rationale, and trace DTOs; hardened graph expansion policy; extended vector candidate prefilters; implemented provider-neutral retrieve assembly; wired crate-visible injected `CharacterMemory::retrieve`; and preserved legacy flat search isolation.
+  - Validation evidence: `cargo fmt --check` passed; `cargo check` passed; `cargo test --no-run` passed; `cargo test retrieve_pipeline::tests -- --nocapture` passed with 6 tests; `cargo test --lib` passed with 131 passed, 0 failed, 1 ignored; embedded Oxigraph retrieve smoke `retrieve_pipeline_expands_fixed_vector_candidate_with_embedded_oxigraph` passed; live Qdrant candidate smoke `QDRANT_CONNECTION_STRING=http://localhost:6334 cargo test qdrant_candidate_store_live_smoke_upserts_filters_searches_and_deletes -- --ignored --nocapture` passed; optional `cargo clippy --all-targets -- -D warnings` passed.
+  - Notes: Final Reviewer approval passed after remediation for supersession direction, bounded returned links, lifecycle-filtered root reporting, Qdrant live-smoke timeout tolerance, clippy warnings, and fail-closed bounded expansion behavior.
+- 2026-04-29 Plan lifecycle completed.
+  - Summary: Drafted the next Correction And Forget Lifecycle plan from the landed retrieval shape and prepared this retrieve plan for move from active to completed.
+  - Validation evidence: Orchestrator closeout confirmed required Worker and Reviewer evidence exists, correction/forget/raw-storage scope did not enter this implementation, and next-plan scope remains independent.
+  - Notes: The retrieve facade remains crate-visible through injected composition; public production constructor rewiring remains a later cleanup/release-validation concern.
 
 ## Decision Log
 
@@ -395,6 +403,16 @@
   - Plan delta: Resolved the open trace question; selected a backend-free `RetrieveOutcome` wrapper around `ContinuityContextPack`; recorded default lifecycle/currentness filtering, opt-in archived/non-current policy knobs, graph expansion controls, stale-candidate and graph-failure rationale/trace reporting, context-pack section boundaries, and provider-neutral dependency direction.
   - Tradeoffs considered: Returning `ContinuityContextPack` directly would make the primary output slightly simpler, but it would either overload the pack with optional debug state or make trace handling inconsistent. A wrapper keeps diagnostics out of the prompt-ready pack while preserving the pack as the primary retrieval artifact.
   - User approval: Task_1 execution approved; reviewer approval still required before implementation tasks begin.
+- 2026-04-29 Decision: Enforce fail-closed bounded retrieval at pipeline boundary
+  - Trigger / new insight: Final review found that graph bounded failures were still being converted into stale candidate omissions when degraded results were disabled.
+  - Plan delta: Retrieve pipeline now requests inspectable bounded-failure metadata and returns an explicit error before absorbing partial graph data when `allow_degraded_results` is false.
+  - Tradeoffs considered: Propagating every graph expansion error would make stale/missing vector candidates too brittle; preserving bounded-failure metadata lets true missing roots remain omissions while timeout/hub-limit policy failures fail closed.
+  - User approval: covered by approved Task_5 remediation and final Reviewer approval.
+- 2026-04-29 Decision: Increase Qdrant candidate-store timeout for blocking live smoke
+  - Trigger / new insight: Local live Qdrant smoke showed that `wait(true)` writes reached Qdrant but the default qdrant-client timeout expired before the blocking response completed.
+  - Plan delta: Candidate-store adapter now uses a longer request and mutation operation timeout while preserving `wait(true)` and graph-authority semantics.
+  - Tradeoffs considered: Removing blocking writes would avoid the timeout but weaken live-smoke evidence. Increasing the candidate adapter timeout keeps deterministic evidence stronger without changing retrieval authority.
+  - User approval: covered by required live-smoke remediation and final validation evidence.
 
 ## Notes
 - Risks:
