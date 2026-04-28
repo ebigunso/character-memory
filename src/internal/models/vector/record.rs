@@ -122,6 +122,12 @@ impl VectorRecord {
 
     pub(crate) fn to_candidate_record(&self, embedding: Vec<f32>) -> VectorCandidateRecord {
         VectorCandidateRecord::new(self.object_id, self.object_type, self.surface, embedding)
+            .with_filter_hints(
+                self.retention_state,
+                self.is_current,
+                self.relationship_hints.clone(),
+                self.payload_hints.clone(),
+            )
     }
 }
 
@@ -188,5 +194,6 @@ mod tests {
         assert_eq!(candidate.object_type, ObjectType::Observation);
         assert_eq!(candidate.surface, VectorSurface::Text);
         assert_eq!(candidate.embedding, vec![0.1, 0.2]);
+        assert_eq!(candidate.retention_state, Some(RetentionState::Active));
     }
 }

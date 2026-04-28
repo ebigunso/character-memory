@@ -14,8 +14,7 @@ use oxigraph::store::Store;
 use crate::api::types::{graph_uri, MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery,
-    GraphObjectQuery,
+    bounded_expansion, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -165,7 +164,11 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             .values()
             .filter(|object| {
                 let (object_id, object_type) = object_identity(object);
-                (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
+                (query.object_refs.is_empty()
+                    || query.object_refs.iter().any(|object_ref| {
+                        object_ref.object_id == object_id && object_ref.object_type == object_type
+                    }))
+                    && (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
                     && (query.object_types.is_empty() || query.object_types.contains(&object_type))
             })
             .cloned()
@@ -184,25 +187,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     ) -> Result<GraphExpansion, CustomError> {
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
-        let root_exists = objects.contains_key(&(query.root_id, query.root_type));
-        let visited = bounded_expansion_node_set(query, root_exists, links.values().cloned())?;
-
-        let mut expanded_objects: Vec<_> = objects
-            .into_values()
-            .filter(|object| visited.contains(&object_identity(object)))
-            .collect();
-        sort_objects(&mut expanded_objects);
-
-        let mut expanded_links: Vec<_> = links
-            .into_values()
-            .filter(|link| {
-                visited.contains(&(link.from_id, link.from_type))
-                    && visited.contains(&(link.to_id, link.to_type))
-            })
-            .collect();
-        expanded_links.sort_by_key(|link| link.id);
-
-        Ok(GraphExpansion::new(expanded_objects, expanded_links))
+        bounded_expansion(query, objects.into_values(), links.into_values())
     }
 }
 
@@ -275,10 +260,21 @@ impl From<oxigraph::model::IriParseError> for CustomError {
 mod tests {
     use super::super::vocabulary as vocab;
     use super::*;
-    use crate::api::types::{graph_uri, RelationType};
+    use crate::api::types::{
+        graph_uri, ContextPackSection, LifecycleFilterAction, RelationType, RetrievalContext,
+    };
+    use crate::internal::models::vector::{
+        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+        VectorSurface,
+    };
     use crate::internal::repositories::test_support::{
         high_fanout_graph_fixture, representative_fixtures,
     };
+    use crate::internal::repositories::{
+        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+    };
+    use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
 
     #[tokio::test]
     async fn oxigraph_store_upserts_and_queries_canonical_objects() {
@@ -461,6 +457,104 @@ mod tests {
         assert_eq!(
             expansion.links,
             vec![fixture.links[0].clone(), fixture.links[1].clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_expansion_returns_only_traversed_links_after_fanout_pruning() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+        let traversed_link = fixture.links[0].clone();
+        let mut pruned_duplicate = traversed_link.clone();
+        pruned_duplicate.id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0195);
+        pruned_duplicate.rationale = Some("Fanout-pruned duplicate endpoint link.".to_owned());
+        let mut links = fixture.links.clone();
+        links.push(pruned_duplicate.clone());
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+
+        let expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_max_fanout_per_node(1),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(expansion.links, vec![traversed_link.clone()]);
+        assert!(!expansion.links.contains(&pruned_duplicate));
+        assert_eq!(
+            expansion
+                .relations
+                .iter()
+                .map(|relation| relation.link_id)
+                .collect::<Vec<_>>(),
+            vec![traversed_link.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_expansion_honors_policy_bounds_and_lifecycle_filters() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store.upsert_links(&fixtures.links()).await.unwrap();
+
+        let default_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.correction.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            default_expansion.objects,
+            vec![MemoryObject::DerivedMemory(fixtures.correction.clone())]
+        );
+        assert_eq!(default_expansion.filtered_nodes.len(), 1);
+        assert_eq!(
+            default_expansion.filtered_nodes[0].object_ref,
+            GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+        );
+        assert_eq!(
+            default_expansion.filtered_nodes[0].reason,
+            GraphExpansionFilteredReason::Suppressed
+        );
+
+        let historical_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.correction.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_suppressed: true,
+                        include_non_current: true,
+                        include_superseded: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            historical_expansion.links,
+            vec![fixtures.hub_links[2].clone()]
+        );
+        assert_eq!(historical_expansion.relations.len(), 1);
+
+        let timed_out = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
+                    .with_failure_policy(GraphExpansionFailurePolicy {
+                        timeout_ms: Some(0),
+                        allow_partial_results: true,
+                    }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            timed_out.bounded_failure.unwrap().reason,
+            GraphExpansionBoundedFailureReason::Timeout
         );
     }
 
@@ -651,5 +745,121 @@ mod tests {
         assert!(expansion
             .objects
             .contains(&MemoryObject::Observation(fixtures.salient_observation)));
+    }
+
+    #[tokio::test]
+    async fn retrieve_pipeline_expands_fixed_vector_candidate_with_embedded_oxigraph() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store.upsert_links(&fixtures.links()).await.unwrap();
+
+        let vector = FixedVectorStore::new(vec![VectorCandidateMatch::new(
+            fixtures.hub_entity.id,
+            ObjectType::Entity,
+            VectorSurface::Summary,
+            0.99,
+        )]);
+        let embedder = FixedEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&store, &vector, &embedder);
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
+        assert_eq!(
+            outcome.pack.derived_memories[0].memory.id,
+            fixtures.derived_reflection.id
+        );
+        assert_eq!(outcome.rationale.vector_candidate_count, 1);
+        assert!(outcome.rationale.graph_verified_count >= 3);
+        assert!(outcome.rationale.summary.contains("graph-verified objects"));
+        assert!(outcome
+            .rationale
+            .lifecycle_filter_decisions
+            .iter()
+            .any(|decision| decision.object.id == fixtures.hub_entity.id
+                && decision.action == LifecycleFilterAction::Included));
+        assert!(outcome
+            .rationale
+            .section_assignments
+            .iter()
+            .any(|assignment| assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::RelevantEpisodes
+                && assignment.reason.is_some()));
+
+        let trace = outcome.trace.as_ref().unwrap();
+        assert_eq!(trace.vector_candidates.len(), 1);
+        assert_eq!(trace.vector_candidates[0].object.id, fixtures.hub_entity.id);
+        assert!(trace.graph_relations.iter().any(|relation| {
+            relation.from.id == fixtures.hub_entity.id
+                && relation.to.id == fixtures.episode.id
+                && relation.relation == RelationType::Involves
+        }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.derived_reflection.id
+                && assignment.section == ContextPackSection::DerivedMemories
+        }));
+    }
+
+    #[derive(Debug)]
+    struct FixedEmbedder {
+        embedding: Vec<f32>,
+    }
+
+    impl FixedEmbedder {
+        fn new(embedding: Vec<f32>) -> Self {
+            Self { embedding }
+        }
+    }
+
+    #[async_trait]
+    impl MemoryEmbedder for FixedEmbedder {
+        async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(self.embedding.clone())
+        }
+
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            Ok(vec![self.embedding.clone(); inputs.len()])
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixedVectorStore {
+        candidates: Vec<VectorCandidateMatch>,
+    }
+
+    impl FixedVectorStore {
+        fn new(candidates: Vec<VectorCandidateMatch>) -> Self {
+            Self { candidates }
+        }
+    }
+
+    #[async_trait]
+    impl VectorCandidateStore for FixedVectorStore {
+        async fn upsert_vector_records(
+            &self,
+            _records: &[VectorRecordEmbedding<'_>],
+        ) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn search_candidates(
+            &self,
+            query: &VectorCandidateSearch,
+        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+            let mut candidates = self.candidates.clone();
+            candidates.truncate(query.limit);
+            Ok(candidates)
+        }
+
+        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+            Ok(())
+        }
     }
 }

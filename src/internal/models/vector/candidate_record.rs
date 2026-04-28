@@ -3,7 +3,11 @@
 // types directly, or prune unused members.
 #![allow(dead_code)]
 
-use crate::api::types::{MemoryId, ObjectType};
+use chrono::{DateTime, Utc};
+
+use crate::api::types::{MemoryId, ObjectType, RetentionState};
+
+use super::{VectorPayloadHints, VectorRelationshipHints};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VectorSurface {
@@ -44,6 +48,10 @@ pub(crate) struct VectorCandidateRecord {
     pub(crate) object_type: ObjectType,
     pub(crate) surface: VectorSurface,
     pub(crate) embedding: Vec<f32>,
+    pub(crate) retention_state: Option<RetentionState>,
+    pub(crate) is_current: Option<bool>,
+    pub(crate) relationship_hints: VectorRelationshipHints,
+    pub(crate) payload_hints: VectorPayloadHints,
 }
 
 impl VectorCandidateRecord {
@@ -58,7 +66,25 @@ impl VectorCandidateRecord {
             object_type,
             surface,
             embedding,
+            retention_state: None,
+            is_current: None,
+            relationship_hints: VectorRelationshipHints::default(),
+            payload_hints: VectorPayloadHints::default(),
         }
+    }
+
+    pub(crate) fn with_filter_hints(
+        mut self,
+        retention_state: Option<RetentionState>,
+        is_current: Option<bool>,
+        relationship_hints: VectorRelationshipHints,
+        payload_hints: VectorPayloadHints,
+    ) -> Self {
+        self.retention_state = retention_state;
+        self.is_current = is_current;
+        self.relationship_hints = relationship_hints;
+        self.payload_hints = payload_hints;
+        self
     }
 }
 
@@ -67,6 +93,7 @@ pub(crate) struct VectorCandidateSearch {
     pub(crate) query_embedding: Vec<f32>,
     pub(crate) limit: usize,
     pub(crate) object_types: Vec<ObjectType>,
+    pub(crate) filters: VectorCandidateFilters,
 }
 
 impl VectorCandidateSearch {
@@ -75,6 +102,7 @@ impl VectorCandidateSearch {
             query_embedding,
             limit,
             object_types: Vec::new(),
+            filters: VectorCandidateFilters::default(),
         }
     }
 
@@ -82,6 +110,105 @@ impl VectorCandidateSearch {
         self.object_types = object_types;
         self
     }
+
+    pub(crate) fn with_default_object_types(mut self) -> Self {
+        self.object_types = default_vector_candidate_object_types();
+        self
+    }
+
+    pub(crate) fn with_filters(mut self, filters: VectorCandidateFilters) -> Self {
+        self.filters = filters;
+        self
+    }
+}
+
+pub(crate) fn default_vector_candidate_object_types() -> Vec<ObjectType> {
+    vec![
+        ObjectType::Episode,
+        ObjectType::Observation,
+        ObjectType::DerivedMemory,
+        ObjectType::MemoryThread,
+        ObjectType::Entity,
+    ]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct VectorCandidateFilters {
+    pub(crate) retention_states: Vec<RetentionState>,
+    pub(crate) is_current: Option<bool>,
+    pub(crate) is_superseded: Option<bool>,
+    pub(crate) thread_ids: Vec<MemoryId>,
+    pub(crate) entity_ids: Vec<MemoryId>,
+    pub(crate) episode_ids: Vec<MemoryId>,
+    pub(crate) time_ranges: Vec<VectorTimeRangeFilter>,
+}
+
+impl VectorCandidateFilters {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn with_retention_states(mut self, retention_states: Vec<RetentionState>) -> Self {
+        self.retention_states = retention_states;
+        self
+    }
+
+    pub(crate) fn current_only(mut self) -> Self {
+        self.is_current = Some(true);
+        self.is_superseded = Some(false);
+        self
+    }
+
+    pub(crate) fn with_thread_ids(mut self, thread_ids: Vec<MemoryId>) -> Self {
+        self.thread_ids = thread_ids;
+        self
+    }
+
+    pub(crate) fn with_entity_ids(mut self, entity_ids: Vec<MemoryId>) -> Self {
+        self.entity_ids = entity_ids;
+        self
+    }
+
+    pub(crate) fn with_episode_ids(mut self, episode_ids: Vec<MemoryId>) -> Self {
+        self.episode_ids = episode_ids;
+        self
+    }
+
+    pub(crate) fn with_time_range(mut self, time_range: VectorTimeRangeFilter) -> Self {
+        self.time_ranges.push(time_range);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VectorTimeRangeFilter {
+    pub(crate) field: VectorTimeField,
+    pub(crate) after: Option<DateTime<Utc>>,
+    pub(crate) before: Option<DateTime<Utc>>,
+}
+
+impl VectorTimeRangeFilter {
+    pub(crate) fn new(
+        field: VectorTimeField,
+        after: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            field,
+            after,
+            before,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VectorTimeField {
+    Created,
+    Updated,
+    Started,
+    Ended,
+    Observed,
+    LastTouched,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +266,33 @@ mod tests {
             search.object_types,
             vec![ObjectType::Episode, ObjectType::DerivedMemory]
         );
+    }
+
+    #[test]
+    fn vector_candidate_search_can_express_default_types_and_payload_hint_filters() {
+        let thread_id = MemoryId::new_v4();
+        let entity_id = MemoryId::new_v4();
+        let episode_id = MemoryId::new_v4();
+        let timestamp = DateTime::parse_from_rfc3339("2026-04-29T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let filters = VectorCandidateFilters::new()
+            .with_retention_states(vec![RetentionState::Active])
+            .current_only()
+            .with_thread_ids(vec![thread_id])
+            .with_entity_ids(vec![entity_id])
+            .with_episode_ids(vec![episode_id])
+            .with_time_range(VectorTimeRangeFilter::new(
+                VectorTimeField::Observed,
+                Some(timestamp),
+                None,
+            ));
+        let search = VectorCandidateSearch::new(vec![1.0, 0.0], 12)
+            .with_default_object_types()
+            .with_filters(filters.clone());
+
+        assert_eq!(search.object_types, default_vector_candidate_object_types());
+        assert_eq!(search.filters, filters);
     }
 
     #[test]

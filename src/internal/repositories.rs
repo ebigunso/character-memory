@@ -4,6 +4,7 @@ mod link_pipeline;
 mod memory_repository;
 mod raw_reference_resolver;
 mod remember_pipeline;
+mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vector_candidate_store;
@@ -19,8 +20,10 @@ pub(crate) use embedder::MemoryEmbedder;
 // exports.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
-    bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery,
-    GraphObjectQuery,
+    bounded_expansion, bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
 // Transitional contract surface: remove this allow once facade wiring
@@ -42,6 +45,11 @@ pub(crate) use remember_pipeline::{
     RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome,
     VectorIndexingFailure as InternalVectorIndexingFailure,
 };
+
+// Transitional contract surface: remove this allow once facade wiring
+// consumes the retrieve pipeline directly, or prune unused outcome helpers.
+#[allow(unused_imports)]
+pub(crate) use retrieve_pipeline::RetrievePipeline;
 
 // Transitional contract surface: remove this allow once adapter or
 // pipeline code consumes vector candidate storage directly, or prune the re-export.
