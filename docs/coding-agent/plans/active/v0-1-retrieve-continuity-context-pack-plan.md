@@ -71,7 +71,7 @@
   - `docs/coding-agent/plans/completed/v0-1-remember-and-link-pipelines-plan.md`
 
 ## Open Questions (max 3)
-- Q1: Should optional retrieval trace live inside `ContinuityContextPack`, or be returned as a separate debug structure/outcome wrapper?
+- None. Task_1 resolved the trace/API boundary below.
 
 ## Resolved Decisions
 - Public request naming should use `RetrievalContext`, matching the roadmap/design terminology. Retrieval input is not a `Draft` because it does not validate into persisted canonical objects.
@@ -80,6 +80,13 @@
 - Context-pack sections are v0.1 sections over existing canonical object and derived-memory types, not new v0.2 first-class continuity objects.
 - Graph verification is authoritative for final inclusion. Vector retention/currentness/thread/entity/time filters are candidate prefilters only and cannot override graph lifecycle/currentness truth.
 - Currentness filtering should use canonical object fields first; supersession links can provide supporting graph evidence where available but must not cause stale vector hints to become authoritative.
+- Task_1 retrieve API boundary: `CharacterMemory::retrieve` should return a backend-free `RetrieveOutcome` wrapper rather than `ContinuityContextPack` directly. `RetrieveOutcome` contains the final `ContinuityContextPack`, a compact always-available rationale summary, and optional trace/debug details when requested by policy. The pack remains the primary product abstraction and must not expose Qdrant, Oxigraph, RDF, vector scores as backend types, or provider-specific graph identifiers. The wrapper keeps optional diagnostics separate from the prompt-ready pack while preserving ADR-D-0004's requirement that retrieval produce a structured continuity context pack rather than a flat result list.
+- Task_1 design gate policy: implementation tasks must not begin until this retrieve API/policy boundary is recorded and reviewed. Task_2 through Task_6 should treat this decision as their dependency contract, and any change to direct-pack versus outcome-wrapper behavior requires returning to this design gate before code edits.
+- Task_1 lifecycle/currentness policy: default retrieval excludes suppressed and deleted records, archived/historical-only records, non-current derived memories, superseded memories, and candidates whose authoritative graph object cannot be resolved. Explicit backend-free policy knobs may include archived/non-current/historical data for inspection or audit use cases, but those knobs must be opt-in, must appear in rationale/trace, and must not let vector payload hints override graph authority.
+- Task_1 graph expansion policy: retrieval graph expansion must support relation allowlists, max fanout per node, hub/entity limits, allowed object types, lifecycle/currentness filters, and timeout or deterministic bounded-failure behavior. Default expansion must avoid traversing through suppressed/deleted/non-current/superseded nodes except where needed to explain an omission in rationale/trace. Timeout or bounded expansion failure should return a partial `RetrieveOutcome` only if the policy allows degraded results; otherwise retrieval should fail closed with an explicit error/rationale entry and no unbounded traversal.
+- Task_1 context-pack model boundary: context-pack sections map to existing canonical object and derived-memory types such as episodes, observations, memory threads, entities, derived memories, preferences, commitments, open loops, relationship notes, and character signals. This chunk must not introduce v0.2 continuity/reflection models, scheduled reflection loops, current-view APIs, or first-class relationship-state projections.
+- Task_1 dependency direction: public retrieval DTOs, `ContinuityContextPack`, `RetrieveOutcome`, rationale, and trace types remain backend-free and depend only on public API/domain types. The retrieve pipeline depends inward on provider-neutral `GraphAuthorityStore`, `VectorCandidateStore`, and `MemoryEmbedder` contracts. Qdrant payloads, Oxigraph storage, RDF vocabulary, SPARQL behavior, and adapter timeout mechanics remain infrastructure details behind those contracts.
+- Task_1 stale-candidate and failure reporting: stale vector candidates, graph-missing candidates, lifecycle/currentness omissions, relation/fanout/hub prunes, and graph expansion timeout or bounded-failure events must be represented in rationale and, when trace is enabled, in detailed trace records. Stale or unresolved candidates are omitted from final pack sections by default; the rationale should explain aggregate omissions compactly, while trace may include per-candidate score, graph lookup result, filter reason, relation/path metadata, and final section assignment or omission reason.
 
 ## Assumptions
 - A1: Retrieval defaults exclude `RetentionState::Suppressed`, `RetentionState::Deleted`, and non-current/superseded derived memories unless policy explicitly includes them.
@@ -366,6 +373,10 @@
   - Summary: Tightened the plan from roadmap, ADR, code-contract, and plan-integrity research before dispatching implementation work.
   - Validation evidence: Researcher reports covered docs/ADR alignment, current provider-neutral contracts, and plan-integrity checks; no code tests were run for this documentation-only refresh.
   - Notes: Resolved request naming and timeout direction from existing docs, narrowed task waves to avoid shared-owns conflicts, and added provenance, relationship-note, graph-authority, smoke-evidence, and lifecycle-closure requirements.
+- 2026-04-29 Task_1 completed: retrieve API and policy boundary selected.
+  - Summary: Resolved the trace/API boundary in favor of a backend-free `RetrieveOutcome` wrapper containing the final `ContinuityContextPack`, rationale, and optional trace/debug details; recorded default lifecycle/currentness filters, graph expansion policy requirements, stale-candidate/failure reporting, DTO dependency direction, and the design-gate requirement before implementation.
+  - Validation evidence: Worker review of roadmap, remember/link plan, provenance/source-reference ADRs, continuity context pack ADR, Qdrant payload authority ADR, and bounded graph expansion ADR; documentation-only Task_1 edit, no Rust checks required.
+  - Notes: Open questions are now resolved; implementation tasks remain blocked on reviewer approval of this design gate.
 
 ## Decision Log
 
@@ -379,6 +390,11 @@
   - Plan delta: Added resolved decisions, provenance/source-reference and relationship-note acceptance, typed graph verification/rationale metadata requirements, graph-authority override tests, sequential task waves, conditional smoke-evidence wording, and final lifecycle closure acceptance.
   - Tradeoffs considered: Sequentializing graph and vector hardening reduces Worker parallelism but avoids conflicting edits in shared repository contracts and fakes.
   - User approval: pending.
+- 2026-04-29 Decision: Select `RetrieveOutcome` wrapper and retrieval policy boundary
+  - Trigger / new insight: Task_1 needed to settle trace placement and facade return shape before DTO, graph, vector, pipeline, and facade implementation could begin.
+  - Plan delta: Resolved the open trace question; selected a backend-free `RetrieveOutcome` wrapper around `ContinuityContextPack`; recorded default lifecycle/currentness filtering, opt-in archived/non-current policy knobs, graph expansion controls, stale-candidate and graph-failure rationale/trace reporting, context-pack section boundaries, and provider-neutral dependency direction.
+  - Tradeoffs considered: Returning `ContinuityContextPack` directly would make the primary output slightly simpler, but it would either overload the pack with optional debug state or make trace handling inconsistent. A wrapper keeps diagnostics out of the prompt-ready pack while preserving the pack as the primary retrieval artifact.
+  - User approval: Task_1 execution approved; reviewer approval still required before implementation tasks begin.
 
 ## Notes
 - Risks:
