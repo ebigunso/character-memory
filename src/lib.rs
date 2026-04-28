@@ -234,7 +234,7 @@ impl CharacterMemory {
     /// Legacy flat vector-only create path retained for existing integration coverage until the
     /// default production constructor is rewired to graph/vector composition.
     #[deprecated(
-        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the graph-authoritative facade"
+        note = "no public graph-authoritative replacement is available yet; remove this once the default constructor is rewired to the replacement facade"
     )]
     pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
         let legacy_repo = self.legacy_repo()?;
@@ -248,7 +248,7 @@ impl CharacterMemory {
     /// Legacy flat vector-only batch create path retained for existing integration coverage until
     /// the default production constructor is rewired to graph/vector composition.
     #[deprecated(
-        note = "use CharacterMemory::remember; remove this once the default constructor is rewired to the graph-authoritative facade"
+        note = "no public graph-authoritative replacement is available yet; remove this once the default constructor is rewired to the replacement facade"
     )]
     pub async fn bulk_create_memories(
         &self,
