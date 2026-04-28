@@ -65,17 +65,22 @@
   - `docs/decisions/implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md`
   - `docs/decisions/implementation/ADR-I-0007-schema-versioning.md`
 
-## Open Questions
-- Q1: Should public draft DTOs generate IDs/timestamps when omitted, or should callers supply all durable IDs/timestamps for this first pipeline chunk?
-- Q2: Should this chunk redesign `CharacterMemory::new` for v0.1 production stores, or add a test-first injectable constructor and defer default production wiring?
-- Q3: On vector upsert failure after graph success, should the pipeline return a hard error only, or return persisted graph IDs plus an indexing failure status?
-- Q4: Should `DerivedType::AssistantBehaviorNote` be renamed or aliased to the ADR-listed `assistant_preference` before draft DTOs become public, so behavior-influencing assistant preferences are not split across names?
+## Open Questions (max 3)
+- None. The initial API construction and partial-failure questions are resolved below.
+
+## Resolved Decisions
+- Draft DTOs should generate IDs/timestamps when omitted while still allowing caller-supplied values for deterministic tests, migrations, import/replay workflows, and cross-store ID stability.
+- Add an injectable v0.1 construction path now as a durable API boundary, not as a legacy-compatibility workaround. A `from_parts`- or builder-style path that accepts `GraphAuthorityStore`, `VectorCandidateStore`, and `MemoryEmbedder` remains useful after legacy removal for tests, alternate backends, alternate embedders, and application-owned wiring.
+- Defer redesigning the default production `CharacterMemory::new` until the remember/link path lands and the old flat facade can be removed or replaced deliberately.
+- If graph persistence succeeds but vector indexing fails, return an explicit partial-success outcome with persisted graph IDs plus indexing failure status, rather than hiding the authoritative graph write behind a hard error only.
+- Comments must distinguish temporary migration scaffolding from durable production API documentation. Code that should be removed or changed later needs clear removal-condition comments; code intended to remain after the complete refactor should use stable, production-ready comments that should not require churn.
 
 ## Assumptions
 - A1: Draft types may be public if Task_1 selects a public `remember`/`link` facade, but they must stay canonical-domain-aligned and backend-free.
 - A2: Persistence ordering should be validate all drafts, upsert graph objects, upsert graph links, embed selected vector records, then upsert vectors.
 - A3: This chunk should fail closed on validation or store errors and explicitly document any non-atomic multi-store behavior.
 - A4: Live Qdrant smoke evidence remains required before PR creation/merge; embedded Oxigraph smoke has no external service prerequisite.
+- A5: `DerivedType` currently exposes `AssistantBehaviorNote`; Task_1 must decide whether to rename, alias, or intentionally defer the ADR-listed `assistant_preference` vocabulary before any public draft surface hardens serialized names.
 
 ## Deferred Review Findings To Address In This Plan
 - Public flat facade replacement: the strict ADR review found that `CharacterMemory::{create_memory, search_memories, update_memory, delete_memory}` still makes the old `MemoryInput`/`MemoryType` and flat `Memory`/`ScoredMemory` model the practical public entry point. Task_1 and Task_5 must decide and implement removal or replacement when `remember`/`link` supersede it; isolation/deprecation is acceptable only with an explicit short-lived architecture or validation-scope reason.
@@ -88,10 +93,6 @@
 ### Task_1: Select draft API and pipeline boundary
 - type: design
 - owns:
-  - `src/api/types/**`
-  - `src/lib.rs`
-  - `src/internal/repositories.rs`
-  - `src/internal/repositories/**`
   - `docs/coding-agent/plans/active/v0-1-remember-and-link-pipelines-plan.md`
 - depends_on: []
 - description: |
@@ -102,6 +103,8 @@
   - Decision records how the deferred review findings in this plan are handled, explicitly including legacy facade replacement, legacy Qdrant repository retirement/split, test-support split boundaries, and `assistant_preference` naming.
   - Decision records persistence ordering and partial-failure policy.
   - Decision keeps draft and pipeline contracts backend-free.
+  - Decision records the dependency direction: draft DTOs convert into canonical domain objects; pipelines depend on `GraphAuthorityStore`, `VectorCandidateStore`, and `MemoryEmbedder`; domain types do not depend on Qdrant, Oxigraph, RDF, or pipeline modules.
+  - Decision records comment policy for this chunk: temporary migration comments name the removal/change condition, while durable constructor/API comments are written as production documentation.
 - validation:
   - kind: review
     required: true
@@ -161,8 +164,10 @@
   - Pipeline accepts validated remember drafts and returns persisted object IDs, link IDs, and vector-indexed IDs.
   - Graph objects are persisted before links; links reference submitted objects or existing graph objects by ID/type.
   - Vector indexing uses `memory_object_vector_record` and indexes only `Episode`, `Observation`, `DerivedMemory`, `MemoryThread`, and `Entity`.
+  - The pipeline explicitly skips `MemoryObject::MemoryLink` during vector record construction.
   - Embeddings use `MemoryEmbedder::embed_batch` or an equivalent deterministic-test-friendly path before `VectorCandidateStore::upsert_vector_records`.
   - Tests assert ordering and no vector write when graph object/link write fails.
+  - Tests assert selected vector records are paired with embeddings in stable order and fail clearly if the embedder returns the wrong number of vectors.
   - New fake-store and fixture helpers are module-local or placed in narrower test-support modules rather than expanding the existing monolithic `test_support.rs` without a split plan.
 - validation:
   - kind: command
@@ -225,18 +230,20 @@
   - `src/api/types/**`
   - `src/internal/repositories.rs`
   - `src/internal/repositories/**`
-  - `tests/**` # public facade/integration tests only; unit tests stay beside source modules
+  - `tests/**`
   - `README.md`
 - depends_on: [Task_3, Task_4]
 - description: |
   Expose the selected `remember`/`link` surface or a clearly scoped transitional equivalent and prevent accidental extension of the old flat API path.
 - acceptance:
   - Public or crate-visible construction path can inject graph store, vector store, and embedder for deterministic tests.
+  - Injectable construction is documented as a durable composition boundary, not as temporary legacy compatibility scaffolding.
   - `CharacterMemory` exposes the selected `remember`/`link` surface or a clearly scoped transitional equivalent.
   - Old flat `create_memory` path is removed or replaced when the v0.1 surface supersedes it; isolation/deprecation is allowed only with an explicit architecture or validation-scope justification from Task_1.
   - The legacy `QdrantVectorMemoryRepository` path is retired with the flat facade when possible; if retained, its legacy mapping responsibilities are split or clearly namespaced so it cannot be confused with the v0.1 `VectorCandidateStore` adapter.
   - README examples are updated only if public surface changes require it.
   - No retrieve/correct/forget behavior is introduced.
+  - Pure Rust behavior tests remain in source-module test files; `tests/**` is used only for public facade or integration-style coverage.
 - validation:
   - kind: command
     required: true
@@ -292,9 +299,10 @@
 
 - Wave 1 (design gate): [Task_1]
 - Wave 2 (draft inputs): [Task_2]
-- Wave 3 (pipeline implementations): [Task_3, Task_4]
-- Wave 4 (facade and legacy isolation): [Task_5]
-- Wave 5 (live smoke, review, next-plan draft): [Task_6]
+- Wave 3 (remember pipeline): [Task_3]
+- Wave 4 (typed link pipeline): [Task_4]
+- Wave 5 (facade and legacy isolation): [Task_5]
+- Wave 6 (live smoke, review, next-plan draft): [Task_6]
 
 ## E2E / Visual Validation Spec
 
@@ -309,12 +317,18 @@
 
 ## Quality Routing Note
 - Routing level: L2
-- In-scope docs: Rust API/internal pipeline architecture, persistence ordering, deterministic fake-store validation, live smoke evidence, data-integrity boundaries.
+- In-scope docs: Rust API/internal pipeline architecture, architecture gates, persistence ordering, deterministic fake-store validation, live smoke evidence, data-integrity boundaries.
 - Out-of-scope docs: UI/E2E, frontend/browser checks, retrieval/ranking behavior, correction/forget lifecycle, production raw storage.
 - Top risks: public API shape, data-integrity, partial failure across graph/vector stores, legacy flat facade drift, live-service validation prerequisites.
 - Risk profile: medium-high because this chunk writes across graph and vector stores and begins public/transitional API behavior.
 - Required checks: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, targeted draft/pipeline/link/facade tests, live Qdrant smoke, embedded Oxigraph smoke, Reviewer gate.
-- Optional recommended checks: gated CI workflow update if live smoke routing needs changes.
+- Optional recommended checks: `cargo clippy --all-targets -- -D warnings`, gated CI workflow update if live smoke routing needs changes.
+
+## Architecture Gate Notes
+- Boundary map: public draft/facade types convert into canonical domain values; internal pipeline code coordinates provider-neutral store/embedder traits; Qdrant/Oxigraph/RDF details remain in infrastructure adapters.
+- Data integrity gate: validation must complete before graph or vector writes; graph object/link writes are authoritative and precede vector indexing; vector payload relationship IDs remain filter hints.
+- Failure containment gate: graph object failure prevents link/vector writes; graph link failure prevents vector writes; vector failure after graph success must return the Task_1-selected explicit non-atomic result or error shape.
+- Observability/evidence gate: tests must prove write ordering, skipped link vectorization, partial failure behavior, and raw reference preservation without logging or persisting raw transcripts.
 
 ## Progress Log
 
@@ -323,6 +337,16 @@
   - Validation evidence: Researcher plan-fill report and current adapter-foundation code review inputs.
   - Notes: Draft status; requires user approval before execution.
 
+- 2026-04-28 Plan refreshed for approval.
+  - Summary: Rechecked prior completed plans, roadmap/design documents, relevant ADRs, canonical domain types, store contracts, vector record builders, and the legacy `CharacterMemory` facade. Tightened open questions, task ownership, validation evidence, and sequential waves where owns overlap.
+  - Validation evidence: Direct source inspection of `src/api/types/domain.rs`, `src/internal/repositories.rs`, `src/internal/repositories/graph_authority_store.rs`, `src/internal/repositories/vector_candidate_store.rs`, `src/internal/repositories/embedder.rs`, `src/internal/models/vector/record.rs`, `src/internal/models/vector/embedding_surface.rs`, and `src/lib.rs`; Researcher plan-fill report.
+  - Notes: Draft status; requires user approval before execution.
+
+- 2026-04-28 Initial open questions resolved.
+  - Summary: User accepted generated IDs/timestamps with caller override, durable injectable construction, deferred default constructor redesign, explicit partial-success result for graph-success/vector-failure, and clear temporary-vs-durable code comment guidance.
+  - Validation evidence: Planning decision update only; no Rust validation required.
+  - Notes: Plan remains draft until the user approves execution.
+
 ## Decision Log
 
 - 2026-04-28 Decision: Draft remember/link plan after adapter foundation final review
@@ -330,6 +354,12 @@
   - Plan delta: Added `v0-1-remember-and-link-pipelines-plan.md` as the next active concrete plan.
   - Tradeoffs considered: Starting with caller-supplied drafts keeps the write pipeline deterministic and avoids adding extractor/LLM dependencies. Keeping retrieval/correction out of scope protects this chunk from expanding into context-pack behavior.
   - User approval: pending.
+
+- 2026-04-28 Decision: Resolve draft defaults, injectable construction, and partial indexing failure semantics
+  - Trigger / new insight: User accepted generated ID/timestamp defaults with caller overrides and explicit partial-success outcomes, then clarified that injectable construction should be considered useful after legacy removal rather than only a backward-compatibility tool.
+  - Plan delta: Replaced the initial open questions with resolved decisions, added durable injectable-constructor guidance, and added comment policy distinguishing temporary migration scaffolding from stable production-ready API comments.
+  - Tradeoffs considered: Requiring caller-supplied IDs would improve explicitness but make normal use noisy; hard-erroring on vector failure would obscure graph-authoritative persistence; treating injectable construction as temporary would undercut testability and backend substitution after the refactor.
+  - User approval: yes.
 
 ## Notes
 - Risks:
