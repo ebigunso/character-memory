@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use character_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::{Duration, Utc};
 mod test_utils;

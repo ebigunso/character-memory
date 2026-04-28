@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 mod test_utils;

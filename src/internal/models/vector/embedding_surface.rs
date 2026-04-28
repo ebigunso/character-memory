@@ -170,7 +170,7 @@ fn derived_label(memory: &DerivedMemory) -> &'static str {
     match memory.derived_type {
         crate::api::types::DerivedType::Reflection => "Reflection",
         crate::api::types::DerivedType::UserPreference => "User preference",
-        crate::api::types::DerivedType::AssistantBehaviorNote => "Assistant behavior note",
+        crate::api::types::DerivedType::AssistantPreference => "Assistant preference",
         crate::api::types::DerivedType::Commitment => "Commitment",
         crate::api::types::DerivedType::OpenLoop => "Open loop",
         crate::api::types::DerivedType::CharacterSignal => "Character signal",

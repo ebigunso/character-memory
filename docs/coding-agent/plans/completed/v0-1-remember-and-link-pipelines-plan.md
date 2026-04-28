@@ -392,6 +392,11 @@
   - Validation evidence: Reviewer status APPROVED; required deterministic checks and smoke evidence are recorded above.
   - Notes: Plan lifecycle is ready to move from active to completed.
 
+- 2026-04-28 Plan lifecycle closed.
+  - Summary: Moved this plan from active to completed and updated the starter episodic memory roadmap to mark remember/link complete and retrieve/context-pack active.
+  - Validation evidence: Final `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo clippy --all-targets -- -D warnings`, and Problems diagnostics all passed.
+  - Notes: Implementation changes remain uncommitted after the earlier plan-decision commit.
+
 - 2026-04-28 Task_1 completed: selected draft API and pipeline boundary.
   - Summary: Recorded the draft DTO module boundary, public remember/link facade shape, legacy flat API retirement/isolation policy, deferred review-finding handling, persistence ordering, partial-failure policy, backend-free dependency direction, and comment policy before implementation edits.
   - Validation evidence: Manual design review against this plan, the v0.1 roadmap, completed domain/store/adapter-foundation plans, and current facade/domain/store contract shapes; Reviewer approved the boundary with no findings.

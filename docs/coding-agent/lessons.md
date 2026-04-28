@@ -21,6 +21,30 @@ Purpose:
 
 ## Entries
 
+## 2026-04-29 - Keep Roadmap Versions Out Of Durable Code  [tags: code-quality, architecture, communication]
+
+Context:
+- Plan: v0.1 remember/link implementation follow-up
+- Task/Wave: post-implementation code review discussion
+- Roles involved: Orchestrator
+
+Symptom:
+- Durable production comments and names used roadmap-version language such as `v0.1`, even when the concept should survive beyond the roadmap milestone.
+
+Root cause:
+- Treated roadmap phase labels as convenient implementation descriptors instead of limiting them to roadmap docs and clearly temporary migration artifacts.
+
+Fix applied:
+- Classified versioned code comments/names as cleanup targets when they describe durable structures such as composition boundaries, facades, or provider-neutral APIs.
+
+Prevention:
+- Do not use roadmap version numbers in long-lived production code comments, identifiers, or user-facing errors. Use stable domain language instead.
+- Roadmap version labels are acceptable in roadmap/planning docs and temporary migration comments only when the cleanup/removal condition is explicit.
+- Schema/data version identifiers must be treated as separate persisted contract decisions, not casual roadmap labels.
+
+Evidence:
+- `CharacterMemory::from_parts` comment and `v0_1_parts` naming were identified as durable concepts needing stable naming/comment cleanup.
+
 ## 2026-04-28 - Distinguish Temporary And Durable Code Comments  [tags: code-quality, communication, architecture]
 
 Context:
