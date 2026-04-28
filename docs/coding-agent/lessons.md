@@ -21,6 +21,53 @@ Purpose:
 
 ## Entries
 
+## 2026-04-29 - Keep Roadmap Versions Out Of Durable Code  [tags: code-quality, architecture, communication]
+
+Context:
+- Plan: v0.1 remember/link implementation follow-up
+- Task/Wave: post-implementation code review discussion
+- Roles involved: Orchestrator
+
+Symptom:
+- Durable production comments and names used roadmap-version language such as `v0.1`, even when the concept should survive beyond the roadmap milestone.
+
+Root cause:
+- Treated roadmap phase labels as convenient implementation descriptors instead of limiting them to roadmap docs and clearly temporary migration artifacts.
+
+Fix applied:
+- Classified versioned code comments/names as cleanup targets when they describe durable structures such as composition boundaries, facades, or provider-neutral APIs.
+
+Prevention:
+- Do not use roadmap version numbers in long-lived production code comments, identifiers, or user-facing errors. Use stable domain language instead.
+- Roadmap version labels are acceptable in roadmap/planning docs and temporary migration comments only when the cleanup/removal condition is explicit.
+- Schema/data version identifiers must be treated as separate persisted contract decisions, not casual roadmap labels.
+
+Evidence:
+- `CharacterMemory::from_parts` comment and `v0_1_parts` naming were identified as durable concepts needing stable naming/comment cleanup.
+
+## 2026-04-28 - Distinguish Temporary And Durable Code Comments  [tags: code-quality, communication, architecture]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-remember-and-link-pipelines-plan.md`
+- Task/Wave: plan decision refinement before implementation
+- Roles involved: Orchestrator
+
+Symptom:
+- The user clarified that comments should communicate whether a structure is temporary migration scaffolding or durable production API/design surface.
+
+Root cause:
+- Planning could otherwise treat all comments as generic explanation, leaving future Workers/Reviewers unsure which code should be removed later and which code is intended to survive the complete v0.1 refactor.
+
+Fix applied:
+- Updated the remember/link plan to require removal-condition comments for temporary scaffolding and stable production-ready comments for durable injectable constructor/API structures.
+
+Prevention:
+- When adding comments during v0.1 refactor work, explicitly choose the comment category: temporary comments name when to remove/change the code; durable comments describe stable intent without implying future cleanup.
+- Reviewers should flag transitional comments without removal conditions and durable API comments that read like temporary scaffolding.
+
+Evidence:
+- Active remember/link plan now includes resolved decision and Task_1/Task_5 acceptance coverage for temporary-vs-durable comment guidance.
+
 ## 2026-04-28 - Parallelize Review Loops And Avoid Token-Burning Waits  [tags: delegation, review, tooling]
 
 Context:

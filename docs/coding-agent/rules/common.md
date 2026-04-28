@@ -1,6 +1,6 @@
 # Common Repository Rules
 
-last_updated: 2026-04-27
+last_updated: 2026-04-29
 
 ## Repository Reference Documents
 
@@ -22,6 +22,7 @@ last_updated: 2026-04-27
 - The primary public memory type is `CharacterMemory`.
 - Prefer direct Rust module filenames such as `foo.rs` over `foo/mod.rs` for source modules.
 - Reserve `tests/` for integration tests; place unit tests in the same source module tree as the production code they test.
+- Keep roadmap version labels out of long-lived production code comments, identifiers, and user-facing errors. Use stable domain/schema language instead; roadmap version labels belong in roadmap/planning docs or clearly temporary migration artifacts with cleanup conditions.
 
 ## Global Migration Candidates (Placeholder)
 

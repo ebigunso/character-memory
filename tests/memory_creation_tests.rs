@@ -2,6 +2,9 @@ use character_memory::{MemoryInput, MemoryType};
 use chrono::Utc;
 mod test_utils;
 
+// These tests intentionally exercise the deprecated legacy flat facade until
+// the public graph-authoritative replacement is wired through the default constructor.
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_create_episodic_memory() {
     // Setup
@@ -34,6 +37,7 @@ async fn test_create_episodic_memory() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_create_semantic_memory() {
     // Setup
@@ -62,6 +66,7 @@ async fn test_create_semantic_memory() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_bulk_create_memories() {
     // Setup

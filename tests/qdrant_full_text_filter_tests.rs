@@ -2,6 +2,9 @@ use character_memory::{MemoryFilters, MemoryInput, MemoryType};
 use chrono::Utc;
 mod test_utils;
 
+// These tests intentionally exercise the deprecated legacy flat facade until
+// the public graph-authoritative replacement is wired through the default constructor.
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_participants_full_text_token_match() {
     let (character_memory, collection_name) = test_utils::setup_character_memory().await;
@@ -66,6 +69,7 @@ async fn test_participants_full_text_token_match() {
     test_utils::cleanup_collection(&collection_name).await;
 }
 
+#[allow(deprecated)]
 #[tokio::test]
 async fn test_location_text_full_text_token_match() {
     let (character_memory, collection_name) = test_utils::setup_character_memory().await;

@@ -1,4 +1,4 @@
-// Transitional v0.1 Qdrant candidate-store scaffold: downstream storage
+// Transitional Qdrant candidate-store scaffold: downstream storage
 // pipeline chunks will consume the concrete adapter after graph authority lands.
 // Remove once remember/link production wiring or tests consume the adapter, or
 // prune any remaining unused surface then.
@@ -304,7 +304,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn search_result_mapping_reads_v0_1_payload_identity_and_surface() {
+    fn search_result_mapping_reads_payload_identity_and_surface() {
         let object_id = Uuid::new_v4();
         let point_id = Uuid::new_v4();
         let point = ScoredPoint {
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_points_use_full_v0_1_vector_record_payloads() {
+    fn upsert_points_use_full_vector_record_payloads() {
         let object_id = Uuid::new_v4();
         let related_episode_id = Uuid::new_v4();
         let record = VectorRecord::new(
@@ -438,10 +438,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
-    async fn qdrant_v0_1_candidate_store_live_smoke_upserts_searches_and_deletes() {
+    async fn qdrant_candidate_store_live_smoke_upserts_searches_and_deletes() {
         let url = env::var("QDRANT_CONNECTION_STRING")
             .expect("QDRANT_CONNECTION_STRING is required for live Qdrant smoke test");
-        let collection_name = format!("cmem_v0_1_candidate_smoke_{}", Uuid::new_v4());
+        let collection_name = format!("cmem_candidate_smoke_{}", Uuid::new_v4());
         let store =
             QdrantVectorCandidateStore::new(url, &collection_name, 2).expect("store builds");
 

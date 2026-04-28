@@ -41,7 +41,7 @@ fn representative_episode() -> Episode {
         started_at: Some(timestamp("2026-04-27T10:00:00Z")),
         ended_at: Some(timestamp("2026-04-27T10:05:00Z")),
         participant_entity_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655440001")],
-        summary: "Discussed the v0.1 domain model.".to_owned(),
+        summary: "Discussed the episodic memory domain model.".to_owned(),
         raw_ref: Some("raw://conversation/2026-04-27#episode-1".to_owned()),
         salience_score: 0.8,
         retention_state: RetentionState::Active,
@@ -157,7 +157,7 @@ fn domain_enums_serialize_as_snake_case() {
         serialized_value(Modality::VoiceTranscript),
         serialized_value(EntityType::Assistant),
         serialized_value(EntityType::Organization),
-        serialized_value(DerivedType::AssistantBehaviorNote),
+        serialized_value(DerivedType::AssistantPreference),
         serialized_value(DerivedType::RelationshipNote),
         serialized_value(RelationType::HasObservation),
         serialized_value(RelationType::CreatesOpenLoop),
@@ -176,7 +176,7 @@ fn domain_enums_serialize_as_snake_case() {
             "voice_transcript",
             "assistant",
             "organization",
-            "assistant_behavior_note",
+            "assistant_preference",
             "relationship_note",
             "has_observation",
             "creates_open_loop",
@@ -213,10 +213,10 @@ fn graph_uri_maps_object_types_to_stable_urns() {
 }
 
 #[test]
-fn schema_version_constants_are_pinned_to_v0_1() {
-    assert_eq!(SCHEMA_VERSION_V0_1, "v0.1");
-    assert_eq!(CURRENT_SCHEMA_VERSION, SCHEMA_VERSION_V0_1);
-    assert_eq!(DEFAULT_SCHEMA_VERSION, SCHEMA_VERSION_V0_1);
+fn schema_version_constants_are_pinned_to_the_initial_episodic_memory_schema() {
+    assert_eq!(EPISODIC_MEMORY_SCHEMA_VERSION, "episodic_memory_initial");
+    assert_eq!(CURRENT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
+    assert_eq!(DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
 }
 
 #[test]
@@ -238,12 +238,12 @@ fn representative_domain_objects_round_trip_through_serde() {
     let thread = MemoryThread {
         id: memory_id("550e8400-e29b-41d4-a716-446655440020"),
         object_type: ObjectType::MemoryThread,
-        title: "v0.1 domain foundation".to_owned(),
+        title: "Episodic memory domain foundation".to_owned(),
         summary: "Model foundation planning and implementation.".to_owned(),
         status: ThreadStatus::Active,
         last_touched_at: timestamp("2026-04-27T10:07:00Z"),
         salience_score: 0.75,
-        canonical_key: Some("thread:v0.1-domain-foundation".to_owned()),
+        canonical_key: Some("thread:episodic-memory-domain-foundation".to_owned()),
         created_at: timestamp("2026-04-27T10:06:04Z"),
         updated_at: timestamp("2026-04-27T10:07:00Z"),
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),

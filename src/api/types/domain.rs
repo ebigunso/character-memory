@@ -4,8 +4,8 @@ use thiserror::Error;
 
 pub type MemoryId = uuid::Uuid;
 
-pub const SCHEMA_VERSION_V0_1: &str = "v0.1";
-pub const CURRENT_SCHEMA_VERSION: &str = SCHEMA_VERSION_V0_1;
+pub const EPISODIC_MEMORY_SCHEMA_VERSION: &str = "episodic_memory_initial";
+pub const CURRENT_SCHEMA_VERSION: &str = EPISODIC_MEMORY_SCHEMA_VERSION;
 pub const DEFAULT_SCHEMA_VERSION: &str = CURRENT_SCHEMA_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -59,7 +59,8 @@ pub enum EntityType {
 pub enum DerivedType {
     Reflection,
     UserPreference,
-    AssistantBehaviorNote,
+    #[serde(alias = "assistant_behavior_note")]
+    AssistantPreference,
     Commitment,
     OpenLoop,
     CharacterSignal,
@@ -67,6 +68,13 @@ pub enum DerivedType {
     ProjectNote,
     Claim,
     Correction,
+}
+
+impl DerivedType {
+    /// Compatibility name for callers still migrating to the ADR vocabulary.
+    /// Remove this alias when pre-ADR `assistant_behavior_note` imports are no longer supported.
+    #[allow(non_upper_case_globals)]
+    pub const AssistantBehaviorNote: Self = Self::AssistantPreference;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -138,6 +146,15 @@ pub enum DomainValidationError {
 
     #[error("{field} must be in 0.0..=1.0 and finite, got {value}")]
     InvalidScore { field: &'static str, value: f32 },
+
+    #[error("memory links cannot point at MemoryLink endpoints via {field}")]
+    UnsupportedMemoryLinkEndpoint { field: &'static str },
+
+    #[error("memory links cannot point from an object to itself: {object_type:?} {id}")]
+    SelfLink {
+        object_type: ObjectType,
+        id: MemoryId,
+    },
 }
 
 fn validate_object_type(
@@ -326,8 +343,30 @@ impl MemoryLink {
             self.object_type,
             ObjectType::MemoryLink,
         )?;
-        validate_score("MemoryLink.confidence", self.confidence)
+        validate_score("MemoryLink.confidence", self.confidence)?;
+        validate_link_endpoint("MemoryLink.from_type", self.from_type)?;
+        validate_link_endpoint("MemoryLink.to_type", self.to_type)?;
+
+        if self.from_id == self.to_id && self.from_type == self.to_type {
+            return Err(DomainValidationError::SelfLink {
+                object_type: self.from_type,
+                id: self.from_id,
+            });
+        }
+
+        Ok(())
     }
+}
+
+fn validate_link_endpoint(
+    field: &'static str,
+    object_type: ObjectType,
+) -> Result<(), DomainValidationError> {
+    if object_type == ObjectType::MemoryLink {
+        return Err(DomainValidationError::UnsupportedMemoryLinkEndpoint { field });
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

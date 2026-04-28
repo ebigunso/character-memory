@@ -1,4 +1,4 @@
-// Transitional v0.1 RDF mapping surface: kept string-based so public domain
+// Transitional RDF mapping surface: kept string-based so public domain
 // and repository contracts remain free of RDF/Oxigraph-specific types. Remove
 // once production graph-store wiring consumes the mapping, or prune unused
 // helpers then.
@@ -393,7 +393,7 @@ fn enum_value(value: impl Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{graph_uri, ObjectType};
+    use crate::api::types::{graph_uri, ObjectType, DEFAULT_SCHEMA_VERSION};
     use crate::internal::repositories::test_support::representative_fixtures;
 
     #[test]
@@ -420,7 +420,7 @@ mod tests {
         let triples =
             rdf_triples_for_object(&MemoryObject::DerivedMemory(fixtures.correction.clone()));
 
-        assert_contains_literal(&triples, vocab::SCHEMA_VERSION, "v0.1");
+        assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
         assert_contains_literal(&triples, vocab::IS_CURRENT, "true");
         assert_contains_literal(&triples, vocab::RETENTION_STATE, "active");
         assert_contains_resource(

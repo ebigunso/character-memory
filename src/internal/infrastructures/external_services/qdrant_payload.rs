@@ -1,4 +1,4 @@
-// Transitional v0.1 Qdrant mapping surface: downstream adapter/pipeline chunks
+// Transitional Qdrant mapping surface: downstream adapter/pipeline chunks
 // will consume all constants and helpers once live candidate storage is wired
 // into remember/retrieve flows. Remove once those production paths consume the
 // mapping surface directly or unused helpers can be pruned.
@@ -64,7 +64,7 @@ pub(crate) fn qdrant_payload_map(
         .as_object()
         .cloned()
         .ok_or_else(|| {
-            CustomError::DatabaseError("Failed to convert v0.1 Qdrant payload to object".to_owned())
+            CustomError::DatabaseError("Failed to convert Qdrant payload to object".to_owned())
         })
 }
 
@@ -291,7 +291,9 @@ fn vector_surface(surface: VectorSurface) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{graph_uri, DerivedType, ObjectType, RetentionState, Stability};
+    use crate::api::types::{
+        graph_uri, DerivedType, ObjectType, RetentionState, Stability, DEFAULT_SCHEMA_VERSION,
+    };
     use crate::internal::models::vector::{
         VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
     };
@@ -301,7 +303,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn payload_maps_v0_1_identity_text_lifecycle_time_and_scores() {
+    fn payload_maps_identity_text_lifecycle_time_and_scores() {
         let object_id = id(40);
         let record = derived_memory_record(object_id);
 
@@ -315,7 +317,7 @@ mod tests {
         assert_eq!(payload[OBJECT_TYPE_FIELD], json!("derived_memory"));
         assert_eq!(payload[RECORD_TYPE_FIELD], json!("derived_memory"));
         assert_eq!(payload[DERIVED_TYPE_FIELD], json!("reflection"));
-        assert_eq!(payload[SCHEMA_VERSION_FIELD], json!("v0.1"));
+        assert_eq!(payload[SCHEMA_VERSION_FIELD], json!(DEFAULT_SCHEMA_VERSION));
         assert_eq!(
             payload[EMBEDDING_TEXT_FIELD],
             json!("Reflection: Keep Qdrant filter-only.")
@@ -356,7 +358,7 @@ mod tests {
             VectorSurface::Summary,
             "Episode summary: Short summary.",
             "Short summary.",
-            "v0.1",
+            DEFAULT_SCHEMA_VERSION,
             Some(RetentionState::Active),
             None,
             VectorRelationshipHints::default(),
@@ -412,7 +414,7 @@ mod tests {
             VectorSurface::DerivedText,
             "Reflection: Keep Qdrant filter-only.",
             "Keep Qdrant filter-only.",
-            "v0.1",
+            DEFAULT_SCHEMA_VERSION,
             Some(RetentionState::Active),
             Some(false),
             VectorRelationshipHints {

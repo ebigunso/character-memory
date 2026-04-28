@@ -1,4 +1,4 @@
-// Transitional v0.1 test harness: exposes reusable fakes and fixtures for
+// Transitional test harness: exposes reusable fakes and fixtures for
 // downstream adapter/pipeline tests before every helper is used. Remove once
 // downstream tests consume the full support surface, or prune unused helpers.
 #![allow(dead_code)]
@@ -367,8 +367,8 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
     let hub_entity = entity(
         fixture_id(4),
         EntityType::Concept,
-        "v0.1 contracts",
-        Some("concept:v0.1-contracts"),
+        "Store contracts",
+        Some("concept:store-contracts"),
     );
     let soft_thread = soft_thread();
     let derived_reflection = derived_memory(
@@ -579,11 +579,11 @@ pub(crate) fn simple_episode() -> Episode {
         id: fixture_id(10),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
-        source_conversation_id: Some("conversation:v0.1-fixture".to_owned()),
+        source_conversation_id: Some("conversation:contract-fixture".to_owned()),
         started_at: Some(timestamp("2026-04-27T10:00:00Z")),
         ended_at: Some(timestamp("2026-04-27T10:10:00Z")),
         participant_entity_ids: vec![fixture_id(1), fixture_id(2)],
-        summary: "Discussed deterministic v0.1 store contract fixtures.".to_owned(),
+        summary: "Discussed deterministic store contract fixtures.".to_owned(),
         raw_ref: Some("file:fixtures/raw/simple-episode.txt".to_owned()),
         salience_score: 0.8,
         retention_state: RetentionState::Active,
@@ -636,12 +636,12 @@ fn soft_thread() -> MemoryThread {
     MemoryThread {
         id: fixture_id(25),
         object_type: ObjectType::MemoryThread,
-        title: "v0.1 contract test support".to_owned(),
+        title: "Contract test support".to_owned(),
         summary: "Soft thread connecting store-contract fixture objects.".to_owned(),
         status: ThreadStatus::Active,
         last_touched_at: timestamp("2026-04-27T10:11:04Z"),
         salience_score: 0.7,
-        canonical_key: Some("thread:v0.1-contract-test-support".to_owned()),
+        canonical_key: Some("thread:contract-test-support".to_owned()),
         created_at: timestamp("2026-04-27T10:11:02Z"),
         updated_at: timestamp("2026-04-27T10:11:04Z"),
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
@@ -974,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn representative_fixtures_cover_v0_1_scenarios() {
+    fn representative_fixtures_cover_canonical_memory_scenarios() {
         let fixtures = representative_fixtures();
 
         assert_eq!(fixtures.episode.object_type, ObjectType::Episode);

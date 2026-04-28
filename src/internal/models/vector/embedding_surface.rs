@@ -1,4 +1,4 @@
-// Transitional v0.1 builder surface: adapter and pipeline chunks will consume
+// Transitional builder surface: adapter and pipeline chunks will consume
 // these builders after the provider-neutral record shape lands. Remove once the
 // remember/link pipeline consumes these builders, or prune unused builders then.
 #![allow(dead_code)]
@@ -170,7 +170,7 @@ fn derived_label(memory: &DerivedMemory) -> &'static str {
     match memory.derived_type {
         crate::api::types::DerivedType::Reflection => "Reflection",
         crate::api::types::DerivedType::UserPreference => "User preference",
-        crate::api::types::DerivedType::AssistantBehaviorNote => "Assistant behavior note",
+        crate::api::types::DerivedType::AssistantPreference => "Assistant preference",
         crate::api::types::DerivedType::Commitment => "Commitment",
         crate::api::types::DerivedType::OpenLoop => "Open loop",
         crate::api::types::DerivedType::CharacterSignal => "Character signal",
