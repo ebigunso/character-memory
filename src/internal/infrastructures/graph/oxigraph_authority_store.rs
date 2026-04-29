@@ -49,14 +49,34 @@ impl OxigraphGraphAuthorityStore {
         triples: &[RdfTriple],
     ) -> Result<(), CustomError> {
         let quads = quads_for_triples(&owner_graph_uri, triples)?;
-        let mut inserted_quads = lock(&self.inserted_quads)?;
+        self.replace_triples_batch(vec![(owner_graph_uri, quads)])
+    }
 
-        if let Some(previous_quads) = inserted_quads.remove(&owner_graph_uri) {
-            self.remove_quads(&previous_quads)?;
+    fn replace_triples_batch(
+        &self,
+        replacements: Vec<(String, Vec<Quad>)>,
+    ) -> Result<(), CustomError> {
+        let mut inserted_quads = lock(&self.inserted_quads)?;
+        let mut transaction = self.store.start_transaction().map_err(oxigraph_error)?;
+
+        for (owner_graph_uri, _) in &replacements {
+            if let Some(previous_quads) = inserted_quads.get(owner_graph_uri) {
+                for quad in previous_quads {
+                    transaction.remove(quad.as_ref());
+                }
+            }
         }
 
-        self.insert_quads(&quads)?;
-        inserted_quads.insert(owner_graph_uri, quads);
+        for (_, quads) in &replacements {
+            for quad in quads {
+                transaction.insert(quad.as_ref());
+            }
+        }
+
+        transaction.commit().map_err(oxigraph_error)?;
+        for (owner_graph_uri, quads) in replacements {
+            inserted_quads.insert(owner_graph_uri, quads);
+        }
         Ok(())
     }
 
@@ -163,31 +183,30 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Result<(), CustomError> {
-        let mut object_triples = Vec::new();
+        let mut replacements = Vec::new();
         for object in objects {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
             let (object_id, object_type) = object_identity(object);
-            object_triples.push((
-                graph_uri(object_type, object_id),
-                rdf_triples_for_object(object),
+            let owner_graph_uri = graph_uri(object_type, object_id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object))?,
             ));
         }
 
-        let mut link_triples = Vec::new();
         for link in links {
             link.validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            link_triples.push((
-                graph_uri(ObjectType::MemoryLink, link.id),
-                rdf_triples_for_link(link),
+            let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link))?,
             ));
         }
 
-        for (owner_graph_uri, triples) in object_triples.iter().chain(link_triples.iter()) {
-            self.replace_triples(owner_graph_uri.clone(), triples)?;
-        }
+        self.replace_triples_batch(replacements)?;
 
         let mut stored_objects = lock(&self.objects)?;
         for object in objects {
@@ -412,6 +431,87 @@ mod tests {
                 .await
                 .unwrap(),
             vec![MemoryObject::Episode(updated_episode)]
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_upsert_objects_and_links_replaces_rdf_and_caches_atomically() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut updated_memory = fixtures.derived_reflection.clone();
+        updated_memory.text = "Updated reflection text replaces stale RDF.".to_owned();
+        let mut updated_link = fixtures.soft_thread_link.clone();
+        updated_link.to_id = fixtures.episode.id;
+        updated_link.to_type = ObjectType::Episode;
+        updated_link.relation = RelationType::DerivedFrom;
+
+        let memory_subject = graph_uri(ObjectType::DerivedMemory, fixtures.derived_reflection.id);
+        let stale_text = RdfTriple {
+            subject: memory_subject.clone(),
+            predicate: vocab::TEXT.to_owned(),
+            object: RdfObject::Literal(fixtures.derived_reflection.text.clone()),
+        };
+        let replacement_text = RdfTriple {
+            subject: memory_subject,
+            predicate: vocab::TEXT.to_owned(),
+            object: RdfObject::Literal(updated_memory.text.clone()),
+        };
+        let stale_relation = RdfTriple {
+            subject: graph_uri(
+                fixtures.soft_thread_link.from_type,
+                fixtures.soft_thread_link.from_id,
+            ),
+            predicate: vocab::relation_predicate("part_of_thread"),
+            object: RdfObject::Resource(graph_uri(
+                fixtures.soft_thread_link.to_type,
+                fixtures.soft_thread_link.to_id,
+            )),
+        };
+        let replacement_relation = RdfTriple {
+            subject: graph_uri(updated_link.from_type, updated_link.from_id),
+            predicate: vocab::relation_predicate("derived_from"),
+            object: RdfObject::Resource(graph_uri(updated_link.to_type, updated_link.to_id)),
+        };
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store
+            .upsert_links(std::slice::from_ref(&fixtures.soft_thread_link))
+            .await
+            .unwrap();
+        assert!(store.contains_triple(&stale_text).unwrap());
+        assert!(store.contains_triple(&stale_relation).unwrap());
+
+        store
+            .upsert_objects_and_links(
+                &[MemoryObject::DerivedMemory(updated_memory.clone())],
+                &[updated_link.clone()],
+            )
+            .await
+            .unwrap();
+
+        assert!(!store.contains_triple(&stale_text).unwrap());
+        assert!(!store.contains_triple(&stale_relation).unwrap());
+        assert!(store.contains_triple(&replacement_text).unwrap());
+        assert!(store.contains_triple(&replacement_relation).unwrap());
+        assert_eq!(
+            store
+                .query_objects(&GraphObjectQuery::by_ids(vec![updated_memory.id]))
+                .await
+                .unwrap(),
+            vec![MemoryObject::DerivedMemory(updated_memory)]
+        );
+        assert_eq!(
+            store
+                .expand_bounded(&GraphExpansionQuery::new(
+                    updated_link.from_id,
+                    updated_link.from_type,
+                    1,
+                    4,
+                ))
+                .await
+                .unwrap()
+                .links,
+            vec![updated_link]
         );
     }
 
