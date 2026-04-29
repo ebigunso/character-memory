@@ -378,12 +378,8 @@ pub(crate) fn derived_memories_by_provenance(
             )
         })
         .filter(|memory| {
-            lifecycle_filter_reason(
-                &MemoryObject::DerivedMemory(memory.clone()),
-                &superseded,
-                query.lifecycle_policy,
-            )
-            .is_none()
+            derived_memory_lifecycle_filter_reason(memory, &superseded, query.lifecycle_policy)
+                .is_none()
         })
         .collect::<Vec<_>>();
 
@@ -417,12 +413,8 @@ pub(crate) fn derived_memories_by_thread(
                     .any(|thread_id| thread_ids.contains(thread_id))
         })
         .filter(|memory| {
-            lifecycle_filter_reason(
-                &MemoryObject::DerivedMemory(memory.clone()),
-                &superseded,
-                query.lifecycle_policy,
-            )
-            .is_none()
+            derived_memory_lifecycle_filter_reason(memory, &superseded, query.lifecycle_policy)
+                .is_none()
         })
         .collect::<Vec<_>>();
 
@@ -831,22 +823,30 @@ fn lifecycle_filter_reason(
             }
         }
         MemoryObject::DerivedMemory(object) => {
-            retention_filter_reason(object.retention_state, policy)
-                .or(if !object.is_current && !policy.include_non_current {
-                    Some(GraphExpansionFilteredReason::NonCurrent)
-                } else {
-                    None
-                })
-                .or(
-                    if superseded.contains(&object.id) && !policy.include_superseded {
-                        Some(GraphExpansionFilteredReason::Superseded)
-                    } else {
-                        None
-                    },
-                )
+            derived_memory_lifecycle_filter_reason(object, superseded, policy)
         }
         MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
     }
+}
+
+fn derived_memory_lifecycle_filter_reason(
+    object: &DerivedMemory,
+    superseded: &HashSet<MemoryId>,
+    policy: GraphExpansionLifecyclePolicy,
+) -> Option<GraphExpansionFilteredReason> {
+    retention_filter_reason(object.retention_state, policy)
+        .or(if !object.is_current && !policy.include_non_current {
+            Some(GraphExpansionFilteredReason::NonCurrent)
+        } else {
+            None
+        })
+        .or(
+            if superseded.contains(&object.id) && !policy.include_superseded {
+                Some(GraphExpansionFilteredReason::Superseded)
+            } else {
+                None
+            },
+        )
 }
 
 fn retention_filter_reason(

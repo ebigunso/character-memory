@@ -104,7 +104,8 @@ where
                 }
                 CorrectionTarget::SourceObject { target } => {
                     requested_targets.push(source_correction_lifecycle_ref(target));
-                    self.ensure_source_object_exists(target).await?;
+                    self.ensure_source_object_matches_original_refs(target)
+                        .await?;
                     match target {
                         SourceObjectCorrectionTarget::Episode { id, .. } => {
                             push_unique(&mut source_episode_ids, *id)
@@ -453,12 +454,63 @@ where
             .ok_or_else(|| missing_object_error(object_ref.object_type, object_ref.object_id))
     }
 
-    async fn ensure_source_object_exists(
+    async fn ensure_source_object_matches_original_refs(
         &self,
         target: &SourceObjectCorrectionTarget,
     ) -> Result<(), CustomError> {
-        let object_ref = GraphObjectRef::new(target.id(), target.object_type());
-        self.fetch_one(object_ref).await.map(|_| ())
+        let has_raw_ref =
+            source_target_original_raw_ref(target).is_some_and(|value| !value.trim().is_empty());
+        let has_source_ref =
+            source_target_original_source_ref(target).is_some_and(|value| !value.trim().is_empty());
+        if !has_raw_ref && !has_source_ref {
+            return Err(validation_error(
+                "source-object correction requires an original raw or source reference",
+            ));
+        }
+
+        match target {
+            SourceObjectCorrectionTarget::Episode {
+                id,
+                original_raw_ref,
+                original_source_ref,
+            } => {
+                let episode = self.fetch_episode(*id).await?;
+                validate_optional_original_ref(
+                    "episode original raw reference",
+                    original_raw_ref.as_deref(),
+                    episode.raw_ref.as_deref(),
+                )?;
+                validate_optional_original_ref(
+                    "episode original source reference",
+                    original_source_ref.as_deref(),
+                    episode.source_conversation_id.as_deref(),
+                )
+            }
+            SourceObjectCorrectionTarget::Observation {
+                id,
+                original_raw_ref,
+                original_source_ref,
+            } => {
+                let observation = self.fetch_observation(*id).await?;
+                validate_optional_original_ref(
+                    "observation original raw reference",
+                    original_raw_ref.as_deref(),
+                    observation.raw_ref.as_deref(),
+                )?;
+                if original_source_ref
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                {
+                    let episode = self.fetch_episode(observation.episode_id).await?;
+                    validate_optional_original_ref(
+                        "observation original source reference",
+                        original_source_ref.as_deref(),
+                        episode.source_conversation_id.as_deref(),
+                    )?;
+                }
+                Ok(())
+            }
+        }
     }
 
     async fn query_current_derived_by_provenance(
@@ -840,6 +892,48 @@ fn source_correction_lifecycle_ref(target: &SourceObjectCorrectionTarget) -> Lif
     }
 }
 
+fn source_target_original_raw_ref(target: &SourceObjectCorrectionTarget) -> Option<&str> {
+    match target {
+        SourceObjectCorrectionTarget::Episode {
+            original_raw_ref, ..
+        }
+        | SourceObjectCorrectionTarget::Observation {
+            original_raw_ref, ..
+        } => original_raw_ref.as_deref(),
+    }
+}
+
+fn source_target_original_source_ref(target: &SourceObjectCorrectionTarget) -> Option<&str> {
+    match target {
+        SourceObjectCorrectionTarget::Episode {
+            original_source_ref,
+            ..
+        }
+        | SourceObjectCorrectionTarget::Observation {
+            original_source_ref,
+            ..
+        } => original_source_ref.as_deref(),
+    }
+}
+
+fn validate_optional_original_ref(
+    label: &str,
+    provided: Option<&str>,
+    stored: Option<&str>,
+) -> Result<(), CustomError> {
+    let Some(provided) = provided.filter(|value| !value.trim().is_empty()) else {
+        return Ok(());
+    };
+
+    if stored == Some(provided) {
+        Ok(())
+    } else {
+        Err(validation_error(format!(
+            "{label} does not match current graph object"
+        )))
+    }
+}
+
 fn absorb_sources(
     episode_ids: &mut Vec<MemoryId>,
     observation_ids: &mut Vec<MemoryId>,
@@ -973,7 +1067,8 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
 
     use crate::api::types::{
-        ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
+        Episode, ExternalSourceReference, Modality, Observation, RetrievalContext,
+        StaleCandidateReason, VectorCandidateTrace,
     };
     use crate::internal::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
@@ -1249,6 +1344,94 @@ mod tests {
             evidence.superseded_memory_id == fixtures.user_preference.id
                 && evidence.superseded_by_memory_id == replacement_id
         }));
+    }
+
+    #[tokio::test]
+    async fn source_object_correction_requires_original_refs_before_writes() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = CorrectMemoryDraft::new(
+            CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
+                id: ids.episode,
+                original_raw_ref: None,
+                original_source_ref: None,
+            }),
+            "Correct source episode.",
+        );
+        draft.correction_origin = SourceProvenanceReference::episode(ids.episode);
+
+        let error = pipeline.correct(draft).await.unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("original raw or source reference"));
+        assert!(graph.calls().is_empty());
+        assert!(vector.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn source_object_correction_rejects_mismatched_episode_refs_before_writes() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = CorrectMemoryDraft::new(
+            CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
+                id: ids.episode,
+                original_raw_ref: Some("raw://wrong".to_owned()),
+                original_source_ref: Some("conversation://original".to_owned()),
+            }),
+            "Correct source episode.",
+        );
+        draft.correction_origin = SourceProvenanceReference::episode(ids.episode);
+
+        let error = pipeline.correct(draft).await.unwrap_err();
+
+        assert!(error.to_string().contains("episode original raw reference"));
+        assert_eq!(
+            graph.calls(),
+            vec![StoreCall::GraphQuery(vec![ids.episode])]
+        );
+        assert!(vector.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn source_object_correction_rejects_mismatched_observation_source_ref_before_writes() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(vec![
+            MemoryObject::Episode(source_episode(&ids)),
+            MemoryObject::Observation(source_observation(&ids)),
+        ]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = CorrectMemoryDraft::new(
+            CorrectionTarget::source_object(SourceObjectCorrectionTarget::Observation {
+                id: ids.observation,
+                original_raw_ref: Some("raw://original/observation".to_owned()),
+                original_source_ref: Some("conversation://wrong".to_owned()),
+            }),
+            "Correct source observation.",
+        );
+        draft.correction_origin = SourceProvenanceReference::observation(ids.observation);
+
+        let error = pipeline.correct(draft).await.unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("observation original source reference"));
+        assert_eq!(
+            graph.calls(),
+            vec![
+                StoreCall::GraphQuery(vec![ids.observation]),
+                StoreCall::GraphQuery(vec![ids.episode]),
+            ]
+        );
+        assert!(vector.calls().is_empty());
     }
 
     #[tokio::test]
@@ -1646,6 +1829,41 @@ mod tests {
             retention_state: RetentionState::Active,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        }
+    }
+
+    fn source_episode(ids: &FixedIds) -> Episode {
+        Episode {
+            id: ids.episode,
+            object_type: ObjectType::Episode,
+            modality: Modality::Chat,
+            source_conversation_id: Some("conversation://original".to_owned()),
+            started_at: None,
+            ended_at: None,
+            participant_entity_ids: Vec::new(),
+            summary: "Original source episode.".to_owned(),
+            raw_ref: Some("raw://original/episode".to_owned()),
+            salience_score: 0.8,
+            retention_state: RetentionState::Active,
+            created_at: Utc::now(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        }
+    }
+
+    fn source_observation(ids: &FixedIds) -> Observation {
+        Observation {
+            id: ids.observation,
+            object_type: ObjectType::Observation,
+            episode_id: ids.episode,
+            speaker_entity_id: None,
+            observed_at: None,
+            modality: Modality::Chat,
+            text: "Original source observation.".to_owned(),
+            raw_ref: Some("raw://original/observation".to_owned()),
+            salience_score: 0.8,
+            retention_state: RetentionState::Active,
+            created_at: Utc::now(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         }
     }

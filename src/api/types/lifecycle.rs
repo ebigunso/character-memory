@@ -103,8 +103,11 @@ impl ExternalSourceReference {
     pub fn has_reference(&self) -> bool {
         self.source_ref
             .as_ref()
-            .is_some_and(|value| !value.is_empty())
-            || self.raw_ref.as_ref().is_some_and(|value| !value.is_empty())
+            .is_some_and(|value| !value.trim().is_empty())
+            || self
+                .raw_ref
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
     }
 }
 
@@ -675,6 +678,23 @@ mod tests {
         assert_eq!(
             replacement.validate(),
             Err(LifecycleDtoValidationError::MissingReplacementSource)
+        );
+    }
+
+    #[test]
+    fn validation_rejects_whitespace_only_external_refs() {
+        assert!(!ExternalSourceReference::raw("   ").has_reference());
+        assert!(!ExternalSourceReference::source("\t\n").has_reference());
+
+        let mut correction = correction_draft();
+        correction.correction_origin = SourceProvenanceReference {
+            episode_ids: Vec::new(),
+            observation_ids: Vec::new(),
+            external_refs: vec![ExternalSourceReference::raw("  ")],
+        };
+        assert_eq!(
+            correction.validate(),
+            Err(LifecycleDtoValidationError::EmptyCorrectionOrigin)
         );
     }
 
