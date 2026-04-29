@@ -324,6 +324,23 @@ impl RetrieveAssembly {
         }
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
+        let included_refs = ranked_objects
+            .iter()
+            .map(|ranked| graph_object_ref(&ranked.object))
+            .collect::<HashSet<_>>();
+        self.lifecycle_decisions.retain(|decision| {
+            decision.action != LifecycleFilterAction::Omitted
+                || !included_refs.contains(&GraphObjectRef::new(
+                    decision.object.id,
+                    decision.object.object_type,
+                ))
+        });
+        self.stale_omissions.retain(|omission| {
+            !included_refs.contains(&GraphObjectRef::new(
+                omission.candidate.id,
+                omission.candidate.object_type,
+            ))
+        });
         self.lifecycle_decisions.sort_by_key(|decision| {
             (
                 decision.object.id,
@@ -1114,6 +1131,39 @@ mod tests {
             .iter()
             .any(|decision| decision.object.id == fixtures.suppressed_seed.id
                 && decision.action == LifecycleFilterAction::Omitted));
+    }
+
+    #[test]
+    fn included_objects_prune_prior_stale_omission_trace_details() {
+        let fixtures = representative_fixtures();
+        let candidate = candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.99);
+        let mut assembly = RetrieveAssembly::new(true);
+        assembly.omit_bounded_candidate(&candidate);
+        assembly.absorb_expansion(
+            &candidate,
+            GraphExpansion::new(
+                vec![MemoryObject::DerivedMemory(
+                    fixtures.user_preference.clone(),
+                )],
+                Vec::new(),
+            ),
+        );
+
+        let ranked = assembly.ranked_objects(&RetrievalLifecyclePolicy::default());
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(
+            object_identity(&ranked[0].object).0,
+            fixtures.user_preference.id
+        );
+        assert!(!assembly
+            .stale_omissions
+            .iter()
+            .any(|omission| omission.candidate.id == fixtures.user_preference.id));
+        assert!(!assembly.lifecycle_decisions.iter().any(|decision| {
+            decision.object.id == fixtures.user_preference.id
+                && decision.action == LifecycleFilterAction::Omitted
+        }));
     }
 
     #[tokio::test]
