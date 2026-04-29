@@ -589,7 +589,10 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(missing_root, CustomError::DatabaseError(_)));
+        assert!(matches!(
+            missing_root,
+            CustomError::GraphExpansionRootNotFound { .. }
+        ));
         assert!(missing_root.to_string().contains("root not found"));
     }
 

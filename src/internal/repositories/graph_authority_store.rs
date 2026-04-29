@@ -307,10 +307,10 @@ pub(crate) fn bounded_expansion_node_set(
     }
 
     if !root_exists {
-        return Err(CustomError::DatabaseError(format!(
-            "Graph expansion root not found: {:?} {}",
-            query.root_type, query.root_id
-        )));
+        return Err(CustomError::GraphExpansionRootNotFound {
+            object_type: query.root_type,
+            object_id: query.root_id,
+        });
     }
 
     if query.max_nodes == 0 {
@@ -379,10 +379,10 @@ fn bounded_expansion_plan<'a>(
     let root = GraphObjectRef::new(query.root_id, query.root_type);
 
     if !object_refs.contains(&root) {
-        return Err(CustomError::DatabaseError(format!(
-            "Graph expansion root not found: {:?} {}",
-            query.root_type, query.root_id
-        )));
+        return Err(CustomError::GraphExpansionRootNotFound {
+            object_type: query.root_type,
+            object_id: query.root_id,
+        });
     }
 
     if let Some(0) = query.failure_policy.timeout_ms {
@@ -790,7 +790,10 @@ mod tests {
 
         let error = bounded_expansion_node_set(&query, false, Vec::new()).unwrap_err();
 
-        assert!(matches!(error, CustomError::DatabaseError(_)));
+        assert!(matches!(
+            error,
+            CustomError::GraphExpansionRootNotFound { .. }
+        ));
         assert!(error.to_string().contains("root not found"));
     }
 }

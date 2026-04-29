@@ -86,7 +86,7 @@ where
                     }
                     assembly.absorb_expansion(candidate, expansion);
                 }
-                Err(error) if graph_root_missing_error(&error) => {
+                Err(CustomError::GraphExpansionRootNotFound { .. }) => {
                     assembly.omit_missing_candidate(candidate)
                 }
                 Err(error) => return Err(error),
@@ -202,13 +202,24 @@ impl RetrieveAssembly {
             } else {
                 candidate.score * 0.75
             };
+            let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
             self.objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.vector_component = ranked.vector_component.max(inherited_vector);
                     ranked.graph_component = ranked.graph_component.max(graph_component);
+                    if let Some(candidate_score) = candidate_score {
+                        ranked.vector_candidate_score = Some(
+                            ranked
+                                .vector_candidate_score
+                                .map(|score| score.max(candidate_score))
+                                .unwrap_or(candidate_score),
+                        );
+                    }
                 })
-                .or_insert_with(|| RankedObject::new(object, inherited_vector, graph_component));
+                .or_insert_with(|| {
+                    RankedObject::new(object, inherited_vector, graph_component, candidate_score)
+                });
         }
 
         let mut root_filtered = false;
@@ -324,17 +335,24 @@ impl RetrieveAssembly {
 struct RankedObject {
     object: MemoryObject,
     vector_component: f32,
+    vector_candidate_score: Option<f32>,
     graph_component: f32,
     salience_component: f32,
     superseded_by: Vec<MemoryId>,
 }
 
 impl RankedObject {
-    fn new(object: MemoryObject, vector_component: f32, graph_component: f32) -> Self {
+    fn new(
+        object: MemoryObject,
+        vector_component: f32,
+        graph_component: f32,
+        vector_candidate_score: Option<f32>,
+    ) -> Self {
         let salience_component = salience_component(&object);
         Self {
             object,
             vector_component,
+            vector_candidate_score,
             graph_component,
             salience_component,
             superseded_by: Vec::new(),
@@ -416,14 +434,17 @@ fn build_pack(
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
                     candidate: memory_object_ref_from_object(&ranked.object),
-                    vector_score: Some(ranked.vector_component),
+                    vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
                 });
             rationale.section_assignments.push(SectionAssignment {
                 object: memory_object_ref_from_object(&ranked.object),
                 section: ContextPackSection::Omitted,
                 rank: None,
-                reason: Some(format!("section limit reached for {section:?}")),
+                reason: Some(format!(
+                    "section limit reached for {}",
+                    context_pack_section_name(section)
+                )),
             });
             continue;
         }
@@ -573,14 +594,6 @@ fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
         bounded_failure_reason_name(failure.reason),
         location
     ))
-}
-
-fn graph_root_missing_error(error: &CustomError) -> bool {
-    matches!(
-        error,
-        CustomError::DatabaseError(message)
-            if message.starts_with("Graph expansion root not found:")
-    )
 }
 
 fn bounded_failure_reason_name(
@@ -849,6 +862,21 @@ fn object_type_name(object_type: ObjectType) -> &'static str {
         ObjectType::MemoryThread => "memory_thread",
         ObjectType::DerivedMemory => "derived_memory",
         ObjectType::MemoryLink => "memory_link",
+    }
+}
+
+fn context_pack_section_name(section: ContextPackSection) -> &'static str {
+    match section {
+        ContextPackSection::ActiveThreads => "active_threads",
+        ContextPackSection::RelevantEpisodes => "relevant_episodes",
+        ContextPackSection::SalientObservations => "salient_observations",
+        ContextPackSection::DerivedMemories => "derived_memories",
+        ContextPackSection::Preferences => "preferences",
+        ContextPackSection::RelationshipNotes => "relationship_notes",
+        ContextPackSection::OpenLoops => "open_loops",
+        ContextPackSection::Commitments => "commitments",
+        ContextPackSection::CharacterSignals => "character_signals",
+        ContextPackSection::Omitted => "omitted",
     }
 }
 
@@ -1121,7 +1149,51 @@ mod tests {
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == second_preference.id
+                && omission.vector_score == Some(0.90)
                 && omission.reason == StaleCandidateReason::SectionLimit));
+        assert!(first
+            .rationale
+            .section_assignments
+            .iter()
+            .any(|assignment| assignment.object.id == second_preference.id
+                && assignment.section == ContextPackSection::Omitted
+                && assignment.reason.as_deref() == Some("section limit reached for preferences")));
+    }
+
+    #[tokio::test]
+    async fn section_limit_omissions_only_report_actual_vector_candidate_scores() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixtures.hub_entity.id,
+            ObjectType::Entity,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut context = RetrievalContext::new("section limits");
+        context.section_limits = ContinuitySectionLimits {
+            relevant_episodes: 0,
+            ..ContinuitySectionLimits::default()
+        };
+
+        let outcome = pipeline.retrieve(context).await.unwrap();
+
+        assert!(outcome
+            .rationale
+            .stale_candidate_omissions
+            .iter()
+            .any(|omission| omission.candidate.id == fixtures.episode.id
+                && omission.vector_score.is_none()
+                && omission.reason == StaleCandidateReason::SectionLimit));
+        assert!(outcome
+            .rationale
+            .section_assignments
+            .iter()
+            .any(|assignment| assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::Omitted
+                && assignment.reason.as_deref()
+                    == Some("section limit reached for relevant_episodes")));
     }
 
     #[tokio::test]
