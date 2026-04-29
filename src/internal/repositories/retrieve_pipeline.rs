@@ -61,19 +61,11 @@ where
         .with_object_types(context.object_type_defaults.clone())
         .with_filters(VectorCandidateFilters::new());
         let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
-        let vector_traces = vector_candidates
-            .iter()
-            .enumerate()
-            .map(|(index, candidate)| VectorCandidateTrace {
-                object: memory_object_ref(candidate.object_type, candidate.object_id),
-                score: candidate.score,
-                rank: index + 1,
-            })
-            .collect::<Vec<_>>();
+        let include_trace = context.include_trace;
 
         let candidate_roots =
             unique_candidate_roots(&vector_candidates, context.candidate_limits.max_graph_roots);
-        let mut assembly = RetrieveAssembly::default();
+        let mut assembly = RetrieveAssembly::new(include_trace);
 
         for candidate in &candidate_roots {
             let query = graph_query_for_candidate(candidate, &context);
@@ -104,9 +96,17 @@ where
         rationale.stale_candidate_omissions = assembly.stale_omissions;
 
         let pack = build_pack(ranked_objects, context.section_limits, &mut rationale);
-        let trace = context.include_trace.then(|| RetrievalTrace {
-            vector_candidates: vector_traces,
-            graph_relations: assembly.graph_relations,
+        let trace = include_trace.then(|| RetrievalTrace {
+            vector_candidates: vector_candidates
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| VectorCandidateTrace {
+                    object: memory_object_ref(candidate.object_type, candidate.object_id),
+                    score: candidate.score,
+                    rank: index + 1,
+                })
+                .collect(),
+            graph_relations: assembly.graph_relations.unwrap_or_default(),
             lifecycle_filter_decisions: rationale.lifecycle_filter_decisions.clone(),
             stale_candidate_omissions: rationale.stale_candidate_omissions.clone(),
             section_assignments: rationale.section_assignments.clone(),
@@ -139,10 +139,17 @@ struct RetrieveAssembly {
     superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
-    graph_relations: Vec<crate::api::types::GraphRelationTrace>,
+    graph_relations: Option<Vec<crate::api::types::GraphRelationTrace>>,
 }
 
 impl RetrieveAssembly {
+    fn new(collect_trace: bool) -> Self {
+        Self {
+            graph_relations: collect_trace.then(Vec::new),
+            ..Self::default()
+        }
+    }
+
     fn absorb_expansion(&mut self, candidate: &VectorCandidateMatch, expansion: GraphExpansion) {
         let bounded_failure = expansion.bounded_failure;
         let candidate_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
@@ -164,14 +171,15 @@ impl RetrieveAssembly {
             }
         }
 
-        for relation in &expansion.relations {
-            self.graph_relations
-                .push(crate::api::types::GraphRelationTrace {
+        if let Some(graph_relations) = &mut self.graph_relations {
+            for relation in &expansion.relations {
+                graph_relations.push(crate::api::types::GraphRelationTrace {
                     from: memory_object_ref(relation.from.object_type, relation.from.object_id),
                     to: memory_object_ref(relation.to.object_type, relation.to.object_id),
                     relation: relation.relation,
                     proximity: relation.proximity,
                 });
+            }
         }
 
         let mut proximity_by_ref = HashMap::new();
@@ -1008,6 +1016,24 @@ mod tests {
             .iter()
             .all(|assignment| assignment.reason.is_some()));
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn graph_relation_trace_collection_is_trace_gated() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 10);
+        let expansion = graph.expand_bounded(&query).await.unwrap();
+        assert!(!expansion.relations.is_empty());
+
+        let candidate = candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.95);
+        let mut without_trace = RetrieveAssembly::new(false);
+        without_trace.absorb_expansion(&candidate, expansion.clone());
+        assert!(without_trace.graph_relations.is_none());
+
+        let mut with_trace = RetrieveAssembly::new(true);
+        with_trace.absorb_expansion(&candidate, expansion);
+        assert!(!with_trace.graph_relations.unwrap().is_empty());
     }
 
     #[tokio::test]
