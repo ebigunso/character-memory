@@ -14,8 +14,9 @@ use oxigraph::store::Store;
 use crate::api::types::{graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    bounded_expansion, derived_memories_by_provenance, GraphAuthorityStore,
-    GraphDerivedMemoryProvenanceQuery, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -189,6 +190,19 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
         Ok(derived_memories_by_provenance(
+            query,
+            objects.into_values(),
+            links.into_values(),
+        ))
+    }
+
+    async fn query_derived_memories_by_thread(
+        &self,
+        query: &GraphDerivedMemoryThreadQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
+        Ok(derived_memories_by_thread(
             query,
             objects.into_values(),
             links.into_values(),

@@ -24,9 +24,10 @@ use crate::internal::models::vector::{
     VectorTimeRangeFilter,
 };
 use crate::internal::repositories::{
-    bounded_expansion, derived_memories_by_provenance, GraphAuthorityStore,
-    GraphDerivedMemoryProvenanceQuery, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
-    MemoryEmbedder, RawReference, RawReferenceResolver, VectorCandidateStore,
+    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder, RawReference,
+    RawReferenceResolver, VectorCandidateStore,
 };
 
 #[derive(Debug, Default)]
@@ -259,6 +260,15 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
         Ok(derived_memories_by_provenance(query, objects, links))
+    }
+
+    async fn query_derived_memories_by_thread(
+        &self,
+        query: &GraphDerivedMemoryThreadQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
+        Ok(derived_memories_by_thread(query, objects, links))
     }
 
     async fn expand_bounded(

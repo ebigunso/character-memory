@@ -27,10 +27,11 @@ pub(crate) use correction_forget_pipeline::{CorrectionForgetPipeline, LifecycleP
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
     bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphExpansion,
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-    GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
+    derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
+    GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
+    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredNode,
+    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
+    GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
 // Transitional contract surface: remove this allow once facade wiring

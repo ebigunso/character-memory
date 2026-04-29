@@ -15,8 +15,9 @@ use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
 use crate::internal::repositories::{
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphExpansionLifecyclePolicy,
-    GraphObjectQuery, GraphObjectRef, MemoryEmbedder, VectorCandidateStore,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef, MemoryEmbedder,
+    VectorCandidateStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,30 +373,26 @@ where
         thread_id: MemoryId,
         target_retention_state: RetentionState,
     ) -> Result<(), CustomError> {
-        let objects = self
+        let matches = self
             .graph_store
-            .query_objects(&GraphObjectQuery::by_types(
-                vec![ObjectType::DerivedMemory],
-                None,
-            ))
+            .query_derived_memories_by_thread(
+                &GraphDerivedMemoryThreadQuery::by_threads(vec![thread_id])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::default()),
+            )
             .await?;
-        for object in objects {
-            if let MemoryObject::DerivedMemory(memory) = object {
-                if memory.thread_ids.contains(&thread_id) {
-                    let id = memory.id;
-                    push_object_unique(
-                        graph_objects,
-                        MemoryObject::DerivedMemory(suppress_derived_memory(
-                            memory,
-                            target_retention_state,
-                        )),
-                    );
-                    push_ref_unique(
-                        vector_delete_refs,
-                        MemoryObjectRef::new(ObjectType::DerivedMemory, id),
-                    );
-                }
-            }
+        for memory in matches {
+            let id = memory.id;
+            push_object_unique(
+                graph_objects,
+                MemoryObject::DerivedMemory(suppress_derived_memory(
+                    memory,
+                    target_retention_state,
+                )),
+            );
+            push_ref_unique(
+                vector_delete_refs,
+                MemoryObjectRef::new(ObjectType::DerivedMemory, id),
+            );
         }
         Ok(())
     }
@@ -1459,6 +1456,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forget_thread_cascade_uses_thread_membership_query() {
+        let ids = fixed_ids();
+        let mut thread = representative_fixtures().soft_thread;
+        thread.id = ids.thread;
+        let graph = RecordingGraphStore::new(vec![
+            MemoryObject::MemoryThread(thread),
+            MemoryObject::DerivedMemory(old_memory(&ids)),
+        ]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = ForgetMemoryDraft::archive_thread(ids.thread, "Archive thread members.");
+        draft
+            .lifecycle_policy
+            .archive
+            .archive_thread_derived_memories = true;
+
+        let outcome = pipeline.forget(draft).await.unwrap();
+
+        assert_eq!(
+            graph.calls(),
+            vec![
+                StoreCall::GraphQuery(vec![ids.thread]),
+                StoreCall::GraphThreadQuery(vec![ids.thread]),
+                StoreCall::GraphObjects(vec![ids.old, ids.thread]),
+            ]
+        );
+        assert_eq!(
+            outcome.graph_mutated_object_ids,
+            vec![
+                MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old),
+                MemoryObjectRef::new(ObjectType::MemoryThread, ids.thread),
+            ]
+        );
+        assert_eq!(
+            outcome.vector_maintained_object_ids,
+            vec![
+                MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old),
+                MemoryObjectRef::new(ObjectType::MemoryThread, ids.thread),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn retrieval_excludes_stale_superseded_candidate_when_vector_cleanup_fails() {
         let ids = fixed_ids();
         let graph = FakeGraphAuthorityStore::new();
@@ -1655,6 +1696,7 @@ mod tests {
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum StoreCall {
         GraphQuery(Vec<MemoryId>),
+        GraphThreadQuery(Vec<MemoryId>),
         GraphObjects(Vec<MemoryId>),
         GraphLinks(Vec<(MemoryId, MemoryId)>),
         EmbedBatch(Vec<MemoryId>),
@@ -1754,6 +1796,26 @@ mod tests {
             _query: &GraphDerivedMemoryProvenanceQuery,
         ) -> Result<Vec<DerivedMemory>, CustomError> {
             Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            query: &GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            lock(&self.calls).push(StoreCall::GraphThreadQuery(query.thread_ids.clone()));
+            Ok(lock(&self.objects)
+                .iter()
+                .filter_map(|object| match object {
+                    MemoryObject::DerivedMemory(memory) => Some(memory.clone()),
+                    _ => None,
+                })
+                .filter(|memory| {
+                    memory
+                        .thread_ids
+                        .iter()
+                        .any(|thread_id| query.thread_ids.contains(thread_id))
+                })
+                .collect())
         }
 
         async fn expand_bounded(
