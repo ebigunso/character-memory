@@ -1,16 +1,26 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
 use super::retrieval::MemoryObjectRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum LifecycleDtoValidationError {
+    #[error("rationale must not be empty")]
     EmptyRationale,
+    #[error("correction origin provenance is required")]
     EmptyCorrectionOrigin,
+    #[error("replacement derived memory text must not be empty")]
     EmptyReplacementText,
+    #[error(
+        "replacement derived memory must reference at least one source episode or observation"
+    )]
     MissingReplacementSource,
+    #[error("correction requires at least one target")]
     MissingCorrectionTarget,
+    #[error("forget requires at least one target")]
     MissingForgetTarget,
+    #[error("unsupported lifecycle target: {0:?}")]
     UnsupportedLifecycleTarget(ObjectType),
 }
 
@@ -719,6 +729,18 @@ mod tests {
         assert_eq!(
             forget.validate(),
             Err(LifecycleDtoValidationError::MissingForgetTarget)
+        );
+    }
+
+    #[test]
+    fn validation_errors_have_actionable_display_messages() {
+        assert_eq!(
+            LifecycleDtoValidationError::MissingForgetTarget.to_string(),
+            "forget requires at least one target"
+        );
+        assert_eq!(
+            LifecycleDtoValidationError::UnsupportedLifecycleTarget(ObjectType::Entity).to_string(),
+            "unsupported lifecycle target: Entity"
         );
     }
 

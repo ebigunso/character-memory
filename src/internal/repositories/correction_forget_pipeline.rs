@@ -718,9 +718,7 @@ fn validate_correction_request(draft: &CorrectMemoryDraft) -> Result<(), CustomE
 }
 
 fn validate_forget_request(draft: &ForgetMemoryDraft) -> Result<(), CustomError> {
-    draft
-        .validate()
-        .map_err(|error| validation_error(error_string(error)))?;
+    draft.validate().map_err(validation_error)?;
     if !draft
         .lifecycle_policy
         .suppression
@@ -820,9 +818,7 @@ fn replacement_drafts_or_default(
         sort_dedup(&mut replacement.thread_ids);
         sort_dedup(&mut replacement.entity_ids);
         sort_dedup(&mut replacement.supersedes);
-        replacement
-            .validate()
-            .map_err(|error| validation_error(error_string(error)))?;
+        replacement.validate().map_err(validation_error)?;
     }
 
     Ok(replacements)
@@ -1059,10 +1055,6 @@ fn missing_object_error(object_type: ObjectType, id: MemoryId) -> CustomError {
         object_type,
         object_id: id,
     }
-}
-
-fn error_string(error: impl std::fmt::Debug) -> String {
-    format!("{error:?}")
 }
 
 fn object_type_rank(object_type: ObjectType) -> u8 {
