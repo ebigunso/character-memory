@@ -169,15 +169,15 @@ impl RetrieveAssembly {
             .and_modify(|score| *score = score.max(candidate.score))
             .or_insert(candidate.score);
 
-        for link in &expansion.links {
-            if link.relation == RelationType::Supersedes
-                && link.from_type == ObjectType::DerivedMemory
-                && link.to_type == ObjectType::DerivedMemory
+        for relation in &expansion.relations {
+            if relation.relation == RelationType::Supersedes
+                && relation.from.object_type == ObjectType::DerivedMemory
+                && relation.to.object_type == ObjectType::DerivedMemory
             {
                 self.superseded_by
-                    .entry(link.to_id)
+                    .entry(relation.to.object_id)
                     .or_default()
-                    .push(link.from_id);
+                    .push(relation.from.object_id);
             }
         }
 
@@ -243,7 +243,13 @@ impl RetrieveAssembly {
 
         let mut root_filtered = false;
         for filtered in expansion.filtered_nodes {
-            let decision = filtered_lifecycle_decision(filtered.object_ref, filtered.reason);
+            let superseded_by = self
+                .superseded_by
+                .get(&filtered.object_ref.object_id)
+                .cloned()
+                .unwrap_or_default();
+            let decision =
+                filtered_lifecycle_decision(filtered.object_ref, filtered.reason, &superseded_by);
             if filtered.object_ref == candidate_ref {
                 root_filtered = true;
                 self.stale_omissions.push(StaleCandidateOmission {
@@ -764,12 +770,13 @@ fn omission_reason(reason: LifecycleFilterReason) -> bool {
 fn filtered_lifecycle_decision(
     object_ref: GraphObjectRef,
     reason: GraphExpansionFilteredReason,
+    superseded_by: &[MemoryId],
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
         object: memory_object_ref(object_ref.object_type, object_ref.object_id),
         retention_state: None,
         is_current: None,
-        superseded_by: Vec::new(),
+        superseded_by: superseded_by.to_vec(),
         action: LifecycleFilterAction::Omitted,
         reason: match reason {
             GraphExpansionFilteredReason::Archived => LifecycleFilterReason::ArchivedOmitted,
@@ -1163,6 +1170,44 @@ mod tests {
         assert!(!assembly.lifecycle_decisions.iter().any(|decision| {
             decision.object.id == fixtures.user_preference.id
                 && decision.action == LifecycleFilterAction::Omitted
+        }));
+    }
+
+    #[test]
+    fn filtered_superseded_decision_uses_relation_evidence_without_links() {
+        let fixtures = representative_fixtures();
+        let candidate = candidate(fixtures.suppressed_seed.id, ObjectType::DerivedMemory, 0.99);
+        let mut expansion = GraphExpansion::new(Vec::new(), Vec::new());
+        expansion
+            .relations
+            .push(crate::internal::repositories::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
+                from: GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
+                to: GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
+                relation: RelationType::Supersedes,
+                proximity: 1,
+            });
+        expansion
+            .filtered_nodes
+            .push(crate::internal::repositories::GraphExpansionFilteredNode {
+                object_ref: GraphObjectRef::new(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                ),
+                reason: GraphExpansionFilteredReason::Superseded,
+            });
+        let mut assembly = RetrieveAssembly::new(true);
+
+        assembly.absorb_expansion(&candidate, expansion);
+
+        assert!(assembly.lifecycle_decisions.iter().any(|decision| {
+            decision.object.id == fixtures.suppressed_seed.id
+                && decision.reason == LifecycleFilterReason::SupersededOmitted
+                && decision.superseded_by == vec![fixtures.correction.id]
+        }));
+        assert!(assembly.stale_omissions.iter().any(|omission| {
+            omission.candidate.id == fixtures.suppressed_seed.id
+                && omission.reason == StaleCandidateReason::Superseded
         }));
     }
 
