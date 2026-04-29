@@ -456,7 +456,7 @@ fn build_pack(
                 object: memory_object_ref_from_object(&ranked.object),
                 section: ContextPackSection::Omitted,
                 rank: None,
-                reason: Some("no context-pack section for object type".to_owned()),
+                reason: Some(section_omission_reason(&ranked.object)),
             });
             continue;
         };
@@ -819,6 +819,33 @@ fn section_for_object(object: &MemoryObject) -> Option<ContextPackSection> {
             | DerivedType::Correction => Some(ContextPackSection::DerivedMemories),
         },
         MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
+    }
+}
+
+fn section_omission_reason(object: &MemoryObject) -> String {
+    match object {
+        MemoryObject::MemoryThread(thread) => format!(
+            "memory_thread status {} is not included in active_threads",
+            thread_status_name(thread.status)
+        ),
+        MemoryObject::Entity(_) => "entity has no prompt-ready context-pack section".to_owned(),
+        MemoryObject::MemoryLink(_) => {
+            "memory_link is graph-only and has no prompt-ready context-pack section".to_owned()
+        }
+        MemoryObject::Episode(_)
+        | MemoryObject::Observation(_)
+        | MemoryObject::DerivedMemory(_) => {
+            "object has no prompt-ready context-pack section".to_owned()
+        }
+    }
+}
+
+fn thread_status_name(status: ThreadStatus) -> &'static str {
+    match status {
+        ThreadStatus::Active => "active",
+        ThreadStatus::Dormant => "dormant",
+        ThreadStatus::Resolved => "resolved",
+        ThreadStatus::Archived => "archived",
     }
 }
 
@@ -1334,6 +1361,40 @@ mod tests {
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == relationship_note.id
                 && assignment.section == ContextPackSection::RelationshipNotes
+        }));
+    }
+
+    #[tokio::test]
+    async fn non_active_thread_omission_reason_names_thread_status() {
+        let fixtures = representative_fixtures();
+        let mut archived_thread = fixtures.soft_thread.clone();
+        archived_thread.status = ThreadStatus::Archived;
+        let mut objects = fixtures.objects();
+        objects.retain(|object| match object {
+            MemoryObject::MemoryThread(thread) => thread.id != archived_thread.id,
+            _ => true,
+        });
+        objects.push(MemoryObject::MemoryThread(archived_thread.clone()));
+        let graph = graph_with(&objects, &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            archived_thread.id,
+            ObjectType::MemoryThread,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut context = RetrievalContext::new("archived thread").with_trace();
+        context.lifecycle_policy.include_archived = true;
+
+        let outcome = pipeline.retrieve(context).await.unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+
+        assert!(outcome.pack.active_threads.is_empty());
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == archived_thread.id
+                && assignment.section == ContextPackSection::Omitted
+                && assignment.reason.as_deref()
+                    == Some("memory_thread status archived is not included in active_threads")
         }));
     }
 
