@@ -322,17 +322,31 @@ pub(crate) fn derived_memories_by_provenance(
     objects: impl IntoIterator<Item = MemoryObject>,
     links: impl IntoIterator<Item = MemoryLink>,
 ) -> Vec<DerivedMemory> {
+    let episode_ids = query.episode_ids.iter().copied().collect::<HashSet<_>>();
+    let observation_ids = query
+        .observation_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
     let links = links.into_iter().collect::<Vec<_>>();
     let link_refs = links.iter().collect::<Vec<_>>();
     let superseded = superseded_derived_memory_ids(&link_refs);
-    let provenance_linked = provenance_linked_derived_memory_ids(query, &links);
+    let provenance_linked =
+        provenance_linked_derived_memory_ids(&episode_ids, &observation_ids, &links);
     let mut memories = objects
         .into_iter()
         .filter_map(|object| match object {
             MemoryObject::DerivedMemory(memory) => Some(memory),
             _ => None,
         })
-        .filter(|memory| derived_memory_matches_provenance(query, memory, &provenance_linked))
+        .filter(|memory| {
+            derived_memory_matches_provenance(
+                &episode_ids,
+                &observation_ids,
+                memory,
+                &provenance_linked,
+            )
+        })
         .filter(|memory| {
             lifecycle_filter_reason(
                 &MemoryObject::DerivedMemory(memory.clone()),
@@ -351,58 +365,59 @@ pub(crate) fn derived_memories_by_provenance(
 }
 
 fn derived_memory_matches_provenance(
-    query: &GraphDerivedMemoryProvenanceQuery,
+    episode_ids: &HashSet<MemoryId>,
+    observation_ids: &HashSet<MemoryId>,
     memory: &DerivedMemory,
     provenance_linked: &HashSet<MemoryId>,
 ) -> bool {
-    (!query.episode_ids.is_empty()
+    (!episode_ids.is_empty()
         && memory
             .derived_from_episode_ids
             .iter()
-            .any(|episode_id| query.episode_ids.contains(episode_id)))
-        || (!query.observation_ids.is_empty()
+            .any(|episode_id| episode_ids.contains(episode_id)))
+        || (!observation_ids.is_empty()
             && memory
                 .derived_from_observation_ids
                 .iter()
-                .any(|observation_id| query.observation_ids.contains(observation_id)))
+                .any(|observation_id| observation_ids.contains(observation_id)))
         || provenance_linked.contains(&memory.id)
 }
 
 fn provenance_linked_derived_memory_ids(
-    query: &GraphDerivedMemoryProvenanceQuery,
+    episode_ids: &HashSet<MemoryId>,
+    observation_ids: &HashSet<MemoryId>,
     links: &[MemoryLink],
 ) -> HashSet<MemoryId> {
     links
         .iter()
         .filter(|link| link.relation == RelationType::DerivedFrom)
-        .filter_map(|link| provenance_linked_derived_memory_id(query, link))
+        .filter_map(|link| provenance_linked_derived_memory_id(episode_ids, observation_ids, link))
         .collect()
 }
 
 fn provenance_linked_derived_memory_id(
-    query: &GraphDerivedMemoryProvenanceQuery,
+    episode_ids: &HashSet<MemoryId>,
+    observation_ids: &HashSet<MemoryId>,
     link: &MemoryLink,
 ) -> Option<MemoryId> {
     let from = GraphObjectRef::new(link.from_id, link.from_type);
     let to = GraphObjectRef::new(link.to_id, link.to_type);
     match (from.object_type, to.object_type) {
-        (ObjectType::DerivedMemory, ObjectType::Episode)
-            if query.episode_ids.contains(&to.object_id) =>
-        {
+        (ObjectType::DerivedMemory, ObjectType::Episode) if episode_ids.contains(&to.object_id) => {
             Some(from.object_id)
         }
         (ObjectType::Episode, ObjectType::DerivedMemory)
-            if query.episode_ids.contains(&from.object_id) =>
+            if episode_ids.contains(&from.object_id) =>
         {
             Some(to.object_id)
         }
         (ObjectType::DerivedMemory, ObjectType::Observation)
-            if query.observation_ids.contains(&to.object_id) =>
+            if observation_ids.contains(&to.object_id) =>
         {
             Some(from.object_id)
         }
         (ObjectType::Observation, ObjectType::DerivedMemory)
-            if query.observation_ids.contains(&from.object_id) =>
+            if observation_ids.contains(&from.object_id) =>
         {
             Some(to.object_id)
         }

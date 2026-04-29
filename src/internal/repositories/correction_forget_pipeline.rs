@@ -233,18 +233,24 @@ where
             match target {
                 LifecycleTargetRef::DerivedMemory(id) => {
                     let memory = self.fetch_derived_memory(*id).await?;
-                    let suppressed = suppress_derived_memory(memory, draft.target_retention_state);
-                    push_object_unique(&mut graph_objects, MemoryObject::DerivedMemory(suppressed));
-                    push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
+                    if draft.lifecycle_policy.suppression.suppress_target {
+                        let suppressed =
+                            suppress_derived_memory(memory, draft.target_retention_state);
+                        push_object_unique(
+                            &mut graph_objects,
+                            MemoryObject::DerivedMemory(suppressed),
+                        );
+                        push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
+                    }
                 }
                 LifecycleTargetRef::Episode(id) => {
                     let episode = self.fetch_episode(*id).await?;
-                    let mut suppressed = episode;
                     if draft.lifecycle_policy.suppression.suppress_target {
+                        let mut suppressed = episode;
                         suppressed.retention_state = draft.target_retention_state;
+                        push_object_unique(&mut graph_objects, MemoryObject::Episode(suppressed));
+                        push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     }
-                    push_object_unique(&mut graph_objects, MemoryObject::Episode(suppressed));
-                    push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     if draft.cascade_policy.apply_to_derived_from_target
                         && draft
                             .lifecycle_policy
@@ -263,12 +269,15 @@ where
                 }
                 LifecycleTargetRef::Observation(id) => {
                     let observation = self.fetch_observation(*id).await?;
-                    let mut suppressed = observation;
                     if draft.lifecycle_policy.suppression.suppress_target {
+                        let mut suppressed = observation;
                         suppressed.retention_state = draft.target_retention_state;
+                        push_object_unique(
+                            &mut graph_objects,
+                            MemoryObject::Observation(suppressed),
+                        );
+                        push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     }
-                    push_object_unique(&mut graph_objects, MemoryObject::Observation(suppressed));
-                    push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     if draft.cascade_policy.apply_to_derived_from_target
                         && draft
                             .lifecycle_policy
@@ -287,13 +296,16 @@ where
                 }
                 LifecycleTargetRef::MemoryThread(id) => {
                     let thread = self.fetch_thread(*id).await?;
-                    let mut archived = thread;
                     if draft.lifecycle_policy.archive.archive_thread {
+                        let mut archived = thread;
                         archived.status =
                             draft.target_thread_status.unwrap_or(ThreadStatus::Archived);
+                        push_object_unique(
+                            &mut graph_objects,
+                            MemoryObject::MemoryThread(archived),
+                        );
+                        push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     }
-                    push_object_unique(&mut graph_objects, MemoryObject::MemoryThread(archived));
-                    push_ref_unique(&mut vector_delete_refs, target.as_memory_object_ref());
                     if draft
                         .lifecycle_policy
                         .archive
@@ -624,6 +636,21 @@ fn validate_correction_request(draft: &CorrectMemoryDraft) -> Result<(), CustomE
     }
     if !draft.correction_origin.has_reference() {
         return Err(validation_error("correction origin provenance is required"));
+    }
+    if !draft.lifecycle_policy.retain_original_source_objects {
+        return Err(validation_error(
+            "correction cannot rewrite or remove original source objects in this lifecycle chunk",
+        ));
+    }
+    if !draft.cascade_policy.require_original_source_match {
+        return Err(validation_error(
+            "correction cascade requires original source provenance matching in this lifecycle chunk",
+        ));
+    }
+    if draft.cascade_policy.cascade_to_threads {
+        return Err(validation_error(
+            "correction cascade to threads is not supported in this lifecycle chunk",
+        ));
     }
     for replacement in &draft.replacement_derived_memories {
         if replacement.text.trim().is_empty() {
@@ -1029,6 +1056,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsupported_correction_policy_knobs_fail_before_writes() {
+        let ids = fixed_ids();
+        for mut draft in [
+            {
+                let mut draft = correction_draft(&ids);
+                draft.lifecycle_policy.retain_original_source_objects = false;
+                draft
+            },
+            {
+                let mut draft = correction_draft(&ids);
+                draft.cascade_policy.require_original_source_match = false;
+                draft
+            },
+            {
+                let mut draft = correction_draft(&ids);
+                draft.cascade_policy.cascade_to_threads = true;
+                draft
+            },
+        ] {
+            draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
+            let graph =
+                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+            let vector = RecordingVectorStore::default();
+            let embedder = RecordingEmbedder::default();
+            let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+
+            let error = pipeline.correct(draft).await.unwrap_err();
+
+            assert!(error.to_string().contains("lifecycle chunk"));
+            assert!(graph.calls().is_empty());
+            assert!(vector.calls().is_empty());
+        }
+    }
+
+    #[tokio::test]
     async fn graph_failure_prevents_vector_maintenance() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
@@ -1296,6 +1358,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forget_policy_can_skip_source_suppression_without_vector_deleting_source() {
+        let fixtures = representative_fixtures();
+        let graph = FakeGraphAuthorityStore::new();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        graph.upsert_links(&fixtures.links()).await.unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::Episode(fixtures.episode.id),
+            "Do not hide source object.",
+        );
+        draft.lifecycle_policy.suppression.suppress_target = false;
+        draft
+            .lifecycle_policy
+            .suppression
+            .suppress_derived_from_target = false;
+
+        let outcome = pipeline.forget(draft).await.unwrap();
+
+        assert!(outcome.graph_mutated_object_ids.is_empty());
+        assert!(outcome.vector_maintained_object_ids.is_empty());
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
+                fixtures.episode.id,
+                ObjectType::Episode,
+            )]))
+            .await
+            .unwrap();
+        assert!(matches!(
+            &objects[0],
+            MemoryObject::Episode(episode)
+                if episode.retention_state == RetentionState::Active
+        ));
+    }
+
+    #[tokio::test]
     async fn forget_archives_memory_thread() {
         let fixtures = representative_fixtures();
         let graph = FakeGraphAuthorityStore::new();
@@ -1330,6 +1429,35 @@ mod tests {
             panic!("expected memory thread");
         };
         assert_eq!(thread.status, ThreadStatus::Archived);
+    }
+
+    #[tokio::test]
+    async fn forget_policy_can_skip_thread_archive_without_vector_deleting_thread() {
+        let fixtures = representative_fixtures();
+        let graph = FakeGraphAuthorityStore::new();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft =
+            ForgetMemoryDraft::archive_thread(fixtures.soft_thread.id, "Do not archive thread.");
+        draft.lifecycle_policy.archive.archive_thread = false;
+
+        let outcome = pipeline.forget(draft).await.unwrap();
+
+        assert!(outcome.graph_mutated_object_ids.is_empty());
+        assert!(outcome.vector_maintained_object_ids.is_empty());
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
+                fixtures.soft_thread.id,
+                ObjectType::MemoryThread,
+            )]))
+            .await
+            .unwrap();
+        assert!(matches!(
+            &objects[0],
+            MemoryObject::MemoryThread(thread) if thread.status == ThreadStatus::Active
+        ));
     }
 
     #[tokio::test]
