@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::api::types::{MemoryId, ObjectType, RetentionState};
+use crate::api::types::{default_retrieval_object_types, MemoryId, ObjectType, RetentionState};
 
 use super::{VectorPayloadHints, VectorRelationshipHints};
 
@@ -123,13 +123,7 @@ impl VectorCandidateSearch {
 }
 
 pub(crate) fn default_vector_candidate_object_types() -> Vec<ObjectType> {
-    vec![
-        ObjectType::Episode,
-        ObjectType::Observation,
-        ObjectType::DerivedMemory,
-        ObjectType::MemoryThread,
-        ObjectType::Entity,
-    ]
+    default_retrieval_object_types()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -295,7 +289,8 @@ mod tests {
             .with_default_object_types()
             .with_filters(filters.clone());
 
-        assert_eq!(search.object_types, default_vector_candidate_object_types());
+        assert_eq!(search.object_types, default_retrieval_object_types());
+        assert_eq!(default_vector_candidate_object_types(), search.object_types);
         assert_eq!(search.filters, filters);
         assert!(search.filters.has_currentness_filters());
     }
