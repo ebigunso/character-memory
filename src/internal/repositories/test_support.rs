@@ -227,6 +227,27 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         Ok(())
     }
 
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        let mut stored_objects = lock(&self.objects)?;
+        let mut stored_links = lock(&self.links)?;
+
+        for object in objects {
+            let (object_id, object_type) = object_identity(object);
+            stored_objects.retain(|existing| object_identity(existing) != (object_id, object_type));
+            stored_objects.push(object.clone());
+        }
+        for link in links {
+            stored_links.retain(|existing| existing.id != link.id);
+            stored_links.push(link.clone());
+        }
+
+        Ok(())
+    }
+
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,

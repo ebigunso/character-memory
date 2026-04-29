@@ -640,6 +640,15 @@ mod tests {
             Ok(())
         }
 
+        async fn upsert_objects_and_links(
+            &self,
+            objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            self.upsert_objects(objects).await?;
+            self.upsert_links(links).await
+        }
+
         async fn query_objects(
             &self,
             _query: &GraphObjectQuery,

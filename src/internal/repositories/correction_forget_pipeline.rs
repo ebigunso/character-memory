@@ -55,8 +55,9 @@ where
         validate_correction_request(&draft)?;
         let plan = self.correction_plan(draft).await?;
 
-        self.graph_store.upsert_objects(&plan.graph_objects).await?;
-        self.graph_store.upsert_links(&plan.graph_links).await?;
+        self.graph_store
+            .upsert_objects_and_links(&plan.graph_objects, &plan.graph_links)
+            .await?;
 
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self
@@ -719,7 +720,22 @@ fn validate_correction_request(draft: &CorrectMemoryDraft) -> Result<(), CustomE
 fn validate_forget_request(draft: &ForgetMemoryDraft) -> Result<(), CustomError> {
     draft
         .validate()
-        .map_err(|error| validation_error(error_string(error)))
+        .map_err(|error| validation_error(error_string(error)))?;
+    if !draft
+        .lifecycle_policy
+        .suppression
+        .preserve_original_raw_refs
+    {
+        return Err(validation_error(
+            "forget cannot remove original raw/source references in this lifecycle chunk",
+        ));
+    }
+    if !draft.lifecycle_policy.archive.preserve_original_raw_refs {
+        return Err(validation_error(
+            "thread archive cannot remove original raw/source references in this lifecycle chunk",
+        ));
+    }
+    Ok(())
 }
 
 fn replacement_drafts_or_default(
@@ -1181,6 +1197,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsupported_forget_policy_knobs_fail_before_writes() {
+        let ids = fixed_ids();
+        for mut draft in [
+            {
+                let mut draft = ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::DerivedMemory(ids.old),
+                    "Suppress without dropping refs.",
+                );
+                draft
+                    .lifecycle_policy
+                    .suppression
+                    .preserve_original_raw_refs = false;
+                draft
+            },
+            {
+                let mut draft =
+                    ForgetMemoryDraft::archive_thread(ids.thread, "Archive without dropping refs.");
+                draft.lifecycle_policy.archive.preserve_original_raw_refs = false;
+                draft
+            },
+        ] {
+            draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
+            let graph =
+                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+            let vector = RecordingVectorStore::default();
+            let embedder = RecordingEmbedder::default();
+            let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+
+            let error = pipeline.forget(draft).await.unwrap_err();
+
+            assert!(error.to_string().contains("lifecycle chunk"));
+            assert!(graph.calls().is_empty());
+            assert!(vector.calls().is_empty());
+        }
+    }
+
+    #[tokio::test]
     async fn graph_failure_prevents_vector_maintenance() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
@@ -1192,6 +1245,33 @@ mod tests {
         let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
 
         assert!(error.to_string().contains("object write failed"));
+        assert!(vector.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn graph_link_failure_prevents_partial_object_mutation_and_vector_maintenance() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
+            .fail_links();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+
+        let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
+
+        assert!(error.to_string().contains("link write failed"));
+        assert_eq!(
+            graph.calls(),
+            vec![
+                StoreCall::GraphQuery(vec![ids.old]),
+                StoreCall::GraphObjects(vec![ids.old, ids.replacement]),
+                StoreCall::GraphLinks(vec![(ids.replacement, ids.old)]),
+            ]
+        );
+        assert_eq!(
+            graph.object_refs(),
+            vec![MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old)]
+        );
         assert!(vector.calls().is_empty());
     }
 
@@ -1928,6 +2008,7 @@ mod tests {
         links: Mutex<Vec<MemoryLink>>,
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_objects: bool,
+        fail_links: bool,
     }
 
     impl RecordingGraphStore {
@@ -1943,8 +2024,22 @@ mod tests {
             self
         }
 
+        fn fail_links(mut self) -> Self {
+            self.fail_links = true;
+            self
+        }
+
         fn calls(&self) -> Vec<StoreCall> {
             lock(&self.calls).clone()
+        }
+
+        fn object_refs(&self) -> Vec<MemoryObjectRef> {
+            let mut refs = lock(&self.objects)
+                .iter()
+                .map(memory_object_ref)
+                .collect::<Vec<_>>();
+            sort_refs(&mut refs);
+            refs
         }
     }
 
@@ -1976,6 +2071,42 @@ mod tests {
                     .map(|link| (link.from_id, link.to_id))
                     .collect(),
             ));
+            if self.fail_links {
+                return Err(CustomError::DatabaseError("link write failed".to_owned()));
+            }
+            lock(&self.links).extend_from_slice(links);
+            Ok(())
+        }
+
+        async fn upsert_objects_and_links(
+            &self,
+            objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            lock(&self.calls).push(StoreCall::GraphObjects(
+                objects
+                    .iter()
+                    .map(|object| memory_object_ref(object).id)
+                    .collect(),
+            ));
+            if self.fail_objects {
+                return Err(CustomError::DatabaseError("object write failed".to_owned()));
+            }
+            lock(&self.calls).push(StoreCall::GraphLinks(
+                links
+                    .iter()
+                    .map(|link| (link.from_id, link.to_id))
+                    .collect(),
+            ));
+            if self.fail_links {
+                return Err(CustomError::DatabaseError("link write failed".to_owned()));
+            }
+            let mut stored = lock(&self.objects);
+            for object in objects {
+                let object_ref = memory_object_ref(object);
+                stored.retain(|existing| memory_object_ref(existing) != object_ref);
+                stored.push(object.clone());
+            }
             lock(&self.links).extend_from_slice(links);
             Ok(())
         }

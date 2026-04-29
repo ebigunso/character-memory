@@ -158,6 +158,49 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         Ok(())
     }
 
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        let mut object_triples = Vec::new();
+        for object in objects {
+            object
+                .validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            let (object_id, object_type) = object_identity(object);
+            object_triples.push((
+                graph_uri(object_type, object_id),
+                rdf_triples_for_object(object),
+            ));
+        }
+
+        let mut link_triples = Vec::new();
+        for link in links {
+            link.validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            link_triples.push((
+                graph_uri(ObjectType::MemoryLink, link.id),
+                rdf_triples_for_link(link),
+            ));
+        }
+
+        for (owner_graph_uri, triples) in object_triples.iter().chain(link_triples.iter()) {
+            self.replace_triples(owner_graph_uri.clone(), triples)?;
+        }
+
+        let mut stored_objects = lock(&self.objects)?;
+        for object in objects {
+            stored_objects.insert(object_identity(object), object.clone());
+        }
+        let mut stored_links = lock(&self.links)?;
+        for link in links {
+            stored_links.insert(link.id, link.clone());
+        }
+
+        Ok(())
+    }
+
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,

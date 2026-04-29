@@ -972,6 +972,12 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
     async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError>;
 
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError>;
+
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
@@ -1001,6 +1007,14 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
 
     async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
         (**self).upsert_links(links).await
+    }
+
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        (**self).upsert_objects_and_links(objects, links).await
     }
 
     async fn query_objects(
