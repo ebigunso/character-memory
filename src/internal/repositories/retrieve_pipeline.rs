@@ -7,11 +7,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
     ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType, IncludedDerivedMemory,
-    LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason, MemoryId, MemoryObject,
-    MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState, RetrievalContext,
-    RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTrace, RetrieveOutcome,
-    SectionAssignment, StaleCandidateOmission, StaleCandidateReason, ThreadStatus,
-    VectorCandidateTrace,
+    LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
+    LifecycleOmissionSummary, MemoryId, MemoryObject, MemoryObjectRef, MemoryThread, ObjectType,
+    RelationType, RetentionState, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
+    RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
@@ -94,12 +94,30 @@ where
 
         let pack = build_pack(ranked_objects, context.section_limits, &mut details);
         let graph_verified_count = included_section_assignment_count(&details.section_assignments);
+        let stale_candidate_omission_reasons =
+            summarize_stale_candidate_omissions(&details.stale_candidate_omissions);
+        let lifecycle_omission_reasons =
+            summarize_lifecycle_omissions(&details.lifecycle_filter_decisions);
+        let stale_candidate_omission_count = stale_candidate_omission_reasons
+            .iter()
+            .map(|summary| summary.count)
+            .sum();
+        let lifecycle_omission_count = lifecycle_omission_reasons
+            .iter()
+            .map(|summary| summary.count)
+            .sum();
         let mut rationale = RetrievalRationale::new(rationale_summary(
             vector_candidates.len(),
             graph_verified_count,
+            stale_candidate_omission_count,
+            lifecycle_omission_count,
         ));
         rationale.vector_candidate_count = vector_candidates.len();
         rationale.graph_verified_count = graph_verified_count;
+        rationale.stale_candidate_omission_count = stale_candidate_omission_count;
+        rationale.stale_candidate_omission_reasons = stale_candidate_omission_reasons;
+        rationale.lifecycle_omission_count = lifecycle_omission_count;
+        rationale.lifecycle_omission_reasons = lifecycle_omission_reasons;
         let trace = include_trace.then(|| RetrievalTrace {
             vector_candidates: vector_candidates
                 .iter()
@@ -532,6 +550,51 @@ fn included_section_assignment_count(section_assignments: &[SectionAssignment]) 
         .iter()
         .filter(|assignment| assignment.section != ContextPackSection::Omitted)
         .count()
+}
+
+fn summarize_stale_candidate_omissions(
+    omissions: &[StaleCandidateOmission],
+) -> Vec<StaleCandidateOmissionSummary> {
+    let mut summaries = Vec::<StaleCandidateOmissionSummary>::new();
+    for omission in omissions {
+        if let Some(summary) = summaries
+            .iter_mut()
+            .find(|summary| summary.reason == omission.reason)
+        {
+            summary.count += 1;
+        } else {
+            summaries.push(StaleCandidateOmissionSummary {
+                reason: omission.reason,
+                count: 1,
+            });
+        }
+    }
+    summaries.sort_by_key(|summary| stale_reason_rank(summary.reason));
+    summaries
+}
+
+fn summarize_lifecycle_omissions(
+    decisions: &[LifecycleFilterDecision],
+) -> Vec<LifecycleOmissionSummary> {
+    let mut summaries = Vec::<LifecycleOmissionSummary>::new();
+    for decision in decisions
+        .iter()
+        .filter(|decision| decision.action == LifecycleFilterAction::Omitted)
+    {
+        if let Some(summary) = summaries
+            .iter_mut()
+            .find(|summary| summary.reason == decision.reason)
+        {
+            summary.count += 1;
+        } else {
+            summaries.push(LifecycleOmissionSummary {
+                reason: decision.reason,
+                count: 1,
+            });
+        }
+    }
+    summaries.sort_by_key(|summary| lifecycle_reason_rank(summary.reason));
+    summaries
 }
 
 fn push_derived(pack: &mut ContinuityContextPack, object: DerivedMemory) {
@@ -1011,9 +1074,14 @@ fn stale_reason_rank(reason: StaleCandidateReason) -> u8 {
     }
 }
 
-fn rationale_summary(vector_candidate_count: usize, graph_verified_count: usize) -> String {
+fn rationale_summary(
+    vector_candidate_count: usize,
+    graph_verified_count: usize,
+    stale_candidate_omission_count: usize,
+    lifecycle_omission_count: usize,
+) -> String {
     format!(
-        "Embedded the retrieval query, evaluated {vector_candidate_count} vector candidates, and assembled {graph_verified_count} graph-verified objects with deterministic vector, graph proximity, and salience scoring."
+        "Embedded the retrieval query, evaluated {vector_candidate_count} vector candidates, included {graph_verified_count} final context-pack objects, omitted {stale_candidate_omission_count} stale or unresolved candidates, and recorded {lifecycle_omission_count} lifecycle omission decisions with deterministic vector, graph proximity, and salience scoring."
     )
 }
 
@@ -1146,6 +1214,65 @@ mod tests {
             .iter()
             .any(|decision| decision.object.id == fixtures.suppressed_seed.id
                 && decision.action == LifecycleFilterAction::Omitted));
+    }
+
+    #[tokio::test]
+    async fn rationale_reports_compact_omissions_without_trace() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let missing_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9998);
+        let vector = RecordingVectorStore::new(vec![
+            candidate(missing_id, ObjectType::DerivedMemory, 0.95),
+            candidate(fixtures.suppressed_seed.id, ObjectType::DerivedMemory, 0.94),
+        ]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("compact rationale omissions"))
+            .await
+            .unwrap();
+
+        assert!(outcome.trace.is_none());
+        assert_eq!(outcome.rationale.stale_candidate_omission_count, 2);
+        assert!(outcome
+            .rationale
+            .stale_candidate_omission_reasons
+            .iter()
+            .any(
+                |summary| summary.reason == StaleCandidateReason::GraphObjectMissing
+                    && summary.count == 1
+            ));
+        assert!(outcome
+            .rationale
+            .stale_candidate_omission_reasons
+            .iter()
+            .any(
+                |summary| summary.reason == StaleCandidateReason::LifecycleMismatch
+                    && summary.count == 1
+            ));
+        assert_eq!(outcome.rationale.lifecycle_omission_count, 2);
+        assert!(outcome
+            .rationale
+            .lifecycle_omission_reasons
+            .iter()
+            .any(
+                |summary| summary.reason == LifecycleFilterReason::GraphObjectMissing
+                    && summary.count == 1
+            ));
+        assert!(outcome
+            .rationale
+            .lifecycle_omission_reasons
+            .iter()
+            .any(
+                |summary| summary.reason == LifecycleFilterReason::SuppressedOmitted
+                    && summary.count == 1
+            ));
+        assert!(outcome
+            .rationale
+            .summary
+            .contains("final context-pack objects"));
+        assert!(outcome.rationale.summary.contains("omitted 2"));
     }
 
     #[test]

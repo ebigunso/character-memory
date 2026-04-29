@@ -215,6 +215,10 @@ pub struct RetrievalRationale {
     pub summary: String,
     pub vector_candidate_count: usize,
     pub graph_verified_count: usize,
+    pub stale_candidate_omission_count: usize,
+    pub stale_candidate_omission_reasons: Vec<StaleCandidateOmissionSummary>,
+    pub lifecycle_omission_count: usize,
+    pub lifecycle_omission_reasons: Vec<LifecycleOmissionSummary>,
 }
 
 impl RetrievalRationale {
@@ -223,6 +227,10 @@ impl RetrievalRationale {
             summary: summary.into(),
             vector_candidate_count: 0,
             graph_verified_count: 0,
+            stale_candidate_omission_count: 0,
+            stale_candidate_omission_reasons: Vec::new(),
+            lifecycle_omission_count: 0,
+            lifecycle_omission_reasons: Vec::new(),
         }
     }
 }
@@ -231,6 +239,18 @@ impl Default for RetrievalRationale {
     fn default() -> Self {
         Self::new(String::new())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StaleCandidateOmissionSummary {
+    pub reason: StaleCandidateReason,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LifecycleOmissionSummary {
+    pub reason: LifecycleFilterReason,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

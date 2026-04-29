@@ -784,7 +784,10 @@ mod tests {
         );
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
-        assert!(outcome.rationale.summary.contains("graph-verified objects"));
+        assert!(outcome
+            .rationale
+            .summary
+            .contains("final context-pack objects"));
         assert!(trace
             .lifecycle_filter_decisions
             .iter()

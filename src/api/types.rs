@@ -26,9 +26,9 @@ pub use memory_type::MemoryType;
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,
     ContinuitySectionLimits, GraphRelationTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, MemoryObjectRef, RetrievalCandidateLimits,
-    RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale,
-    RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
-    StaleCandidateReason, VectorCandidateTrace,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
+    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
+    RetrievalRationale, RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
 };
 pub use scored_memory::ScoredMemory;
