@@ -21,6 +21,29 @@ Purpose:
 
 ## Entries
 
+## 2026-04-29 - Scan Complete PR Thread Payload Before Closeout  [tags: review, tooling, validation]
+
+Context:
+- Plan: PR #33 retrieve/context-pack review remediation
+- Task/Wave: repeated PR comment triage follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- Reported that all active PR review threads were handled while one unresolved thread remained in the fetched payload.
+
+Root cause:
+- Relied on a partial read of a large saved GraphQL payload and did not run a final unresolved-thread extraction across the complete payload before closeout.
+
+Fix applied:
+- Re-fetched the full PR thread list, searched it for every `isResolved: false` entry, and addressed the missed fail-closed graph policy comment.
+
+Prevention:
+- Before claiming all PR comments are resolved, run a complete-payload unresolved-thread extraction, not just a line-range read of the saved output.
+- Treat a large `gh api graphql` result as incomplete until every unresolved thread ID has been enumerated and triaged.
+
+Evidence:
+- Missed thread `PRRT_kwDONxNRBs5-Z49b` was found by searching the complete saved PR thread payload for `"isResolved": false`.
+
 ## 2026-04-29 - Keep Roadmap Versions Out Of Durable Code  [tags: code-quality, architecture, communication]
 
 Context:

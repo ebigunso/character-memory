@@ -605,7 +605,7 @@ fn graph_query_for_candidate(
     })
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
-        allow_partial_results: true,
+        allow_partial_results: context.graph_limits.allow_degraded_results,
     })
 }
 
@@ -1140,6 +1140,23 @@ mod tests {
                     && location.contains("object_type=derived_memory")
                     && location.contains(&fixtures.user_preference.id.to_string())
         ));
+    }
+
+    #[test]
+    fn graph_query_failure_policy_follows_degraded_results_setting() {
+        let object_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0110);
+        let candidate = candidate(object_id, ObjectType::DerivedMemory, 0.99);
+        let mut context = RetrievalContext::new("fail closed query");
+        context.graph_limits.allow_degraded_results = false;
+
+        let query = graph_query_for_candidate(&candidate, &context);
+
+        assert!(!query.failure_policy.allow_partial_results);
+
+        context.graph_limits.allow_degraded_results = true;
+        let query = graph_query_for_candidate(&candidate, &context);
+
+        assert!(query.failure_policy.allow_partial_results);
     }
 
     #[tokio::test]
