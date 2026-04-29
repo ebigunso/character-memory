@@ -441,7 +441,21 @@ fn bounded_expansion_plan<'a>(
     let mut queue = VecDeque::from([(root, 0_u8)]);
 
     while let Some((object_ref, depth)) = queue.pop_front() {
-        if visited.len() >= query.max_nodes || visited.contains(&object_ref) {
+        if visited.contains(&object_ref) {
+            continue;
+        }
+        if visited.len() >= query.max_nodes {
+            let failure = GraphExpansionBoundedFailure {
+                reason: GraphExpansionBoundedFailureReason::NodeLimit,
+                at: Some(object_ref),
+            };
+            if !query.failure_policy.allow_partial_results {
+                return Err(CustomError::DatabaseError(format!(
+                    "Graph expansion node limit exceeded at {:?} {}",
+                    object_ref.object_type, object_ref.object_id
+                )));
+            }
+            bounded_failure.get_or_insert(failure);
             continue;
         }
 
@@ -506,6 +520,17 @@ fn bounded_expansion_plan<'a>(
             }
 
             if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
+                let failure = GraphExpansionBoundedFailure {
+                    reason: GraphExpansionBoundedFailureReason::NodeLimit,
+                    at: Some(neighbor),
+                };
+                if !query.failure_policy.allow_partial_results {
+                    return Err(CustomError::DatabaseError(format!(
+                        "Graph expansion node limit exceeded at {:?} {}",
+                        neighbor.object_type, neighbor.object_id
+                    )));
+                }
+                bounded_failure.get_or_insert(failure);
                 continue;
             }
             queue.push_back((neighbor, depth + 1));
@@ -746,6 +771,7 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::repositories::test_support::representative_fixtures;
 
     #[test]
     fn graph_queries_use_domain_ids_and_object_types() {
@@ -805,5 +831,42 @@ mod tests {
             CustomError::GraphExpansionRootNotFound { .. }
         ));
         assert!(error.to_string().contains("root not found"));
+    }
+
+    #[test]
+    fn bounded_expansion_reports_node_limit_when_traversal_truncates_results() {
+        let fixtures = representative_fixtures();
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 1)
+            .with_failure_policy(GraphExpansionFailurePolicy {
+                timeout_ms: Some(250),
+                allow_partial_results: true,
+            });
+
+        let expansion = bounded_expansion(&query, fixtures.objects(), fixtures.links()).unwrap();
+
+        assert_eq!(expansion.objects.len(), 1);
+        assert!(matches!(
+            expansion.bounded_failure,
+            Some(GraphExpansionBoundedFailure {
+                reason: GraphExpansionBoundedFailureReason::NodeLimit,
+                at: Some(_),
+            })
+        ));
+    }
+
+    #[test]
+    fn bounded_expansion_fails_closed_when_node_limit_truncates_results() {
+        let fixtures = representative_fixtures();
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 1)
+            .with_failure_policy(GraphExpansionFailurePolicy {
+                timeout_ms: Some(250),
+                allow_partial_results: false,
+            });
+
+        let error = bounded_expansion(&query, fixtures.objects(), fixtures.links()).unwrap_err();
+
+        assert!(
+            matches!(error, CustomError::DatabaseError(message) if message.contains("node limit exceeded"))
+        );
     }
 }
