@@ -517,8 +517,10 @@ where
     async fn query_current_derived_by_provenance(
         &self,
         episode_ids: Vec<MemoryId>,
-        observation_ids: Vec<MemoryId>,
+        mut observation_ids: Vec<MemoryId>,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
+        observation_ids.extend(self.observation_ids_for_episodes(&episode_ids).await?);
+        sort_dedup(&mut observation_ids);
         let mut matches = self
             .graph_store
             .query_derived_memories_by_provenance(
@@ -528,6 +530,35 @@ where
             .await?;
         sort_derived_memories(&mut matches);
         Ok(matches)
+    }
+
+    async fn observation_ids_for_episodes(
+        &self,
+        episode_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        if episode_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let objects = self
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![ObjectType::Observation],
+                None,
+            ))
+            .await?;
+        let mut observation_ids = objects
+            .into_iter()
+            .filter_map(|object| match object {
+                MemoryObject::Observation(observation)
+                    if episode_ids.contains(&observation.episode_id) =>
+                {
+                    Some(observation.id)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        sort_dedup(&mut observation_ids);
+        Ok(observation_ids)
     }
 
     async fn maintain_vectors(
@@ -1419,6 +1450,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn episode_correction_supersedes_observation_only_derived_memories() {
+        let fixtures = representative_fixtures();
+        let mut observation_only = fixtures.user_preference.clone();
+        observation_only.id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9101);
+        observation_only.derived_from_episode_ids.clear();
+        observation_only.derived_from_observation_ids = vec![fixtures.salient_observation.id];
+        let graph = FakeGraphAuthorityStore::new();
+        let mut objects = fixtures.objects();
+        objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
+        graph.upsert_objects(&objects).await.unwrap();
+        graph.upsert_links(&fixtures.links()).await.unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let replacement_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9102);
+        let mut replacement = ReplacementDerivedMemoryDraft::new(
+            DerivedType::Correction,
+            "The corrected episode supersedes observation-only behavior.",
+        )
+        .with_source_episode(fixtures.episode.id);
+        replacement.id = Some(replacement_id);
+        replacement.original_source_provenance =
+            SourceProvenanceReference::episode(fixtures.episode.id);
+        replacement.correction_origin_provenance =
+            SourceProvenanceReference::observation(fixtures.salient_observation.id);
+        let mut draft = CorrectMemoryDraft::new(
+            CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
+                id: fixtures.episode.id,
+                original_raw_ref: fixtures.episode.raw_ref.clone(),
+                original_source_ref: fixtures.episode.source_conversation_id.clone(),
+            }),
+            "Correct episode-derived observation-only behavior.",
+        )
+        .with_replacement(replacement);
+        draft.correction_origin =
+            SourceProvenanceReference::observation(fixtures.salient_observation.id);
+
+        let outcome = pipeline.correct(draft).await.unwrap();
+
+        assert!(outcome
+            .graph_mutated_object_ids
+            .contains(&MemoryObjectRef::new(
+                ObjectType::DerivedMemory,
+                observation_only.id,
+            )));
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                GraphObjectRef::new(observation_only.id, ObjectType::DerivedMemory),
+                GraphObjectRef::new(replacement_id, ObjectType::DerivedMemory),
+            ]))
+            .await
+            .unwrap();
+        let old = objects
+            .iter()
+            .find_map(|object| match object {
+                MemoryObject::DerivedMemory(memory) if memory.id == observation_only.id => {
+                    Some(memory)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(!old.is_current);
+        let replacement = objects
+            .iter()
+            .find_map(|object| match object {
+                MemoryObject::DerivedMemory(memory) if memory.id == replacement_id => Some(memory),
+                _ => None,
+            })
+            .unwrap();
+        assert!(replacement.supersedes.contains(&observation_only.id));
+    }
+
+    #[tokio::test]
     async fn source_object_correction_requires_original_refs_before_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]);
@@ -1556,6 +1660,50 @@ mod tests {
             }
             _ => false,
         }));
+    }
+
+    #[tokio::test]
+    async fn episode_forget_suppresses_observation_only_derived_memories() {
+        let fixtures = representative_fixtures();
+        let mut observation_only = fixtures.user_preference.clone();
+        observation_only.id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9103);
+        observation_only.derived_from_episode_ids.clear();
+        observation_only.derived_from_observation_ids = vec![fixtures.salient_observation.id];
+        let graph = FakeGraphAuthorityStore::new();
+        let mut objects = fixtures.objects();
+        objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
+        graph.upsert_objects(&objects).await.unwrap();
+        graph.upsert_links(&fixtures.links()).await.unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+
+        let outcome = pipeline
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::Episode(fixtures.episode.id),
+                "Forget source episode.",
+            ))
+            .await
+            .unwrap();
+
+        assert!(outcome
+            .graph_mutated_object_ids
+            .contains(&MemoryObjectRef::new(
+                ObjectType::DerivedMemory,
+                observation_only.id,
+            )));
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
+                observation_only.id,
+                ObjectType::DerivedMemory,
+            )]))
+            .await
+            .unwrap();
+        let MemoryObject::DerivedMemory(memory) = &objects[0] else {
+            panic!("expected observation-only derived memory");
+        };
+        assert_eq!(memory.retention_state, RetentionState::Suppressed);
+        assert!(!memory.is_current);
     }
 
     #[tokio::test]
