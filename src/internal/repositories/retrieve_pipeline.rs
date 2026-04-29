@@ -92,10 +92,13 @@ where
         ));
         rationale.vector_candidate_count = vector_candidates.len();
         rationale.graph_verified_count = ranked_objects.len();
-        rationale.lifecycle_filter_decisions = assembly.lifecycle_decisions;
-        rationale.stale_candidate_omissions = assembly.stale_omissions;
+        let mut details = RetrievalDetails {
+            lifecycle_filter_decisions: assembly.lifecycle_decisions,
+            stale_candidate_omissions: assembly.stale_omissions,
+            section_assignments: Vec::new(),
+        };
 
-        let pack = build_pack(ranked_objects, context.section_limits, &mut rationale);
+        let pack = build_pack(ranked_objects, context.section_limits, &mut details);
         let trace = include_trace.then(|| RetrievalTrace {
             vector_candidates: vector_candidates
                 .iter()
@@ -107,9 +110,9 @@ where
                 })
                 .collect(),
             graph_relations: assembly.graph_relations.unwrap_or_default(),
-            lifecycle_filter_decisions: rationale.lifecycle_filter_decisions.clone(),
-            stale_candidate_omissions: rationale.stale_candidate_omissions.clone(),
-            section_assignments: rationale.section_assignments.clone(),
+            lifecycle_filter_decisions: details.lifecycle_filter_decisions,
+            stale_candidate_omissions: details.stale_candidate_omissions,
+            section_assignments: details.section_assignments,
         });
 
         Ok(RetrieveOutcome {
@@ -129,6 +132,13 @@ where
         let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
         self.embedder.embed(&input).await
     }
+}
+
+#[derive(Debug, Default)]
+struct RetrievalDetails {
+    lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
+    stale_candidate_omissions: Vec<StaleCandidateOmission>,
+    section_assignments: Vec<SectionAssignment>,
 }
 
 #[derive(Debug, Default)]
@@ -435,14 +445,14 @@ struct RankKey {
 fn build_pack(
     ranked_objects: Vec<RankedObject>,
     limits: crate::api::types::ContinuitySectionLimits,
-    rationale: &mut RetrievalRationale,
+    details: &mut RetrievalDetails,
 ) -> ContinuityContextPack {
-    let mut pack = ContinuityContextPack::empty(RetrievalRationale::default());
+    let mut pack = ContinuityContextPack::empty();
     let mut section_counts = SectionCounts::default();
 
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked.object) else {
-            rationale.section_assignments.push(SectionAssignment {
+            details.section_assignments.push(SectionAssignment {
                 object: memory_object_ref_from_object(&ranked.object),
                 section: ContextPackSection::Omitted,
                 rank: None,
@@ -453,14 +463,14 @@ fn build_pack(
 
         let count = section_counts.count_mut(section);
         if *count >= section_limit(section, limits) {
-            rationale
+            details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
                     candidate: memory_object_ref_from_object(&ranked.object),
                     vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
                 });
-            rationale.section_assignments.push(SectionAssignment {
+            details.section_assignments.push(SectionAssignment {
                 object: memory_object_ref_from_object(&ranked.object),
                 section: ContextPackSection::Omitted,
                 rank: None,
@@ -474,7 +484,7 @@ fn build_pack(
 
         *count += 1;
         let rank = *count;
-        rationale.section_assignments.push(SectionAssignment {
+        details.section_assignments.push(SectionAssignment {
             object: memory_object_ref_from_object(&ranked.object),
             section,
             rank: Some(rank),
@@ -490,7 +500,6 @@ fn build_pack(
         }
     }
 
-    pack.rationale = rationale.clone();
     pack
 }
 
@@ -612,11 +621,10 @@ fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
         })
         .unwrap_or_default();
 
-    CustomError::DatabaseError(format!(
-        "Graph expansion exceeded bounded retrieval limits while degraded results are disabled: reason={}{}",
-        bounded_failure_reason_name(failure.reason),
-        location
-    ))
+    CustomError::GraphExpansionBounded {
+        reason: bounded_failure_reason_name(failure.reason).to_owned(),
+        location,
+    }
 }
 
 fn bounded_failure_reason_name(
@@ -1010,12 +1018,12 @@ mod tests {
             fixtures.episode.raw_ref
         );
         assert_eq!(outcome.rationale.vector_candidate_count, 4);
-        assert!(outcome
-            .rationale
+        let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace
             .section_assignments
             .iter()
             .all(|assignment| assignment.reason.is_some()));
-        assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 4);
+        assert_eq!(trace.vector_candidates.len(), 4);
     }
 
     #[tokio::test]
@@ -1049,35 +1057,32 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .retrieve(RetrievalContext::new("omit stale"))
+            .retrieve(RetrievalContext::new("omit stale").with_trace())
             .await
             .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
 
         assert!(outcome.pack.preferences.is_empty());
-        assert!(outcome
-            .rationale
+        assert!(trace
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == missing_id
                 && omission.reason == StaleCandidateReason::GraphObjectMissing));
-        assert!(!outcome
-            .rationale
+        assert!(!trace
             .stale_candidate_omissions
             .iter()
             .any(
                 |omission| omission.candidate.id == fixtures.suppressed_seed.id
                     && omission.reason == StaleCandidateReason::GraphObjectMissing
             ));
-        assert!(outcome
-            .rationale
+        assert!(trace
             .stale_candidate_omissions
             .iter()
             .any(
                 |omission| omission.candidate.id == fixtures.suppressed_seed.id
                     && omission.reason == StaleCandidateReason::LifecycleMismatch
             ));
-        assert!(outcome
-            .rationale
+        assert!(trace
             .lifecycle_filter_decisions
             .iter()
             .any(|decision| decision.object.id == fixtures.suppressed_seed.id
@@ -1101,9 +1106,13 @@ mod tests {
 
         let error = pipeline.retrieve(context).await.unwrap_err();
 
-        assert!(
-            matches!(error, CustomError::DatabaseError(message) if message.contains("reason=timeout") && message.contains("object_type=derived_memory") && message.contains(&fixtures.user_preference.id.to_string()))
-        );
+        assert!(matches!(
+            error,
+            CustomError::GraphExpansionBounded { reason, location }
+                if reason == "timeout"
+                    && location.contains("object_type=derived_memory")
+                    && location.contains(&fixtures.user_preference.id.to_string())
+        ));
     }
 
     #[tokio::test]
@@ -1120,28 +1129,27 @@ mod tests {
         let mut context = RetrievalContext::new("bounded graph limits");
         context.graph_limits.max_nodes = 0;
         context.graph_limits.allow_degraded_results = true;
+        context.include_trace = true;
 
         let outcome = pipeline.retrieve(context).await.unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
 
         assert!(outcome.pack.preferences.is_empty());
-        assert!(outcome
-            .rationale
+        assert!(trace
             .stale_candidate_omissions
             .iter()
             .any(
                 |omission| omission.candidate.id == fixtures.user_preference.id
                     && omission.reason == StaleCandidateReason::GraphExpansionBounded
             ));
-        assert!(!outcome
-            .rationale
+        assert!(!trace
             .stale_candidate_omissions
             .iter()
             .any(
                 |omission| omission.candidate.id == fixtures.user_preference.id
                     && omission.reason == StaleCandidateReason::GraphObjectMissing
             ));
-        assert!(outcome
-            .rationale
+        assert!(trace
             .lifecycle_filter_decisions
             .iter()
             .any(|decision| decision.object.id == fixtures.user_preference.id
@@ -1211,7 +1219,7 @@ mod tests {
             outcome.pack.preferences[0].memory.id,
             fixtures.user_preference.id
         );
-        assert!(outcome.rationale.stale_candidate_omissions.is_empty());
+        assert!(outcome.trace.is_none());
     }
 
     #[tokio::test]
@@ -1234,24 +1242,24 @@ mod tests {
             preferences: 1,
             ..ContinuitySectionLimits::default()
         };
+        context.include_trace = true;
 
         let first = pipeline.retrieve(context.clone()).await.unwrap();
         let second = pipeline.retrieve(context).await.unwrap();
+        let trace = first.trace.as_ref().unwrap();
 
         assert_eq!(first.pack.preferences, second.pack.preferences);
         assert_eq!(
             first.pack.preferences[0].memory.id,
             fixtures.user_preference.id
         );
-        assert!(first
-            .rationale
+        assert!(trace
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == second_preference.id
                 && omission.vector_score == Some(0.90)
                 && omission.reason == StaleCandidateReason::SectionLimit));
-        assert!(first
-            .rationale
+        assert!(trace
             .section_assignments
             .iter()
             .any(|assignment| assignment.object.id == second_preference.id
@@ -1275,18 +1283,18 @@ mod tests {
             relevant_episodes: 0,
             ..ContinuitySectionLimits::default()
         };
+        context.include_trace = true;
 
         let outcome = pipeline.retrieve(context).await.unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
 
-        assert!(outcome
-            .rationale
+        assert!(trace
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == fixtures.episode.id
                 && omission.vector_score.is_none()
                 && omission.reason == StaleCandidateReason::SectionLimit));
-        assert!(outcome
-            .rationale
+        assert!(trace
             .section_assignments
             .iter()
             .any(|assignment| assignment.object.id == fixtures.episode.id
@@ -1314,22 +1322,19 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .retrieve(RetrievalContext::new("relationship note"))
+            .retrieve(RetrievalContext::new("relationship note").with_trace())
             .await
             .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
 
         assert_eq!(
             outcome.pack.relationship_notes[0].memory.id,
             relationship_note.id
         );
-        assert!(outcome
-            .rationale
-            .section_assignments
-            .iter()
-            .any(|assignment| {
-                assignment.object.id == relationship_note.id
-                    && assignment.section == ContextPackSection::RelationshipNotes
-            }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == relationship_note.id
+                && assignment.section == ContextPackSection::RelationshipNotes
+        }));
     }
 
     async fn graph_with(

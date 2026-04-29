@@ -35,6 +35,9 @@ pub enum CustomError {
         object_id: MemoryId,
     },
 
+    #[error("Graph expansion bounded by retrieval policy: reason={reason}{location}")]
+    GraphExpansionBounded { reason: String, location: String },
+
     #[error("Vector database error: {0}")]
     QdrantError(#[source] Box<QdrantError>),
 

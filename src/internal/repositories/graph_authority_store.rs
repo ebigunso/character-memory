@@ -399,9 +399,7 @@ fn bounded_expansion_plan<'a>(
                 bounded_failure: Some(bounded_failure),
             });
         }
-        return Err(CustomError::DatabaseError(
-            "Graph expansion timed out before traversal".to_owned(),
-        ));
+        return Err(graph_expansion_bounded_error(bounded_failure));
     }
 
     if query.max_nodes == 0 {
@@ -410,9 +408,7 @@ fn bounded_expansion_plan<'a>(
             at: Some(root),
         };
         if !query.failure_policy.allow_partial_results {
-            return Err(CustomError::DatabaseError(
-                "Graph expansion node limit reached before traversal".to_owned(),
-            ));
+            return Err(graph_expansion_bounded_error(bounded_failure));
         }
         return Ok(BoundedExpansionPlan {
             visited: HashSet::new(),
@@ -450,10 +446,7 @@ fn bounded_expansion_plan<'a>(
                 at: Some(object_ref),
             };
             if !query.failure_policy.allow_partial_results {
-                return Err(CustomError::DatabaseError(format!(
-                    "Graph expansion node limit exceeded at {:?} {}",
-                    object_ref.object_type, object_ref.object_id
-                )));
+                return Err(graph_expansion_bounded_error(failure));
             }
             bounded_failure.get_or_insert(failure);
             continue;
@@ -484,10 +477,7 @@ fn bounded_expansion_plan<'a>(
                 at: Some(object_ref),
             };
             if !query.failure_policy.allow_partial_results {
-                return Err(CustomError::DatabaseError(format!(
-                    "Graph expansion hub limit exceeded at {:?} {}",
-                    object_ref.object_type, object_ref.object_id
-                )));
+                return Err(graph_expansion_bounded_error(failure));
             }
             bounded_failure.get_or_insert(failure);
             incident_links.truncate(query.max_fanout_per_node.min(query.max_hub_edges));
@@ -525,10 +515,7 @@ fn bounded_expansion_plan<'a>(
                     at: Some(neighbor),
                 };
                 if !query.failure_policy.allow_partial_results {
-                    return Err(CustomError::DatabaseError(format!(
-                        "Graph expansion node limit exceeded at {:?} {}",
-                        neighbor.object_type, neighbor.object_id
-                    )));
+                    return Err(graph_expansion_bounded_error(failure));
                 }
                 bounded_failure.get_or_insert(failure);
                 continue;
@@ -558,6 +545,41 @@ fn bounded_expansion_plan<'a>(
         filtered_nodes,
         bounded_failure,
     })
+}
+
+fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
+    CustomError::GraphExpansionBounded {
+        reason: bounded_failure_reason_name(failure.reason).to_owned(),
+        location: failure
+            .at
+            .map(|object_ref| {
+                format!(
+                    " at object_type={} object_id={}",
+                    graph_object_type_name(object_ref.object_type),
+                    object_ref.object_id
+                )
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn bounded_failure_reason_name(reason: GraphExpansionBoundedFailureReason) -> &'static str {
+    match reason {
+        GraphExpansionBoundedFailureReason::NodeLimit => "node_limit",
+        GraphExpansionBoundedFailureReason::Timeout => "timeout",
+        GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
+    }
+}
+
+fn graph_object_type_name(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::Episode => "episode",
+        ObjectType::Observation => "observation",
+        ObjectType::Entity => "entity",
+        ObjectType::MemoryThread => "memory_thread",
+        ObjectType::DerivedMemory => "derived_memory",
+        ObjectType::MemoryLink => "memory_link",
+    }
 }
 
 fn push_filtered_node(
@@ -865,8 +887,9 @@ mod tests {
 
         let error = bounded_expansion(&query, fixtures.objects(), fixtures.links()).unwrap_err();
 
-        assert!(
-            matches!(error, CustomError::DatabaseError(message) if message.contains("node limit exceeded"))
-        );
+        assert!(matches!(
+            error,
+            CustomError::GraphExpansionBounded { reason, .. } if reason == "node_limit"
+        ));
     }
 }

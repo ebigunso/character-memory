@@ -175,11 +175,10 @@ pub struct ContinuityContextPack {
     pub open_loops: Vec<IncludedDerivedMemory>,
     pub commitments: Vec<IncludedDerivedMemory>,
     pub character_signals: Vec<IncludedDerivedMemory>,
-    pub rationale: RetrievalRationale,
 }
 
 impl ContinuityContextPack {
-    pub fn empty(rationale: RetrievalRationale) -> Self {
+    pub fn empty() -> Self {
         Self {
             active_threads: Vec::new(),
             relevant_episodes: Vec::new(),
@@ -190,7 +189,6 @@ impl ContinuityContextPack {
             open_loops: Vec::new(),
             commitments: Vec::new(),
             character_signals: Vec::new(),
-            rationale,
         }
     }
 }
@@ -217,9 +215,6 @@ pub struct RetrievalRationale {
     pub summary: String,
     pub vector_candidate_count: usize,
     pub graph_verified_count: usize,
-    pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
-    pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
-    pub section_assignments: Vec<SectionAssignment>,
 }
 
 impl RetrievalRationale {
@@ -228,9 +223,6 @@ impl RetrievalRationale {
             summary: summary.into(),
             vector_candidate_count: 0,
             graph_verified_count: 0,
-            lifecycle_filter_decisions: Vec::new(),
-            stale_candidate_omissions: Vec::new(),
-            section_assignments: Vec::new(),
         }
     }
 }
@@ -555,8 +547,7 @@ mod tests {
             episode_id,
         );
         let included = IncludedDerivedMemory::from(derived.clone());
-        let rationale = RetrievalRationale::new("Included one preference from a current source.");
-        let mut pack = ContinuityContextPack::empty(rationale);
+        let mut pack = ContinuityContextPack::empty();
         pack.relevant_episodes.push(episode(episode_id));
         pack.preferences.push(included);
 

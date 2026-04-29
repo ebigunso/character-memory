@@ -779,21 +779,17 @@ mod tests {
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert!(outcome.rationale.graph_verified_count >= 3);
         assert!(outcome.rationale.summary.contains("graph-verified objects"));
-        assert!(outcome
-            .rationale
+        let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace
             .lifecycle_filter_decisions
             .iter()
             .any(|decision| decision.object.id == fixtures.hub_entity.id
                 && decision.action == LifecycleFilterAction::Included));
-        assert!(outcome
-            .rationale
-            .section_assignments
-            .iter()
-            .any(|assignment| assignment.object.id == fixtures.episode.id
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
                 && assignment.section == ContextPackSection::RelevantEpisodes
-                && assignment.reason.is_some()));
-
-        let trace = outcome.trace.as_ref().unwrap();
+                && assignment.reason.is_some()
+        }));
         assert_eq!(trace.vector_candidates.len(), 1);
         assert_eq!(trace.vector_candidates[0].object.id, fixtures.hub_entity.id);
         assert!(trace.graph_relations.iter().any(|relation| {
