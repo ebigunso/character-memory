@@ -41,7 +41,7 @@
   - `docs/coding-agent/plans/active/v0-1-starter-episodic-memory-roadmap.md`
   - `docs/coding-agent/plans/completed/v0-1-remember-and-link-pipelines-plan.md`
   - `docs/coding-agent/plans/completed/v0-1-retrieve-continuity-context-pack-plan.md`
-  - `docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md`
+  - `docs/coding-agent/plans/completed/v0-1-correction-forget-lifecycle-plan.md`
   - `src/lib.rs`
   - `src/internal/infrastructures/external_services/qdrant_vector_memory_repository.rs`
   - `src/internal/infrastructures/external_services/qdrant_vector_candidate_store.rs`
