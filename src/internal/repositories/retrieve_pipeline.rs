@@ -385,8 +385,14 @@ impl RankedObject {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 struct SortableScore(f32);
+
+impl PartialEq for SortableScore {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
 
 impl Eq for SortableScore {}
 
@@ -1075,6 +1081,15 @@ mod tests {
         assert!(
             matches!(error, CustomError::MemoryValidation(message) if message.contains("unsupported root"))
         );
+    }
+
+    #[test]
+    fn sortable_score_equality_uses_total_float_ordering() {
+        let left = SortableScore(f32::NAN);
+        let right = SortableScore(f32::NAN);
+
+        assert_eq!(left, right);
+        assert_eq!(left.cmp(&right), std::cmp::Ordering::Equal);
     }
 
     #[tokio::test]
