@@ -86,12 +86,6 @@ where
         }
 
         let ranked_objects = assembly.ranked_objects(&context.lifecycle_policy);
-        let mut rationale = RetrievalRationale::new(rationale_summary(
-            vector_candidates.len(),
-            ranked_objects.len(),
-        ));
-        rationale.vector_candidate_count = vector_candidates.len();
-        rationale.graph_verified_count = ranked_objects.len();
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -99,6 +93,13 @@ where
         };
 
         let pack = build_pack(ranked_objects, context.section_limits, &mut details);
+        let graph_verified_count = included_section_assignment_count(&details.section_assignments);
+        let mut rationale = RetrievalRationale::new(rationale_summary(
+            vector_candidates.len(),
+            graph_verified_count,
+        ));
+        rationale.vector_candidate_count = vector_candidates.len();
+        rationale.graph_verified_count = graph_verified_count;
         let trace = include_trace.then(|| RetrievalTrace {
             vector_candidates: vector_candidates
                 .iter()
@@ -524,6 +525,13 @@ fn build_pack(
     }
 
     pack
+}
+
+fn included_section_assignment_count(section_assignments: &[SectionAssignment]) -> usize {
+    section_assignments
+        .iter()
+        .filter(|assignment| assignment.section != ContextPackSection::Omitted)
+        .count()
 }
 
 fn push_derived(pack: &mut ContinuityContextPack, object: DerivedMemory) {
@@ -1440,6 +1448,39 @@ mod tests {
                 && assignment.section == ContextPackSection::Omitted
                 && assignment.reason.as_deref()
                     == Some("section limit reached for relevant_episodes")));
+    }
+
+    #[tokio::test]
+    async fn graph_verified_count_tracks_final_pack_inclusions() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixtures.hub_entity.id,
+            ObjectType::Entity,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut context = RetrievalContext::new("pack counts").with_trace();
+        context.section_limits = ContinuitySectionLimits {
+            relevant_episodes: 0,
+            ..ContinuitySectionLimits::default()
+        };
+
+        let outcome = pipeline.retrieve(context).await.unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+        let included_assignments = trace
+            .section_assignments
+            .iter()
+            .filter(|assignment| assignment.section != ContextPackSection::Omitted)
+            .count();
+
+        assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
+        assert_eq!(outcome.rationale.graph_verified_count, 1);
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::Omitted
+        }));
     }
 
     #[tokio::test]

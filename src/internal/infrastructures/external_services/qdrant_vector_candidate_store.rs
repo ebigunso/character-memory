@@ -308,12 +308,29 @@ fn currentness_filter_condition(query: &VectorCandidateSearch) -> Option<Conditi
 fn currentness_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
     let mut conditions = Vec::new();
     if let Some(is_current) = filters.is_current {
-        conditions.push(Condition::matches(IS_CURRENT_FIELD, is_current));
+        conditions.push(payload_hint_matches_or_missing(
+            IS_CURRENT_FIELD,
+            is_current,
+        ));
     }
     if let Some(is_superseded) = filters.is_superseded {
-        conditions.push(Condition::matches(IS_SUPERSEDED_FIELD, is_superseded));
+        conditions.push(payload_hint_matches_or_missing(
+            IS_SUPERSEDED_FIELD,
+            is_superseded,
+        ));
     }
     conditions
+}
+
+fn payload_hint_matches_or_missing(field: &str, value: bool) -> Condition {
+    Condition::from(Filter::min_should(
+        1,
+        vec![
+            Condition::matches(field, value),
+            Condition::is_empty(field),
+            Condition::is_null(field),
+        ],
+    ))
 }
 
 fn any_field_matches(
@@ -698,6 +715,25 @@ mod tests {
     }
 
     #[test]
+    fn candidate_prefilter_allows_missing_currentness_hints_for_graph_verification() {
+        let condition = currentness_filter_condition(
+            &VectorCandidateSearch::new(vec![1.0, 0.0], 10)
+                .with_object_types(vec![ObjectType::DerivedMemory])
+                .with_filters(VectorCandidateFilters::new().current_only()),
+        )
+        .expect("currentness filter builds");
+        let mut condition_kinds = Vec::new();
+        collect_condition_kinds(&condition, &mut condition_kinds);
+
+        assert!(condition_kinds.contains(&"field:is_current".to_owned()));
+        assert!(condition_kinds.contains(&"is_empty:is_current".to_owned()));
+        assert!(condition_kinds.contains(&"is_null:is_current".to_owned()));
+        assert!(condition_kinds.contains(&"field:is_superseded".to_owned()));
+        assert!(condition_kinds.contains(&"is_empty:is_superseded".to_owned()));
+        assert!(condition_kinds.contains(&"is_null:is_superseded".to_owned()));
+    }
+
+    #[test]
     fn candidate_mapping_preserves_qdrant_result_order_and_scores() {
         let higher_score_id = Uuid::new_v4();
         let lower_score_id = Uuid::new_v4();
@@ -833,6 +869,30 @@ mod tests {
         match &condition.condition_one_of {
             Some(ConditionOneOf::Field(field)) => keys.push(field.key.clone()),
             Some(ConditionOneOf::Filter(filter)) => keys.extend(field_keys(filter)),
+            _ => {}
+        }
+    }
+
+    fn collect_condition_kinds(condition: &Condition, kinds: &mut Vec<String>) {
+        match &condition.condition_one_of {
+            Some(ConditionOneOf::Field(field)) => kinds.push(format!("field:{}", field.key)),
+            Some(ConditionOneOf::IsEmpty(field)) => kinds.push(format!("is_empty:{}", field.key)),
+            Some(ConditionOneOf::IsNull(field)) => kinds.push(format!("is_null:{}", field.key)),
+            Some(ConditionOneOf::Filter(filter)) => {
+                for condition in filter
+                    .must
+                    .iter()
+                    .chain(filter.should.iter())
+                    .chain(filter.must_not.iter())
+                {
+                    collect_condition_kinds(condition, kinds);
+                }
+                if let Some(min_should) = &filter.min_should {
+                    for condition in &min_should.conditions {
+                        collect_condition_kinds(condition, kinds);
+                    }
+                }
+            }
             _ => {}
         }
     }

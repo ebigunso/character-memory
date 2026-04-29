@@ -770,6 +770,12 @@ mod tests {
             .retrieve(RetrievalContext::new("store contract continuity").with_trace())
             .await
             .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+        let included_assignments = trace
+            .section_assignments
+            .iter()
+            .filter(|assignment| assignment.section != ContextPackSection::Omitted)
+            .count();
 
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
         assert_eq!(
@@ -777,9 +783,8 @@ mod tests {
             fixtures.derived_reflection.id
         );
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
-        assert!(outcome.rationale.graph_verified_count >= 3);
+        assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
         assert!(outcome.rationale.summary.contains("graph-verified objects"));
-        let trace = outcome.trace.as_ref().unwrap();
         assert!(trace
             .lifecycle_filter_decisions
             .iter()
