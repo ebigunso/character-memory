@@ -143,10 +143,10 @@ fn currentness_filters_match(
 
     filters
         .is_current
-        .is_none_or(|is_current| record.is_current == Some(is_current))
-        && filters
-            .is_superseded
-            .is_none_or(|is_superseded| record_is_superseded(record) == Some(is_superseded))
+        .is_none_or(|is_current| record.is_current.is_none_or(|actual| actual == is_current))
+        && filters.is_superseded.is_none_or(|is_superseded| {
+            record_is_superseded(record).is_none_or(|actual| actual == is_superseded)
+        })
 }
 
 fn record_is_superseded(record: &VectorCandidateRecord) -> Option<bool> {
@@ -993,6 +993,7 @@ mod tests {
     async fn vector_fake_currentness_prefilter_keeps_non_derived_candidates() {
         let store = FakeVectorCandidateStore::new();
         let fixtures = representative_fixtures();
+        let missing_hint_id = fixture_id(360);
 
         store
             .upsert_candidates(&[
@@ -1017,6 +1018,12 @@ mod tests {
                         ..VectorPayloadHints::default()
                     },
                 ),
+                VectorCandidateRecord::new(
+                    missing_hint_id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::DerivedText,
+                    vec![1.0, 0.0],
+                ),
             ])
             .await
             .unwrap();
@@ -1027,9 +1034,16 @@ mod tests {
 
         let matches = store.search_candidates(&query).await.unwrap();
 
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].object_id, fixtures.episode.id);
-        assert_eq!(matches[0].object_type, ObjectType::Episode);
+        assert_eq!(matches.len(), 2);
+        assert!(matches.iter().any(|matched| {
+            matched.object_id == fixtures.episode.id && matched.object_type == ObjectType::Episode
+        }));
+        assert!(matches.iter().any(|matched| {
+            matched.object_id == missing_hint_id && matched.object_type == ObjectType::DerivedMemory
+        }));
+        assert!(!matches
+            .iter()
+            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
     }
 
     #[tokio::test]
