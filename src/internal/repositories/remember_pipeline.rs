@@ -647,6 +647,13 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &crate::internal::repositories::GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
         async fn expand_bounded(
             &self,
             _query: &GraphExpansionQuery,

@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use std::collections::{HashSet, VecDeque};
 
 use crate::api::types::{
-    MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState, ThreadStatus,
+    DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
+    ThreadStatus,
 };
 use crate::errors::CustomError;
 
@@ -32,6 +33,38 @@ pub(crate) struct GraphObjectQuery {
     pub(crate) object_ids: Vec<MemoryId>,
     pub(crate) object_types: Vec<ObjectType>,
     pub(crate) limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GraphDerivedMemoryProvenanceQuery {
+    pub(crate) episode_ids: Vec<MemoryId>,
+    pub(crate) observation_ids: Vec<MemoryId>,
+    pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
+    pub(crate) limit: Option<usize>,
+}
+
+impl GraphDerivedMemoryProvenanceQuery {
+    pub(crate) fn by_sources(episode_ids: Vec<MemoryId>, observation_ids: Vec<MemoryId>) -> Self {
+        Self {
+            episode_ids,
+            observation_ids,
+            lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
+            limit: None,
+        }
+    }
+
+    pub(crate) fn with_lifecycle_policy(
+        mut self,
+        lifecycle_policy: GraphExpansionLifecyclePolicy,
+    ) -> Self {
+        self.lifecycle_policy = lifecycle_policy;
+        self
+    }
+
+    pub(crate) fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
 }
 
 impl GraphObjectQuery {
@@ -282,6 +315,99 @@ pub(crate) fn bounded_expansion(
         plan.filtered_nodes,
         plan.bounded_failure,
     ))
+}
+
+pub(crate) fn derived_memories_by_provenance(
+    query: &GraphDerivedMemoryProvenanceQuery,
+    objects: impl IntoIterator<Item = MemoryObject>,
+    links: impl IntoIterator<Item = MemoryLink>,
+) -> Vec<DerivedMemory> {
+    let links = links.into_iter().collect::<Vec<_>>();
+    let link_refs = links.iter().collect::<Vec<_>>();
+    let superseded = superseded_derived_memory_ids(&link_refs);
+    let provenance_linked = provenance_linked_derived_memory_ids(query, &links);
+    let mut memories = objects
+        .into_iter()
+        .filter_map(|object| match object {
+            MemoryObject::DerivedMemory(memory) => Some(memory),
+            _ => None,
+        })
+        .filter(|memory| derived_memory_matches_provenance(query, memory, &provenance_linked))
+        .filter(|memory| {
+            lifecycle_filter_reason(
+                &MemoryObject::DerivedMemory(memory.clone()),
+                &superseded,
+                query.lifecycle_policy,
+            )
+            .is_none()
+        })
+        .collect::<Vec<_>>();
+
+    memories.sort_by_key(|memory| memory.id);
+    if let Some(limit) = query.limit {
+        memories.truncate(limit);
+    }
+    memories
+}
+
+fn derived_memory_matches_provenance(
+    query: &GraphDerivedMemoryProvenanceQuery,
+    memory: &DerivedMemory,
+    provenance_linked: &HashSet<MemoryId>,
+) -> bool {
+    (!query.episode_ids.is_empty()
+        && memory
+            .derived_from_episode_ids
+            .iter()
+            .any(|episode_id| query.episode_ids.contains(episode_id)))
+        || (!query.observation_ids.is_empty()
+            && memory
+                .derived_from_observation_ids
+                .iter()
+                .any(|observation_id| query.observation_ids.contains(observation_id)))
+        || provenance_linked.contains(&memory.id)
+}
+
+fn provenance_linked_derived_memory_ids(
+    query: &GraphDerivedMemoryProvenanceQuery,
+    links: &[MemoryLink],
+) -> HashSet<MemoryId> {
+    links
+        .iter()
+        .filter(|link| link.relation == RelationType::DerivedFrom)
+        .filter_map(|link| provenance_linked_derived_memory_id(query, link))
+        .collect()
+}
+
+fn provenance_linked_derived_memory_id(
+    query: &GraphDerivedMemoryProvenanceQuery,
+    link: &MemoryLink,
+) -> Option<MemoryId> {
+    let from = GraphObjectRef::new(link.from_id, link.from_type);
+    let to = GraphObjectRef::new(link.to_id, link.to_type);
+    match (from.object_type, to.object_type) {
+        (ObjectType::DerivedMemory, ObjectType::Episode)
+            if query.episode_ids.contains(&to.object_id) =>
+        {
+            Some(from.object_id)
+        }
+        (ObjectType::Episode, ObjectType::DerivedMemory)
+            if query.episode_ids.contains(&from.object_id) =>
+        {
+            Some(to.object_id)
+        }
+        (ObjectType::DerivedMemory, ObjectType::Observation)
+            if query.observation_ids.contains(&to.object_id) =>
+        {
+            Some(from.object_id)
+        }
+        (ObjectType::Observation, ObjectType::DerivedMemory)
+            if query.observation_ids.contains(&from.object_id) =>
+        {
+            Some(to.object_id)
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn bounded_expansion_node_set(
@@ -767,6 +893,11 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError>;
 
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError>;
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -788,6 +919,13 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError> {
         (**self).query_objects(query).await
+    }
+
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        (**self).query_derived_memories_by_provenance(query).await
     }
 
     async fn expand_bounded(

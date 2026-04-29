@@ -1,3 +1,4 @@
+mod correction_forget_pipeline;
 mod embedder;
 mod graph_authority_store;
 mod link_pipeline;
@@ -15,12 +16,18 @@ mod vector_memory_repository;
 #[allow(unused_imports)]
 pub(crate) use embedder::MemoryEmbedder;
 
+// Transitional contract surface: remove this allow once facade wiring
+// consumes lifecycle mutation pipelines directly, or prune unused outcome types.
+#[allow(unused_imports)]
+pub(crate) use correction_forget_pipeline::{CorrectionForgetPipeline, LifecyclePipelineOutcome};
+
 // Transitional contract surface: remove this allow once adapter or
 // pipeline code consumes the graph authority contract directly, or prune unused
 // exports.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
-    bounded_expansion, bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion,
+    bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphExpansion,
     GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
     GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,

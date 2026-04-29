@@ -2,7 +2,7 @@
 
 - status: draft
 - generated: 2026-04-27
-- last_updated: 2026-04-29
+- last_updated: 2026-04-30
 - work_type: mixed
 - roadmap_scope: full v0.1 implementation phase
 - concrete_plan_policy: draft one separate implementation plan per chunk when that chunk is reached
@@ -18,7 +18,7 @@
 - The old flat live persistence path remains legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and `QdrantVectorMemoryRepository` still serves the old flat facade.
 - The v0.1 vector foundation now has provider-neutral `VectorRecord` and natural-language embedding surfaces, plus Qdrant v0.1 payload mapping and `VectorCandidateStore::upsert_vector_records` support for full record payloads.
 - The v0.1 graph foundation now has RDF vocabulary/mapping and an embedded/in-memory `OxigraphGraphAuthorityStore` implementing `GraphAuthorityStore` for canonical objects, typed links, query, and bounded expansion foundation.
-- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, draft DTO conversion, retrieval DTOs, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph retrieve/expansion smoke, bounded graph expansion, internal remember/link/retrieve pipelines, injected facade-level remember/link/retrieve behavior, and live Qdrant candidate smoke. Correction supersession and forget lifecycle pipelines remain future chunks.
+- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, draft DTO conversion, lifecycle DTOs, retrieval DTOs, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph retrieve/expansion/lifecycle smoke, bounded graph expansion, internal remember/link/retrieve/correction/forget pipelines, injected facade-level remember/link/retrieve/correction/forget behavior, lifecycle retrieval regression behavior, and live Qdrant candidate smoke when the service prerequisite is available.
 - `Cargo.toml` includes the selected Qdrant and Oxigraph dependencies for the adapter foundation.
 
 ## Resolved Decisions
@@ -58,14 +58,14 @@
 
 ### Correction And Forget Lifecycle
 - Purpose: implement non-destructive correction through supersession and lifecycle updates, plus `forget` with suppression as the default.
-- Expected outcome: corrections preserve provenance, old derived memories become non-current, and suppressed memories are hidden from normal retrieval.
+- Expected outcome: corrections preserve original and correction-origin provenance, old or source-affected derived memories become non-current/suppressed or superseded, source-object forget cascades to behavior-influencing derived memories, archived threads are excluded, and suppressed/non-current/superseded memories are hidden from normal retrieval unless historical policy opts in.
 - Deferred review findings to carry forward: hard delete/update behavior in the legacy flat facade conflicts with the v0.1 lifecycle direction. Correction/forget work should preserve supersession/suppression as default behavior and reserve hard deletion for explicit redaction/delete semantics.
-- Concrete plan: [docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md](v0-1-correction-forget-lifecycle-plan.md)
+- Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-correction-forget-lifecycle-plan.md](../completed/v0-1-correction-forget-lifecycle-plan.md)
 
 ### Documentation, Migration Cleanup, And Release Validation
 - Purpose: update README and roadmap docs, remove or rewrite old flat memory examples, remove non-contributing legacy implementations, and run final deterministic plus gated integration validation.
 - Expected outcome: v0.1 is documented as chat-native episodic continuity memory, with Qdrant/Oxigraph responsibilities and old flat concepts clearly retired or removed.
-- Concrete plan: draft after implementation behavior is substantially complete.
+- Concrete plan: active draft in [docs/coding-agent/plans/active/v0-1-documentation-migration-cleanup-release-validation-plan.md](v0-1-documentation-migration-cleanup-release-validation-plan.md)
 
 ## Cross-Cutting Validation Expectations
 - Every concrete implementation plan should include `cargo fmt --check`, `cargo check`, and `cargo test --no-run` unless explicitly waived.
@@ -113,6 +113,10 @@
   - Summary: Completed backend-free retrieval DTOs, bounded graph expansion hardening, vector candidate prefilters, provider-neutral retrieve pipeline, crate-visible injected `CharacterMemory::retrieve`, rationale/trace behavior, and the next active correction/forget lifecycle plan.
   - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, embedded Oxigraph retrieve smoke, live Qdrant candidate smoke, `cargo clippy --all-targets -- -D warnings`, and final Reviewer approval passed.
   - Notes: Correction/forget planning now starts from graph-authoritative retrieval defaults that exclude suppressed/deleted and non-current/superseded records.
+- 2026-04-30 Correction/forget lifecycle completed; cleanup plan drafted.
+  - Summary: Completed backend-free lifecycle DTOs, graph-authoritative correction/forget pipelines, source-provenance cascade, correction-origin provenance, injected crate-visible lifecycle facades, retrieval lifecycle regressions, and the next documentation/migration cleanup/release validation plan.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, embedded Oxigraph lifecycle/retrieve smoke, `cargo clippy --all-targets -- -D warnings`, local live Qdrant candidate smoke, and final Reviewer approval passed; `cargo test --lib` reported 180 passed, 0 failed, 1 ignored, and the Qdrant smoke reported 1 passed, 0 failed.
+  - Notes: The cleanup plan is active as a draft only; lifecycle plan has moved to completed.
 
 ## Decision Log
 

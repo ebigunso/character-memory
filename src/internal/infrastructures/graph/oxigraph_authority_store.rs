@@ -11,10 +11,11 @@ use async_trait::async_trait;
 use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
 
-use crate::api::types::{graph_uri, MemoryId, MemoryLink, MemoryObject, ObjectType};
+use crate::api::types::{graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    bounded_expansion, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    bounded_expansion, derived_memories_by_provenance, GraphAuthorityStore,
+    GraphDerivedMemoryProvenanceQuery, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -181,6 +182,19 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         Ok(objects)
     }
 
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
+        Ok(derived_memories_by_provenance(
+            query,
+            objects.into_values(),
+            links.into_values(),
+        ))
+    }
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -261,7 +275,8 @@ mod tests {
     use super::super::vocabulary as vocab;
     use super::*;
     use crate::api::types::{
-        graph_uri, ContextPackSection, LifecycleFilterAction, RelationType, RetrievalContext,
+        graph_uri, ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, RelationType,
+        RetentionState, RetrievalContext, ThreadStatus,
     };
     use crate::internal::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
@@ -271,8 +286,9 @@ mod tests {
         high_fanout_graph_fixture, representative_fixtures,
     };
     use crate::internal::repositories::{
-        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+        GraphDerivedMemoryProvenanceQuery, GraphExpansionBoundedFailureReason,
+        GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+        GraphObjectRef,
     };
     use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
 
@@ -556,6 +572,269 @@ mod tests {
             timed_out.bounded_failure.unwrap().reason,
             GraphExpansionBoundedFailureReason::Timeout
         );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_lifecycle_upserts_support_supersession_and_provenance_discovery() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let superseded_memory = fixtures.user_preference.clone();
+        let mut non_current_memory = fixtures.open_loop.clone();
+        let mut replacement = fixtures.correction.clone();
+        let mut archived_thread = fixtures.soft_thread.clone();
+        non_current_memory.is_current = false;
+        replacement.supersedes = vec![superseded_memory.id];
+        archived_thread.status = ThreadStatus::Archived;
+        let supersedes_link = crate::api::types::MemoryLink {
+            id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0001),
+            object_type: ObjectType::MemoryLink,
+            from_id: replacement.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: superseded_memory.id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::Supersedes,
+            confidence: 1.0,
+            rationale: Some("Replacement supersedes historical derived memory.".to_owned()),
+            created_at: replacement.created_at,
+            schema_version: replacement.schema_version.clone(),
+        };
+
+        store
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(fixtures.salient_observation.clone()),
+                MemoryObject::MemoryThread(archived_thread.clone()),
+                MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+                MemoryObject::DerivedMemory(superseded_memory.clone()),
+                MemoryObject::DerivedMemory(non_current_memory.clone()),
+                MemoryObject::DerivedMemory(replacement.clone()),
+            ])
+            .await
+            .unwrap();
+        store
+            .upsert_links(&[fixtures.soft_thread_link.clone(), supersedes_link.clone()])
+            .await
+            .unwrap();
+
+        let default_matches = store
+            .query_derived_memories_by_provenance(
+                &GraphDerivedMemoryProvenanceQuery::by_sources(
+                    vec![fixtures.episode.id],
+                    vec![fixtures.salient_observation.id],
+                )
+                .with_limit(10),
+            )
+            .await
+            .unwrap();
+        assert!(default_matches
+            .iter()
+            .any(|memory| memory.id == fixtures.derived_reflection.id));
+        assert!(default_matches
+            .iter()
+            .any(|memory| memory.id == replacement.id));
+        assert!(!default_matches
+            .iter()
+            .any(|memory| memory.id == superseded_memory.id));
+        assert!(!default_matches
+            .iter()
+            .any(|memory| memory.id == non_current_memory.id));
+
+        let historical_matches = store
+            .query_derived_memories_by_provenance(
+                &GraphDerivedMemoryProvenanceQuery::by_sources(
+                    vec![fixtures.episode.id],
+                    vec![fixtures.salient_observation.id],
+                )
+                .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                    include_non_current: true,
+                    include_superseded: true,
+                    ..GraphExpansionLifecyclePolicy::default()
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(historical_matches
+            .iter()
+            .any(|memory| memory.id == superseded_memory.id));
+        assert!(historical_matches
+            .iter()
+            .any(|memory| memory.id == non_current_memory.id));
+
+        let default_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(replacement.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            default_expansion.objects,
+            vec![MemoryObject::DerivedMemory(replacement.clone())]
+        );
+        assert!(default_expansion.links.is_empty());
+        assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref
+                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                && filtered.reason == GraphExpansionFilteredReason::Superseded
+        }));
+
+        let historical_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(replacement.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_superseded: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+        assert!(historical_expansion
+            .objects
+            .contains(&MemoryObject::DerivedMemory(superseded_memory.clone())));
+        assert_eq!(historical_expansion.links, vec![supersedes_link]);
+        assert_eq!(replacement.supersedes, vec![superseded_memory.id]);
+
+        let thread_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(
+                    fixtures.salient_observation.id,
+                    ObjectType::Observation,
+                    1,
+                    5,
+                )
+                .with_allowed_relation_types(vec![RelationType::PartOfThread]),
+            )
+            .await
+            .unwrap();
+        assert!(thread_expansion.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref == GraphObjectRef::new(archived_thread.id, ObjectType::MemoryThread)
+                && filtered.reason == GraphExpansionFilteredReason::Archived
+        }));
+    }
+
+    #[tokio::test]
+    async fn oxigraph_retrieval_after_lifecycle_mutation_excludes_stale_records_by_default() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut superseded_memory = fixtures.user_preference.clone();
+        let mut suppressed_memory = fixtures.suppressed_seed.clone();
+        let mut non_current_memory = fixtures.open_loop.clone();
+        let mut replacement = fixtures.correction.clone();
+        let mut archived_thread = fixtures.soft_thread.clone();
+        superseded_memory.retention_state = RetentionState::Active;
+        superseded_memory.is_current = true;
+        suppressed_memory.retention_state = RetentionState::Suppressed;
+        non_current_memory.is_current = false;
+        replacement.supersedes = vec![superseded_memory.id];
+        archived_thread.status = ThreadStatus::Archived;
+        let supersedes_link = crate::api::types::MemoryLink {
+            id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0002),
+            object_type: ObjectType::MemoryLink,
+            from_id: replacement.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: superseded_memory.id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::Supersedes,
+            confidence: 1.0,
+            rationale: Some("Replacement supersedes stale retrieval candidate.".to_owned()),
+            created_at: replacement.created_at,
+            schema_version: replacement.schema_version.clone(),
+        };
+        store
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(fixtures.salient_observation.clone()),
+                MemoryObject::MemoryThread(archived_thread.clone()),
+                MemoryObject::DerivedMemory(superseded_memory.clone()),
+                MemoryObject::DerivedMemory(suppressed_memory.clone()),
+                MemoryObject::DerivedMemory(non_current_memory.clone()),
+                MemoryObject::DerivedMemory(replacement.clone()),
+            ])
+            .await
+            .unwrap();
+        store
+            .upsert_links(&[fixtures.soft_thread_link.clone(), supersedes_link])
+            .await
+            .unwrap();
+
+        let vector = FixedVectorStore::new(vec![
+            VectorCandidateMatch::new(
+                replacement.id,
+                ObjectType::DerivedMemory,
+                VectorSurface::DerivedText,
+                0.99,
+            ),
+            VectorCandidateMatch::new(
+                superseded_memory.id,
+                ObjectType::DerivedMemory,
+                VectorSurface::DerivedText,
+                0.98,
+            ),
+            VectorCandidateMatch::new(
+                suppressed_memory.id,
+                ObjectType::DerivedMemory,
+                VectorSurface::DerivedText,
+                0.97,
+            ),
+            VectorCandidateMatch::new(
+                non_current_memory.id,
+                ObjectType::DerivedMemory,
+                VectorSurface::DerivedText,
+                0.96,
+            ),
+            VectorCandidateMatch::new(
+                archived_thread.id,
+                ObjectType::MemoryThread,
+                VectorSurface::Summary,
+                0.95,
+            ),
+        ]);
+        let embedder = FixedEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&store, &vector, &embedder);
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("lifecycle graph truth").with_trace())
+            .await
+            .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+
+        assert!(outcome
+            .pack
+            .derived_memories
+            .iter()
+            .any(|included| included.memory.id == replacement.id));
+        assert!(!outcome
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == superseded_memory.id));
+        assert!(!outcome
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == suppressed_memory.id));
+        assert!(!outcome
+            .pack
+            .open_loops
+            .iter()
+            .any(|included| included.memory.id == non_current_memory.id));
+        assert!(outcome.pack.active_threads.is_empty());
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == superseded_memory.id
+                && decision.reason == LifecycleFilterReason::SupersededOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == suppressed_memory.id
+                && decision.reason == LifecycleFilterReason::SuppressedOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == non_current_memory.id
+                && decision.reason == LifecycleFilterReason::NonCurrentOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == archived_thread.id
+                && decision.reason == LifecycleFilterReason::ArchivedOmitted
+        }));
     }
 
     #[tokio::test]

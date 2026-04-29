@@ -24,7 +24,8 @@ use crate::internal::models::vector::{
     VectorTimeRangeFilter,
 };
 use crate::internal::repositories::{
-    bounded_expansion, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    bounded_expansion, derived_memories_by_provenance, GraphAuthorityStore,
+    GraphDerivedMemoryProvenanceQuery, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
     MemoryEmbedder, RawReference, RawReferenceResolver, VectorCandidateStore,
 };
 
@@ -249,6 +250,15 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         }
 
         Ok(objects)
+    }
+
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
+        Ok(derived_memories_by_provenance(query, objects, links))
     }
 
     async fn expand_bounded(
@@ -819,6 +829,214 @@ fn surface_rank(surface: VectorSurface) -> u8 {
         VectorSurface::Name => 2,
         VectorSurface::DerivedText => 3,
         VectorSurface::Query => 4,
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::internal::repositories::{
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+    };
+
+    #[tokio::test]
+    async fn fake_graph_lifecycle_upserts_keep_historical_objects_inspectable() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let mut episode = fixtures.episode.clone();
+        let mut observation = fixtures.salient_observation.clone();
+        let mut old_memory = fixtures.user_preference.clone();
+        let mut replacement = fixtures.correction.clone();
+        let mut thread = fixtures.soft_thread.clone();
+
+        episode.retention_state = RetentionState::Suppressed;
+        observation.retention_state = RetentionState::Suppressed;
+        old_memory.retention_state = RetentionState::Suppressed;
+        old_memory.is_current = false;
+        replacement.supersedes = vec![old_memory.id];
+        thread.status = ThreadStatus::Archived;
+        let supersedes_link = link(
+            fixture_id(250),
+            replacement.id,
+            ObjectType::DerivedMemory,
+            old_memory.id,
+            ObjectType::DerivedMemory,
+            RelationType::Supersedes,
+        );
+        let thread_link = link(
+            fixture_id(251),
+            observation.id,
+            ObjectType::Observation,
+            thread.id,
+            ObjectType::MemoryThread,
+            RelationType::PartOfThread,
+        );
+
+        graph
+            .upsert_objects(&[
+                MemoryObject::Episode(episode.clone()),
+                MemoryObject::Observation(observation.clone()),
+                MemoryObject::DerivedMemory(old_memory.clone()),
+                MemoryObject::DerivedMemory(replacement.clone()),
+                MemoryObject::MemoryThread(thread.clone()),
+            ])
+            .await
+            .unwrap();
+        graph
+            .upsert_links(&[supersedes_link.clone(), thread_link.clone()])
+            .await
+            .unwrap();
+
+        let explicit_history = graph
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory),
+                GraphObjectRef::new(replacement.id, ObjectType::DerivedMemory),
+                GraphObjectRef::new(episode.id, ObjectType::Episode),
+                GraphObjectRef::new(observation.id, ObjectType::Observation),
+                GraphObjectRef::new(thread.id, ObjectType::MemoryThread),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(explicit_history.len(), 5);
+        assert!(explicit_history.contains(&MemoryObject::DerivedMemory(old_memory.clone())));
+        assert!(explicit_history.contains(&MemoryObject::DerivedMemory(replacement.clone())));
+
+        let default_expansion = graph
+            .expand_bounded(
+                &GraphExpansionQuery::new(replacement.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            default_expansion.objects,
+            vec![MemoryObject::DerivedMemory(replacement.clone())]
+        );
+        assert!(default_expansion.links.is_empty());
+        assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref == GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory)
+                && filtered.reason == GraphExpansionFilteredReason::Suppressed
+        }));
+
+        let historical_expansion = graph
+            .expand_bounded(
+                &GraphExpansionQuery::new(replacement.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::Supersedes])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_suppressed: true,
+                        include_non_current: true,
+                        include_superseded: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+        assert!(historical_expansion
+            .objects
+            .contains(&MemoryObject::DerivedMemory(old_memory.clone())));
+        assert_eq!(historical_expansion.links, vec![supersedes_link]);
+        assert_eq!(replacement.supersedes, vec![old_memory.id]);
+
+        let archived_thread_expansion = graph
+            .expand_bounded(
+                &GraphExpansionQuery::new(observation.id, ObjectType::Observation, 1, 5)
+                    .with_allowed_relation_types(vec![RelationType::PartOfThread])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_suppressed: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+        assert!(archived_thread_expansion
+            .filtered_nodes
+            .iter()
+            .any(|filtered| {
+                filtered.object_ref == GraphObjectRef::new(thread.id, ObjectType::MemoryThread)
+                    && filtered.reason == GraphExpansionFilteredReason::Archived
+            }));
+    }
+
+    #[tokio::test]
+    async fn fake_graph_discovers_source_provenanced_derived_memories_with_history_policy() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let mut non_current = fixtures.user_preference.clone();
+        non_current.is_current = false;
+        let mut link_only = derived_memory(
+            fixture_id(260),
+            DerivedType::ProjectNote,
+            "Typed provenance link discovers this derived memory.",
+            fixture_id(998),
+            fixture_id(999),
+            Vec::new(),
+            Vec::new(),
+            true,
+            Vec::new(),
+            RetentionState::Active,
+        );
+        link_only.derived_from_episode_ids.clear();
+        link_only.derived_from_observation_ids.clear();
+        let provenance_link = link(
+            fixture_id(261),
+            link_only.id,
+            ObjectType::DerivedMemory,
+            fixtures.episode.id,
+            ObjectType::Episode,
+            RelationType::DerivedFrom,
+        );
+
+        graph
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(fixtures.salient_observation.clone()),
+                MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+                MemoryObject::DerivedMemory(non_current.clone()),
+                MemoryObject::DerivedMemory(link_only.clone()),
+            ])
+            .await
+            .unwrap();
+        graph
+            .upsert_links(std::slice::from_ref(&provenance_link))
+            .await
+            .unwrap();
+
+        let default_matches = graph
+            .query_derived_memories_by_provenance(
+                &GraphDerivedMemoryProvenanceQuery::by_sources(
+                    vec![fixtures.episode.id],
+                    vec![fixtures.salient_observation.id],
+                )
+                .with_limit(10),
+            )
+            .await
+            .unwrap();
+        assert!(default_matches
+            .iter()
+            .any(|memory| memory.id == fixtures.derived_reflection.id));
+        assert!(default_matches
+            .iter()
+            .any(|memory| memory.id == link_only.id));
+        assert!(!default_matches
+            .iter()
+            .any(|memory| memory.id == non_current.id));
+
+        let historical_matches = graph
+            .query_derived_memories_by_provenance(
+                &GraphDerivedMemoryProvenanceQuery::by_sources(
+                    vec![fixtures.episode.id],
+                    vec![fixtures.salient_observation.id],
+                )
+                .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                    include_non_current: true,
+                    ..GraphExpansionLifecyclePolicy::default()
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(historical_matches
+            .iter()
+            .any(|memory| memory.id == non_current.id));
     }
 }
 

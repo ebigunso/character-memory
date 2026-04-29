@@ -1,6 +1,6 @@
 # Plan: v0.1 Correction And Forget Lifecycle
 
-- status: draft
+- status: done
 - generated: 2026-04-29
 - last_updated: 2026-04-30
 - work_type: mixed
@@ -19,6 +19,10 @@
 - Normal retrieve behavior excludes suppressed/deleted and non-current/superseded memories after correction/forget. Compact rationale summarizes omissions; detailed historical/included-by-policy inspection requires trace-enabled retrieval.
 - Retrieval correctness still holds if stale vector candidates remain after graph mutation or vector maintenance partially fails; graph authority must exclude stale lifecycle state from final normal retrieval.
 - Required Rust checks, deterministic lifecycle tests, `cargo test --lib`, embedded Oxigraph smoke, gated Qdrant candidate smoke, clippy, and Reviewer approval are complete, or blockers/required-check waivers are explicitly recorded.
+
+## Current Blockers
+- None. Prior Task_6 closeout blockers are resolved: clippy passes after `ForgetLifecyclePolicy` derived `Default`, and the local Qdrant live smoke passed with a prepared service environment.
+- Final Reviewer approved and Orchestrator closeout confirmed evidence completeness before moving this plan to completed.
 
 ## Scope / Non-goals
 - Scope:
@@ -71,18 +75,40 @@
   - `docs/decisions/implementation/ADR-I-0006-bounded-graph-expansion.md`
 
 ## Open Questions (max 3)
-- None pending plan approval.
+- None.
 
-## Resolved Decisions Pending User Approval
-- Correction/forget facades should remain crate-visible injected surfaces in this chunk, matching the current `remember`/`link`/`retrieve` boundary. Public lifecycle API stabilization belongs to Documentation, Migration Cleanup, And Release Validation after production construction is graph-authoritative.
-- Supported lifecycle mutation targets are bounded to existing lifecycle fields: correction supersedes `DerivedMemory` records directly and can supersede source-affected derived memories discovered from corrected episodes/observations; forget suppresses `DerivedMemory`, `Episode`, and `Observation` records; forget archives `MemoryThread` records through `ThreadStatus::Archived`; entity and link lifecycle are deferred.
-- Correction requests must carry or reference correction-origin provenance when available, such as a correction episode ID, correction observation ID, and/or raw/source reference. Replacement correction memories must preserve both the old memory's original source chain and the correction event/source that explains the revision.
-- Forgetting an episode or observation defaults to cascade-suppressing behavior-influencing derived memories whose provenance references the forgotten source, because otherwise forgotten source material could still influence generation through derived memories.
-- Derived-memory supersession must persist both the replacement object's `supersedes` field and a typed `MemoryLink` with `RelationType::Supersedes` from the new derived memory to the old derived memory, because retrieval `superseded_by` evidence is relation-derived.
-- Physical hard deletion/redaction is deferred. This chunk may recognize the existing `RetentionState::Deleted` as a retrieval-filtered soft lifecycle state, but it must not add physical deletion/redaction behavior.
-- After graph success, vector maintenance deletes candidates for old/superseded/suppressed/archived object IDs and upserts replacement candidates. Vector failure after graph success returns explicit partial-success evidence and must not roll back graph truth.
-- Public DTOs stay backend-free; lifecycle pipelines depend on provider-neutral graph/vector/embedder contracts; Qdrant/Oxigraph/RDF remain infrastructure details.
-- Compact rationale should report aggregate lifecycle omissions; trace-enabled retrieval remains the detailed inspection path for corrected, superseded, suppressed, and historical opt-in behavior.
+## Required-Check Waivers
+
+- None active.
+
+## Resolved Required-Check Evidence
+
+- 2026-04-30 Deterministic closeout validation passed after clippy remediation.
+  - Check: `cargo fmt --check && cargo check && cargo test --no-run && cargo test --lib && cargo clippy --all-targets -- -D warnings`
+  - Local result: passed; `cargo test --lib` reported 180 passed, 0 failed, 1 ignored, and final clippy finished the dev profile successfully.
+  - Notes: The prior `clippy::derivable_impls` failure on `ForgetLifecyclePolicy` was resolved by deriving `Default`; a final policy-toggle remediation added two pipeline tests before the passing rerun.
+- 2026-04-30 Live Qdrant candidate maintenance smoke passed locally.
+  - Check: `docker compose -f docker-compose.qdrant.yml up -d && QDRANT_CONNECTION_STRING=http://localhost:6334 cargo test --lib qdrant_candidate_store_live_smoke_upserts_filters_searches_and_deletes -- --ignored`
+  - Local result: passed, 1 passed, 0 failed.
+  - Notes: This closes the prior missing-`QDRANT_CONNECTION_STRING` waiver for Task_6 lifecycle closeout evidence.
+
+## Review Placeholders
+
+- Reviewer-owned: approve no production raw-storage, reflection scheduling, external LLM extraction, physical hard-delete/redaction, or belief/evidence ontology scope creep was introduced by the lifecycle implementation.
+- Reviewer-owned: confirm normal retrieval lifecycle behavior remains inspectable through compact rationale aggregates and trace-enabled lifecycle/candidate omission details.
+- Orchestrator-owned: confirm Task_6 blocker resolution, waiver closure, evidence completeness, and independence of the next Documentation, Migration Cleanup, And Release Validation plan before moving this plan to completed.
+
+## Resolved Decisions
+- User approval for the revised lifecycle plan is recorded as of 2026-04-30. Task_1 selects the implementation boundary before Rust edits; later implementation tasks must treat these decisions as their dependency contract.
+- Correction/forget facades remain crate-visible injected surfaces in this chunk, matching the current `remember`/`link`/`retrieve` boundary. Public lifecycle API stabilization belongs to Documentation, Migration Cleanup, And Release Validation after production construction is graph-authoritative.
+- Supported lifecycle mutation targets are bounded to existing lifecycle fields: correction supersedes `DerivedMemory` records directly; episode/observation correction does not rewrite historical source objects but can create correction derived memories and supersede or mark non-current affected derived memories discovered through provenance; forget suppresses `DerivedMemory`, `Episode`, and `Observation` records; forget archives `MemoryThread` records through `ThreadStatus::Archived`; entity and link lifecycle are deferred.
+- Source-target cascade rules are defaulted now: correcting an episode or observation discovers behavior-influencing derived memories provenanced to that source and supersedes or marks those derived memories non-current through replacement correction memories; forgetting an episode or observation suppresses the source and cascade-suppresses behavior-influencing derived memories whose provenance references the forgotten source, so forgotten source material does not continue influencing normal retrieval.
+- Correction requests must carry or reference correction-origin provenance when available, such as a correction episode ID, correction observation ID, and/or raw/source reference. Replacement correction memories must preserve both the superseded memory's original source chain and the distinct correction event/source that explains the revision.
+- Derived-memory supersession direction is `new DerivedMemory supersedes old DerivedMemory`. Persistence must include both the replacement object's `DerivedMemory.supersedes` field and a typed `MemoryLink` with `RelationType::Supersedes` from the new derived memory to the old derived memory; retrieval evidence should present old or source-affected derived memories as `superseded_by` the replacement where relation evidence exists.
+- Default lifecycle behavior is non-destructive supersession for correction and suppression/archive for forget. Physical hard deletion/redaction is deferred; this chunk may recognize the existing `RetentionState::Deleted` as a retrieval-filtered soft lifecycle state, but it must not add physical deletion/redaction behavior.
+- Graph authority is the source of truth for lifecycle mutation semantics: currentness, retention state, thread archival, provenance, and typed supersession links are graph-authoritative. After graph success, vector maintenance deletes candidates for old/superseded/suppressed/archived object IDs and upserts replacement candidates; vector failure after graph success returns explicit partial-success evidence and must not roll back graph truth or compromise final retrieval correctness.
+- Public DTOs stay backend-free; lifecycle pipelines depend on provider-neutral `GraphAuthorityStore`, `VectorCandidateStore`, and `MemoryEmbedder` contracts; Qdrant/Oxigraph/RDF remain infrastructure details.
+- Compact rationale should report aggregate lifecycle omissions for corrected, superseded, suppressed, and historical opt-in behavior without promising full history in always-on output. Trace-enabled retrieval remains the detailed inspection path for per-object correction, supersession, suppression, vector-candidate, and historical-policy evidence.
 
 ## Assumptions
 - A1: Correction is non-destructive by default: create replacement memory, preserve old provenance, and mark old or source-affected derived memories non-current/superseded rather than overwriting them.
@@ -348,23 +374,43 @@
 - 2026-04-29 Plan drafted.
   - Summary: Created the next concrete plan for correction and forget lifecycle behavior from the landed retrieve/context-pack implementation.
   - Validation evidence: Documentation-only draft after completed retrieve plan validation and final Reviewer approval.
-  - Notes: Draft status; requires user approval before execution.
+  - Notes: Initial draft state; user approval was later recorded by Task_1.
 - 2026-04-30 Final PR #33 closeout review tightened plan boundaries.
   - Summary: Updated lifecycle plan to reflect the final retrieval shape: compact omission rationale plus detailed trace, graph authority over vector maintenance, derived-memory supersession direction, object-type lifecycle boundaries, and required clippy validation.
   - Validation evidence: Documentation review against completed retrieve plan, project philosophy, ADR-D-0006, ADR-I-0005, and current retrieval DTO/pipeline behavior.
-  - Notes: No lifecycle implementation performed; draft still requires user approval before execution.
+  - Notes: No lifecycle implementation performed; user approval was later recorded by Task_1.
 - 2026-04-30 Pre-implementation plan review tightened lifecycle target scope.
   - Summary: Reviewed the draft against the overarching roadmap, v0.1 roadmap, ADR-D-0002, ADR-D-0006, ADR-D-0008, ADR-I-0004, ADR-I-0005, ADR-I-0006, and current domain/retrieval/repository code. Initially narrowed this chunk to derived-memory correction/supersession and derived-memory forget/suppression, deferred source-object cascades and physical redaction/delete, required typed supersession links plus object supersedes fields, selected delete-old/upsert-replacement vector hygiene, and added `cargo test --lib` as required evidence.
   - Validation evidence: Researcher plan review plus direct source/doc inspection; no implementation performed.
-  - Notes: Draft still requires user approval before execution.
+  - Notes: User approval was later recorded by Task_1.
 - 2026-04-30 Roadmap scope recheck broadened lifecycle targets.
   - Summary: Rechecked the development roadmap and v0.1 roadmap after user feedback. Broadened this plan so completion covers derived-memory correction, episode/observation correction of affected derived memories, derived-memory/episode/observation suppression, default source-provenance cascade for forgotten episodes/observations, memory-thread archival, and graph-authoritative retrieval exclusion.
   - Validation evidence: Researcher scope reassessment plus direct roadmap/design/ADR review; no implementation performed.
-  - Notes: Draft still requires user approval before execution.
+  - Notes: User approval was later recorded by Task_1.
 - 2026-04-30 Reviewer requested explicit correction-origin provenance.
   - Summary: Added requirements that correction requests and outcomes preserve correction-origin episode/observation/source references separately from original source provenance, and that tests prove correction-origin provenance remains inspectable.
   - Validation evidence: Reviewer plan review requested changes; no implementation performed.
-  - Notes: Draft still requires user approval before execution.
+  - Notes: User approval was later recorded by Task_1.
+- 2026-04-30 Task_1 completed: lifecycle API and policy boundary selected.
+  - Summary: Recorded user approval of the revised lifecycle plan and selected crate-visible injected correction/forget facades, supported lifecycle targets, source-object correction/forget cascade rules, separate correction-origin provenance, derived-memory supersession direction and persistence shape, non-destructive suppression/default supersession behavior, graph-authoritative mutation semantics, vector hygiene/failure policy, backend-free dependency direction, and rationale/trace exposure boundaries.
+  - Validation evidence: Manual Worker review of the plan's lifecycle API, policy, vector-maintenance, failure-policy, provenance, graph-authority, and retrieval-evidence decisions before implementation edits; documentation-only Task_1 edit, no Rust checks required.
+  - Notes: No source files, lessons, or git state were changed by this task. Task_2 and later implementation tasks remain bound by this design gate and their own validation/reviewer requirements.
+- 2026-04-30 Tasks_2 through Task_5 implementation evidence consolidated by Task_6.
+  - Summary: Working tree contains backend-free lifecycle DTOs, provider-neutral correction/forget pipeline behavior, graph-authoritative lifecycle mutation support, crate-visible injected `CharacterMemory::correct` / `CharacterMemory::forget`, and deterministic retrieval regression coverage for supersession, suppression, archival, vector-maintenance failure, legacy isolation, and trace inspectability.
+  - Validation evidence: Final deterministic validation reran `cargo fmt --check` (pass), `cargo check` (pass), `cargo test --no-run` (pass), `cargo test --lib` (180 passed, 0 failed, 1 ignored), and `cargo clippy --all-targets -- -D warnings` (pass). The library suite includes lifecycle DTO tests, fake graph/vector pipeline tests, embedded Oxigraph graph lifecycle tests, injected facade lifecycle tests, retrieval stale-candidate/lifecycle omission tests, and policy-toggle regression tests.
+  - Notes: This is evidence consolidation only; Task_6 did not edit source, README, tests, rules, lessons, or git state.
+- 2026-04-30 Task_6 blocked during final validation.
+  - Summary: Embedded Oxigraph lifecycle/retrieve smoke passed and the next Documentation, Migration Cleanup, And Release Validation plan was drafted, but lifecycle closeout was paused at that point because clippy failed in source outside Task_6 owns.
+  - Validation evidence: Historical result: `cargo test --lib oxigraph_retrieval_after_lifecycle_mutation_excludes_stale_records_by_default` passed (1 passed, 0 failed); `cargo clippy --all-targets -- -D warnings` failed with `clippy::derivable_impls` on `ForgetLifecyclePolicy`; live Qdrant smoke failed before service exercise because `QDRANT_CONNECTION_STRING` was missing.
+  - Notes: This entry is superseded by the follow-up evidence below, which records clippy remediation, successful deterministic validation, successful live Qdrant smoke, and final gates pending.
+- 2026-04-30 Task_6 follow-up cleared validation blockers.
+  - Summary: Orchestrator remediated the clippy source issue by deriving `Default` for `ForgetLifecyclePolicy`, reran the deterministic validation suite successfully, started local Qdrant, and reran the live Qdrant candidate smoke successfully. The lifecycle plan remains active in pending review state rather than being moved to completed.
+  - Validation evidence: `cargo fmt --check && cargo test correction_forget_pipeline --lib && cargo test --lib && cargo check && cargo test --no-run && cargo clippy --all-targets -- -D warnings` passed; `cargo test correction_forget_pipeline --lib` reported 11 passed, 0 failed; `cargo test --lib` reported 180 passed, 0 failed, 1 ignored; `docker compose -f docker-compose.qdrant.yml up -d && QDRANT_CONNECTION_STRING=http://localhost:6334 cargo test --lib qdrant_candidate_store_live_smoke_upserts_filters_searches_and_deletes -- --ignored` passed with 1 passed, 0 failed.
+  - Notes: Reviewer and Orchestrator final gates remain pending before moving this plan to completed. The next Documentation, Migration Cleanup, And Release Validation plan remains drafted and preserved.
+- 2026-04-30 Final Reviewer and Orchestrator closeout approved lifecycle completion.
+  - Summary: Reviewer approved the completed lifecycle implementation after policy-toggle remediation, with no blocking findings. Orchestrator confirmed required evidence completeness, live Qdrant smoke evidence, retrieval lifecycle behavior, and next-plan independence.
+  - Validation evidence: Final Reviewer approval plus deterministic validation, embedded Oxigraph smoke, live Qdrant smoke, and clippy evidence recorded above.
+  - Notes: This plan is ready to move from active to completed. The Documentation, Migration Cleanup, And Release Validation plan remains active as the next independent concrete plan.
 
 ## Decision Log
 
@@ -372,12 +418,12 @@
   - Trigger / new insight: Retrieval now exposes graph-authoritative lifecycle/currentness omission behavior, rationale, trace, and fail-closed bounded expansion policy, making correction and forget lifecycle mutation the next roadmap chunk.
   - Plan delta: Added this active concrete plan for non-destructive correction, suppression-by-default forget, vector candidate maintenance, retrieval regression tests, and final lifecycle review.
   - Tradeoffs considered: Implementing lifecycle mutation before documentation cleanup keeps retrieval behavior grounded in actual graph state before retiring or rewriting legacy flat update/delete examples.
-  - User approval: pending.
+  - User approval: approved on 2026-04-30 via revised lifecycle plan approval.
 - 2026-04-30 Decision: Lifecycle plan must not overgeneralize supersession or vector maintenance authority
   - Trigger / new insight: Final retrieve PR review added compact omission rationale, relation-derived supersession evidence, and stronger Qdrant/fake hint parity; next-phase lifecycle work must align with that landed behavior.
   - Plan delta: Clarified derived-memory supersession direction, object-type lifecycle boundaries, vector maintenance as non-authoritative hygiene, trace versus compact rationale expectations, and required clippy validation.
   - Tradeoffs considered: Keeping generic correction/forget wording would be shorter, but risks workers implementing lifecycle mutation for object types that lack canonical lifecycle fields or treating vector maintenance as correctness authority.
-  - User approval: pending.
+  - User approval: approved on 2026-04-30 via revised lifecycle plan approval.
 - 2026-04-30 Decision: Constrain lifecycle implementation to derived-memory mutation first
   - Trigger / new insight: Current code supports retention filtering for episodes/observations but has no source-object forget cascade semantics, no physical delete/redact graph contract, and retrieval supersession evidence is relation-derived from typed links.
   - Plan delta: Resolved open questions toward crate-visible injected facades, derived-memory-only correction/forget mutation, hard-delete/redaction deferral, typed supersession link plus object field persistence, and vector deletion of stale candidates after graph success.
@@ -387,12 +433,22 @@
   - Trigger / new insight: The development roadmap and v0.1 design expect `forget` and suppression to prevent memories from being used for generation, and ADR-D-0002 says corrections must be able to find derived memories affected by a source episode or observation.
   - Plan delta: Brought episode/observation suppression and correction-target provenance cascade into scope, while keeping entity/link lifecycle and physical redaction/delete deferred.
   - Tradeoffs considered: Derived-memory-only lifecycle mutation is simpler but can leave forgotten source material influencing generation through derived memories. Cascade suppression increases implementation and test scope but better satisfies the roadmap's suppression and provenance goals.
-  - User approval: pending.
+  - User approval: approved on 2026-04-30 via revised lifecycle plan approval.
 - 2026-04-30 Decision: Preserve correction-origin provenance separately
   - Trigger / new insight: The roadmap says a correction episode explains why and v0.1 acceptance requires provenance to the correction episode, while ADR-D-0008 requires source-reference auditability.
   - Plan delta: Required correction DTOs, pipelines, and facade tests to represent and preserve correction-origin episode/observation/source references separately from the superseded memory's original provenance chain.
   - Tradeoffs considered: Only carrying the old source chain would preserve where the outdated memory came from, but not why it changed. A separate correction-origin chain keeps correction history auditable without forcing raw transcript storage into core.
-  - User approval: pending.
+  - User approval: approved on 2026-04-30 via revised lifecycle plan approval.
+- 2026-04-30 Decision: Honor non-default lifecycle policy toggles consistently
+  - Trigger / new insight: Final Reviewer noted that non-default DTO policy knobs were expressible but not fully honored by the pipeline.
+  - Plan delta: Correction now suppresses typed supersession links and `superseded_by` trace evidence when `supersede_replaced_derived_memories` is disabled; source-object forget cascade now requires both the cascade policy and suppression policy to allow derived-memory suppression.
+  - Tradeoffs considered: Defaults already satisfied the roadmap behavior, but honoring non-default policy toggles keeps the backend-free DTO contract honest before later public API stabilization.
+  - User approval: implementation refinement within approved lifecycle scope.
+- 2026-04-30 Decision: Approve Task_1 lifecycle boundary for implementation dependencies
+  - Trigger / new insight: User approved the revised lifecycle plan after roadmap-scope corrections and requested Task_1 record the lifecycle API and policy boundary before code implementation.
+  - Plan delta: Moved the plan to `in_progress`, renamed resolved decisions from pending approval to approved decisions, expanded the design-gate decisions to cover supported object types, cascade defaults, correction-origin provenance, supersession persistence/evidence, non-destructive lifecycle defaults, graph/vector failure semantics, backend-free dependency direction, and rationale/trace behavior, and recorded Task_1 completion in the progress log.
+  - Tradeoffs considered: Keeping these details only in task acceptance would make later Workers re-derive policy from scattered bullets; recording them as resolved decisions gives Task_2+ a single dependency contract without changing Rust code.
+  - User approval: approved on 2026-04-30; reviewer gates for later implementation tasks remain as listed in task validation.
 
 ## Notes
 - Risks:
