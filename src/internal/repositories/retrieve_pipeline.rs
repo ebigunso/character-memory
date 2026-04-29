@@ -1796,10 +1796,32 @@ mod tests {
             Ok(())
         }
 
+        async fn upsert_objects_and_links(
+            &self,
+            _objects: &[MemoryObject],
+            _links: &[crate::api::types::MemoryLink],
+        ) -> Result<(), CustomError> {
+            Ok(())
+        }
+
         async fn query_objects(
             &self,
             _query: &crate::internal::repositories::GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &crate::internal::repositories::GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            _query: &crate::internal::repositories::GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 

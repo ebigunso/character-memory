@@ -640,10 +640,33 @@ mod tests {
             Ok(())
         }
 
+        async fn upsert_objects_and_links(
+            &self,
+            objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            self.upsert_objects(objects).await?;
+            self.upsert_links(links).await
+        }
+
         async fn query_objects(
             &self,
             _query: &GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &crate::internal::repositories::GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            _query: &crate::internal::repositories::GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 

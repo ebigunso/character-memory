@@ -1,4 +1,5 @@
 pub mod domain;
+pub mod lifecycle;
 pub mod retrieval;
 
 mod draft;
@@ -18,6 +19,14 @@ pub use draft::{
     DerivedMemoryDraft, DraftDefaults, EntityDraft, EpisodeDraft, MemoryLinkDraft,
     MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberDraft, RememberOutcome,
     VectorIndexingFailure,
+};
+pub use lifecycle::{
+    ArchivePolicy, CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy,
+    CorrectionTarget, DeferredDestructiveLifecyclePolicy, DeferredLifecycleAction,
+    ExternalSourceReference, ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
+    LifecycleDtoValidationError, LifecycleMutationOutcome, LifecycleMutationTrace,
+    LifecycleTargetRef, ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget,
+    SourceProvenanceReference, SupersededByEvidence, SuppressionPolicy, VectorMaintenanceFailure,
 };
 pub use memory::Memory;
 pub use memory_filters::MemoryFilters;

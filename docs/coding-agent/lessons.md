@@ -44,6 +44,35 @@ Prevention:
 Evidence:
 - Missed thread `PRRT_kwDONxNRBs5-Z49b` was found by searching the complete saved PR thread payload for `"isResolved": false`.
 
+## 2026-04-30 - Check Roadmap Functionality Before Narrowing Scope  [tags: planning, scope-owns, validation]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md`
+- Task/Wave: pre-implementation plan review
+- Roles involved: Orchestrator | Researcher | Reviewer
+
+Symptom:
+- Narrowed the lifecycle plan to derived-memory-only correction/forget behavior before fully reconciling the chunk with the development roadmap and v0.1 roadmap.
+- The narrowed plan would have left episode/observation forget cascades and correction-origin provenance under-specified despite roadmap expectations for `correct`, `forget`, suppression, and correction provenance.
+
+Root cause:
+- Overweighted current implementation convenience and code-shape constraints before checking the intended functional acceptance for the roadmap chunk.
+- Focused on which objects were easiest to mutate, not enough on whether forgotten source material could still influence generation through provenanced derived memories.
+
+Fix applied:
+- Rechecked the development roadmap, v0.1 design, backend-contract draft, ADR-D-0002, and ADR-D-0008.
+- Broadened the plan to include episode/observation suppression with default provenance-based cascade, source-object correction of affected derived memories, memory-thread archival, and explicit correction-origin provenance.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: Before narrowing an implementation plan for feasibility, explicitly compare the narrowed scope against roadmap/design acceptance and record which intended features remain in scope, are deferred, or require user approval.
+- Dispatch/plan guardrail:
+  - For correction/forget plans, check both provenance chains before approval: original source provenance and correction-origin provenance.
+
+Evidence:
+- User correction on 2026-04-30 prompted roadmap recheck and plan revisions in `docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md`.
+
 ## 2026-04-29 - Keep Roadmap Versions Out Of Durable Code  [tags: code-quality, architecture, communication]
 
 Context:
