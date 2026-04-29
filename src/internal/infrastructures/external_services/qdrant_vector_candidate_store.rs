@@ -189,10 +189,10 @@ fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
         ));
     }
 
-    must_conditions.extend(qdrant_filter_conditions(
-        &query.filters,
-        currentness_filters_are_type_scoped(query),
-    ));
+    must_conditions.extend(qdrant_filter_conditions(&query.filters));
+    if let Some(condition) = currentness_filter_condition(query) {
+        must_conditions.push(condition);
+    }
 
     if must_conditions.is_empty() {
         None
@@ -201,10 +201,7 @@ fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
     }
 }
 
-fn qdrant_filter_conditions(
-    filters: &VectorCandidateFilters,
-    include_currentness_filters: bool,
-) -> Vec<Condition> {
+fn qdrant_filter_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
     let mut conditions = Vec::new();
 
     if !filters.retention_states.is_empty() {
@@ -215,18 +212,6 @@ fn qdrant_filter_conditions(
                 .iter()
                 .map(|value| retention_state_name(*value)),
         ));
-    }
-
-    if include_currentness_filters {
-        if let Some(is_current) = filters.is_current {
-            conditions.push(Condition::matches(IS_CURRENT_FIELD, is_current));
-        }
-    }
-
-    if include_currentness_filters {
-        if let Some(is_superseded) = filters.is_superseded {
-            conditions.push(Condition::matches(IS_SUPERSEDED_FIELD, is_superseded));
-        }
     }
 
     if !filters.thread_ids.is_empty() {
@@ -268,13 +253,67 @@ fn qdrant_filter_conditions(
     conditions
 }
 
-fn currentness_filters_are_type_scoped(query: &VectorCandidateSearch) -> bool {
-    query.filters.has_currentness_filters()
-        && !query.object_types.is_empty()
-        && query
+fn currentness_filter_condition(query: &VectorCandidateSearch) -> Option<Condition> {
+    if !query.filters.has_currentness_filters() {
+        return None;
+    }
+
+    let currentness_conditions = currentness_conditions(&query.filters);
+    if currentness_conditions.is_empty() {
+        return None;
+    }
+
+    let mut branches = Vec::new();
+    if query.object_types.is_empty() {
+        branches.push(Condition::from(Filter {
+            must: Vec::new(),
+            should: Vec::new(),
+            must_not: vec![Condition::matches(
+                OBJECT_TYPE_FIELD,
+                object_type_name(ObjectType::DerivedMemory).to_owned(),
+            )],
+            min_should: None,
+        }));
+    } else {
+        let non_derived_types = query
             .object_types
             .iter()
-            .all(|object_type| *object_type == ObjectType::DerivedMemory)
+            .copied()
+            .filter(|object_type| *object_type != ObjectType::DerivedMemory)
+            .collect::<Vec<_>>();
+        if !non_derived_types.is_empty() {
+            branches.push(any_field_matches(
+                OBJECT_TYPE_FIELD,
+                non_derived_types.into_iter().map(object_type_name),
+            ));
+        }
+    }
+
+    if query.object_types.is_empty() || query.object_types.contains(&ObjectType::DerivedMemory) {
+        let mut derived_conditions = vec![Condition::matches(
+            OBJECT_TYPE_FIELD,
+            object_type_name(ObjectType::DerivedMemory).to_owned(),
+        )];
+        derived_conditions.extend(currentness_conditions);
+        branches.push(Condition::from(Filter::must(derived_conditions)));
+    }
+
+    match branches.len() {
+        0 => None,
+        1 => branches.into_iter().next(),
+        _ => Some(Condition::from(Filter::min_should(1, branches))),
+    }
+}
+
+fn currentness_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
+    let mut conditions = Vec::new();
+    if let Some(is_current) = filters.is_current {
+        conditions.push(Condition::matches(IS_CURRENT_FIELD, is_current));
+    }
+    if let Some(is_superseded) = filters.is_superseded {
+        conditions.push(Condition::matches(IS_SUPERSEDED_FIELD, is_superseded));
+    }
+    conditions
 }
 
 fn any_field_matches(
@@ -641,8 +680,8 @@ mod tests {
         ] {
             assert!(keys.contains(&expected.to_owned()), "missing {expected}");
         }
-        assert!(!keys.contains(&IS_CURRENT_FIELD.to_owned()));
-        assert!(!keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
+        assert!(keys.contains(&IS_CURRENT_FIELD.to_owned()));
+        assert!(keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
     }
 
     #[test]

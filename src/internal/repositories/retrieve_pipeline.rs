@@ -144,6 +144,7 @@ struct RetrieveAssembly {
 
 impl RetrieveAssembly {
     fn absorb_expansion(&mut self, candidate: &VectorCandidateMatch, expansion: GraphExpansion) {
+        let bounded_failure = expansion.bounded_failure;
         let candidate_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
         self.candidate_refs.insert(candidate_ref);
         self.candidate_scores
@@ -237,20 +238,28 @@ impl RetrieveAssembly {
         }
 
         if !root_filtered && !root_verified && !self.objects.contains_key(&candidate_ref) {
-            self.stale_omissions.push(StaleCandidateOmission {
-                candidate: memory_object_ref(candidate.object_type, candidate.object_id),
-                vector_score: Some(candidate.score),
-                reason: StaleCandidateReason::GraphObjectMissing,
-            });
-            self.lifecycle_decisions.push(LifecycleFilterDecision {
-                object: memory_object_ref(candidate.object_type, candidate.object_id),
-                retention_state: None,
-                is_current: None,
-                superseded_by: Vec::new(),
-                action: LifecycleFilterAction::Omitted,
-                reason: LifecycleFilterReason::GraphObjectMissing,
-            });
+            if bounded_failure.is_some() {
+                self.omit_bounded_candidate(candidate);
+            } else {
+                self.omit_missing_candidate(candidate);
+            }
         }
+    }
+
+    fn omit_bounded_candidate(&mut self, candidate: &VectorCandidateMatch) {
+        self.stale_omissions.push(StaleCandidateOmission {
+            candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+            vector_score: Some(candidate.score),
+            reason: StaleCandidateReason::GraphExpansionBounded,
+        });
+        self.lifecycle_decisions.push(LifecycleFilterDecision {
+            object: memory_object_ref(candidate.object_type, candidate.object_id),
+            retention_state: None,
+            is_current: None,
+            superseded_by: Vec::new(),
+            action: LifecycleFilterAction::Omitted,
+            reason: LifecycleFilterReason::GraphExpansionBounded,
+        });
     }
 
     fn omit_missing_candidate(&mut self, candidate: &VectorCandidateMatch) {
@@ -606,6 +615,9 @@ fn bounded_failure_reason_name(
     reason: crate::internal::repositories::GraphExpansionBoundedFailureReason,
 ) -> &'static str {
     match reason {
+        crate::internal::repositories::GraphExpansionBoundedFailureReason::NodeLimit => {
+            "node_limit"
+        }
         crate::internal::repositories::GraphExpansionBoundedFailureReason::Timeout => "timeout",
         crate::internal::repositories::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
     }
@@ -712,6 +724,7 @@ fn omission_reason(reason: LifecycleFilterReason) -> bool {
             | LifecycleFilterReason::NonCurrentOmitted
             | LifecycleFilterReason::SupersededOmitted
             | LifecycleFilterReason::GraphObjectMissing
+            | LifecycleFilterReason::GraphExpansionBounded
     )
 }
 
@@ -750,6 +763,7 @@ fn stale_reason_from_decision(reason: LifecycleFilterReason) -> StaleCandidateRe
         LifecycleFilterReason::NonCurrentOmitted => StaleCandidateReason::CurrentnessMismatch,
         LifecycleFilterReason::SupersededOmitted => StaleCandidateReason::Superseded,
         LifecycleFilterReason::GraphObjectMissing => StaleCandidateReason::GraphObjectMissing,
+        LifecycleFilterReason::GraphExpansionBounded => StaleCandidateReason::GraphExpansionBounded,
         _ => StaleCandidateReason::LifecycleMismatch,
     }
 }
@@ -907,6 +921,7 @@ fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
         LifecycleFilterReason::NonCurrentOmitted => 9,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
+        LifecycleFilterReason::GraphExpansionBounded => 12,
     }
 }
 
@@ -917,6 +932,7 @@ fn stale_reason_rank(reason: StaleCandidateReason) -> u8 {
         StaleCandidateReason::CurrentnessMismatch => 2,
         StaleCandidateReason::Superseded => 3,
         StaleCandidateReason::SectionLimit => 4,
+        StaleCandidateReason::GraphExpansionBounded => 5,
     }
 }
 
@@ -1062,6 +1078,48 @@ mod tests {
         assert!(
             matches!(error, CustomError::DatabaseError(message) if message.contains("reason=timeout") && message.contains("object_type=derived_memory") && message.contains(&fixtures.user_preference.id.to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_empty_expansion_omits_without_reporting_graph_missing() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixtures.user_preference.id,
+            ObjectType::DerivedMemory,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut context = RetrievalContext::new("bounded graph limits");
+        context.graph_limits.max_nodes = 0;
+        context.graph_limits.allow_degraded_results = true;
+
+        let outcome = pipeline.retrieve(context).await.unwrap();
+
+        assert!(outcome.pack.preferences.is_empty());
+        assert!(outcome
+            .rationale
+            .stale_candidate_omissions
+            .iter()
+            .any(
+                |omission| omission.candidate.id == fixtures.user_preference.id
+                    && omission.reason == StaleCandidateReason::GraphExpansionBounded
+            ));
+        assert!(!outcome
+            .rationale
+            .stale_candidate_omissions
+            .iter()
+            .any(
+                |omission| omission.candidate.id == fixtures.user_preference.id
+                    && omission.reason == StaleCandidateReason::GraphObjectMissing
+            ));
+        assert!(outcome
+            .rationale
+            .lifecycle_filter_decisions
+            .iter()
+            .any(|decision| decision.object.id == fixtures.user_preference.id
+                && decision.reason == LifecycleFilterReason::GraphExpansionBounded));
     }
 
     #[tokio::test]

@@ -176,6 +176,7 @@ pub(crate) struct GraphExpansionFilteredNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GraphExpansionBoundedFailureReason {
+    NodeLimit,
     Timeout,
     HubLimit,
 }
@@ -404,11 +405,20 @@ fn bounded_expansion_plan<'a>(
     }
 
     if query.max_nodes == 0 {
+        let bounded_failure = GraphExpansionBoundedFailure {
+            reason: GraphExpansionBoundedFailureReason::NodeLimit,
+            at: Some(root),
+        };
+        if !query.failure_policy.allow_partial_results {
+            return Err(CustomError::DatabaseError(
+                "Graph expansion node limit reached before traversal".to_owned(),
+            ));
+        }
         return Ok(BoundedExpansionPlan {
             visited: HashSet::new(),
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
-            bounded_failure: None,
+            bounded_failure: Some(bounded_failure),
         });
     }
 
