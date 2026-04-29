@@ -30,6 +30,7 @@
   - Reflection scheduling or background summarization.
   - Belief/evidence ontology or contradiction-resolution engine.
   - Physical hard deletion/redaction semantics.
+  - New durable schema fields for structured external correction-origin/source refs; those require a separate domain/schema decision before docs can describe them as graph-persisted provenance.
   - UI/browser/E2E validation.
 
 ## Context (workspace)
@@ -49,8 +50,10 @@
 - Existing lifecycle shape to preserve:
   - `remember`, `link`, `retrieve`, `correct`, and `forget` use injected graph/vector/embedder paths where currently exposed.
   - Graph authority decides lifecycle/currentness/supersession/suppression/archive truth.
+  - Episode correction/forget cascades include derived memories provenanced directly to the episode and derived memories provenanced only to observations in that episode.
   - Qdrant candidate maintenance is hygiene and recall reduction, not authority.
   - Normal retrieval excludes suppressed/deleted and non-current/superseded records by default, with detailed inspectability through trace.
+  - Correction-origin and original-source external refs exist in lifecycle DTOs, but durable `DerivedMemory` provenance currently persists episode/observation IDs; do not document structured external correction-origin refs as graph-persisted unless the schema is extended.
 
 ## Open Questions (max 3)
 - Should the old flat public facade be removed in this chunk or kept as explicitly deprecated while production v0.1 constructors are finalized?
@@ -73,6 +76,7 @@
 - acceptance:
   - Audit lists README/doc sections that still describe flat memory behavior as canonical.
   - Audit lists legacy source/test paths that should be removed, rewritten, or explicitly isolated.
+  - Audit records lifecycle DTO external correction-origin/source refs as deferred from durable graph persistence in this plan unless a separate user-approved schema plan supersedes that boundary.
   - Audit confirms no cleanup task requires adding compatibility wrappers.
 - validation:
   - kind: review
@@ -94,6 +98,7 @@
   - README examples do not promote old flat `create/search/update/delete` behavior as the v0.1 path.
   - Docs describe Qdrant and Oxigraph responsibilities accurately.
   - Lifecycle docs preserve non-destructive correction, suppression/archive defaults, provenance preservation, and trace inspectability.
+  - Lifecycle docs describe episode cascades through observations and document structured external correction-origin/source refs as request metadata/deferred schema work rather than graph-persisted provenance.
   - Non-goals remain explicit for raw storage, reflection scheduling, belief ontology, and physical redaction/delete.
 - validation:
   - kind: review
@@ -112,6 +117,7 @@
   Remove, rewrite, or explicitly isolate legacy flat facade and Qdrant vector-memory repository behavior that conflicts with the v0.1 graph-authoritative architecture.
 - acceptance:
   - Legacy `update_memory` / `delete_memory` paths no longer imply hard update/delete lifecycle semantics for v0.1.
+  - Durable correction-origin/source external-ref schema work is not introduced in this cleanup chunk; retained docs and tests describe episode/observation provenance as the persisted correction trail.
   - Any retained legacy path has a clear transitional reason and test boundary.
   - Tests are updated to validate the v0.1 path rather than preserving legacy behavior for compatibility alone.
   - No production raw storage, reflection scheduling, belief ontology, or physical redaction/delete semantics are introduced.
@@ -216,7 +222,9 @@
 - Risks:
   - Removing legacy code may reveal integration tests that still depend on old flat Qdrant behavior.
   - Documentation can overstate crate-visible injected lifecycle surfaces if production constructors are not yet graph-authoritative.
+  - Documentation can overstate correction-origin/source external-ref persistence if it does not distinguish DTO request metadata from durable episode/observation provenance and source refs.
   - Live Qdrant validation remains environment-sensitive and must be captured before release validation closes.
 - Edge cases:
   - Retained legacy paths need explicit transitional ownership and should not be described as canonical v0.1 behavior.
   - Examples should preserve source references without embedding raw transcript content into Qdrant or Oxigraph.
+  - Episode-level correction/forget examples should include observation-only derived memories so source cascades do not depend on duplicate episode IDs on every derived memory.
