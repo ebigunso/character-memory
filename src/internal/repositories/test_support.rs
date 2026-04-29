@@ -1206,7 +1206,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(fail_closed.to_string().contains("hub limit exceeded"));
+        assert!(matches!(
+            fail_closed,
+            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+        ));
     }
 
     #[tokio::test]

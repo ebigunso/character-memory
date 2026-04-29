@@ -434,9 +434,11 @@ fn bounded_expansion_plan<'a>(
     let mut relations = Vec::new();
     let mut bounded_failure = None;
     let mut relation_link_ids = HashSet::new();
+    let mut queued = HashSet::from([root]);
     let mut queue = VecDeque::from([(root, 0_u8)]);
 
     while let Some((object_ref, depth)) = queue.pop_front() {
+        queued.remove(&object_ref);
         if visited.contains(&object_ref) {
             continue;
         }
@@ -467,9 +469,18 @@ fn bounded_expansion_plan<'a>(
             .iter()
             .filter(|link| relation_allowed(query, link.relation))
             .filter(|link| link_touches_ref(link, object_ref))
-            .copied()
+            .filter_map(|link| {
+                let neighbor = other_endpoint(link, object_ref);
+                if object_refs.contains(&neighbor)
+                    && object_type_allowed(query, neighbor.object_type)
+                {
+                    Some((*link, neighbor))
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
-        incident_links.sort_by_key(|link| stable_link_key(link));
+        incident_links.sort_by_key(|(link, _)| stable_link_key(link));
 
         if incident_links.len() > query.max_hub_edges {
             let failure = GraphExpansionBoundedFailure {
@@ -485,15 +496,7 @@ fn bounded_expansion_plan<'a>(
             incident_links.truncate(query.max_fanout_per_node);
         }
 
-        for link in incident_links {
-            let neighbor = other_endpoint(link, object_ref);
-            if !object_refs.contains(&neighbor) {
-                continue;
-            }
-            if !object_type_allowed(query, neighbor.object_type) {
-                continue;
-            }
-
+        for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
                 relations.push(GraphExpansionRelation {
                     link_id: link.id,
@@ -509,7 +512,10 @@ fn bounded_expansion_plan<'a>(
                 continue;
             }
 
-            if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
+            if visited.len() + queued.len() >= query.max_nodes
+                && !visited.contains(&neighbor)
+                && !queued.contains(&neighbor)
+            {
                 let failure = GraphExpansionBoundedFailure {
                     reason: GraphExpansionBoundedFailureReason::NodeLimit,
                     at: Some(neighbor),
@@ -520,7 +526,9 @@ fn bounded_expansion_plan<'a>(
                 bounded_failure.get_or_insert(failure);
                 continue;
             }
-            queue.push_back((neighbor, depth + 1));
+            if queued.insert(neighbor) {
+                queue.push_back((neighbor, depth + 1));
+            }
         }
     }
 
@@ -793,7 +801,11 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::repositories::test_support::representative_fixtures;
+    use chrono::Utc;
+
+    use crate::internal::repositories::test_support::{
+        high_fanout_graph_fixture, representative_fixtures,
+    };
 
     #[test]
     fn graph_queries_use_domain_ids_and_object_types() {
@@ -891,5 +903,96 @@ mod tests {
             error,
             CustomError::GraphExpansionBounded { reason, .. } if reason == "node_limit"
         ));
+    }
+
+    #[test]
+    fn bounded_expansion_applies_hub_limits_after_traversable_filtering() {
+        let fixture = high_fanout_graph_fixture();
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 5)
+            .with_allowed_object_types(vec![ObjectType::Episode])
+            .with_max_hub_edges(1)
+            .with_failure_policy(GraphExpansionFailurePolicy {
+                timeout_ms: Some(250),
+                allow_partial_results: false,
+            });
+
+        let expansion = bounded_expansion(&query, fixture.objects(), fixture.links).unwrap();
+
+        assert!(expansion.bounded_failure.is_none());
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::Episode(episode) if episode.id == fixture.episode.id)
+        }));
+        assert_eq!(expansion.links.len(), 1);
+    }
+
+    #[test]
+    fn bounded_expansion_node_limit_counts_unique_queued_nodes() {
+        let fixtures = representative_fixtures();
+        let links = vec![
+            test_link(
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                fixtures.episode.id,
+                ObjectType::Episode,
+                RelationType::Involves,
+            ),
+            test_link(
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                fixtures.salient_observation.id,
+                ObjectType::Observation,
+                RelationType::Mentions,
+            ),
+            test_link(
+                fixtures.episode.id,
+                ObjectType::Episode,
+                fixtures.derived_reflection.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+            test_link(
+                fixtures.salient_observation.id,
+                ObjectType::Observation,
+                fixtures.derived_reflection.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+        ];
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 4)
+            .with_allowed_object_types(vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::DerivedMemory,
+            ])
+            .with_max_fanout_per_node(2);
+
+        let expansion = bounded_expansion(&query, fixtures.objects(), links).unwrap();
+
+        assert!(expansion.bounded_failure.is_none());
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == fixtures.derived_reflection.id)
+        }));
+    }
+
+    fn test_link(
+        from_id: MemoryId,
+        from_type: ObjectType,
+        to_id: MemoryId,
+        to_type: ObjectType,
+        relation: RelationType,
+    ) -> MemoryLink {
+        MemoryLink {
+            id: MemoryId::new_v4(),
+            object_type: ObjectType::MemoryLink,
+            from_id,
+            from_type,
+            to_id,
+            to_type,
+            relation,
+            confidence: 1.0,
+            rationale: None,
+            created_at: Utc::now(),
+            schema_version: "test_schema".to_owned(),
+        }
     }
 }

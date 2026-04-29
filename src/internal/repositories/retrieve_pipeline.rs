@@ -546,7 +546,7 @@ impl SectionCounts {
             ContextPackSection::OpenLoops => &mut self.open_loops,
             ContextPackSection::Commitments => &mut self.commitments,
             ContextPackSection::CharacterSignals => &mut self.character_signals,
-            ContextPackSection::Omitted => &mut self.derived_memories,
+            ContextPackSection::Omitted => unreachable!("omitted is not a pack section counter"),
         }
     }
 }
