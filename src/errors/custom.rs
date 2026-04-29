@@ -1,6 +1,8 @@
 use qdrant_client::QdrantError;
 use thiserror::Error;
 
+use crate::api::types::{MemoryId, ObjectType};
+
 #[derive(Error, Debug)]
 pub enum CustomError {
     #[error("Environment file not found: {0}")]
@@ -26,6 +28,15 @@ pub enum CustomError {
 
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
+
+    #[error("Graph expansion root not found: {object_type:?} {object_id}")]
+    GraphExpansionRootNotFound {
+        object_type: ObjectType,
+        object_id: MemoryId,
+    },
+
+    #[error("Graph expansion bounded by retrieval policy: reason={reason}{location}")]
+    GraphExpansionBounded { reason: String, location: String },
 
     #[error("Vector database error: {0}")]
     QdrantError(#[source] Box<QdrantError>),

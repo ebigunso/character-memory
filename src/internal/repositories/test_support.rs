@@ -19,12 +19,13 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
-    EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
-    VectorRecordEmbedding, VectorSurface,
+    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord,
+    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
+    VectorTimeRangeFilter,
 };
 use crate::internal::repositories::{
-    bounded_expansion_node_set, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery,
-    GraphObjectQuery, MemoryEmbedder, RawReference, RawReferenceResolver, VectorCandidateStore,
+    bounded_expansion, GraphAuthorityStore, GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    MemoryEmbedder, RawReference, RawReferenceResolver, VectorCandidateStore,
 };
 
 #[derive(Debug, Default)]
@@ -81,6 +82,7 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             .filter(|record| {
                 query.object_types.is_empty() || query.object_types.contains(&record.object_type)
             })
+            .filter(|record| candidate_matches_filters(record, &query.filters))
             .map(|record| {
                 VectorCandidateMatch::new(
                     record.object_id,
@@ -111,6 +113,79 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
         lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
         Ok(())
     }
+}
+
+fn candidate_matches_filters(
+    record: &VectorCandidateRecord,
+    filters: &VectorCandidateFilters,
+) -> bool {
+    (filters.retention_states.is_empty()
+        || record
+            .retention_state
+            .is_some_and(|retention_state| filters.retention_states.contains(&retention_state)))
+        && currentness_filters_match(record, filters)
+        && ids_overlap(&filters.thread_ids, &record.relationship_hints.thread_ids)
+        && ids_overlap(&filters.episode_ids, &record.relationship_hints.episode_ids)
+        && entity_filter_matches(record, &filters.entity_ids)
+        && filters
+            .time_ranges
+            .iter()
+            .all(|time_range| time_range_matches(record, time_range))
+}
+
+fn currentness_filters_match(
+    record: &VectorCandidateRecord,
+    filters: &VectorCandidateFilters,
+) -> bool {
+    if !filters.has_currentness_filters() || record.object_type != ObjectType::DerivedMemory {
+        return true;
+    }
+
+    filters
+        .is_current
+        .is_none_or(|is_current| record.is_current.is_none_or(|actual| actual == is_current))
+        && filters.is_superseded.is_none_or(|is_superseded| {
+            record_is_superseded(record).is_none_or(|actual| actual == is_superseded)
+        })
+}
+
+fn record_is_superseded(record: &VectorCandidateRecord) -> Option<bool> {
+    record
+        .payload_hints
+        .is_superseded
+        .or_else(|| record.is_current.map(|is_current| !is_current))
+}
+
+fn ids_overlap(filters: &[MemoryId], values: &[MemoryId]) -> bool {
+    filters.is_empty() || filters.iter().any(|filter| values.contains(filter))
+}
+
+fn entity_filter_matches(record: &VectorCandidateRecord, entity_ids: &[MemoryId]) -> bool {
+    entity_ids.is_empty()
+        || entity_ids.iter().any(|entity_id| {
+            record.relationship_hints.entity_ids.contains(entity_id)
+                || record
+                    .relationship_hints
+                    .participant_entity_ids
+                    .contains(entity_id)
+                || record.relationship_hints.speaker_entity_id == Some(*entity_id)
+        })
+}
+
+fn time_range_matches(record: &VectorCandidateRecord, time_range: &VectorTimeRangeFilter) -> bool {
+    let value = match time_range.field {
+        VectorTimeField::Created => record.payload_hints.created_at,
+        VectorTimeField::Updated => record.payload_hints.updated_at,
+        VectorTimeField::Started => record.payload_hints.started_at,
+        VectorTimeField::Ended => record.payload_hints.ended_at,
+        VectorTimeField::Observed => record.payload_hints.observed_at,
+        VectorTimeField::LastTouched => record.payload_hints.last_touched_at,
+    };
+
+    value.is_some_and(|value| {
+        time_range.after.is_none_or(|after| value >= after)
+            && time_range.before.is_none_or(|before| value <= before)
+    })
 }
 
 #[derive(Debug, Default)]
@@ -158,7 +233,11 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
             .iter()
             .filter(|object| {
                 let (object_id, object_type) = object_identity(object);
-                (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
+                (query.object_refs.is_empty()
+                    || query.object_refs.iter().any(|object_ref| {
+                        object_ref.object_id == object_id && object_ref.object_type == object_type
+                    }))
+                    && (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
                     && (query.object_types.is_empty() || query.object_types.contains(&object_type))
             })
             .cloned()
@@ -178,27 +257,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
     ) -> Result<GraphExpansion, CustomError> {
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
-        let root_exists = objects
-            .iter()
-            .any(|object| object_identity(object) == (query.root_id, query.root_type));
-        let visited = bounded_expansion_node_set(query, root_exists, links.clone())?;
-
-        let mut expanded_objects: Vec<_> = objects
-            .into_iter()
-            .filter(|object| visited.contains(&object_identity(object)))
-            .collect();
-        sort_objects(&mut expanded_objects);
-
-        let mut expanded_links: Vec<_> = links
-            .into_iter()
-            .filter(|link| {
-                visited.contains(&(link.from_id, link.from_type))
-                    && visited.contains(&(link.to_id, link.to_type))
-            })
-            .collect();
-        expanded_links.sort_by_key(|link| link.id);
-
-        Ok(GraphExpansion::new(expanded_objects, expanded_links))
+        bounded_expansion(query, objects, links)
     }
 }
 
@@ -813,6 +872,11 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::models::vector::{VectorPayloadHints, VectorRelationshipHints};
+    use crate::internal::repositories::{
+        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+    };
 
     #[tokio::test]
     async fn vector_fake_upserts_searches_and_deletes_deterministically() {
@@ -877,6 +941,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vector_fake_applies_payload_hint_prefilters_and_preserves_candidate_ordering() {
+        let store = FakeVectorCandidateStore::new();
+        let fixtures = representative_fixtures();
+        let reflection = crate::internal::models::vector::derived_memory_vector_record(
+            &fixtures.derived_reflection,
+        );
+        let preference = crate::internal::models::vector::derived_memory_vector_record(
+            &fixtures.user_preference,
+        );
+        let suppressed = crate::internal::models::vector::derived_memory_vector_record(
+            &fixtures.suppressed_seed,
+        );
+
+        store
+            .upsert_vector_records(&[
+                VectorRecordEmbedding::new(&reflection, &[0.8, 0.2]),
+                VectorRecordEmbedding::new(&preference, &[1.0, 0.0]),
+                VectorRecordEmbedding::new(&suppressed, &[1.0, 0.0]),
+            ])
+            .await
+            .unwrap();
+
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
+            .with_default_object_types()
+            .with_filters(
+                VectorCandidateFilters::new()
+                    .with_retention_states(vec![RetentionState::Active])
+                    .current_only()
+                    .with_thread_ids(vec![fixtures.soft_thread.id])
+                    .with_entity_ids(vec![fixtures.user_entity.id])
+                    .with_episode_ids(vec![fixtures.episode.id])
+                    .with_time_range(VectorTimeRangeFilter::new(
+                        VectorTimeField::Updated,
+                        Some(timestamp("2026-04-27T10:11:05Z")),
+                        Some(timestamp("2026-04-27T10:11:07Z")),
+                    )),
+            );
+
+        let matches = store.search_candidates(&query).await.unwrap();
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].object_id, fixtures.user_preference.id);
+        assert_eq!(matches[1].object_id, fixtures.derived_reflection.id);
+        assert!(!matches
+            .iter()
+            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
+    }
+
+    #[tokio::test]
+    async fn vector_fake_currentness_prefilter_keeps_non_derived_candidates() {
+        let store = FakeVectorCandidateStore::new();
+        let fixtures = representative_fixtures();
+        let missing_hint_id = fixture_id(360);
+
+        store
+            .upsert_candidates(&[
+                VectorCandidateRecord::new(
+                    fixtures.episode.id,
+                    ObjectType::Episode,
+                    VectorSurface::Summary,
+                    vec![1.0, 0.0],
+                ),
+                VectorCandidateRecord::new(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::DerivedText,
+                    vec![1.0, 0.0],
+                )
+                .with_filter_hints(
+                    Some(RetentionState::Suppressed),
+                    Some(false),
+                    VectorRelationshipHints::default(),
+                    VectorPayloadHints {
+                        is_superseded: Some(true),
+                        ..VectorPayloadHints::default()
+                    },
+                ),
+                VectorCandidateRecord::new(
+                    missing_hint_id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::DerivedText,
+                    vec![1.0, 0.0],
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
+            .with_default_object_types()
+            .with_filters(VectorCandidateFilters::new().current_only());
+
+        let matches = store.search_candidates(&query).await.unwrap();
+
+        assert_eq!(matches.len(), 2);
+        assert!(matches.iter().any(|matched| {
+            matched.object_id == fixtures.episode.id && matched.object_type == ObjectType::Episode
+        }));
+        assert!(matches.iter().any(|matched| {
+            matched.object_id == missing_hint_id && matched.object_type == ObjectType::DerivedMemory
+        }));
+        assert!(!matches
+            .iter()
+            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
+    }
+
+    #[tokio::test]
     async fn graph_fake_preserves_objects_links_lifecycle_and_raw_refs() {
         let store = FakeGraphAuthorityStore::new();
         let fixtures = representative_fixtures();
@@ -923,6 +1093,221 @@ mod tests {
             .objects
             .contains(&MemoryObject::Episode(fixtures.episode.clone())));
         assert!(expansion.links.contains(&fixtures.hub_links[0]));
+    }
+
+    #[tokio::test]
+    async fn graph_fake_queries_exact_typed_object_refs() {
+        let store = FakeGraphAuthorityStore::new();
+        let mut fixtures = representative_fixtures();
+        fixtures.user_entity.id = fixtures.episode.id;
+
+        store
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Entity(fixtures.user_entity.clone()),
+            ])
+            .await
+            .unwrap();
+
+        let queried = store
+            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
+                fixtures.episode.id,
+                ObjectType::Episode,
+            )]))
+            .await
+            .unwrap();
+
+        assert_eq!(queried, vec![MemoryObject::Episode(fixtures.episode)]);
+    }
+
+    #[tokio::test]
+    async fn graph_fake_honors_relation_allowlist_and_fanout_bounds() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_allowed_relation_types(vec![RelationType::About])
+                    .with_max_fanout_per_node(3),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(expansion.objects.len(), 4);
+        assert_eq!(expansion.links.len(), 3);
+        assert_eq!(expansion.relations.len(), 3);
+        assert!(expansion
+            .objects
+            .contains(&MemoryObject::Entity(fixture.hub_entity)));
+        assert!(expansion.objects.iter().all(|object| matches!(
+            object,
+            MemoryObject::Entity(_) | MemoryObject::DerivedMemory(_)
+        )));
+        assert!(expansion
+            .relations
+            .iter()
+            .all(|relation| relation.relation == RelationType::About && relation.proximity == 1));
+    }
+
+    #[tokio::test]
+    async fn graph_fake_returns_only_traversed_links_after_fanout_pruning() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixture = high_fanout_graph_fixture();
+        let traversed_link = fixture.links[0].clone();
+        let mut pruned_duplicate = traversed_link.clone();
+        pruned_duplicate.id = fixture_id(195);
+        pruned_duplicate.rationale = Some("Fanout-pruned duplicate endpoint link.".to_owned());
+        let mut links = fixture.links.clone();
+        links.push(pruned_duplicate.clone());
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+
+        let expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_max_fanout_per_node(1),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(expansion.links, vec![traversed_link.clone()]);
+        assert!(!expansion.links.contains(&pruned_duplicate));
+        assert_eq!(
+            expansion
+                .relations
+                .iter()
+                .map(|relation| relation.link_id)
+                .collect::<Vec<_>>(),
+            vec![traversed_link.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn graph_fake_reports_or_fails_closed_on_bounded_hub_policy() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let partial = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_max_hub_edges(2)
+                    .with_max_fanout_per_node(2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            partial.bounded_failure.unwrap().reason,
+            GraphExpansionBoundedFailureReason::HubLimit
+        );
+        assert_eq!(partial.links.len(), 2);
+
+        let fail_closed = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_max_hub_edges(2)
+                    .with_failure_policy(GraphExpansionFailurePolicy {
+                        timeout_ms: Some(250),
+                        allow_partial_results: false,
+                    }),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            fail_closed,
+            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+        ));
+    }
+
+    #[tokio::test]
+    async fn graph_fake_filters_lifecycle_currentness_and_superseded_nodes_by_default() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store.upsert_links(&fixtures.links()).await.unwrap();
+
+        let default_expansion = store
+            .expand_bounded(&GraphExpansionQuery::new(
+                fixtures.correction.id,
+                ObjectType::DerivedMemory,
+                1,
+                5,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            default_expansion.objects,
+            vec![MemoryObject::DerivedMemory(fixtures.correction.clone())]
+        );
+        assert!(default_expansion.links.is_empty());
+        assert_eq!(default_expansion.filtered_nodes.len(), 1);
+        assert_eq!(
+            default_expansion.filtered_nodes[0].object_ref,
+            GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+        );
+        assert_eq!(
+            default_expansion.filtered_nodes[0].reason,
+            GraphExpansionFilteredReason::Suppressed
+        );
+
+        let historical_expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.correction.id, ObjectType::DerivedMemory, 1, 5)
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_suppressed: true,
+                        include_non_current: true,
+                        include_superseded: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+
+        assert!(historical_expansion
+            .objects
+            .contains(&MemoryObject::DerivedMemory(
+                fixtures.suppressed_seed.clone()
+            )));
+        assert_eq!(
+            historical_expansion.links,
+            vec![fixtures.hub_links[2].clone()]
+        );
+        assert!(historical_expansion.filtered_nodes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn graph_fake_uses_deterministic_timeout_substitute() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store.upsert_links(&fixtures.links()).await.unwrap();
+
+        let expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
+                    .with_failure_policy(GraphExpansionFailurePolicy {
+                        timeout_ms: Some(0),
+                        allow_partial_results: true,
+                    }),
+            )
+            .await
+            .unwrap();
+
+        assert!(expansion.objects.is_empty());
+        assert_eq!(
+            expansion.bounded_failure.unwrap().reason,
+            GraphExpansionBoundedFailureReason::Timeout
+        );
     }
 
     #[tokio::test]

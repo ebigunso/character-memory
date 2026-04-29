@@ -2,7 +2,7 @@
 
 - status: draft
 - generated: 2026-04-27
-- last_updated: 2026-04-28
+- last_updated: 2026-04-29
 - work_type: mixed
 - roadmap_scope: full v0.1 implementation phase
 - concrete_plan_policy: draft one separate implementation plan per chunk when that chunk is reached
@@ -13,12 +13,12 @@
 - Preserve the handoff's constraints: Rust library crate, chat/voice-transcript scope, Qdrant for vector candidate recall, Oxigraph for graph authority, stable cross-store IDs, deterministic tests, and no required LLM dependency in core.
 
 ## Current State Assessment
-- The current public facade is `CharacterMemory` in `src/lib.rs`; crate-visible `remember` and typed `link` now use the v0.1 injected graph/vector/embedder path, while flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory` are deprecated legacy surface rather than canonical v0.1 model.
+- The current public facade is `CharacterMemory` in `src/lib.rs`; crate-visible `remember`, typed `link`, and `retrieve` now use the v0.1 injected graph/vector/embedder path, while flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory` are deprecated legacy surface rather than canonical v0.1 model.
 - Canonical v0.1 domain objects now live under `src/api/types/domain.rs`, with store/embedder contracts and deterministic fake-store fixtures under `src/internal/repositories/**`.
 - The old flat live persistence path remains legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and `QdrantVectorMemoryRepository` still serves the old flat facade.
 - The v0.1 vector foundation now has provider-neutral `VectorRecord` and natural-language embedding surfaces, plus Qdrant v0.1 payload mapping and `VectorCandidateStore::upsert_vector_records` support for full record payloads.
 - The v0.1 graph foundation now has RDF vocabulary/mapping and an embedded/in-memory `OxigraphGraphAuthorityStore` implementing `GraphAuthorityStore` for canonical objects, typed links, query, and bounded expansion foundation.
-- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, draft DTO conversion, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph smoke, bounded graph expansion, internal remember/link pipelines, and injected facade-level remember/link behavior. Grouped retrieval and correction supersession pipelines remain future chunks.
+- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, draft DTO conversion, retrieval DTOs, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph retrieve/expansion smoke, bounded graph expansion, internal remember/link/retrieve pipelines, injected facade-level remember/link/retrieve behavior, and live Qdrant candidate smoke. Correction supersession and forget lifecycle pipelines remain future chunks.
 - `Cargo.toml` includes the selected Qdrant and Oxigraph dependencies for the adapter foundation.
 
 ## Resolved Decisions
@@ -53,15 +53,14 @@
 
 ### Retrieve And ContinuityContextPack
 - Purpose: implement vector-to-graph retrieval, bounded expansion, lifecycle/currentness filtering, deterministic reranking, grouped context pack assembly, rationale, and optional trace.
-- Expected outcome: `retrieve` returns `ContinuityContextPack` and excludes suppressed/deleted and superseded/non-current memories by default.
-- Deferred review findings to carry forward: the current `GraphExpansionQuery` only covers depth, node count, and object-type constraints. The retrieve plan should add relation-type allowlists, fanout or hub limits, lifecycle/currentness filters, and timeout/failure policy before retrieval assembly depends on graph expansion.
-- Concrete plan: [docs/coding-agent/plans/active/v0-1-retrieve-continuity-context-pack-plan.md](v0-1-retrieve-continuity-context-pack-plan.md)
+- Expected outcome: crate-visible injected `retrieve` returns `RetrieveOutcome` with a `ContinuityContextPack`, compact rationale, and optional trace; normal retrieval excludes suppressed/deleted and superseded/non-current memories by default.
+- Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-retrieve-continuity-context-pack-plan.md](../completed/v0-1-retrieve-continuity-context-pack-plan.md)
 
 ### Correction And Forget Lifecycle
 - Purpose: implement non-destructive correction through supersession and lifecycle updates, plus `forget` with suppression as the default.
 - Expected outcome: corrections preserve provenance, old derived memories become non-current, and suppressed memories are hidden from normal retrieval.
 - Deferred review findings to carry forward: hard delete/update behavior in the legacy flat facade conflicts with the v0.1 lifecycle direction. Correction/forget work should preserve supersession/suppression as default behavior and reserve hard deletion for explicit redaction/delete semantics.
-- Concrete plan: draft after retrieval filtering semantics are stable.
+- Concrete plan: [docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md](v0-1-correction-forget-lifecycle-plan.md)
 
 ### Documentation, Migration Cleanup, And Release Validation
 - Purpose: update README and roadmap docs, remove or rewrite old flat memory examples, remove non-contributing legacy implementations, and run final deterministic plus gated integration validation.
@@ -110,6 +109,10 @@
   - Summary: Completed caller-supplied draft DTOs, internal remember/link pipelines, crate-visible injected `CharacterMemory::remember`/`link` wiring, legacy flat facade isolation, and the next active retrieve/context-pack plan.
   - Validation evidence: Required Rust checks, targeted draft/remember/link/facade tests, clippy warning gate, embedded Oxigraph smoke, local Qdrant live smoke, and final Reviewer approval passed.
   - Notes: The retrieve plan carries forward graph expansion hardening before context-pack assembly.
+- 2026-04-29 Retrieve and context-pack completed; correction/forget plan drafted.
+  - Summary: Completed backend-free retrieval DTOs, bounded graph expansion hardening, vector candidate prefilters, provider-neutral retrieve pipeline, crate-visible injected `CharacterMemory::retrieve`, rationale/trace behavior, and the next active correction/forget lifecycle plan.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, embedded Oxigraph retrieve smoke, live Qdrant candidate smoke, `cargo clippy --all-targets -- -D warnings`, and final Reviewer approval passed.
+  - Notes: Correction/forget planning now starts from graph-authoritative retrieval defaults that exclude suppressed/deleted and non-current/superseded records.
 
 ## Decision Log
 
@@ -139,6 +142,11 @@
   - Trigger / new insight: Remember/link final review approved the write pipeline and injected composition behavior with required deterministic and smoke validation evidence.
   - Plan delta: Moved the remember/link concrete plan to completed plans and drafted the retrieve/context-pack concrete plan as the next active chunk.
   - Tradeoffs considered: Retrieval should harden graph expansion policy before assembling context packs, rather than relying on depth/node-count bounds alone.
+  - User approval: directed by approved roadmap sequence.
+- 2026-04-29 Decision: Move from retrieval to correction/forget lifecycle planning
+  - Trigger / new insight: Retrieval final review approved graph-authoritative vector-to-graph context assembly, lifecycle/currentness filtering, rationale/trace behavior, and injected facade isolation.
+  - Plan delta: Moved the retrieve/context-pack concrete plan to completed plans and drafted the correction/forget lifecycle concrete plan as the next active chunk.
+  - Tradeoffs considered: Correction/forget should mutate graph-authoritative lifecycle state before documentation/migration cleanup retires legacy flat update/delete examples.
   - User approval: directed by approved roadmap sequence.
 
 ## Notes

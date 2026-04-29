@@ -9,8 +9,9 @@ mod vector_metadata;
 // pipeline code consumes the surface directly, or prune unused exports.
 #[allow(unused_imports)]
 pub(crate) use candidate_record::{
-    EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
-    VectorSurface,
+    default_vector_candidate_object_types, EmbeddingInput, VectorCandidateFilters,
+    VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch, VectorSurface,
+    VectorTimeField, VectorTimeRangeFilter,
 };
 pub(crate) use embedding_model::EmbeddingModel;
 #[allow(unused_imports)]

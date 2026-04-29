@@ -1,4 +1,5 @@
 pub mod domain;
+pub mod retrieval;
 
 mod draft;
 mod memory;
@@ -22,4 +23,12 @@ pub use memory::Memory;
 pub use memory_filters::MemoryFilters;
 pub use memory_input::MemoryInput;
 pub use memory_type::MemoryType;
+pub use retrieval::{
+    default_retrieval_object_types, ContextPackSection, ContinuityContextPack,
+    ContinuitySectionLimits, GraphRelationTrace, IncludedDerivedMemory, LifecycleFilterAction,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
+    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
+    RetrievalRationale, RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+};
 pub use scored_memory::ScoredMemory;
