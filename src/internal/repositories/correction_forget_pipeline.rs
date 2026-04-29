@@ -658,9 +658,7 @@ fn validate_correction_request(draft: &CorrectMemoryDraft) -> Result<(), CustomE
                 "replacement derived memory text must not be empty",
             ));
         }
-        if !replacement.correction_origin_provenance.has_reference()
-            && !draft.correction_origin.has_reference()
-        {
+        if !replacement.correction_origin_provenance.has_reference() {
             return Err(validation_error(
                 "replacement correction origin provenance is required",
             ));
