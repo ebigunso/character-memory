@@ -7,35 +7,36 @@
 
 ## Goal
 - Implement non-destructive correction and forget lifecycle behavior on top of the landed graph-authoritative remember/link/retrieve path.
-- Preserve provenance and source references while marking replaced derived memories non-current and suppressing forgotten memories by default.
+- Preserve original source provenance, correction-origin provenance, and source references while marking replaced derived memories non-current, suppressing forgotten source/derived memories by default, and preventing source-provenanced derived memories from continuing to influence retrieval after their source is forgotten.
 - Keep this chunk focused on lifecycle mutation and retrieval visibility; do not implement production raw storage, reflection scheduling, belief/evidence ontology, or broad legacy facade removal beyond necessary isolation.
 
 ## Definition of Done
 - Backend-free correction and forget request/outcome DTOs exist without Qdrant/Oxigraph/RDF types.
-- Correction creates replacement canonical objects/links, records supersession, marks replaced derived memories non-current where applicable, and preserves provenance/source references.
-- Supersession support is explicitly scoped by object type: v0.1 derived-memory correction records `new DerivedMemory supersedes old DerivedMemory`; lifecycle behavior for episodes, observations, threads, entities, and links is either object-type-specific or deferred by Task_1 before implementation.
-- Forget defaults to suppression rather than hard deletion, with explicit redaction/delete semantics reserved for deliberately named policy paths if included.
+- Correction creates replacement canonical derived-memory objects/links, records supersession through both `DerivedMemory.supersedes` and a typed `RelationType::Supersedes` link, marks replaced or source-affected derived memories non-current, and preserves both original source provenance and correction-origin provenance/source references.
+- Supersession support is explicitly scoped by object type: this chunk supports derived-memory correction where `new DerivedMemory supersedes old DerivedMemory`; episode/observation correction may create correction derived memories and supersede affected derived memories discovered through provenance, without rewriting historical source objects.
+- Forget defaults to soft lifecycle mutation rather than hard deletion. Derived memories, episodes, and observations can be suppressed; episode/observation suppression cascades by default to behavior-influencing derived memories provenanced to the forgotten source. Memory threads can be archived. Physical redaction/delete behavior is deferred from this chunk; the existing `RetentionState::Deleted` remains a soft lifecycle state that retrieval can filter.
 - Graph authority remains the source of truth for supersession, suppression, lifecycle, provenance, and currentness; Qdrant payloads/candidates are updated or removed only to keep candidate recall from surfacing stale hints.
 - Normal retrieve behavior excludes suppressed/deleted and non-current/superseded memories after correction/forget. Compact rationale summarizes omissions; detailed historical/included-by-policy inspection requires trace-enabled retrieval.
 - Retrieval correctness still holds if stale vector candidates remain after graph mutation or vector maintenance partially fails; graph authority must exclude stale lifecycle state from final normal retrieval.
-- Required Rust checks, deterministic lifecycle tests, embedded Oxigraph smoke, gated Qdrant candidate smoke, clippy, and Reviewer approval are complete, or blockers/required-check waivers are explicitly recorded.
+- Required Rust checks, deterministic lifecycle tests, `cargo test --lib`, embedded Oxigraph smoke, gated Qdrant candidate smoke, clippy, and Reviewer approval are complete, or blockers/required-check waivers are explicitly recorded.
 
 ## Scope / Non-goals
 - Scope:
   - Backend-free correction/forget request, policy, and outcome DTOs.
-  - Lifecycle target object-type boundary selected before implementation: `Episode`, `Observation`, and `DerivedMemory` have `retention_state`; `DerivedMemory` has `is_current` and derived-memory supersession; `MemoryThread` uses `ThreadStatus`; `Entity` and `MemoryLink` do not currently have retention/currentness fields.
-  - Provider-neutral graph lifecycle mutation support needed for currentness, supersession, suppression, and optional explicit hard deletion/redaction semantics.
-  - Vector candidate maintenance needed after correction/forget so Qdrant remains a candidate hint store rather than authority.
+  - Correction-origin provenance fields that can identify the episode/observation/source reference explaining why a correction was made, without requiring production raw transcript storage.
+  - Lifecycle target object-type boundary selected before implementation: derived-memory correction/supersession and derived-memory forget/suppression are in scope; episode/observation correction can supersede affected derived memories through provenance rather than rewriting the source object; episode/observation forget suppresses the source object and cascades to dependent behavior-influencing derived memories by default; `MemoryThread` forget archives the thread through `ThreadStatus::Archived`; `Entity` and `MemoryLink` do not currently have retention/currentness fields and are deferred.
+  - Provider-neutral graph lifecycle mutation support needed for derived-memory currentness, typed supersession, episode/observation/derived-memory suppression, and memory-thread archival, without adding physical hard-delete/redaction graph contracts.
+  - Vector candidate maintenance needed after correction/forget so Qdrant remains a candidate hint store rather than authority; the selected strategy is to delete affected old/suppressed/archived candidates and upsert replacement candidates after graph success.
   - Internal correction and forget pipelines over `GraphAuthorityStore`, `VectorCandidateStore`, and `MemoryEmbedder` where replacement objects need indexing.
-  - Injected `CharacterMemory::correct` / `CharacterMemory::forget` facade shape if selected by Task_1.
+  - Crate-visible injected `CharacterMemory::correct` / `CharacterMemory::forget` facade shape.
   - Deterministic fake-store tests plus embedded Oxigraph and gated Qdrant smoke evidence.
 - Non-goals:
   - Full belief/evidence ontology or contradiction-resolution system.
   - Reflection scheduling, background summarization, external LLM extraction, or LLM-based correction generation.
   - Production raw transcript storage.
   - Public production constructor rewiring unless narrowly required to keep lifecycle behavior testable.
-  - Generic cross-object supersession unless Task_1 deliberately defines object-type-specific semantics and retrieval consequences.
-  - Hard deletion/redaction by default; any such path must be named, opt-in, and validated separately for provenance preservation and user-control/privacy semantics.
+  - Generic cross-object supersession beyond source-provenanced derived-memory correction, or lifecycle mutation for object types without existing lifecycle/currentness fields.
+  - Physical hard deletion/redaction contracts or policy paths; these require separate raw/source, graph, vector, and privacy semantics.
   - UI/E2E/browser validation.
 
 ## Context (workspace)
@@ -70,13 +71,22 @@
   - `docs/decisions/implementation/ADR-I-0006-bounded-graph-expansion.md`
 
 ## Open Questions (max 3)
-- Q1: Should this chunk expose crate-visible injected `correct`/`forget` facades only, matching current `remember`/`link`/`retrieve`, or make any lifecycle method public now?
-- Q2: Should explicit hard deletion/redaction be modeled in this chunk as a backend-free policy path, or deferred until migration cleanup/release validation?
-- Q3: After graph-authoritative suppression/supersession, should vector candidates be deleted immediately for affected object IDs, or upserted with stale lifecycle hints plus graph verification still excluding them?
+- None pending plan approval.
+
+## Resolved Decisions Pending User Approval
+- Correction/forget facades should remain crate-visible injected surfaces in this chunk, matching the current `remember`/`link`/`retrieve` boundary. Public lifecycle API stabilization belongs to Documentation, Migration Cleanup, And Release Validation after production construction is graph-authoritative.
+- Supported lifecycle mutation targets are bounded to existing lifecycle fields: correction supersedes `DerivedMemory` records directly and can supersede source-affected derived memories discovered from corrected episodes/observations; forget suppresses `DerivedMemory`, `Episode`, and `Observation` records; forget archives `MemoryThread` records through `ThreadStatus::Archived`; entity and link lifecycle are deferred.
+- Correction requests must carry or reference correction-origin provenance when available, such as a correction episode ID, correction observation ID, and/or raw/source reference. Replacement correction memories must preserve both the old memory's original source chain and the correction event/source that explains the revision.
+- Forgetting an episode or observation defaults to cascade-suppressing behavior-influencing derived memories whose provenance references the forgotten source, because otherwise forgotten source material could still influence generation through derived memories.
+- Derived-memory supersession must persist both the replacement object's `supersedes` field and a typed `MemoryLink` with `RelationType::Supersedes` from the new derived memory to the old derived memory, because retrieval `superseded_by` evidence is relation-derived.
+- Physical hard deletion/redaction is deferred. This chunk may recognize the existing `RetentionState::Deleted` as a retrieval-filtered soft lifecycle state, but it must not add physical deletion/redaction behavior.
+- After graph success, vector maintenance deletes candidates for old/superseded/suppressed/archived object IDs and upserts replacement candidates. Vector failure after graph success returns explicit partial-success evidence and must not roll back graph truth.
+- Public DTOs stay backend-free; lifecycle pipelines depend on provider-neutral graph/vector/embedder contracts; Qdrant/Oxigraph/RDF remain infrastructure details.
+- Compact rationale should report aggregate lifecycle omissions; trace-enabled retrieval remains the detailed inspection path for corrected, superseded, suppressed, and historical opt-in behavior.
 
 ## Assumptions
-- A1: Correction is non-destructive by default: create replacement memory, preserve old provenance, and mark old derived memories non-current/superseded rather than overwriting them.
-- A2: Forget means suppression by default; hard deletion/redaction requires explicit policy naming and stronger validation.
+- A1: Correction is non-destructive by default: create replacement memory, preserve old provenance, and mark old or source-affected derived memories non-current/superseded rather than overwriting them.
+- A2: Forget means suppression by default; hard deletion/redaction requires a later dedicated policy and validation plan.
 - A3: Retrieval defaults from the completed retrieve plan remain the acceptance oracle for lifecycle visibility.
 - A4: Vector candidate maintenance should reduce stale recall noise and cost but must not become lifecycle authority or a correctness requirement.
 
@@ -88,13 +98,15 @@
   - `docs/coding-agent/plans/active/v0-1-correction-forget-lifecycle-plan.md`
 - depends_on: []
 - description: |
-  Decide correction/forget request names, facade visibility, suppression versus hard-delete policy, vector maintenance strategy, and failure semantics before implementation edits.
+  Decide correction/forget request names, facade visibility, suppression versus hard-delete policy, source-object cascade boundaries, thread archival behavior, vector maintenance strategy, and failure semantics before implementation edits.
 - acceptance:
   - Decision records whether correction/forget facades are crate-visible injected surfaces or public API in this chunk.
   - Decision records supported lifecycle target object types and defers unsupported object types explicitly.
-  - Decision records that derived-memory supersession direction is `new DerivedMemory supersedes old DerivedMemory`, and old memories appear as `superseded_by` in retrieval evidence.
-  - Decision records default suppression and supersession behavior plus any explicit redaction/delete policy boundaries.
-  - Decision records graph-authority lifecycle mutation semantics and Qdrant candidate maintenance strategy.
+  - Decision records source-target cascade rules for correcting or forgetting episodes/observations, including default cascade suppression for behavior-influencing derived memories provenanced to forgotten sources.
+  - Decision records how correction-origin provenance is represented separately from the superseded memory's original source provenance.
+  - Decision records that derived-memory supersession direction is `new DerivedMemory supersedes old DerivedMemory`, that persistence includes both `DerivedMemory.supersedes` and a typed `RelationType::Supersedes` link, and that old or source-affected derived memories appear as `superseded_by` in retrieval evidence.
+  - Decision records default suppression and supersession behavior, and records that physical hard deletion/redaction is deferred from this chunk.
+  - Decision records graph-authority lifecycle mutation semantics and Qdrant candidate maintenance strategy, including delete-old/delete-suppressed/delete-archived/upsert-replacement vector hygiene and graph-authoritative correctness when vector maintenance fails.
   - Decision records dependency direction: public DTOs stay backend-free; pipelines depend on provider-neutral graph/vector/embedder contracts; Qdrant/Oxigraph/RDF remain infrastructure details.
   - Decision records how compact rationale and optional trace should expose corrected, superseded, suppressed, and historical opt-in behavior without overpromising detailed history in always-on rationale.
 - validation:
@@ -117,11 +129,11 @@
 - description: |
   Add backend-free correction/forget request, policy, and outcome DTOs aligned with canonical domain objects and retrieval lifecycle vocabulary.
 - acceptance:
-  - DTOs can express replacement derived-memory data, optional selected object-type-specific lifecycle targets, superseded source IDs, rationale, lifecycle policy, suppression policy, and optional trace flags where selected.
-  - DTOs preserve `supersedes` direction and retrieval-facing `superseded_by` evidence semantics.
-  - DTOs preserve source/raw references without introducing raw transcript storage.
+  - DTOs can express typed lifecycle targets for `DerivedMemory`, `Episode`, `Observation`, and `MemoryThread`; replacement derived-memory data; superseded derived-memory IDs; source-object correction targets; correction-origin episode/observation/source references; rationale; lifecycle policy; cascade policy; suppression/archive policy; and optional trace flags where selected.
+  - DTOs preserve `supersedes` direction and retrieval-facing `superseded_by` evidence semantics without exposing backend graph/vector details.
+  - DTOs preserve original source/raw references and correction-origin source/raw references without introducing raw transcript storage.
   - Outcomes report graph-mutated object IDs, link IDs, vector-maintained object IDs, and partial vector maintenance failures where graph mutation succeeded.
-  - Pure DTO tests cover serialization, defaults, validation, non-destructive correction semantics, suppression defaults, and explicit hard-delete/redaction naming if included.
+  - Pure DTO tests cover serialization, defaults, validation, typed target boundaries, non-destructive correction semantics, source-target cascade defaults, original-source versus correction-origin provenance, suppression/archive defaults, and hard-delete/redaction deferral.
 - validation:
   - kind: command
     required: true
@@ -135,6 +147,10 @@
     required: true
     owner: worker
     detail: "cargo test --no-run"
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo test --lib"
   - kind: command
     required: true
     owner: worker
@@ -149,13 +165,15 @@
   - `src/internal/infrastructures/graph/**`
 - depends_on: [Task_1]
 - description: |
-  Add provider-neutral graph authority behavior needed to mark supported lifecycle/currentness fields, record derived-memory supersession, and support suppression/default forget semantics.
+  Add provider-neutral graph authority behavior needed to mark supported lifecycle/currentness fields, record derived-memory supersession, support source-object cascade discovery, and support suppression/archive forget semantics.
 - acceptance:
-  - Graph authority can persist derived-memory correction supersession links and supported lifecycle/currentness updates without hard-deleting by default.
+  - Graph authority can persist derived-memory correction supersession links, episode/observation/derived-memory retention-state updates, memory-thread archive updates, and supported lifecycle/currentness updates without hard-deleting by default.
   - Graph lifecycle mutation may reuse whole-object `upsert_objects` and `upsert_links` where sufficient; new special mutation methods are optional and must be justified by adapter needs.
+  - Supersession persistence includes both replacement-object `supersedes` data and fake/Oxigraph parity for typed `RelationType::Supersedes` link evidence.
+  - Fake graph and embedded Oxigraph behavior can discover derived memories affected by an episode or observation through provenance fields and/or typed provenance links under bounded query rules.
   - Fake graph and embedded Oxigraph behavior keep old and replacement objects inspectable under explicit historical policy.
   - Normal retrieval after lifecycle mutation excludes suppressed/deleted and non-current/superseded records by default.
-  - Tests cover supersession directionality, suppression, optional historical inclusion, and no accidental traversal through suppressed/non-current records.
+  - Tests cover supersession directionality, episode/observation/derived-memory suppression, memory-thread archival, source-provenance cascade discovery, optional historical inclusion, and no accidental traversal through suppressed/non-current records.
 - validation:
   - kind: command
     required: true
@@ -169,6 +187,10 @@
     required: true
     owner: worker
     detail: "cargo test --no-run"
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo test --lib"
   - kind: command
     required: true
     owner: worker
@@ -185,11 +207,13 @@
 - description: |
   Implement internal correction and forget pipelines with ordered graph mutation, vector candidate maintenance, and deterministic partial-failure behavior.
 - acceptance:
-  - Correction validates all inputs before graph mutation, writes replacement objects/links, records supersession, marks replaced derived memories non-current where applicable, and indexes replacement vector records when selected.
-  - Forget applies suppression by default and updates or deletes vector candidates according to Task_1 policy.
+  - Correction validates all inputs before graph mutation, writes replacement derived-memory objects/links, records typed supersession, marks directly replaced or source-affected derived memories non-current, and indexes replacement vector records when selected.
+  - Correction targeting an episode or observation discovers affected derived memories through provenance, creates a correction derived memory with both original-source and correction-origin provenance, and supersedes or marks non-current the affected derived memories without rewriting the historical episode/observation.
+  - Forget applies suppression to derived-memory, episode, and observation targets by default; episode/observation forget cascade-suppresses behavior-influencing derived memories provenanced to the forgotten source; memory-thread forget archives the thread.
   - Graph mutation failure prevents vector maintenance; vector maintenance failure after graph success returns explicit partial-success outcome.
-  - Tests cover ordering, graph-authoritative lifecycle changes, vector maintenance, partial failure, and retrieval-after-mutation defaults.
-  - Tests prove retrieval still excludes stale lifecycle state through graph authority when vector maintenance fails or stale candidates remain.
+  - After graph success, correction deletes vector candidates for old/superseded object IDs and upserts replacement candidates; forget deletes candidates for suppressed/archived object IDs; vector cleanup is hygiene and never lifecycle authority.
+  - Tests cover ordering, graph-authoritative lifecycle changes, correction-origin provenance preservation, vector maintenance, partial failure, and retrieval-after-mutation defaults.
+  - Tests prove retrieval still excludes stale lifecycle state through graph authority when vector maintenance fails or stale candidates remain, including source-object stale candidates and dependent derived-memory stale candidates.
 - validation:
   - kind: command
     required: true
@@ -203,6 +227,10 @@
     required: true
     owner: worker
     detail: "cargo test --no-run"
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo test --lib"
   - kind: command
     required: true
     owner: worker
@@ -222,7 +250,8 @@
 - acceptance:
   - Selected `CharacterMemory::correct` / `CharacterMemory::forget` facade shape uses injected provider-neutral parts and returns selected backend-free outcomes.
   - Legacy flat `update_memory` / `delete_memory` remain isolated/deprecated and are not used by lifecycle pipelines.
-  - Deterministic facade tests cover correction, forget/suppression, retrieval exclusion, historical opt-in visibility if selected, and legacy isolation.
+  - Facade tests prove deprecated `update_memory` / `delete_memory` do not participate in lifecycle correction/forget behavior.
+  - Deterministic facade tests cover derived-memory correction, episode/observation correction of affected derived memories, correction-origin provenance inspectability, derived-memory forget/suppression, episode/observation forget cascade, memory-thread archive behavior, retrieval exclusion, historical opt-in visibility if selected, and legacy isolation.
   - README examples are updated only if the public runnable surface is production-usable enough to document without misleading users.
   - If correction/forget remains crate-visible like `remember`/`link`/`retrieve`, README updates avoid implying a public production lifecycle API exists.
 - validation:
@@ -238,6 +267,10 @@
     required: true
     owner: worker
     detail: "cargo test --no-run"
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo test --lib"
   - kind: command
     required: true
     owner: worker
@@ -295,7 +328,9 @@
 
 ## Rollback / Safety
 - Keep correction/forget DTOs and facade backend-free.
-- Preserve non-destructive correction and suppression-by-default forget behavior unless Task_1 explicitly selects named hard-delete/redaction semantics.
+- Preserve non-destructive correction, suppression-by-default forget behavior, and source-provenance cascade behavior for forgotten episodes/observations.
+- Preserve both provenance chains for corrections: what the old memory came from and what correction event/source explains the revision.
+- Keep physical hard deletion/redaction deferred; do not add graph/vector/raw redaction contracts in this chunk.
 - Treat Qdrant lifecycle/supersession fields as hints; graph authority remains final truth.
 - Normal retrieval must exclude suppressed/deleted and non-current/superseded memories by default after lifecycle mutation.
 - Keep production raw storage, reflection scheduling, external LLM behavior, and belief/evidence ontology out of this plan.
@@ -306,7 +341,7 @@
 - Out-of-scope docs: UI/E2E, frontend/browser checks, production raw storage, reflection scheduling, external LLM extraction/reranking, full belief/evidence ontology.
 - Top risks: data-integrity lifecycle mutation, correction provenance, graph/vector drift, legacy update/delete drift, public API shape.
 - Risk profile: medium-high because this chunk mutates lifecycle/currentness state and must keep retrieval visibility correct across graph and vector stores.
-- Required checks: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo clippy --all-targets -- -D warnings`, targeted DTO/graph/pipeline/facade/retrieval regression tests, embedded Oxigraph lifecycle smoke, live Qdrant candidate maintenance smoke or CI evidence/required-check waiver, Reviewer gate.
+- Required checks: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`, targeted DTO/graph/pipeline/facade/retrieval regression tests, embedded Oxigraph lifecycle smoke, live Qdrant candidate maintenance smoke or CI evidence/required-check waiver, Reviewer gate.
 
 ## Progress Log
 
@@ -318,6 +353,18 @@
   - Summary: Updated lifecycle plan to reflect the final retrieval shape: compact omission rationale plus detailed trace, graph authority over vector maintenance, derived-memory supersession direction, object-type lifecycle boundaries, and required clippy validation.
   - Validation evidence: Documentation review against completed retrieve plan, project philosophy, ADR-D-0006, ADR-I-0005, and current retrieval DTO/pipeline behavior.
   - Notes: No lifecycle implementation performed; draft still requires user approval before execution.
+- 2026-04-30 Pre-implementation plan review tightened lifecycle target scope.
+  - Summary: Reviewed the draft against the overarching roadmap, v0.1 roadmap, ADR-D-0002, ADR-D-0006, ADR-D-0008, ADR-I-0004, ADR-I-0005, ADR-I-0006, and current domain/retrieval/repository code. Initially narrowed this chunk to derived-memory correction/supersession and derived-memory forget/suppression, deferred source-object cascades and physical redaction/delete, required typed supersession links plus object supersedes fields, selected delete-old/upsert-replacement vector hygiene, and added `cargo test --lib` as required evidence.
+  - Validation evidence: Researcher plan review plus direct source/doc inspection; no implementation performed.
+  - Notes: Draft still requires user approval before execution.
+- 2026-04-30 Roadmap scope recheck broadened lifecycle targets.
+  - Summary: Rechecked the development roadmap and v0.1 roadmap after user feedback. Broadened this plan so completion covers derived-memory correction, episode/observation correction of affected derived memories, derived-memory/episode/observation suppression, default source-provenance cascade for forgotten episodes/observations, memory-thread archival, and graph-authoritative retrieval exclusion.
+  - Validation evidence: Researcher scope reassessment plus direct roadmap/design/ADR review; no implementation performed.
+  - Notes: Draft still requires user approval before execution.
+- 2026-04-30 Reviewer requested explicit correction-origin provenance.
+  - Summary: Added requirements that correction requests and outcomes preserve correction-origin episode/observation/source references separately from original source provenance, and that tests prove correction-origin provenance remains inspectable.
+  - Validation evidence: Reviewer plan review requested changes; no implementation performed.
+  - Notes: Draft still requires user approval before execution.
 
 ## Decision Log
 
@@ -331,14 +378,32 @@
   - Plan delta: Clarified derived-memory supersession direction, object-type lifecycle boundaries, vector maintenance as non-authoritative hygiene, trace versus compact rationale expectations, and required clippy validation.
   - Tradeoffs considered: Keeping generic correction/forget wording would be shorter, but risks workers implementing lifecycle mutation for object types that lack canonical lifecycle fields or treating vector maintenance as correctness authority.
   - User approval: pending.
+- 2026-04-30 Decision: Constrain lifecycle implementation to derived-memory mutation first
+  - Trigger / new insight: Current code supports retention filtering for episodes/observations but has no source-object forget cascade semantics, no physical delete/redact graph contract, and retrieval supersession evidence is relation-derived from typed links.
+  - Plan delta: Resolved open questions toward crate-visible injected facades, derived-memory-only correction/forget mutation, hard-delete/redaction deferral, typed supersession link plus object field persistence, and vector deletion of stale candidates after graph success.
+  - Tradeoffs considered: Supporting episode/observation forget immediately would appear broader, but could leave behavior-influencing derived memories active unless cascade rules are designed and tested. Deferring physical redaction/delete avoids inventing incomplete graph/raw/vector privacy semantics in a lifecycle chunk.
+  - User approval: superseded before implementation by the source-object suppression and provenance cascade decision below.
+- 2026-04-30 Decision: Include source-object suppression with provenance cascade
+  - Trigger / new insight: The development roadmap and v0.1 design expect `forget` and suppression to prevent memories from being used for generation, and ADR-D-0002 says corrections must be able to find derived memories affected by a source episode or observation.
+  - Plan delta: Brought episode/observation suppression and correction-target provenance cascade into scope, while keeping entity/link lifecycle and physical redaction/delete deferred.
+  - Tradeoffs considered: Derived-memory-only lifecycle mutation is simpler but can leave forgotten source material influencing generation through derived memories. Cascade suppression increases implementation and test scope but better satisfies the roadmap's suppression and provenance goals.
+  - User approval: pending.
+- 2026-04-30 Decision: Preserve correction-origin provenance separately
+  - Trigger / new insight: The roadmap says a correction episode explains why and v0.1 acceptance requires provenance to the correction episode, while ADR-D-0008 requires source-reference auditability.
+  - Plan delta: Required correction DTOs, pipelines, and facade tests to represent and preserve correction-origin episode/observation/source references separately from the superseded memory's original provenance chain.
+  - Tradeoffs considered: Only carrying the old source chain would preserve where the outdated memory came from, but not why it changed. A separate correction-origin chain keeps correction history auditable without forcing raw transcript storage into core.
+  - User approval: pending.
 
 ## Notes
 - Risks:
   - Graph/vector drift can make stale candidates noisy even when graph authority excludes them correctly.
-  - Hard deletion/redaction semantics can accidentally bypass provenance preservation if not explicitly named and tested.
+  - Episode/observation forget cascades can accidentally leave behavior-influencing derived memories active unless dependency traversal and mutation rules are explicitly designed.
+  - Hard deletion/redaction semantics can accidentally bypass provenance preservation if implemented without dedicated raw/source, graph, vector, and privacy contracts.
   - Legacy flat update/delete methods may confuse users until the public replacement lifecycle surface and documentation cleanup land.
 - Edge cases:
   - Correcting a derived memory should not erase the old source-reference chain.
+  - Correcting a memory should preserve the correction event/source that explains why the replacement exists.
+  - Forgetting an episode or observation should cascade to behavior-influencing derived memories provenanced to that source by default.
   - Forget should suppress normal retrieval but preserve historical/audit visibility when policy explicitly includes it.
   - Supersession direction must remain clear: new memory supersedes old memory; old memory may be described as superseded_by the new memory in rationale/trace.
   - Vector candidates for suppressed/superseded objects must not become lifecycle authority even if they remain in Qdrant temporarily.
