@@ -189,7 +189,10 @@ fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
         ));
     }
 
-    must_conditions.extend(qdrant_filter_conditions(&query.filters));
+    must_conditions.extend(qdrant_filter_conditions(
+        &query.filters,
+        currentness_filters_are_type_scoped(query),
+    ));
 
     if must_conditions.is_empty() {
         None
@@ -198,7 +201,10 @@ fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
     }
 }
 
-fn qdrant_filter_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
+fn qdrant_filter_conditions(
+    filters: &VectorCandidateFilters,
+    include_currentness_filters: bool,
+) -> Vec<Condition> {
     let mut conditions = Vec::new();
 
     if !filters.retention_states.is_empty() {
@@ -211,12 +217,16 @@ fn qdrant_filter_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> 
         ));
     }
 
-    if let Some(is_current) = filters.is_current {
-        conditions.push(Condition::matches(IS_CURRENT_FIELD, is_current));
+    if include_currentness_filters {
+        if let Some(is_current) = filters.is_current {
+            conditions.push(Condition::matches(IS_CURRENT_FIELD, is_current));
+        }
     }
 
-    if let Some(is_superseded) = filters.is_superseded {
-        conditions.push(Condition::matches(IS_SUPERSEDED_FIELD, is_superseded));
+    if include_currentness_filters {
+        if let Some(is_superseded) = filters.is_superseded {
+            conditions.push(Condition::matches(IS_SUPERSEDED_FIELD, is_superseded));
+        }
     }
 
     if !filters.thread_ids.is_empty() {
@@ -256,6 +266,15 @@ fn qdrant_filter_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> 
     }));
 
     conditions
+}
+
+fn currentness_filters_are_type_scoped(query: &VectorCandidateSearch) -> bool {
+    query.filters.has_currentness_filters()
+        && !query.object_types.is_empty()
+        && query
+            .object_types
+            .iter()
+            .all(|object_type| *object_type == ObjectType::DerivedMemory)
 }
 
 fn any_field_matches(
@@ -613,8 +632,6 @@ mod tests {
         for expected in [
             OBJECT_TYPE_FIELD,
             RETENTION_STATE_FIELD,
-            IS_CURRENT_FIELD,
-            IS_SUPERSEDED_FIELD,
             THREAD_IDS_FIELD,
             EPISODE_IDS_FIELD,
             ENTITY_IDS_FIELD,
@@ -624,6 +641,21 @@ mod tests {
         ] {
             assert!(keys.contains(&expected.to_owned()), "missing {expected}");
         }
+        assert!(!keys.contains(&IS_CURRENT_FIELD.to_owned()));
+        assert!(!keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
+    }
+
+    #[test]
+    fn candidate_prefilter_scopes_currentness_to_derived_memory_searches() {
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
+            .with_object_types(vec![ObjectType::DerivedMemory])
+            .with_filters(VectorCandidateFilters::new().current_only());
+
+        let filter = qdrant_candidate_filter(&query).expect("filter builds");
+        let keys = field_keys(&filter);
+
+        assert!(keys.contains(&IS_CURRENT_FIELD.to_owned()));
+        assert!(keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
     }
 
     #[test]
@@ -667,7 +699,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Task_7 evidence path; requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
+    #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
     async fn qdrant_candidate_store_live_smoke_upserts_filters_searches_and_deletes() {
         let url = env::var("QDRANT_CONNECTION_STRING")
             .expect("QDRANT_CONNECTION_STRING is required for live Qdrant smoke test");

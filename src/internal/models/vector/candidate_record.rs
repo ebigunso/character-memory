@@ -159,6 +159,10 @@ impl VectorCandidateFilters {
         self
     }
 
+    pub(crate) fn has_currentness_filters(&self) -> bool {
+        self.is_current.is_some() || self.is_superseded.is_some()
+    }
+
     pub(crate) fn with_thread_ids(mut self, thread_ids: Vec<MemoryId>) -> Self {
         self.thread_ids = thread_ids;
         self
@@ -293,6 +297,7 @@ mod tests {
 
         assert_eq!(search.object_types, default_vector_candidate_object_types());
         assert_eq!(search.filters, filters);
+        assert!(search.filters.has_currentness_filters());
     }
 
     #[test]
