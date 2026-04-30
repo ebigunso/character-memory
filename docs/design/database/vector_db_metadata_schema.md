@@ -210,25 +210,6 @@ Graph state wins over Qdrant payload state.
 
 If Qdrant is stale, retrieval may do extra work, but it should not return stale or suppressed memories as current context after graph verification.
 
-## What Changed From The Old Schema
-
-The previous schema described flat `episodic` and `semantic` memory entries with fields such as `memory_type`, `content`, `timestamp`, `location_text`, and `participants`.
-
-That no longer matches the graph-authoritative architecture.
-
-The durable model uses typed memory objects:
-
-```text
-Episode
-Observation
-Entity
-MemoryThread
-DerivedMemory
-MemoryLink
-```
-
-The vector schema indexes semantic surfaces for the object types that benefit from recall. It does not preserve the old flat `memory_type` split, and it does not treat location or participant text as required episodic fields. Participants are entity relationships, and relationships are graph-authoritative.
-
 ## Future Revisit Points
 
 Revisit this design when:

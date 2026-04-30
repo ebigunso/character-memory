@@ -13,7 +13,7 @@ What happened?
 Who or what was involved?
 Which memories came from this episode?
 Which memories are current?
-Which old memories were corrected or suppressed?
+Which memories were corrected or suppressed?
 What nearby context should travel with this candidate?
 ```
 
@@ -107,9 +107,9 @@ supersedes
 threadStatus
 ```
 
-The reason is correctness under partial vector maintenance failure. If a memory is corrected or suppressed in the graph but Qdrant still returns its old vector, retrieval must omit it by consulting graph lifecycle state.
+The reason is correctness under partial vector maintenance failure. If a memory is corrected or suppressed in the graph but Qdrant still returns a stale vector, retrieval must omit it by consulting graph lifecycle state.
 
-Supersession is represented as a relationship rather than overwriting history. That preserves the old memory for audit/historical retrieval while making the new current memory visible by default.
+Supersession is represented as a relationship rather than overwriting history. That preserves the prior memory for audit/historical retrieval while making the replacement memory visible by default.
 
 ## Core Predicate Groups
 
