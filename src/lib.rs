@@ -153,11 +153,18 @@ impl CharacterMemory {
         collection_name: String,
         embed_provider: Box<dyn EmbeddingProvider>,
     ) -> Result<Self, CustomError> {
-        let embedding_model = settings.get_embedding_model()?;
+        let expected_vector_size = settings.get_embedding_vector_size()?;
+        let provider_vector_size = embed_provider.vector_size();
+        if provider_vector_size != expected_vector_size {
+            return Err(CustomError::EmbeddingInitializationError(format!(
+                "Embedding provider vector size ({provider_vector_size}) does not match configured embedding model vector size ({expected_vector_size})."
+            )));
+        }
+
         let vector_store = QdrantVectorCandidateStore::new(
             settings.get_qdrant_connection(),
             collection_name,
-            embedding_model.vector_size(),
+            expected_vector_size as u64,
         )?;
         vector_store.init_collection().await?;
         Ok(Self::from_parts(
@@ -290,6 +297,7 @@ impl From<crate::internal::repositories::InternalVectorIndexingFailure> for Vect
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use secrecy::SecretString;
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, EntityType, ObjectType, RelationType};
@@ -628,6 +636,33 @@ mod tests {
             .any(|thread| thread.id == fixtures.soft_thread.id));
     }
 
+    #[tokio::test]
+    async fn constructor_rejects_embedding_provider_vector_size_mismatch_before_storage_init() {
+        let settings = Settings::new_for_tests(
+            SecretString::new("not-a-qdrant-url".into()),
+            SecretString::new("memory://local".into()),
+            SecretString::new("dummy-key".into()),
+            SecretString::new("text-embedding-3-small".into()),
+        );
+
+        let error = match CharacterMemory::new_with_embedding_provider(
+            settings,
+            "mismatched_provider_vectors".to_owned(),
+            Box::new(FixedEmbeddingProvider::new(8)),
+        )
+        .await
+        {
+            Ok(_) => panic!("constructor should reject mismatched provider vector size"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            CustomError::EmbeddingInitializationError(message)
+                if message.contains("8") && message.contains("1536")
+        ));
+    }
+
     fn injected_memory() -> CharacterMemory {
         CharacterMemory::from_parts(
             Box::new(FakeGraphAuthorityStore::new()),
@@ -788,6 +823,35 @@ mod tests {
             .chain(pack.commitments.iter())
             .chain(pack.character_signals.iter())
             .any(|included| included.memory.id == memory_id)
+    }
+
+    #[derive(Debug)]
+    struct FixedEmbeddingProvider {
+        vector_size: usize,
+    }
+
+    impl FixedEmbeddingProvider {
+        fn new(vector_size: usize) -> Self {
+            Self { vector_size }
+        }
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for FixedEmbeddingProvider {
+        fn vector_size(&self) -> usize {
+            self.vector_size
+        }
+
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![0.0; self.vector_size])
+        }
+
+        async fn bulk_generate_embeddings<'a>(
+            &self,
+            texts: &'a [&'a str],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            Ok(vec![vec![0.0; self.vector_size]; texts.len()])
+        }
     }
 
     #[derive(Debug)]

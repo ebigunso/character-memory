@@ -50,6 +50,10 @@ impl DeterministicEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for DeterministicEmbeddingProvider {
+    fn vector_size(&self) -> usize {
+        self.vector_size
+    }
+
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         Ok(self.vector_for_text(text))
     }
