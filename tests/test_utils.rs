@@ -4,6 +4,7 @@ use character_memory::{CharacterMemory, CustomError, EmbeddingProvider};
 use qdrant_client::{Qdrant, QdrantError};
 use std::io::ErrorKind;
 use std::sync::Once;
+use tonic::Code;
 use uuid::Uuid;
 
 static INIT: Once = Once::new();
@@ -100,7 +101,7 @@ pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), C
 
 pub fn is_qdrant_unavailable_error(error: &QdrantError) -> bool {
     match error {
-        QdrantError::ResponseError { status } => status.code().to_string() == "Unavailable",
+        QdrantError::ResponseError { status } => status.code() == Code::Unavailable,
         QdrantError::Reqwest(error) => error.is_connect() || error.is_timeout(),
         QdrantError::Io(error) => matches!(
             error.kind(),

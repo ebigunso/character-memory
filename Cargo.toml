@@ -27,3 +27,6 @@ async-trait = "0.1.86"
 # Utils
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
+
+[dev-dependencies]
+tonic = "0.12.3"

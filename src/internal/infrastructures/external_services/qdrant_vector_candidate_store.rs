@@ -147,8 +147,21 @@ fn validate_collection_vector_config(
     };
 
     match vectors_config.config.as_ref() {
-        Some(vectors_config::Config::Params(params)) if params.size == expected_vector_size => {
+        Some(vectors_config::Config::Params(params))
+            if params.size == expected_vector_size
+                && params.distance == Distance::Cosine as i32 =>
+        {
             Ok(())
+        }
+        Some(vectors_config::Config::Params(params))
+            if params.size == expected_vector_size =>
+        {
+            Err(CustomError::DatabaseError(format!(
+                "Qdrant collection '{collection_name}' vector distance mismatch: expected Cosine, found {}.",
+                Distance::try_from(params.distance)
+                    .map(|distance| distance.as_str_name().to_owned())
+                    .unwrap_or_else(|_| params.distance.to_string())
+            )))
         }
         Some(vectors_config::Config::Params(params)) => Err(CustomError::DatabaseError(format!(
             "Qdrant collection '{collection_name}' vector size mismatch: expected {expected_vector_size}, found {}.",
@@ -598,6 +611,27 @@ mod tests {
                 if message.contains("memories")
                     && message.contains("expected 3072")
                     && message.contains("found 1536")
+        ));
+    }
+
+    #[test]
+    fn rejects_existing_collection_with_wrong_distance_metric() {
+        let config = VectorsConfig {
+            config: Some(vectors_config::Config::Params(VectorParams {
+                size: 1536,
+                distance: Distance::Euclid.into(),
+                ..Default::default()
+            })),
+        };
+
+        let error = validate_collection_vector_config("memories", 1536, Some(&config))
+            .expect_err("same-size collection with wrong distance should fail");
+        assert!(matches!(
+            error,
+            CustomError::DatabaseError(message)
+                if message.contains("memories")
+                    && message.contains("expected Cosine")
+                    && message.contains("Euclid")
         ));
     }
 
