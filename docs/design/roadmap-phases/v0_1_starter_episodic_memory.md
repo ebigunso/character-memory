@@ -346,7 +346,7 @@ Internal steps:
 3. Resolve and expand candidates through Oxigraph by entity, thread, lifecycle state, and provenance.
 4. Filter suppressed/archived/non-current records.
 5. Rerank by semantic similarity, thread match, entity overlap, recency, salience, and open-loop priority.
-6. Format a compact continuity context pack.
+6. Format a `RetrieveOutcome` containing a compact continuity context pack in `pack`.
 ```
 
 ---
@@ -386,8 +386,8 @@ Thread links can be created, confidence-scored, and revised.
 ## Retrieval
 
 ```text
-retrieve() returns ContinuityContextPack.
-Pack includes rationale for included memories.
+retrieve() returns RetrieveOutcome.
+RetrieveOutcome.pack is the ContinuityContextPack and includes rationale for included memories.
 Suppressed/archived memories are excluded.
 Current derived memories outrank superseded ones.
 Thread and entity matches influence ranking.

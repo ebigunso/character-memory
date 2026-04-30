@@ -17,7 +17,9 @@ async fn test_character_memory_initialization() {
 
     // Construction initializes the Qdrant candidate collection, so reaching this point
     // means the public constructor completed live storage setup.
+    let test_result: Result<(), String> = async { Ok(()) }.await;
 
     // Cleanup
     cleanup_collection(&collection_name).await;
+    test_result.expect("live initialization test should pass");
 }
