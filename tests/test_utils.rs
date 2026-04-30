@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
 use character_memory::{CharacterMemory, CustomError, EmbeddingProvider};
 use qdrant_client::Qdrant;
-use std::env;
 use std::sync::Once;
 use uuid::Uuid;
 
@@ -72,17 +71,6 @@ fn stable_hash(text: &str) -> usize {
     })
 }
 
-fn embedding_vector_size_from_env() -> usize {
-    match env::var("EMBEDDING_MODEL")
-        .expect("EMBEDDING_MODEL must be set for integration tests")
-        .trim()
-    {
-        "text-embedding-3-small" | "text-embedding-ada-002" => 1536,
-        "text-embedding-3-large" => 3072,
-        other => panic!("Unsupported EMBEDDING_MODEL for integration tests: {other}"),
-    }
-}
-
 // Setup CharacterMemory instance with a unique collection
 pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), CustomError> {
     initialize();
@@ -92,7 +80,7 @@ pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), C
     // Use the load_test_settings function from the test_utils module
     let settings = load_test_settings().expect("Failed to load settings from environment");
     let embed_provider = Box::new(DeterministicEmbeddingProvider::new(
-        embedding_vector_size_from_env(),
+        settings.get_embedding_vector_size()?,
     ));
 
     let character_memory = CharacterMemory::new_with_embedding_provider(
@@ -101,8 +89,6 @@ pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), C
         embed_provider,
     )
     .await?;
-
-    character_memory.init_storage().await?;
 
     Ok((character_memory, collection_name))
 }

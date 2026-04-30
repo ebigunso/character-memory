@@ -97,6 +97,10 @@ impl Settings {
         self.openai_api_key.expose_secret()
     }
 
+    pub fn get_embedding_vector_size(&self) -> Result<usize, CustomError> {
+        Ok(self.get_embedding_model()?.vector_size() as usize)
+    }
+
     pub(crate) fn get_embedding_model(&self) -> Result<EmbeddingModel, CustomError> {
         self.embedding_model.expose_secret().parse()
     }

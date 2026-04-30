@@ -189,23 +189,6 @@ impl CharacterMemory {
         Self::new_with_embedding_provider(settings, collection_name, embed_provider).await
     }
 
-    /// Initializes the storage systems.
-    ///
-    /// # Description
-    ///
-    /// Ensures all required storage systems are properly initialized before any operations are performed.
-    /// This should be called during application startup.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: Empty unit type if initialization succeeds
-    /// - `Err`: A `CustomError` if initialization fails
-    pub async fn init_storage(&self) -> Result<(), CustomError> {
-        Ok(())
-    }
-
     /// Persists a remember draft through the graph-authoritative write pipeline.
     pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
         let parts = self.memory_composition();

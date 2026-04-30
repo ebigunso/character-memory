@@ -9,10 +9,8 @@ async fn test_character_memory_initialization() {
         return;
     };
 
-    // The setup function already calls init_storage, so if we got here without errors,
-    // it means initialization was successful
-
-    // No explicit assertions needed as the test would fail if initialization failed
+    // Construction initializes the Qdrant candidate collection, so reaching this point
+    // means the public constructor completed live storage setup.
 
     // Cleanup
     cleanup_collection(&collection_name).await;
