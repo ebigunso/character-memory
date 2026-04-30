@@ -2,8 +2,8 @@
 
 This is the compact schema reference. The companion design notes explain why the schema is shaped this way:
 
-- [Vector Database Payload Design](vector_db_metadata_schema.md)
-- [Graph Database Schema Design](graph_db_schema.md)
+- [Vector Database Payload Design](vector_payload_design.md)
+- [Graph Database Schema Design](graph_schema_design.md)
 
 ## Authority Split
 
