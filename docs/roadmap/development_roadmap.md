@@ -113,6 +113,7 @@ high salience
 |---|---|---|
 | v0.1 | Starter episodic memory | Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
 | v0.1 backend | Storage contracts | Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, and tests. |
+| v0.1.1 | Persistent graph authority | Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation before adding richer continuity/reflection features. |
 | v0.2 | Continuity and reflection | Relationship state, character signals, open-loop/commitment lifecycle, scheduled reflection, current continuity views. |
 | v0.3 | Factual rigor | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, current-belief view. |
 | v0.4 | Advanced recall and governance | Associations, episode clusters, retention governance, retrieval traces, validation, context subgraph construction. |
@@ -281,7 +282,300 @@ retrieval behavior is deterministic under fixed fixtures
 
 ---
 
-# 7. v0.2: continuity and reflection
+# 7. v0.1.1: persistent graph authority
+
+Detailed draft: [`v0_1_1_persistent_graph_authority.md`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
+
+## Intent
+
+Make the v0.1 graph-authoritative architecture durable across process restarts before adding richer continuity and reflection features.
+
+v0.1 established the starter Character Memory object model and retrieval behavior:
+
+```text
+Episode
+Observation
+Entity
+MemoryThread
+DerivedMemory
+MemoryLink
+ContinuityContextPack
+```
+
+It also established the storage split:
+
+```text
+Qdrant   = vector candidate recall
+Oxigraph = graph authority for objects, links, provenance, lifecycle, currentness, and correction
+```
+
+However, the current graph authority is embedded/in-memory. This creates a durability gap: Qdrant candidates may survive restart while the graph state required to validate provenance, currentness, retention, supersession, and links may not.
+
+v0.1.1 closes that gap without adding new memory concepts.
+
+## Why this phase comes before v0.2
+
+v0.2 introduces stronger continuity structures:
+
+```text
+RelationshipState
+CharacterSignal
+OpenLoop
+Commitment
+ReflectionJob
+CurrentContinuityView
+```
+
+These should not be built on a volatile graph authority layer.
+
+If graph state is lost across process restart, the system can no longer reliably answer:
+
+```text
+Does this memory still exist?
+Is this memory current?
+Was it suppressed?
+Was it superseded?
+What episode or observation supports this derived memory?
+Which thread/entity links make this relevant?
+```
+
+For Character Memory, this is not only a storage concern. It affects whether the assistant behaves from grounded continuity or from stale/unvalidated vector candidates.
+
+Therefore v0.1.1 should make the existing graph-authoritative design operationally durable before the roadmap moves to richer continuity and reflection features.
+
+## Core concepts
+
+No new memory concepts are introduced in this phase.
+
+The phase hardens existing v0.1 concepts:
+
+```text
+Episode
+Observation
+Entity
+MemoryThread
+DerivedMemory
+MemoryLink
+Retention state
+Currentness
+Supersession
+Suppression
+Provenance
+Bounded graph expansion
+```
+
+## Goals
+
+```text
+support persistent Oxigraph storage configuration
+preserve graph-authoritative state across process restarts
+keep in-memory graph mode available for deterministic tests
+validate restart-safe retrieval
+detect Qdrant/Oxigraph drift
+prevent vector-only candidates from becoming behavior-influencing memory
+document persistence configuration and operational expectations
+```
+
+## Non-goals
+
+Do not implement in v0.1.1:
+
+```text
+new memory object types
+relationship-state model
+character-signal reinforcement
+reflection scheduler
+separate Assertion / Claim / EvidenceLink / BeliefAssessment classes
+domain-scoped source credibility
+advanced association graph
+retention governance beyond existing lifecycle state
+multimodal observation model
+distributed transactions across Qdrant and Oxigraph
+heavy ontology or OWL reasoning
+```
+
+This phase is operational hardening of the v0.1 storage model, not expansion of the ontology.
+
+## Deliverables
+
+```text
+configurable Oxigraph graph store mode
+persistent Oxigraph graph authority implementation
+restart-safe graph authority tests
+retrieval behavior tests after graph restart
+Qdrant/Oxigraph reconciliation diagnostics
+partial-persistence visibility gates
+documentation for persistent graph setup
+```
+
+## Configuration direction
+
+The graph authority should support at least two modes:
+
+```rust
+GraphStoreMode::InMemory
+GraphStoreMode::Persistent { path: PathBuf }
+```
+
+or equivalent settings:
+
+```toml
+[graph]
+mode = "persistent"
+path = "./data/oxigraph"
+```
+
+In-memory mode remains useful for deterministic unit tests and local fast fixtures.
+
+Persistent mode is the default recommendation for applications that expect memory to survive process restart.
+
+## Required behavior
+
+Persistent graph mode must preserve:
+
+```text
+memory object existence
+object type triples
+episode → observation links
+derived memory → episode/observation provenance links
+entity links
+thread links
+supersession links
+retention state
+currentness
+bounded expansion behavior
+```
+
+After restart, retrieval must still obey:
+
+```text
+Qdrant candidate
+  → graph validation
+  → lifecycle/currentness/provenance filtering
+  → bounded graph expansion
+  → ContinuityContextPack
+```
+
+Retrieval must not fall back to treating Qdrant payloads as authoritative memory if graph validation fails.
+
+## Qdrant/Oxigraph reconciliation
+
+This phase should add at least diagnostic reconciliation for cross-store drift.
+
+Detect:
+
+```text
+Qdrant point exists but graph object is missing
+graph object exists but Qdrant point is missing
+Qdrant graph_uri does not match canonical graph URI
+Qdrant payload says active but graph says suppressed
+Qdrant payload says current but graph says superseded or non-current
+Qdrant payload schema_version is unsupported
+graph object has missing required provenance
+```
+
+Initial reconciliation may report rather than fully repair all cases.
+
+Minimum behavior:
+
+```text
+vector-only candidates are excluded from normal retrieval
+graph-only records remain valid but may have degraded semantic recall
+suppressed or superseded graph records are excluded even if Qdrant payload is stale
+```
+
+## Partial persistence policy
+
+v0.1.1 should make this rule explicit:
+
+```text
+Partial persistence may create repairable degraded state.
+It must not create behavior-influencing ungrounded memory.
+```
+
+Acceptable degraded states:
+
+```text
+graph object exists but vector point is missing
+optional thread/entity link is missing
+reflection/vector indexing failed
+Qdrant is unavailable but graph lookup still works
+```
+
+Unacceptable visible states:
+
+```text
+vector point exists and is used without graph validation
+DerivedMemory influences behavior without provenance
+suppressed/deleted memory appears in normal retrieval
+superseded memory appears as current
+Qdrant payload joins to the wrong graph object
+duplicate retry writes inflate salience or apparent recurrence
+```
+
+## Acceptance criteria
+
+```text
+Persistent graph mode can be configured.
+In-memory graph mode remains available.
+Episode objects survive graph store restart.
+Observation links survive graph store restart.
+DerivedMemory provenance links survive graph store restart.
+Entity and thread links survive graph store restart.
+Suppression and supersession state survive graph store restart.
+Currentness filtering works after restart.
+Retrieval after restart excludes suppressed, deleted, non-current, and superseded records by default.
+Qdrant candidates whose graph objects are missing are rejected from normal retrieval.
+Reconciliation diagnostics can report vector-only and graph-only drift.
+Stable object ID to graph IRI mapping remains unchanged.
+Existing v0.1 public APIs continue to work.
+```
+
+## Validation expectations
+
+Concrete implementation plans for this phase should include:
+
+```text
+cargo fmt --check
+cargo check
+cargo test --no-run
+cargo test --lib
+targeted persistent Oxigraph restart tests
+targeted retrieval-after-restart tests
+targeted reconciliation diagnostics tests
+bounded graph expansion regression tests
+lifecycle filtering regression tests
+```
+
+If live Qdrant is required for reconciliation smoke tests, those tests should remain prerequisite-gated and documented, as in the existing v0.1 validation approach.
+
+## Design constraints
+
+```text
+Qdrant remains candidate recall only.
+Oxigraph remains authoritative for object existence, links, provenance, lifecycle, currentness, and correction.
+Stable IDs and deterministic graph IRIs must not change.
+Persistent graph mode must not require changing the public v0.1 object model.
+In-memory mode must remain available for tests.
+No new v0.2 continuity concepts should be introduced in this phase.
+```
+
+## Expected outcome
+
+After v0.1.1, the starter Character Memory model is operationally durable.
+
+The system can safely move to v0.2 continuity and reflection work because the graph authority needed for provenance, lifecycle, currentness, and retrieval validation survives process restarts.
+
+In short:
+
+```text
+v0.1 made the starter memory model feature-complete.
+v0.1.1 makes the starter memory model persistence-safe.
+```
+
+---
+
+# 8. v0.2: continuity and reflection
 
 Detailed draft: [`v0_2_continuity_reflection.md`](../design/roadmap-phases/v0_2_continuity_reflection.md)
 
@@ -307,7 +601,7 @@ separate current continuity context from raw historical memories
 
 ---
 
-# 8. v0.3: factual rigor and belief tracking
+# 9. v0.3: factual rigor and belief tracking
 
 Detailed draft: [`v0_3_factual_rigor_belief_tracking.md`](../design/roadmap-phases/v0_3_factual_rigor_belief_tracking.md)
 
@@ -336,7 +630,7 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 9. v0.4: advanced recall and governance
+# 10. v0.4: advanced recall and governance
 
 Detailed draft: [`v0_4_advanced_recall_governance.md`](../design/roadmap-phases/v0_4_advanced_recall_governance.md)
 
@@ -363,7 +657,7 @@ validate invariants
 
 ---
 
-# 10. v1.0+: multimodal and embodied expansion
+# 11. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -391,7 +685,7 @@ This is a future path, not starter scope.
 
 ---
 
-# 11. Public API evolution
+# 12. Public API evolution
 
 ## v0.1 API
 
@@ -450,7 +744,7 @@ let retention_result = memory
 
 ---
 
-# 12. YAGNI rules
+# 13. YAGNI rules
 
 Do not implement in v0.1:
 
