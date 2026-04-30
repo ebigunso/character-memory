@@ -21,6 +21,38 @@ Purpose:
 
 ## Entries
 
+## 2026-04-30 - Re-request Copilot PR Review Through GraphQL When Add-Reviewer Is A No-Op  [tags: tooling, review, git]
+
+Context:
+- Plan: PR #35 final Copilot re-review request
+- Task/Wave: post-remediation review request
+- Roles involved: Orchestrator
+
+Symptom:
+- `gh pr edit 35 --add-reviewer '@copilot'` returned success, but the PR page did not show Copilot reviewing and no new Copilot review appeared.
+- Removing and re-adding `@copilot` through `gh pr edit` also returned success without starting a new review.
+
+Root cause:
+- Copilot PR review behaves like a special reviewer/re-review flow after it has already reviewed a PR.
+- The normal `gh pr edit --add-reviewer '@copilot'` path can be a no-op for re-review even when it returns the PR URL.
+- GitHub GraphQL exposes the working request as `requestReviewsByLogin` with `userLogins: ["copilot-pull-request-reviewer"]`; using `botLogins` caused a GitHub server-side error.
+
+Fix applied:
+- Requested review with GraphQL:
+  - query PR id:
+    `gh api graphql -f query='query { repository(owner: "OWNER", name: "REPO") { pullRequest(number: PR_NUMBER) { id } } }'`
+  - request Copilot re-review:
+    `gh api graphql -f query='mutation($pullRequestId: ID!) { requestReviewsByLogin(input: { pullRequestId: $pullRequestId, userLogins: ["copilot-pull-request-reviewer"], union: true }) { pullRequest { reviewRequests(first:20) { nodes { requestedReviewer { __typename ... on Bot { login } ... on User { login } } } } } } }' -f pullRequestId='PR_ID'`
+- Verified that `reviewRequests` temporarily contained `copilot-pull-request-reviewer`, then that Copilot posted a new review with no new comments.
+
+Prevention:
+- In PowerShell, quote `@copilot` when using the ordinary path: `gh pr edit PR_NUMBER --add-reviewer '@copilot'`.
+- If Copilot has already reviewed the PR and the ordinary path returns success but does not start a new review, use the GraphQL `requestReviewsByLogin` fallback with `userLogins: ["copilot-pull-request-reviewer"]`.
+- After requesting, verify via GraphQL `reviewRequests` and `latestReviews`, not just by command exit code.
+
+Evidence:
+- PR #35 received a new Copilot review at `2026-04-30T11:42:14Z` after the GraphQL fallback: "Copilot reviewed 57 out of 58 changed files in this pull request and generated no new comments."
+
 ## 2026-04-30 - Treat Cleanup Chunks As Completion Work When Roadmap Says Migration Cleanup  [tags: planning, scope-owns, assumptions]
 
 Context:
