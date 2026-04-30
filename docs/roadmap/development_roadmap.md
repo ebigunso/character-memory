@@ -113,6 +113,7 @@ high salience
 |---|---|---|
 | v0.1 | Starter episodic memory | Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
 | v0.1 backend | Storage contracts | Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, and tests. |
+| v0.1.1 | Persistent graph authority | Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation before adding richer continuity/reflection features. |
 | v0.2 | Continuity and reflection | Relationship state, character signals, open-loop/commitment lifecycle, scheduled reflection, current continuity views. |
 | v0.3 | Factual rigor | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, current-belief view. |
 | v0.4 | Advanced recall and governance | Associations, episode clusters, retention governance, retrieval traces, validation, context subgraph construction. |
@@ -281,7 +282,70 @@ retrieval behavior is deterministic under fixed fixtures
 
 ---
 
-# 7. v0.2: continuity and reflection
+# 7. v0.1.1: persistent graph authority
+
+Detailed draft: [`v0_1_1_persistent_graph_authority`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
+
+## Intent
+
+Make the v0.1 graph-authoritative architecture durable across process restarts before adding richer continuity and reflection features.
+
+This phase closes the gap where Qdrant candidates may survive restart while the Oxigraph authority required to validate provenance, lifecycle, currentness, supersession, and links may not.
+
+## Goals
+
+```text
+support persistent Oxigraph storage configuration
+preserve graph-authoritative state across process restarts
+keep in-memory graph mode available for deterministic tests
+validate restart-safe retrieval
+detect Qdrant/Oxigraph drift
+prevent vector-only candidates from becoming behavior-influencing memory
+document persistence configuration and operational expectations
+```
+
+## Non-goals
+
+```text
+new memory object types
+relationship-state model
+character-signal reinforcement
+reflection scheduler
+separate Assertion / Claim / EvidenceLink / BeliefAssessment classes
+advanced association graph
+multimodal observation model
+distributed transactions across Qdrant and Oxigraph
+```
+
+## Deliverables
+
+```text
+configurable Oxigraph graph store mode
+persistent Oxigraph graph authority implementation
+restart-safe graph authority tests
+retrieval behavior tests after graph restart
+Qdrant/Oxigraph reconciliation diagnostics
+partial-persistence visibility gates
+documentation for persistent graph setup
+```
+
+## Acceptance criteria
+
+```text
+Persistent graph mode can be configured.
+In-memory graph mode remains available.
+Objects, links, provenance, suppression, supersession, and currentness survive graph store restart.
+Currentness filtering works after restart.
+Retrieval after restart excludes suppressed, deleted, non-current, and superseded records by default.
+Qdrant candidates whose graph objects are missing are rejected from normal retrieval.
+Reconciliation diagnostics can report vector-only and graph-only drift.
+Stable object ID to graph IRI mapping remains unchanged.
+Existing v0.1 public APIs continue to work.
+```
+
+---
+
+# 8. v0.2: continuity and reflection
 
 Detailed draft: [`v0_2_continuity_reflection.md`](../design/roadmap-phases/v0_2_continuity_reflection.md)
 
@@ -307,7 +371,7 @@ separate current continuity context from raw historical memories
 
 ---
 
-# 8. v0.3: factual rigor and belief tracking
+# 9. v0.3: factual rigor and belief tracking
 
 Detailed draft: [`v0_3_factual_rigor_belief_tracking.md`](../design/roadmap-phases/v0_3_factual_rigor_belief_tracking.md)
 
@@ -336,7 +400,7 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 9. v0.4: advanced recall and governance
+# 10. v0.4: advanced recall and governance
 
 Detailed draft: [`v0_4_advanced_recall_governance.md`](../design/roadmap-phases/v0_4_advanced_recall_governance.md)
 
@@ -363,7 +427,7 @@ validate invariants
 
 ---
 
-# 10. v1.0+: multimodal and embodied expansion
+# 11. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -391,7 +455,7 @@ This is a future path, not starter scope.
 
 ---
 
-# 11. Public API evolution
+# 12. Public API evolution
 
 ## v0.1 API
 
@@ -450,7 +514,7 @@ let retention_result = memory
 
 ---
 
-# 12. YAGNI rules
+# 13. YAGNI rules
 
 Do not implement in v0.1:
 
