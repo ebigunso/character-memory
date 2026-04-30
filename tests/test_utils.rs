@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
 use character_memory::{CharacterMemory, CustomError, EmbeddingProvider};
-use qdrant_client::Qdrant;
+use qdrant_client::{Qdrant, QdrantError};
+use std::io::ErrorKind;
 use std::sync::Once;
 use uuid::Uuid;
 
@@ -95,6 +96,22 @@ pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), C
     .await?;
 
     Ok((character_memory, collection_name))
+}
+
+pub fn is_qdrant_unavailable_error(error: &QdrantError) -> bool {
+    match error {
+        QdrantError::ResponseError { status } => status.code().to_string() == "Unavailable",
+        QdrantError::Reqwest(error) => error.is_connect() || error.is_timeout(),
+        QdrantError::Io(error) => matches!(
+            error.kind(),
+            ErrorKind::ConnectionRefused
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::NotConnected
+                | ErrorKind::TimedOut
+        ),
+        _ => false,
+    }
 }
 
 // Cleanup after tests by deleting the collection
