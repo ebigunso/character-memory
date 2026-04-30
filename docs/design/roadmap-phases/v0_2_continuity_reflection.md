@@ -99,7 +99,7 @@ An unresolved question, task, tension, or pending decision.
 {
   "id": "loop_roadmap_revision",
   "object_type": "open_loop",
-  "text": "Revise the roadmap by incorporating useful backend discipline from the old roadmap while preserving the Character Memory philosophy.",
+  "text": "Revise the roadmap by preserving useful backend discipline while preserving the Character Memory philosophy.",
   "status": "active",
   "priority": 0.86,
   "created_in_episode_id": "ep_...",
@@ -234,10 +234,8 @@ Current views exclude superseded/suppressed records.
 
 ---
 
-# 8. Relation to old roadmap
+# 8. Library Boundary
 
-The old roadmap did not include a continuity layer. It treated application behavior as out-of-repository context.
-
-The revised v0.2 keeps the library boundary but makes continuity structures first-class because they are the actual product goal.
+v0.2 keeps the library boundary but makes continuity structures first-class because they are the actual product goal.
 
 This is not agent orchestration. It is memory state.

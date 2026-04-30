@@ -1,7 +1,5 @@
-// v0.1 typed-link pipeline used by the public facade and internal tests. Some
-// helpers remain available for focused test/control paths.
-#![allow(dead_code)]
-
+// Typed-link pipeline used by the public facade and internal tests. Some
+// helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft};
 use crate::errors::CustomError;
 use crate::internal::repositories::GraphAuthorityStore;

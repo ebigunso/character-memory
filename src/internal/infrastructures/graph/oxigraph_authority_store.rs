@@ -1,4 +1,4 @@
-// v0.1 embedded Oxigraph graph authority. Canonical domain objects are retained
+// Embedded Oxigraph graph authority. Canonical domain objects are retained
 // for contract reads while RDF triples are materialized into Oxigraph.
 #![allow(dead_code)]
 

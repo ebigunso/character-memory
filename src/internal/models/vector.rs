@@ -3,7 +3,7 @@ mod embedding_model;
 mod embedding_surface;
 mod record;
 
-// v0.1 provider-neutral vector model surface. Adapters, pipelines, and test
+// Provider-neutral vector model surface. Adapters, pipelines, and test
 // support intentionally consume different subsets of these helpers.
 #[allow(unused_imports)]
 pub(crate) use candidate_record::{

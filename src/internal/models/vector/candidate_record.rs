@@ -1,4 +1,4 @@
-// v0.1 vector candidate query surface. Some filters are exercised by live
+// Vector candidate query surface. Some filters are exercised by live
 // adapters while deterministic tests use narrower subsets.
 #![allow(dead_code)]
 

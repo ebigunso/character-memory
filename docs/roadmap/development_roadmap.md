@@ -258,7 +258,7 @@ Detailed draft: [`v0_1_storage_and_backend_contracts.md`](../design/roadmap-phas
 
 ## Goals
 
-Incorporate the useful engineering discipline from the old roadmap:
+Backend storage work should preserve the engineering discipline that matters for a durable memory substrate:
 
 ```text
 shared IDs

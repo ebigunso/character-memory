@@ -1,4 +1,4 @@
-// v0.1 Qdrant payload mapping. These fields are denormalized candidate
+// Qdrant payload mapping. These fields are denormalized candidate
 // recall/filter hints, not graph authority.
 #![allow(dead_code)]
 

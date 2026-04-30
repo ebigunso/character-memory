@@ -1,4 +1,4 @@
-// v0.1 deterministic test harness shared by pipeline, adapter, and facade
+// Deterministic test harness shared by pipeline, adapter, and facade
 // tests.
 #![allow(dead_code)]
 

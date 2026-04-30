@@ -1,4 +1,4 @@
-// v0.1 embedding-surface builders for graph objects that participate in vector
+// Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
 #![allow(dead_code)]
 

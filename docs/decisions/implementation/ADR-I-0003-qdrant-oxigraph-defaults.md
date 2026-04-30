@@ -13,7 +13,7 @@ superseded_by: null
 
 ## Context and Problem Statement
 
-The library needs both semantic recall and explicit relationship traversal. Qdrant and Oxigraph provide practical default backends for those roles. The old roadmap already assumed this split, with Qdrant for vectors and payload filtering and Oxigraph for RDF/SPARQL relationships.
+The library needs both semantic recall and explicit relationship traversal. Qdrant and Oxigraph provide practical default backends for those roles: Qdrant for vectors and payload filtering, Oxigraph for RDF/SPARQL relationships.
 
 ## Decision Drivers
 

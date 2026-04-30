@@ -1,4 +1,4 @@
-// v0.1 Qdrant candidate-store adapter. Qdrant provides vector recall and
+// Qdrant candidate-store adapter. Qdrant provides vector recall and
 // payload prefiltering; Oxigraph remains authoritative for graph/lifecycle
 // truth.
 #![allow(dead_code)]

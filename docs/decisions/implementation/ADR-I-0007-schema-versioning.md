@@ -24,17 +24,15 @@ Character Memory is expected to evolve. The starter schema intentionally leaves 
 
 ## Decision
 
-Persist schema version metadata from v0.1 onward.
+Persist schema version metadata from the first stored schema onward.
 
-Examples:
+The initial persisted schema spelling is:
 
 ```text
-schema_version = "cmem_v0.1"
-graph_schema_version = "cmem_graph_v0.1"
-qdrant_payload_version = "cmem_qdrant_v0.1"
+schema_version = "episodic_memory_initial"
 ```
 
-The exact field names may vary, but persisted records should expose enough version metadata to support migration and validation.
+This value is exposed through `EPISODIC_MEMORY_SCHEMA_VERSION`, `CURRENT_SCHEMA_VERSION`, and `DEFAULT_SCHEMA_VERSION`. The exact field names may vary by persistence surface, but persisted records should expose enough version metadata to support migration and validation.
 
 ## Implementation Impact
 
@@ -46,11 +44,11 @@ The exact field names may vary, but persisted records should expose enough versi
 
 1. Add schema versioning only when a migration is needed.
 2. Version only the Rust domain model.
-3. Version persisted storage schemas from v0.1.
+3. Version persisted storage schemas from the first implementation.
 
 ## Decision Outcome
 
-Chosen option: **3. Version persisted storage schemas from v0.1**.
+Chosen option: **3. Version persisted storage schemas from the first implementation**.
 
 This is low-cost early and high-value later.
 

@@ -1,8 +1,6 @@
-// v0.1 correction/forget lifecycle pipeline used by the public facade and
-// internal tests. Some helper APIs are intentionally reserved for focused
-// lifecycle controls.
-#![allow(dead_code)]
-
+// Correction/forget lifecycle pipeline used by the public facade and internal
+// tests. The module keeps helper APIs for focused lifecycle controls and
+// fixture-level validation.
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -22,9 +20,6 @@ use crate::internal::repositories::{
     GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef, MemoryEmbedder,
     VectorCandidateStore,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LifecyclePipelineOutcome(pub(crate) LifecycleMutationOutcome);
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
 where

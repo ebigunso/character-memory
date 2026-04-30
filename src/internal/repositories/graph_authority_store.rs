@@ -1,4 +1,4 @@
-// v0.1 graph authority contract and provider-neutral expansion helpers.
+// Graph authority contract and provider-neutral expansion helpers.
 // Oxigraph is the default in-process authority; tests also use deterministic
 // fake stores.
 #![allow(dead_code)]

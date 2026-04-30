@@ -2,7 +2,7 @@
 
 ## Version intent
 
-This draft preserves the useful engineering discipline from the old roadmap while aligning the data model with Character Memory.
+This draft records the backend discipline needed for the Character Memory data model.
 
 Default stack:
 
@@ -184,7 +184,7 @@ Keep metadata in payload.
   "is_superseded": false,
   "retention_state": "active",
 
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -215,7 +215,7 @@ source_conversation_id
 participant_ids
 ```
 
-Old roadmap fields like `participants` and `location_text` can remain as optional payload fields, but they are not the v0.1 core.
+Additional caller-specific payload fields can be added when they serve filtering, but they are not core graph authority.
 
 ---
 
@@ -335,7 +335,7 @@ Optional debug trace:
 
 # 6. Performance controls
 
-Keep old roadmap's graph expansion safeguards.
+Keep graph expansion bounded and predictable.
 
 ```json
 {
@@ -400,9 +400,9 @@ clear failure behavior if migration is required
 
 ---
 
-# 8. What changed from the old backend contract
+# 8. Design Summary
 
-## Kept
+## Core backend commitments
 
 ```text
 Qdrant/Oxigraph defaults
@@ -414,12 +414,12 @@ bounded graph expansion
 non-core examples
 ```
 
-## Changed
+## Current data model direction
 
 ```text
-MemoryRecord schema replaced by typed memory objects
-memory_type replaced by object_type and derived_type
-RetrievalBundle replaced by ContinuityContextPack
-location/date fields made optional rather than mandatory placeholders
-semantic memory becomes DerivedMemory or later Claim/Belief subsystem
+typed memory objects
+object_type and derived_type payload/schema markers
+ContinuityContextPack retrieval output
+optional contextual fields instead of mandatory placeholders
+DerivedMemory now, richer Claim/Belief subsystem later
 ```

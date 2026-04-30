@@ -20,7 +20,7 @@ Hybrid retrieval expands from vector candidates into graph context. Without boun
 - Keep retrieval latency and output size predictable.
 - Prevent hub entities from overwhelming context packs.
 - Make memory injection debuggable.
-- Preserve the old roadmap's concern for graph expansion controls while adapting output to continuity context.
+- Keep graph expansion controls explicit while adapting output to continuity context.
 
 ## Decision
 

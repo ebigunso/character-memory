@@ -1,4 +1,4 @@
-// v0.1 vector candidate recall contract. Qdrant is the default adapter, while
+// Vector candidate recall contract. Qdrant is the default adapter, while
 // tests use deterministic fake stores.
 #![allow(dead_code)]
 

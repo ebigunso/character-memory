@@ -226,17 +226,7 @@ Factual memory does not overwrite raw episodes.
 
 ---
 
-# 8. Relation to old roadmap
-
-The old roadmap's `semantic` memory type is replaced by a richer factual subsystem.
-
-Old:
-
-```text
-semantic memory = content + id
-```
-
-Revised:
+# 8. Factual Subsystem Shape
 
 ```text
 source assertion

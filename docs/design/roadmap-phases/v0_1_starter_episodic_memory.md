@@ -93,7 +93,7 @@ Example:
   "raw_ref": "raw://conversation/chat_123",
   "salience_score": 0.86,
   "retention_state": "active",
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -120,7 +120,7 @@ For chat, this may be a user message, assistant message, or condensed excerpt.
   "text": "I want to leave room for evolution without major breaking changes, but not have everything at the start.",
   "raw_ref": "raw://conversation/chat_123#turn_42",
   "salience_score": 0.91,
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -138,7 +138,7 @@ A recurring person, project, tool, place, document, concept, or other memory anc
   "name": "Character Memory",
   "aliases": ["character-memory", "memory library"],
   "summary": "A library for long-term episodic memory and character continuity.",
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -172,7 +172,7 @@ A thread is not the same thing as a chat thread. It is a continuity structure ac
   "status": "active",
   "last_touched_at": "2026-04-26T10:45:00+09:00",
   "salience_score": 0.94,
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -212,7 +212,7 @@ This is the v0.1 simplification that avoids premature schema explosion.
   "supersedes": [],
   "retention_state": "active",
   "created_at": "2026-04-26T10:46:00+09:00",
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -247,7 +247,7 @@ A typed relation between memory objects.
   "confidence": 1.0,
   "rationale": "The reflection was generated from the episode.",
   "created_at": "2026-04-26T10:46:00+09:00",
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -412,7 +412,7 @@ No heavy ontology machinery required.
 
 ---
 
-# 8. What this inherits from the old roadmap
+# 8. Design Commitments
 
 v0.1 keeps:
 
@@ -426,11 +426,11 @@ regression tests
 bounded graph expansion
 ```
 
-v0.1 replaces:
+v0.1 uses:
 
 ```text
-MemoryRecord → Episode/Observation/DerivedMemory
-RetrievalBundle → ContinuityContextPack
-memory_type episodic|semantic → object_type + derived_type
-required location/date placeholders → optional context fields
+Episode/Observation/DerivedMemory
+ContinuityContextPack
+object_type + derived_type
+optional context fields
 ```

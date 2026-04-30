@@ -1,4 +1,4 @@
-// v0.1 raw-reference resolution boundary. Current graph/vector storage keeps
+// Raw-reference resolution boundary. Current graph/vector storage keeps
 // raw references as pointers; production raw storage can implement this later.
 #![allow(dead_code)]
 

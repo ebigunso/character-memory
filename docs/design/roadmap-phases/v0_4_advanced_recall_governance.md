@@ -235,11 +235,9 @@ ContextSubgraph can be built for a query and converted into ContinuityContextPac
 
 ---
 
-# 6. Relation to old roadmap
+# 6. Recall Governance Scope
 
-The old roadmap's performance hardening phase is incorporated here and partially moved earlier.
-
-Kept:
+This phase keeps recall behavior explicit and bounded:
 
 ```text
 bounded graph expansion
@@ -249,7 +247,7 @@ regression tests
 clear migration/versioning
 ```
 
-Expanded:
+It expands:
 
 ```text
 retrieval traces

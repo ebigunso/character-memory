@@ -1,8 +1,5 @@
-// v0.1 continuity retrieval pipeline used by the public facade and internal
-// tests. Some helper APIs are intentionally reserved for focused retrieval
-// controls.
-#![allow(dead_code)]
-
+// Continuity retrieval pipeline used by the public facade and internal tests.
+// Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{

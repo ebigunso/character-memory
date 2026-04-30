@@ -1,7 +1,5 @@
-// v0.1 remember pipeline used by the public facade and internal tests. Some
-// builders remain available for focused test/control paths.
-#![allow(dead_code)]
-
+// Remember pipeline used by the public facade and internal tests. Some
+// builders remain available for focused test and validation paths.
 use crate::api::types::{
     DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft,
 };
@@ -30,6 +28,7 @@ impl RememberPipelineDraft {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_defaults(mut self, defaults: DraftDefaults) -> Self {
         self.defaults = defaults;
         self

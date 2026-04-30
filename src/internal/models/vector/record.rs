@@ -1,4 +1,4 @@
-// v0.1 provider-neutral vector record surface. Payload hints remain
+// Provider-neutral vector record surface. Payload hints remain
 // denormalized recall/filter hints; graph state stays authoritative.
 #![allow(dead_code)]
 

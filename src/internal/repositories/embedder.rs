@@ -1,4 +1,4 @@
-// v0.1 provider-neutral embedding boundary used by remember, retrieve, and
+// Provider-neutral embedding boundary used by remember, retrieve, and
 // lifecycle vector maintenance.
 #![allow(dead_code)]
 
