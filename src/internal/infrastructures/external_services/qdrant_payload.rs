@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::errors::CustomError;
 use crate::internal::models::vector::{VectorRecord, VectorSurface};
+use crate::internal::schema::require_current_schema_version;
 
 pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
     "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";
@@ -57,6 +58,8 @@ pub(crate) struct QdrantPayloadIndexField {
 pub(crate) fn qdrant_payload_map(
     record: &VectorRecord,
 ) -> Result<serde_json::Map<String, serde_json::Value>, CustomError> {
+    require_current_schema_version(&record.schema_version, "Qdrant payload mapping")?;
+
     let payload = QdrantVectorPayload::from(record);
     serde_json::to_value(payload)?
         .as_object()
@@ -348,6 +351,13 @@ mod tests {
     }
 
     #[test]
+    fn payload_preserves_schema_version_field() {
+        let payload = qdrant_payload_map(&derived_memory_record(id(40))).expect("payload maps");
+
+        assert_eq!(payload[SCHEMA_VERSION_FIELD], json!(DEFAULT_SCHEMA_VERSION));
+    }
+
+    #[test]
     fn payload_preserves_raw_ref_without_full_raw_transcript_field() {
         let record = VectorRecord::new(
             id(10),
@@ -374,6 +384,22 @@ mod tests {
     }
 
     #[test]
+    fn payload_mapping_rejects_unsupported_schema_versions() {
+        let mut record = derived_memory_record(id(40));
+        record.schema_version = "future_schema".to_owned();
+
+        let error = qdrant_payload_map(&record).expect_err("unsupported schema fails");
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedSchemaVersion {
+                context: "Qdrant payload mapping",
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn index_helper_covers_high_value_filter_fields() {
         let fields = qdrant_payload_index_fields();
         let names: Vec<_> = fields.iter().map(|field| field.name).collect();
@@ -382,6 +408,7 @@ mod tests {
             OBJECT_TYPE_FIELD,
             RECORD_TYPE_FIELD,
             DERIVED_TYPE_FIELD,
+            SCHEMA_VERSION_FIELD,
             ENTITY_IDS_FIELD,
             THREAD_IDS_FIELD,
             EPISODE_IDS_FIELD,

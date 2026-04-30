@@ -145,32 +145,44 @@ fn quads_for_triples(
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
+        let mut replacements = Vec::new();
         for object in objects {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
             let (object_id, object_type) = object_identity(object);
-            self.replace_triples(
-                graph_uri(object_type, object_id),
-                &rdf_triples_for_object(object),
-            )?;
+            let owner_graph_uri = graph_uri(object_type, object_id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
+            ));
+        }
 
-            let mut stored = lock(&self.objects)?;
+        self.replace_triples_batch(replacements)?;
+
+        let mut stored = lock(&self.objects)?;
+        for object in objects {
             stored.insert(object_identity(object), object.clone());
         }
         Ok(())
     }
 
     async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+        let mut replacements = Vec::new();
         for link in links {
             link.validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            self.replace_triples(
-                graph_uri(ObjectType::MemoryLink, link.id),
-                &rdf_triples_for_link(link),
-            )?;
+            let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link)?)?,
+            ));
+        }
 
-            let mut stored = lock(&self.links)?;
+        self.replace_triples_batch(replacements)?;
+
+        let mut stored = lock(&self.links)?;
+        for link in links {
             stored.insert(link.id, link.clone());
         }
         Ok(())
@@ -190,7 +202,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             let owner_graph_uri = graph_uri(object_type, object_id);
             replacements.push((
                 owner_graph_uri.clone(),
-                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object))?,
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
             ));
         }
 
@@ -200,7 +212,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
             replacements.push((
                 owner_graph_uri.clone(),
-                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link))?,
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link)?)?,
             ));
         }
 
@@ -388,6 +400,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oxigraph_upsert_objects_rejects_unsupported_schema_before_mutation() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut unsupported = fixtures.salient_observation.clone();
+        unsupported.schema_version = "future_schema".to_owned();
+
+        let error = store
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(unsupported),
+            ])
+            .await
+            .expect_err("unsupported schema fails");
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedSchemaVersion { .. }
+        ));
+        assert_eq!(store.triple_count().unwrap(), 0);
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_ids(vec![fixtures.episode.id]))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn oxigraph_upsert_links_rejects_unsupported_schema_before_mutation() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        let baseline_triples = store.triple_count().unwrap();
+        let mut unsupported = fixtures.soft_thread_link.clone();
+        unsupported.id = MemoryId::new_v4();
+        unsupported.schema_version = "future_schema".to_owned();
+
+        let error = store
+            .upsert_links(&[fixtures.soft_thread_link.clone(), unsupported])
+            .await
+            .expect_err("unsupported schema fails");
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedSchemaVersion { .. }
+        ));
+        assert_eq!(store.triple_count().unwrap(), baseline_triples);
+        assert!(store
+            .expand_bounded(&GraphExpansionQuery::new(
+                fixtures.salient_observation.id,
+                ObjectType::Observation,
+                1,
+                4,
+            ))
+            .await
+            .unwrap()
+            .links
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn oxigraph_combined_upsert_rejects_unsupported_schema_before_mutation() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut unsupported = fixtures.soft_thread_link.clone();
+        unsupported.schema_version = "future_schema".to_owned();
+
+        let error = store
+            .upsert_objects_and_links(
+                &[MemoryObject::Episode(fixtures.episode.clone())],
+                &[unsupported],
+            )
+            .await
+            .expect_err("unsupported schema fails");
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedSchemaVersion { .. }
+        ));
+        assert_eq!(store.triple_count().unwrap(), 0);
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_ids(vec![fixtures.episode.id]))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn oxigraph_store_replaces_stale_object_quads_on_repeated_upsert() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
@@ -421,7 +520,9 @@ mod tests {
         assert!(store.contains_triple(&replacement_summary).unwrap());
         assert_eq!(
             store.triple_count().unwrap(),
-            rdf_triples_for_object(&MemoryObject::Episode(updated_episode.clone())).len()
+            rdf_triples_for_object(&MemoryObject::Episode(updated_episode.clone()))
+                .unwrap()
+                .len()
         );
         assert_eq!(
             store

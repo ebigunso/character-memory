@@ -9,6 +9,8 @@ use crate::api::types::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
     ObjectType, Observation,
 };
+use crate::errors::CustomError;
+use crate::internal::schema::require_current_schema_version;
 
 use super::vocabulary as vocab;
 
@@ -51,18 +53,35 @@ impl RdfTriple {
     }
 }
 
-pub(crate) fn rdf_triples_for_object(object: &MemoryObject) -> Vec<RdfTriple> {
+pub(crate) fn rdf_triples_for_object(object: &MemoryObject) -> Result<Vec<RdfTriple>, CustomError> {
     match object {
-        MemoryObject::Episode(object) => episode_triples(object),
-        MemoryObject::Observation(object) => observation_triples(object),
-        MemoryObject::Entity(object) => entity_triples(object),
-        MemoryObject::MemoryThread(object) => memory_thread_triples(object),
-        MemoryObject::DerivedMemory(object) => derived_memory_triples(object),
+        MemoryObject::Episode(object) => {
+            require_current_schema_version(&object.schema_version, "RDF episode mapping")?;
+            Ok(episode_triples(object))
+        }
+        MemoryObject::Observation(object) => {
+            require_current_schema_version(&object.schema_version, "RDF observation mapping")?;
+            Ok(observation_triples(object))
+        }
+        MemoryObject::Entity(object) => {
+            require_current_schema_version(&object.schema_version, "RDF entity mapping")?;
+            Ok(entity_triples(object))
+        }
+        MemoryObject::MemoryThread(object) => {
+            require_current_schema_version(&object.schema_version, "RDF memory thread mapping")?;
+            Ok(memory_thread_triples(object))
+        }
+        MemoryObject::DerivedMemory(object) => {
+            require_current_schema_version(&object.schema_version, "RDF derived memory mapping")?;
+            Ok(derived_memory_triples(object))
+        }
         MemoryObject::MemoryLink(object) => rdf_triples_for_link(object),
     }
 }
 
-pub(crate) fn rdf_triples_for_link(link: &MemoryLink) -> Vec<RdfTriple> {
+pub(crate) fn rdf_triples_for_link(link: &MemoryLink) -> Result<Vec<RdfTriple>, CustomError> {
+    require_current_schema_version(&link.schema_version, "RDF memory link mapping")?;
+
     let subject = graph_uri(ObjectType::MemoryLink, link.id);
     let from = graph_uri(link.from_type, link.from_id);
     let to = graph_uri(link.to_type, link.to_id);
@@ -92,7 +111,7 @@ pub(crate) fn rdf_triples_for_link(link: &MemoryLink) -> Vec<RdfTriple> {
         vocab::RATIONALE,
         link.rationale.as_deref(),
     );
-    triples
+    Ok(triples)
 }
 
 fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
@@ -399,7 +418,7 @@ mod tests {
         let fixtures = representative_fixtures();
 
         for object in fixtures.objects() {
-            let triples = rdf_triples_for_object(&object);
+            let triples = rdf_triples_for_object(&object).expect("current schema maps");
             let (id, object_type) = object_identity(&object);
 
             assert!(triples
@@ -416,7 +435,8 @@ mod tests {
     fn rdf_mapping_covers_lifecycle_currentness_provenance_and_supersession() {
         let fixtures = representative_fixtures();
         let triples =
-            rdf_triples_for_object(&MemoryObject::DerivedMemory(fixtures.correction.clone()));
+            rdf_triples_for_object(&MemoryObject::DerivedMemory(fixtures.correction.clone()))
+                .expect("current schema maps");
 
         assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
         assert_contains_literal(&triples, vocab::IS_CURRENT, "true");
@@ -449,10 +469,27 @@ mod tests {
     }
 
     #[test]
+    fn rdf_mapping_preserves_schema_version_literals_for_objects_and_links() {
+        let fixtures = representative_fixtures();
+
+        for object in fixtures.objects() {
+            let triples = rdf_triples_for_object(&object).expect("current schema maps");
+
+            assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
+        }
+
+        for link in fixtures.links() {
+            let triples = rdf_triples_for_link(&link).expect("current schema maps");
+
+            assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
+        }
+    }
+
+    #[test]
     fn rdf_mapping_reifies_memory_links_and_adds_typed_relation_triples() {
         let fixtures = representative_fixtures();
         let link = fixtures.soft_thread_link;
-        let triples = rdf_triples_for_link(&link);
+        let triples = rdf_triples_for_link(&link).expect("current schema maps");
         let from = graph_uri(link.from_type, link.from_id);
         let to = graph_uri(link.to_type, link.to_id);
 
@@ -464,6 +501,48 @@ mod tests {
                 && triple.predicate == "urn:cmem:relation:part_of_thread"
                 && triple.object == RdfObject::Resource(to.clone())
         }));
+    }
+
+    #[test]
+    fn rdf_mapping_rejects_unsupported_schema_versions_for_all_object_variants() {
+        let fixtures = representative_fixtures();
+        let mut objects = fixtures.objects();
+        objects.push(MemoryObject::MemoryLink(fixtures.soft_thread_link));
+
+        for mut object in objects {
+            set_schema_version(&mut object, "future_schema");
+
+            let error = rdf_triples_for_object(&object).expect_err("unsupported schema fails");
+
+            assert!(
+                matches!(
+                    error,
+                    CustomError::UnsupportedSchemaVersion {
+                        expected: DEFAULT_SCHEMA_VERSION,
+                        ref actual,
+                        ..
+                    } if actual == "future_schema"
+                ),
+                "expected unsupported schema error for {object:?}, got {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rdf_link_mapping_rejects_unsupported_schema_versions() {
+        let fixtures = representative_fixtures();
+        let mut link = fixtures.soft_thread_link;
+        link.schema_version = "future_schema".to_owned();
+
+        let error = rdf_triples_for_link(&link).expect_err("unsupported schema fails");
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedSchemaVersion {
+                context: "RDF memory link mapping",
+                ..
+            }
+        ));
     }
 
     fn assert_contains_literal(triples: &[RdfTriple], predicate: &'static str, value: &str) {
@@ -486,6 +565,19 @@ mod tests {
             MemoryObject::MemoryThread(object) => (object.id, object.object_type),
             MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
             MemoryObject::MemoryLink(object) => (object.id, object.object_type),
+        }
+    }
+
+    fn set_schema_version(object: &mut MemoryObject, schema_version: &str) {
+        match object {
+            MemoryObject::Episode(object) => object.schema_version = schema_version.to_owned(),
+            MemoryObject::Observation(object) => object.schema_version = schema_version.to_owned(),
+            MemoryObject::Entity(object) => object.schema_version = schema_version.to_owned(),
+            MemoryObject::MemoryThread(object) => object.schema_version = schema_version.to_owned(),
+            MemoryObject::DerivedMemory(object) => {
+                object.schema_version = schema_version.to_owned()
+            }
+            MemoryObject::MemoryLink(object) => object.schema_version = schema_version.to_owned(),
         }
     }
 }

@@ -1,6 +1,6 @@
 # Plan: v0.1 Schema Migration Hooks And Tests
 
-- status: draft
+- status: done
 - generated: 2026-05-01
 - last_updated: 2026-05-01
 - work_type: code
@@ -47,7 +47,7 @@
   - `docs/design/roadmap-phases/v0_1_storage_and_backend_contracts.md`
 
 ## Open Questions (max 3)
-- Q1: Should unsupported schema rejection live in domain `validate()` or only at persistence/import boundaries?
+- Resolved: Unsupported schema rejection should live at persistence/import/mapping boundaries, not domain `validate()`.
 
 ## Assumptions
 - A1: The first implementation should validate current compatibility and fail unsupported versions rather than transforming records.
@@ -115,6 +115,7 @@
 ### Task_3: Add Migration Hook Regression Tests
 - type: test
 - owns:
+  - `src/internal/schema.rs`
   - `src/api/types/domain/tests.rs`
   - `src/internal/infrastructures/graph/rdf_mapping.rs`
   - `src/internal/infrastructures/external_services/qdrant_payload.rs`
@@ -175,6 +176,26 @@
   - Validation evidence: Not run; plan only.
   - Notes: Awaiting user approval before implementation.
 
+- 2026-05-01 01:35 Wave 1 completed: [Task_1]
+  - Summary: Added internal schema compatibility helpers and typed unsupported-schema error.
+  - Validation evidence: Worker reported `cargo fmt --check`, `cargo test api::types::domain --lib`, and `cargo test internal --lib` passed after formatting.
+  - Notes: Initial `cargo fmt --check` failed before formatting, then passed after `cargo fmt`.
+
+- 2026-05-01 01:45 Wave 2 completed: [Task_2]
+  - Summary: Wired current-schema checks into RDF mapping, Oxigraph upserts, and Qdrant payload mapping.
+  - Validation evidence: Worker reported `cargo test internal::infrastructures::graph --lib`, `cargo test internal::infrastructures::external_services::qdrant_payload --lib`, and `cargo check` passed.
+  - Notes: `cargo check` passed with a dead-code warning for the intentionally introduced migration hook; Task_3 owns was expanded to cover `src/internal/schema.rs` for regression documentation or an explicit temporary suppression.
+
+- 2026-05-01 01:55 Wave 3 completed: [Task_3]
+  - Summary: Added regression coverage for current-schema no-op migration, absent forward migrations, RDF schema-version preservation, and Qdrant schema-version preservation.
+  - Validation evidence: Worker reported `cargo test --lib` and `cargo test --no-run` passed; optional `cargo fmt --check` and `cargo check` also passed.
+  - Notes: The intentionally future-facing migration hook now has a narrow documented dead-code allowance.
+
+- 2026-05-01 02:05 Wave 4 completed: [Task_4]
+  - Summary: Reviewer approved the schema boundary implementation with no findings.
+  - Validation evidence: Reviewer reran `cargo fmt --check`, `cargo check`, `cargo test internal::schema --lib`, `cargo test internal::infrastructures::graph --lib`, and `cargo test internal::infrastructures::external_services::qdrant_payload --lib`.
+  - Notes: Reviewer inspected worker evidence for full `cargo test --lib` and `cargo test --no-run`; live Qdrant remains out of scope for this plan.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-05-01 00:00 Decision:
@@ -182,6 +203,18 @@
   - Plan delta (what changed): Created a standalone plan for schema compatibility and migration-test seams.
   - Tradeoffs considered: Persistence-boundary rejection avoids constraining future import/migration representation in domain objects.
   - User approval: no
+
+- 2026-05-01 01:30 Decision:
+  - Trigger / new insight: User approved implementation and asked to resolve open questions before work.
+  - Plan delta (what changed): Marked the plan in progress and resolved schema-version rejection to persistence/import/mapping boundaries.
+  - Tradeoffs considered: Keeping domain validation schema-version-neutral preserves future ability to represent old records before migration.
+  - User approval: yes
+
+- 2026-05-01 01:45 Decision:
+  - Trigger / new insight: Task_2 validation passed with an unused-hook warning for `migrate_current_schema`.
+  - Plan delta (what changed): Expanded Task_3 owns to include `src/internal/schema.rs` so the regression task can document or suppress the intentionally unused future migration hook within scope.
+  - Tradeoffs considered: Keeping the hook preserves the migration seam required by the plan; adding a narrow owned path avoids out-of-scope follow-up edits.
+  - User approval: yes
 
 ## Notes
 - Risks:
