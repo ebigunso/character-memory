@@ -276,9 +276,21 @@ fn raw_references_are_preserved_as_external_reference_strings() {
     let episode = representative_episode();
     let observation = representative_observation();
 
+    let serialized_episode = serde_json::to_value(&episode).unwrap();
+    let serialized_observation = serde_json::to_value(&observation).unwrap();
     let round_tripped_episode: Episode = round_trip(&episode);
     let round_tripped_observation: Observation = round_trip(&observation);
 
+    assert_eq!(
+        serialized_episode["raw_ref"],
+        episode.raw_ref.as_deref().unwrap()
+    );
+    assert_eq!(
+        serialized_observation["raw_ref"],
+        observation.raw_ref.as_deref().unwrap()
+    );
+    assert!(serialized_episode.get("raw_transcript").is_none());
+    assert!(serialized_observation.get("raw_transcript").is_none());
     assert_eq!(round_tripped_episode.raw_ref, episode.raw_ref);
     assert_eq!(round_tripped_observation.raw_ref, observation.raw_ref);
 }

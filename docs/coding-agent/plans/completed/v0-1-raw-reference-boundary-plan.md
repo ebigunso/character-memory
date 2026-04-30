@@ -1,6 +1,6 @@
 # Plan: v0.1 Raw Reference Boundary Hardening
 
-- status: draft
+- status: done
 - generated: 2026-05-01
 - last_updated: 2026-05-01
 - work_type: mixed
@@ -51,7 +51,7 @@
   - `docs/design/roadmap-phases/v0_1_storage_and_backend_contracts.md`
 
 ## Open Questions (max 3)
-- Q1: Should the internal `RawReferenceResolver` remain test/support-only for now, or should it become an injectable internal dependency in a later plan?
+- Resolved: Keep `RawReferenceResolver` internal/test-support-only for this plan; do not add a public or injectable raw-store API.
 
 ## Assumptions
 - A1: This plan hardens the boundary; it does not add production raw transcript storage.
@@ -178,6 +178,21 @@
   - Validation evidence: Not run; plan only.
   - Notes: Awaiting user approval before implementation.
 
+- 2026-05-01 03:25 Wave 1 completed: [Task_1, Task_2]
+  - Summary: Added raw_ref preservation tests across domain, retrieval, RDF, and Qdrant payload surfaces; added resolver success, unavailable, and error behavior tests.
+  - Validation evidence: Task_2 reported `cargo test internal::repositories::raw_reference_resolver --lib` and `cargo test internal::repositories::test_support --lib` passed. Task_1 reported all required targeted tests passed; Orchestrator resolved a parallel formatting conflict and reran `cargo fmt --check`, `cargo test api::types::domain --lib`, `cargo test internal::infrastructures::external_services::qdrant_payload --lib`, and `cargo test internal::infrastructures::graph::rdf_mapping --lib` successfully.
+  - Notes: Initial Task_1 `cargo fmt --check` was blocked by parallel Task_2 edits in an unowned file; integrated formatting resolved it.
+
+- 2026-05-01 03:45 Wave 2 completed: [Task_3]
+  - Summary: Aligned README and storage/backend docs with the v0.1 raw-reference boundary: production raw storage is caller-owned/deferred, `raw_ref`/`rawRef` values are source pointers rather than transcript content, and public raw-resolution APIs are not promised.
+  - Validation evidence: Worker manually reviewed the scoped doc diff and ran `cargo test --no-run` successfully.
+  - Notes: Persistent graph storage authority and graph/vector reconciliation remain documented as v0.1.1 future work.
+
+- 2026-05-01 04:05 Wave 3 completed: [Task_4]
+  - Summary: Reviewer approved the raw-reference boundary changes with no findings.
+  - Validation evidence: Reviewer reran `cargo fmt --check`, `cargo test api::types::domain --lib`, `cargo test api::types::retrieval --lib`, `cargo test internal::infrastructures::external_services::qdrant_payload --lib`, `cargo test internal::infrastructures::graph::rdf_mapping --lib`, `cargo test internal::repositories::raw_reference_resolver --lib`, `cargo test internal::repositories::test_support --lib`, and `cargo test --no-run` successfully.
+  - Notes: Reviewer confirmed no production raw transcript store, no public raw-resolution API, and no injectable raw-store API were added.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-05-01 00:00 Decision:
@@ -185,6 +200,12 @@
   - Plan delta (what changed): Created a standalone raw-reference boundary plan.
   - Tradeoffs considered: A production raw transcript store is excluded because it conflicts with the v0.1 contract boundary and would be a larger API/storage design.
   - User approval: no
+
+- 2026-05-01 03:10 Decision:
+  - Trigger / new insight: User approved implementation and resolved open questions before work.
+  - Plan delta (what changed): Marked the plan in progress; resolved raw resolver scope to internal/test-support-only.
+  - Tradeoffs considered: Avoiding an injectable/public raw-store API keeps this plan focused on pointer preservation and unavailable-reference behavior.
+  - User approval: yes
 
 ## Notes
 - Risks:

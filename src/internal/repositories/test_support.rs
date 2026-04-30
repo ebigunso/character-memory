@@ -1586,6 +1586,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn raw_reference_resolver_resolves_in_memory_fixture_content() {
+        let resolver = FixtureRawReferenceResolver::new();
+
+        resolver
+            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
+            .unwrap();
+        let resolved = resolver
+            .resolve("raw://fixture/conversation#turn=1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
+        assert_eq!(resolved.text, "raw fixture text");
+    }
+
+    #[tokio::test]
+    async fn raw_reference_resolver_reports_unavailable_reference_as_none() {
+        let resolver = FixtureRawReferenceResolver::new();
+
+        resolver
+            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
+            .unwrap();
+        let resolved = resolver
+            .resolve("raw://fixture/conversation#turn=2")
+            .await
+            .unwrap();
+
+        assert_eq!(resolved, None);
+    }
+
+    #[tokio::test]
+    async fn raw_reference_resolver_overwrites_duplicate_references_deterministically() {
+        let resolver = FixtureRawReferenceResolver::new();
+
+        resolver
+            .insert("raw://fixture/conversation#turn=1", "first fixture text")
+            .unwrap();
+        resolver
+            .insert("raw://fixture/conversation#turn=1", "updated fixture text")
+            .unwrap();
+
+        let first = resolver
+            .resolve("raw://fixture/conversation#turn=1")
+            .await
+            .unwrap();
+        let second = resolver
+            .resolve("raw://fixture/conversation#turn=1")
+            .await
+            .unwrap();
+
+        assert_eq!(first, second);
+        let resolved = first.unwrap();
+        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
+        assert_eq!(resolved.text, "updated fixture text");
+    }
+
+    #[tokio::test]
     async fn raw_reference_resolver_uses_fixture_backed_file_content() {
         let resolver = FixtureRawReferenceResolver::new();
         let path = std::env::temp_dir().join(format!("cmem-raw-ref-{}.txt", Uuid::new_v4()));

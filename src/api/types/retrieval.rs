@@ -420,6 +420,23 @@ mod tests {
         }
     }
 
+    fn observation(id: MemoryId, episode_id: MemoryId) -> Observation {
+        Observation {
+            id,
+            object_type: ObjectType::Observation,
+            episode_id,
+            speaker_entity_id: None,
+            observed_at: Some(timestamp("2026-04-29T10:01:00Z")),
+            modality: Modality::Chat,
+            text: "Concise observation excerpt.".to_owned(),
+            raw_ref: Some("raw://conversation/42#turn-2".to_owned()),
+            salience_score: 0.7,
+            retention_state: RetentionState::Active,
+            created_at: timestamp("2026-04-29T10:06:01Z"),
+            schema_version: "test_schema".to_owned(),
+        }
+    }
+
     fn derived_memory(id: MemoryId, source_episode_id: MemoryId) -> DerivedMemory {
         DerivedMemory {
             id,
@@ -562,6 +579,7 @@ mod tests {
     #[test]
     fn context_pack_preserves_source_references_without_raw_transcript_storage() {
         let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442030");
+        let raw_transcript = "verbatim raw transcript text should not be packed";
         let derived = derived_memory(
             memory_id("550e8400-e29b-41d4-a716-446655442031"),
             episode_id,
@@ -569,6 +587,10 @@ mod tests {
         let included = IncludedDerivedMemory::from(derived.clone());
         let mut pack = ContinuityContextPack::empty();
         pack.relevant_episodes.push(episode(episode_id));
+        pack.salient_observations.push(observation(
+            memory_id("550e8400-e29b-41d4-a716-446655442010"),
+            episode_id,
+        ));
         pack.preferences.push(included);
 
         let encoded = serde_json::to_string(&pack).unwrap();
@@ -578,12 +600,21 @@ mod tests {
             decoded.relevant_episodes[0].raw_ref.as_deref(),
             Some("raw://conversation/42#episode")
         );
+        assert_eq!(
+            decoded.salient_observations[0].raw_ref.as_deref(),
+            Some("raw://conversation/42#turn-2")
+        );
         assert_eq!(decoded.preferences[0].source_episode_ids, vec![episode_id]);
         assert_eq!(
             decoded.preferences[0].source_observation_ids,
             derived.derived_from_observation_ids
         );
         assert_eq!(decoded.preferences[0].memory.text, derived.text);
+        assert!(decoded
+            .salient_observations
+            .iter()
+            .all(|observation| observation.raw_ref.as_deref() != Some(raw_transcript)));
+        assert!(!encoded.contains(raw_transcript));
     }
 
     #[test]
