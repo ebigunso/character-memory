@@ -78,7 +78,7 @@ pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), C
     let collection_name = unique_collection_name();
 
     // Use the load_test_settings function from the test_utils module
-    let settings = load_test_settings().expect("Failed to load settings from environment");
+    let settings = load_test_settings()?;
     let embed_provider = Box::new(DeterministicEmbeddingProvider::new(
         settings.get_embedding_vector_size()?,
     ));

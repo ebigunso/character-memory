@@ -72,8 +72,9 @@ pub mod test_utils {
 /// # Description
 ///
 /// This struct serves as the main entry point for memory operations,
-/// providing a high-level interface for storing, retrieving, and
-/// searching memory entries.
+/// providing a high-level interface for remembering typed memory objects,
+/// linking canonical relationships, retrieving continuity context, and
+/// applying lifecycle corrections or suppression.
 pub struct CharacterMemory {
     memory_composition: MemoryComposition,
 }
@@ -144,8 +145,9 @@ impl CharacterMemory {
     ///
     /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by Oxigraph graph authority and
     ///   Qdrant vector candidate recall.
-    /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
-    ///   repository or when resolving configuration from `settings`.
+    /// - `Err(CustomError)`: Returned if any error occurs while resolving configuration from
+    ///   `settings` or initializing the Oxigraph graph authority and Qdrant vector candidate
+    ///   store.
     pub async fn new_with_embedding_provider(
         settings: Settings,
         collection_name: String,

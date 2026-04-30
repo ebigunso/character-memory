@@ -1,7 +1,8 @@
 use character_memory::{
-    CorrectMemoryDraft, CorrectionTarget, DerivedMemoryDraft, DerivedType, EpisodeDraft,
-    ForgetMemoryDraft, LifecycleTargetRef, MemoryId, MemoryObjectDraft, ObservationDraft,
-    RememberDraft, ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
+    CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
+    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, MemoryObjectDraft,
+    ObservationDraft, RememberDraft, ReplacementDerivedMemoryDraft, RetrievalContext,
+    SourceProvenanceReference,
 };
 use uuid::Uuid;
 
@@ -9,9 +10,13 @@ mod test_utils;
 
 #[tokio::test]
 async fn public_remember_and_retrieve_use_graph_authoritative_path() {
-    let Ok((memory, collection_name)) = test_utils::try_setup_character_memory().await else {
-        println!("skipping live public facade test because Qdrant is unavailable");
-        return;
+    let (memory, collection_name) = match test_utils::try_setup_character_memory().await {
+        Ok(setup) => setup,
+        Err(CustomError::QdrantError(error)) => {
+            println!("skipping live public facade test because Qdrant is unavailable: {error}");
+            return;
+        }
+        Err(error) => panic!("unexpected live public facade setup failure: {error}"),
     };
     let episode_id = id("550e8400-e29b-41d4-a716-446655440101");
     let observation_id = id("550e8400-e29b-41d4-a716-446655440102");
@@ -70,9 +75,15 @@ async fn public_remember_and_retrieve_use_graph_authoritative_path() {
 
 #[tokio::test]
 async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
-    let Ok((memory, collection_name)) = test_utils::try_setup_character_memory().await else {
-        println!("skipping live public lifecycle facade test because Qdrant is unavailable");
-        return;
+    let (memory, collection_name) = match test_utils::try_setup_character_memory().await {
+        Ok(setup) => setup,
+        Err(CustomError::QdrantError(error)) => {
+            println!(
+                "skipping live public lifecycle facade test because Qdrant is unavailable: {error}"
+            );
+            return;
+        }
+        Err(error) => panic!("unexpected live public lifecycle setup failure: {error}"),
     };
     let episode_id = id("550e8400-e29b-41d4-a716-446655440201");
     let old_id = id("550e8400-e29b-41d4-a716-446655440202");

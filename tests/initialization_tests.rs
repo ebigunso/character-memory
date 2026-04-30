@@ -1,12 +1,18 @@
+use character_memory::CustomError;
+
 mod test_utils;
 use test_utils::{cleanup_collection, try_setup_character_memory};
 
 #[tokio::test]
 async fn test_character_memory_initialization() {
     // Setup
-    let Ok((_character_memory, collection_name)) = try_setup_character_memory().await else {
-        println!("skipping live initialization test because Qdrant is unavailable");
-        return;
+    let (_character_memory, collection_name) = match try_setup_character_memory().await {
+        Ok(setup) => setup,
+        Err(CustomError::QdrantError(error)) => {
+            println!("skipping live initialization test because Qdrant is unavailable: {error}");
+            return;
+        }
+        Err(error) => panic!("unexpected live initialization setup failure: {error}"),
     };
 
     // Construction initializes the Qdrant candidate collection, so reaching this point
