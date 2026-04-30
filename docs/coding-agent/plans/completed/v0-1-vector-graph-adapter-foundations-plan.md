@@ -61,7 +61,7 @@
   - `docs/roadmap/development_roadmap.md`
   - `docs/design/roadmap-phases/v0_1_starter_episodic_memory.md`
   - `docs/design/roadmap-phases/v0_1_storage_and_backend_contracts.md`
-  - `docs/design/database/vector_db_metadata_schema.md`
+  - `docs/design/database/vector_payload_design.md`
   - `docs/decisions/design/ADR-D-0002-derived-memory-provenance.md`
   - `docs/decisions/design/ADR-D-0006-supersession-and-suppression.md`
   - `docs/decisions/design/ADR-D-0008-preserve-source-references.md`

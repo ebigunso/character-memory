@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -35,7 +35,7 @@ DerivedMemory
 MemoryLink
 ```
 
-The old flat `MemoryRecord` shape is not the canonical domain model for the new implementation.
+Flat memory records are not the canonical domain model for the implementation.
 
 ## Character Memory Relevance
 
@@ -44,12 +44,12 @@ This decision protects the project from drifting into generic RAG. Character con
 ## Implementation Impact
 
 - Storage, graph mapping, and vector payloads should use object type fields such as `episode`, `observation`, `derived_memory`, `thread`, and `entity`.
-- Existing code built around `MemoryRecord { memory_type: episodic | semantic }` should be migrated or wrapped.
-- `DerivedMemory` replaces the previous first-pass idea of semantic memories as peers of episodic memories.
+- Storage, retrieval, and public APIs should not require callers to model memory as only `episodic | semantic`.
+- `DerivedMemory` represents behavior-influencing interpretations while richer claim/belief objects remain future work.
 
 ## Considered Options
 
-1. Keep the old `MemoryRecord` model with `memory_type = episodic | semantic`.
+1. Use a single flat memory record model with `memory_type = episodic | semantic`.
 2. Implement the full future ontology immediately: `Assertion`, `Claim`, `EvidenceLink`, `BeliefAssessment`, etc.
 3. Use the v0.1 episode-backed object model.
 
@@ -69,8 +69,8 @@ It preserves the core Character Memory philosophy without forcing the full futur
 
 ### Negative / Tradeoffs
 
-- More complex than a single `MemoryRecord` table.
-- Requires migration or compatibility work if old code assumes `episodic | semantic` as the only memory types.
+- More complex than a single generic memory table.
+- Requires more explicit storage and retrieval contracts than a flat record model.
 
 ## Validation
 

@@ -11,6 +11,9 @@ use async_trait::async_trait;
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
+    /// Returns the dimensionality of embeddings produced by this provider.
+    fn vector_size(&self) -> usize;
+
     /// Generates a vector embedding for the provided text.
     ///
     /// # Parameters
@@ -46,6 +49,10 @@ pub trait EmbeddingProvider: Send + Sync {
 // Implement the trait for Box<dyn EmbeddingProvider> to allow using boxed trait objects
 #[async_trait]
 impl<T: EmbeddingProvider + ?Sized> EmbeddingProvider for Box<T> {
+    fn vector_size(&self) -> usize {
+        (**self).vector_size()
+    }
+
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         (**self).generate_embedding(text).await
     }

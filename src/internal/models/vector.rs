@@ -2,11 +2,9 @@ mod candidate_record;
 mod embedding_model;
 mod embedding_surface;
 mod record;
-mod vector_metadata;
 
-// Transitional contract surface: these re-exports are consumed by test
-// support before production adapters use all of them. Remove once adapter or
-// pipeline code consumes the surface directly, or prune unused exports.
+// Provider-neutral vector model surface. Adapters, pipelines, and test
+// support intentionally consume different subsets of these helpers.
 #[allow(unused_imports)]
 pub(crate) use candidate_record::{
     default_vector_candidate_object_types, EmbeddingInput, VectorCandidateFilters,
@@ -23,4 +21,3 @@ pub(crate) use embedding_surface::{
 pub(crate) use record::{
     VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
 };
-pub(crate) use vector_metadata::VectorMetadata;

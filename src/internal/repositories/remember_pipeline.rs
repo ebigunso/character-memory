@@ -1,8 +1,5 @@
-// Transitional remember pipeline: later facade wiring will consume this
-// internal service directly. Remove this allow once the public remember surface
-// exercises the service, or prune unused outcome helpers then.
-#![allow(dead_code)]
-
+// Remember pipeline used by the public facade and internal tests. Some
+// builders remain available for focused test and validation paths.
 use crate::api::types::{
     DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft,
 };
@@ -31,6 +28,7 @@ impl RememberPipelineDraft {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_defaults(mut self, defaults: DraftDefaults) -> Self {
         self.defaults = defaults;
         self

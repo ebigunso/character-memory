@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -27,6 +27,8 @@ Episode summaries and derived memories are useful, but they are lossy. If the sy
 Episodes should include `raw_ref` or an equivalent pointer to the source conversation, transcript, or stored source material when available.
 
 The graph/vector layer may store summaries, excerpts, and derived memories, but these are not substitutes for source material.
+
+v0.1 does not store raw transcripts directly in graph/vector memory stores.
 
 ## Character Memory Relevance
 

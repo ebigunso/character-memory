@@ -20,6 +20,7 @@ use crate::EmbeddingProvider;
 pub(crate) struct OpenAIEmbeddingProvider {
     api_key: String,
     model: String,
+    vector_size: usize,
     client: Client,
 }
 
@@ -47,6 +48,7 @@ impl OpenAIEmbeddingProvider {
         Ok(OpenAIEmbeddingProvider {
             api_key: settings.api_key,
             model: settings.model.as_str().to_string(),
+            vector_size: settings.model.vector_size() as usize,
             client: Client::new(),
         })
     }
@@ -54,6 +56,10 @@ impl OpenAIEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for OpenAIEmbeddingProvider {
+    fn vector_size(&self) -> usize {
+        self.vector_size
+    }
+
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
         if text.trim().is_empty() {
             return Err(CustomError::EmbeddingGenerationError(

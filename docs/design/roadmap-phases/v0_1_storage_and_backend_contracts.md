@@ -2,17 +2,19 @@
 
 ## Version intent
 
-This draft preserves the useful engineering discipline from the old roadmap while aligning the data model with Character Memory.
+This draft records the backend discipline needed for the Character Memory data model.
 
 Default stack:
 
 ```text
 Qdrant   = vector candidate recall + payload filtering
-Oxigraph = RDF/SPARQL graph store
+Oxigraph = embedded in-memory RDF/SPARQL graph authority
 RawStore = source conversation/transcript references
 ```
 
 The implementation should remain backend-abstract where practical.
+
+Public construction and facades compose an embedder, a Qdrant vector candidate store, and an embedded in-memory Oxigraph graph authority store. Qdrant results are candidates only; Oxigraph is authoritative for memory objects and relationships within the running process. Persistent Oxigraph storage configuration remains future work.
 
 ---
 
@@ -20,7 +22,7 @@ The implementation should remain backend-abstract where practical.
 
 ## 1.1 Raw store
 
-Stores or references original interaction material.
+Stores or references original interaction material outside the graph/vector memory stores.
 
 Examples:
 
@@ -31,7 +33,7 @@ source conversation log
 selected excerpts
 ```
 
-The graph does not need to store all raw text. It needs stable pointers.
+The graph/vector layer does not store raw transcripts as v0.1 memory content. It stores summaries, excerpts, derived memories, and stable pointers.
 
 ```json
 {
@@ -54,11 +56,11 @@ retention state
 currentness
 ```
 
-Default: Oxigraph RDF/SPARQL.
+Default: embedded in-memory Oxigraph RDF/SPARQL. Persistent Oxigraph storage configuration remains future work.
 
 ## 1.3 Vector store
 
-Authoritative only for:
+Responsible only for:
 
 ```text
 candidate recall
@@ -68,7 +70,7 @@ coarse payload filtering
 
 Default: Qdrant.
 
-The vector store is not the source of truth for provenance, currentness, or correction.
+The vector store is not the source of truth for memory existence, relationships, provenance, currentness, or correction.
 
 ---
 
@@ -182,7 +184,7 @@ Keep metadata in payload.
   "is_superseded": false,
   "retention_state": "active",
 
-  "schema_version": "cmem_v0_1"
+  "schema_version": "episodic_memory_initial"
 }
 ```
 
@@ -213,7 +215,7 @@ source_conversation_id
 participant_ids
 ```
 
-Old roadmap fields like `participants` and `location_text` can remain as optional payload fields, but they are not the v0.1 core.
+Additional caller-specific payload fields can be added when they serve filtering, but they are not core graph authority.
 
 ---
 
@@ -283,7 +285,7 @@ derived memories by episode/provenance
 derived memories by thread/entity
 active threads by last_touched_at
 current derived memories only
-suppressed/deleted filtering
+suppressed/archived filtering
 ```
 
 Example query intents:
@@ -304,17 +306,17 @@ Internal flow:
 ```text
 1. Vector search over natural-language surfaces.
 2. Collect candidate graph IDs.
-3. Graph expand around candidates.
+3. Resolve and expand candidates through the graph authority.
 4. Add thread/entity/provenance context.
 5. Filter by lifecycle state.
 6. Rerank.
-7. Return ContinuityContextPack.
+7. Return RetrieveOutcome with the assembled ContinuityContextPack plus rationale/trace metadata.
 ```
 
 Public API should expose:
 
 ```rust
-fn retrieve(&self, context: RetrievalContext) -> Result<ContinuityContextPack, MemoryError>;
+async fn retrieve(&self, context: RetrievalContext) -> Result<RetrieveOutcome, CustomError>;
 ```
 
 Optional debug trace:
@@ -333,7 +335,7 @@ Optional debug trace:
 
 # 6. Performance controls
 
-Keep old roadmap's graph expansion safeguards.
+Keep graph expansion bounded and predictable.
 
 ```json
 {
@@ -398,9 +400,9 @@ clear failure behavior if migration is required
 
 ---
 
-# 8. What changed from the old backend contract
+# 8. Design Summary
 
-## Kept
+## Core backend commitments
 
 ```text
 Qdrant/Oxigraph defaults
@@ -412,12 +414,12 @@ bounded graph expansion
 non-core examples
 ```
 
-## Changed
+## Current data model direction
 
 ```text
-MemoryRecord schema replaced by typed memory objects
-memory_type replaced by object_type and derived_type
-RetrievalBundle replaced by ContinuityContextPack
-location/date fields made optional rather than mandatory placeholders
-semantic memory becomes DerivedMemory or later Claim/Belief subsystem
+typed memory objects
+object_type and derived_type payload/schema markers
+ContinuityContextPack retrieval output
+optional contextual fields instead of mandatory placeholders
+DerivedMemory now, richer Claim/Belief subsystem later
 ```

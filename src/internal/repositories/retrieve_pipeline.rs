@@ -1,8 +1,5 @@
-// Transitional retrieve pipeline: facade wiring will consume this internal
-// service directly. Remove this allow once the public retrieve surface exercises
-// the service, or prune unused helpers then.
-#![allow(dead_code)]
-
+// Continuity retrieval pipeline used by the public facade and internal tests.
+// Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{

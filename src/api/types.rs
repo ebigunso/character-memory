@@ -3,11 +3,6 @@ pub mod lifecycle;
 pub mod retrieval;
 
 mod draft;
-mod memory;
-mod memory_filters;
-mod memory_input;
-mod memory_type;
-mod scored_memory;
 
 pub use domain::{
     graph_uri, DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode,
@@ -28,10 +23,6 @@ pub use lifecycle::{
     LifecycleTargetRef, ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget,
     SourceProvenanceReference, SupersededByEvidence, SuppressionPolicy, VectorMaintenanceFailure,
 };
-pub use memory::Memory;
-pub use memory_filters::MemoryFilters;
-pub use memory_input::MemoryInput;
-pub use memory_type::MemoryType;
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,
     ContinuitySectionLimits, GraphRelationTrace, IncludedDerivedMemory, LifecycleFilterAction,
@@ -40,4 +31,3 @@ pub use retrieval::{
     RetrievalRationale, RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
     StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
 };
-pub use scored_memory::ScoredMemory;

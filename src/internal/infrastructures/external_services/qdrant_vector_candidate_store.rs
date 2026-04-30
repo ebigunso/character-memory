@@ -1,7 +1,6 @@
-// Transitional Qdrant candidate-store scaffold: downstream storage
-// pipeline chunks will consume the concrete adapter after graph authority lands.
-// Remove once remember/link production wiring or tests consume the adapter, or
-// prune any remaining unused surface then.
+// Qdrant candidate-store adapter. Qdrant provides vector recall and
+// payload prefiltering; Oxigraph remains authoritative for graph/lifecycle
+// truth.
 #![allow(dead_code)]
 
 use std::{collections::HashMap, time::Duration};
@@ -80,13 +79,29 @@ impl QdrantVectorCandidateStore {
 
     pub(crate) async fn ensure_payload_indexes(&self) -> Result<(), CustomError> {
         let info = self.client.collection_info(&self.collection_name).await?;
+        let collection_info = info.result.as_ref().ok_or_else(|| {
+            CustomError::DatabaseError(format!(
+                "Qdrant collection info response was missing result for collection '{}'",
+                self.collection_name
+            ))
+        })?;
+        validate_collection_vector_config(
+            &self.collection_name,
+            self.vector_size,
+            collection_info
+                .config
+                .as_ref()
+                .and_then(|config| config.params.as_ref())
+                .and_then(|params| params.vectors_config.as_ref()),
+        )?;
+
         let empty_payload_schema: HashMap<String, qdrant_client::qdrant::PayloadSchemaInfo> =
             HashMap::new();
-        let payload_schema = info
-            .result
-            .as_ref()
-            .map(|result| &result.payload_schema)
-            .unwrap_or(&empty_payload_schema);
+        let payload_schema = if collection_info.payload_schema.is_empty() {
+            &empty_payload_schema
+        } else {
+            &collection_info.payload_schema
+        };
 
         for field in qdrant_payload_index_fields() {
             if payload_schema.contains_key(field.name) {
@@ -116,6 +131,52 @@ impl QdrantVectorCandidateStore {
             .build();
         self.client.upsert_points(request).await?;
         Ok(())
+    }
+}
+
+fn validate_collection_vector_config(
+    collection_name: &str,
+    expected_vector_size: u64,
+    vectors_config: Option<&VectorsConfig>,
+) -> Result<(), CustomError> {
+    let Some(vectors_config) = vectors_config else {
+        return Err(CustomError::DatabaseError(format!(
+            "Qdrant collection '{collection_name}' is missing vector configuration; expected unnamed vectors with size {expected_vector_size}."
+        )));
+    };
+
+    match vectors_config.config.as_ref() {
+        Some(vectors_config::Config::Params(params))
+            if params.size == expected_vector_size
+                && params.distance == Distance::Cosine as i32 =>
+        {
+            Ok(())
+        }
+        Some(vectors_config::Config::Params(params))
+            if params.size == expected_vector_size =>
+        {
+            Err(CustomError::DatabaseError(format!(
+                "Qdrant collection '{collection_name}' vector distance mismatch: expected Cosine, found {}.",
+                Distance::try_from(params.distance)
+                    .map(|distance| distance.as_str_name().to_owned())
+                    .unwrap_or_else(|_| params.distance.to_string())
+            )))
+        }
+        Some(vectors_config::Config::Params(params)) => Err(CustomError::DatabaseError(format!(
+            "Qdrant collection '{collection_name}' vector size mismatch: expected {expected_vector_size}, found {}.",
+            params.size
+        ))),
+        Some(vectors_config::Config::ParamsMap(params_map)) => {
+            let mut vector_names = params_map.map.keys().cloned().collect::<Vec<_>>();
+            vector_names.sort();
+            Err(CustomError::DatabaseError(format!(
+                "Qdrant collection '{collection_name}' uses named vectors ({}) but CharacterMemory expects an unnamed vector with size {expected_vector_size}.",
+                vector_names.join(", ")
+            )))
+        }
+        None => Err(CustomError::DatabaseError(format!(
+            "Qdrant collection '{collection_name}' vector configuration is empty; expected unnamed vectors with size {expected_vector_size}."
+        ))),
     }
 }
 
@@ -513,7 +574,7 @@ mod tests {
     };
     use qdrant_client::qdrant::condition::ConditionOneOf;
     use qdrant_client::qdrant::{
-        point_id::PointIdOptions, value::Kind, vector, vectors, PointId, Value,
+        point_id::PointIdOptions, value::Kind, vector, vectors, PointId, Value, VectorParamsMap,
     };
     use std::env;
     use uuid::Uuid;
@@ -527,6 +588,74 @@ mod tests {
             Duration::from_secs(QDRANT_CANDIDATE_TIMEOUT_SECS)
         );
         assert_eq!(config.uri, "http://localhost:6334");
+    }
+
+    #[test]
+    fn validates_existing_collection_vector_size() {
+        let config = VectorsConfig {
+            config: Some(vectors_config::Config::Params(VectorParams {
+                size: 1536,
+                distance: Distance::Cosine.into(),
+                ..Default::default()
+            })),
+        };
+
+        assert!(validate_collection_vector_config("memories", 1536, Some(&config)).is_ok());
+
+        let error = validate_collection_vector_config("memories", 3072, Some(&config))
+            .expect_err("mismatched existing collection should fail");
+        assert!(matches!(
+            error,
+            CustomError::DatabaseError(message)
+                if message.contains("memories")
+                    && message.contains("expected 3072")
+                    && message.contains("found 1536")
+        ));
+    }
+
+    #[test]
+    fn rejects_existing_collection_with_wrong_distance_metric() {
+        let config = VectorsConfig {
+            config: Some(vectors_config::Config::Params(VectorParams {
+                size: 1536,
+                distance: Distance::Euclid.into(),
+                ..Default::default()
+            })),
+        };
+
+        let error = validate_collection_vector_config("memories", 1536, Some(&config))
+            .expect_err("same-size collection with wrong distance should fail");
+        assert!(matches!(
+            error,
+            CustomError::DatabaseError(message)
+                if message.contains("memories")
+                    && message.contains("expected Cosine")
+                    && message.contains("Euclid")
+        ));
+    }
+
+    #[test]
+    fn rejects_named_vector_collection_config() {
+        let config = VectorsConfig {
+            config: Some(vectors_config::Config::ParamsMap(VectorParamsMap {
+                map: HashMap::from([(
+                    "content".to_owned(),
+                    VectorParams {
+                        size: 1536,
+                        distance: Distance::Cosine.into(),
+                        ..Default::default()
+                    },
+                )]),
+            })),
+        };
+
+        let error = validate_collection_vector_config("memories", 1536, Some(&config))
+            .expect_err("named vectors should not be accepted for unnamed vector store");
+        assert!(matches!(
+            error,
+            CustomError::DatabaseError(message)
+                if message.contains("named vectors") && message.contains("content")
+        ));
     }
 
     #[test]

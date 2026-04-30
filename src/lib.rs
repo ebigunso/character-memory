@@ -5,16 +5,17 @@ mod errors;
 pub mod api;
 mod internal;
 
-use uuid::Uuid;
+use async_trait::async_trait;
 
-use crate::config::settings::{EmbeddingProviderSettings, VectorMemoryRepositorySettings};
+use crate::config::settings::EmbeddingProviderSettings;
 use crate::internal::infrastructures::external_services::{
-    OpenAIEmbeddingProvider, QdrantVectorMemoryRepository,
+    OpenAIEmbeddingProvider, QdrantVectorCandidateStore,
 };
-use crate::internal::models::vector::VectorMetadata;
+use crate::internal::infrastructures::graph::OxigraphGraphAuthorityStore;
+use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
-    CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, MemoryRepository,
-    RememberPipeline, RememberPipelineDraft, RetrievePipeline, VectorCandidateStore,
+    CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
+    RememberPipelineDraft, RetrievePipeline, VectorCandidateStore,
 };
 
 // Re-export types for public use
@@ -28,17 +29,16 @@ pub use crate::api::types::{
     ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft, GraphRelationTrace,
     IncludedDerivedMemory, LifecycleDtoValidationError, LifecycleFilterAction,
     LifecycleFilterDecision, LifecycleFilterReason, LifecycleMutationOutcome,
-    LifecycleMutationTrace, LifecycleOmissionSummary, LifecycleTargetRef, Memory, MemoryFilters,
-    MemoryId, MemoryInput, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft,
-    MemoryObjectRef, MemoryThread, MemoryThreadDraft, MemoryType, Modality, ObjectType,
-    Observation, ObservationDraft, RelationType, RememberDraft, RememberOutcome,
-    ReplacementDerivedMemoryDraft, RetentionState, RetrievalCandidateLimits, RetrievalContext,
-    RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTrace,
-    RetrieveOutcome, ScoredMemory, SectionAssignment, SourceObjectCorrectionTarget,
-    SourceProvenanceReference, Stability, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, SupersededByEvidence, SuppressionPolicy, ThreadStatus,
-    VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    LifecycleMutationTrace, LifecycleOmissionSummary, LifecycleTargetRef, MemoryId, MemoryLink,
+    MemoryLinkDraft, MemoryObject, MemoryObjectDraft, MemoryObjectRef, MemoryThread,
+    MemoryThreadDraft, Modality, ObjectType, Observation, ObservationDraft, RelationType,
+    RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
+    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
+    RetrievalRationale, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SourceObjectCorrectionTarget, SourceProvenanceReference, Stability, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, SupersededByEvidence, SuppressionPolicy,
+    ThreadStatus, VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure,
+    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::Settings;
 pub use crate::errors::CustomError;
@@ -72,44 +72,54 @@ pub mod test_utils {
 /// # Description
 ///
 /// This struct serves as the main entry point for memory operations,
-/// providing a high-level interface for storing, retrieving, and
-/// searching memory entries.
+/// providing a high-level interface for remembering typed memory objects,
+/// linking canonical relationships, retrieving continuity context, and
+/// applying lifecycle corrections or suppression.
 pub struct CharacterMemory {
-    legacy_memory_repo: Option<MemoryRepository>,
-    // Remove this allow once public graph/vector construction or internal retrieval wiring
-    // consumes injected composition outside source-module tests.
-    #[allow(dead_code)]
-    memory_composition: Option<MemoryComposition>,
+    memory_composition: MemoryComposition,
 }
 
-// Remove this allow once public graph/vector construction or internal retrieval wiring
-// consumes injected composition outside source-module tests.
-#[allow(dead_code)]
 struct MemoryComposition {
     graph_store: Box<dyn GraphAuthorityStore>,
     vector_store: Box<dyn VectorCandidateStore>,
     embedder: Box<dyn MemoryEmbedder>,
 }
 
+struct EmbeddingProviderMemoryEmbedder {
+    provider: Box<dyn EmbeddingProvider>,
+}
+
+impl EmbeddingProviderMemoryEmbedder {
+    fn new(provider: Box<dyn EmbeddingProvider>) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait]
+impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
+    async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+        self.provider.generate_embedding(&input.text).await
+    }
+
+    async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
+        let texts: Vec<&str> = inputs.iter().map(|input| input.text.as_str()).collect();
+        self.provider.bulk_generate_embeddings(&texts).await
+    }
+}
+
 impl CharacterMemory {
     /// Builds CharacterMemory from provider-neutral graph, vector, and embedder parts.
-    ///
-    /// This is the durable composition boundary for deterministic tests and application-owned
-    /// backend wiring. It remains crate-visible until the public graph/vector/embedder trait
-    /// surface is selected.
-    #[allow(dead_code)]
     pub(crate) fn from_parts(
         graph_store: Box<dyn GraphAuthorityStore>,
         vector_store: Box<dyn VectorCandidateStore>,
         embedder: Box<dyn MemoryEmbedder>,
     ) -> Self {
         Self {
-            legacy_memory_repo: None,
-            memory_composition: Some(MemoryComposition {
+            memory_composition: MemoryComposition {
                 graph_store,
                 vector_store,
                 embedder,
-            }),
+            },
         }
     }
 
@@ -117,13 +127,13 @@ impl CharacterMemory {
     ///
     /// # Description
     ///
-    /// This constructor allows callers to inject custom embedding generation, while keeping
-    /// vector storage on the default Qdrant backend.
+    /// This constructor allows callers to inject custom embedding generation while using the
+    /// default graph-authoritative storage composition.
     ///
     /// # Parameters
     ///
     /// - `settings`: Global configuration used to derive the Qdrant connection and embedding
-    ///   model settings required to initialize the underlying vector memory repository.
+    ///   model settings required to initialize the Qdrant candidate collection.
     /// - `collection_name`: The name of the Qdrant collection where memory vectors will be
     ///   stored and queried.
     /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
@@ -133,26 +143,35 @@ impl CharacterMemory {
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by the provided embedding provider
-    ///   and a Qdrant-based vector memory repository.
-    /// - `Err(CustomError)`: Returned if any error occurs while creating the vector memory
-    ///   repository or when resolving configuration from `settings`.
+    /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by Oxigraph graph authority and
+    ///   Qdrant vector candidate recall.
+    /// - `Err(CustomError)`: Returned if any error occurs while resolving configuration from
+    ///   `settings` or initializing the Oxigraph graph authority and Qdrant vector candidate
+    ///   store.
     pub async fn new_with_embedding_provider(
         settings: Settings,
         collection_name: String,
         embed_provider: Box<dyn EmbeddingProvider>,
     ) -> Result<Self, CustomError> {
-        let vector_memory_settings = VectorMemoryRepositorySettings::new(
-            settings.get_qdrant_connection().to_string(),
+        let expected_vector_size = settings.get_embedding_vector_size()?;
+        let provider_vector_size = embed_provider.vector_size();
+        if provider_vector_size != expected_vector_size {
+            return Err(CustomError::EmbeddingInitializationError(format!(
+                "Embedding provider vector size ({provider_vector_size}) does not match configured embedding model vector size ({expected_vector_size})."
+            )));
+        }
+
+        let vector_store = QdrantVectorCandidateStore::new(
+            settings.get_qdrant_connection(),
             collection_name,
-            settings.get_embedding_model()?,
-        );
-        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
-        let memory_repo = MemoryRepository::new(embed_provider, vector_repo);
-        Ok(Self {
-            legacy_memory_repo: Some(memory_repo),
-            memory_composition: None,
-        })
+            expected_vector_size as u64,
+        )?;
+        vector_store.init_collection().await?;
+        Ok(Self::from_parts(
+            Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
+            Box::new(vector_store),
+            Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
+        ))
     }
 
     /// Constructs a new CharacterMemory instance.
@@ -176,48 +195,12 @@ impl CharacterMemory {
         );
         let embed_provider = Box::new(OpenAIEmbeddingProvider::new(embedding_settings)?);
 
-        // Configure and create the vector memory repository
-        let vector_memory_settings = VectorMemoryRepositorySettings::new(
-            settings.get_qdrant_connection().to_string(),
-            collection_name.clone(),
-            settings.get_embedding_model()?,
-        );
-        let vector_repo = Box::new(QdrantVectorMemoryRepository::new(vector_memory_settings)?);
-        // Assemble the high-level MemoryRepository.
-        let memory_repo = MemoryRepository::new(embed_provider, vector_repo);
-
-        Ok(Self {
-            legacy_memory_repo: Some(memory_repo),
-            memory_composition: None,
-        })
-    }
-
-    /// Initializes the storage systems.
-    ///
-    /// # Description
-    ///
-    /// Ensures all required storage systems are properly initialized before any operations are performed.
-    /// This should be called during application startup.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: Empty unit type if initialization succeeds
-    /// - `Err`: A `CustomError` if initialization fails
-    pub async fn init_storage(&self) -> Result<(), CustomError> {
-        self.legacy_repo()?.init_storage().await
+        Self::new_with_embedding_provider(settings, collection_name, embed_provider).await
     }
 
     /// Persists a remember draft through the graph-authoritative write pipeline.
-    // Remove this allow once public graph/vector construction or internal retrieval wiring
-    // consumes the injected write path outside source-module tests.
-    #[allow(dead_code)]
-    pub(crate) async fn remember(
-        &self,
-        draft: RememberDraft,
-    ) -> Result<RememberOutcome, CustomError> {
-        let parts = self.memory_composition()?;
+    pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
+        let parts = self.memory_composition();
         let pipeline = RememberPipeline::new(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
@@ -233,25 +216,19 @@ impl CharacterMemory {
     }
 
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
-    // Remove this allow once public graph/vector construction or internal retrieval wiring
-    // consumes the injected write path outside source-module tests.
-    #[allow(dead_code)]
-    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
-        let parts = self.memory_composition()?;
+    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+        let parts = self.memory_composition();
         LinkPipeline::new(parts.graph_store.as_ref())
             .link(draft)
             .await
     }
 
     /// Assembles a graph-verified continuity context pack through injected retrieval parts.
-    // Remove this allow once public graph/vector construction or internal retrieval wiring
-    // consumes the injected retrieve path outside source-module tests.
-    #[allow(dead_code)]
-    pub(crate) async fn retrieve(
+    pub async fn retrieve(
         &self,
         context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
-        let parts = self.memory_composition()?;
+        let parts = self.memory_composition();
         RetrievePipeline::new(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
@@ -262,14 +239,11 @@ impl CharacterMemory {
     }
 
     /// Applies a non-destructive lifecycle correction through injected graph/vector parts.
-    // Remove this allow once public graph/vector construction or internal lifecycle wiring
-    // consumes the injected correction path outside source-module tests.
-    #[allow(dead_code)]
-    pub(crate) async fn correct(
+    pub async fn correct(
         &self,
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
-        let parts = self.memory_composition()?;
+        let parts = self.memory_composition();
         CorrectionForgetPipeline::new(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
@@ -280,14 +254,11 @@ impl CharacterMemory {
     }
 
     /// Applies suppression/archive lifecycle mutation through injected graph/vector parts.
-    // Remove this allow once public graph/vector construction or internal lifecycle wiring
-    // consumes the injected forget path outside source-module tests.
-    #[allow(dead_code)]
-    pub(crate) async fn forget(
+    pub async fn forget(
         &self,
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
-        let parts = self.memory_composition()?;
+        let parts = self.memory_composition();
         CorrectionForgetPipeline::new(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
@@ -297,175 +268,8 @@ impl CharacterMemory {
         .await
     }
 
-    /// Legacy flat vector-only create path retained for existing integration coverage until the
-    /// default production constructor is rewired to graph/vector composition.
-    #[deprecated(
-        note = "no public graph-authoritative replacement is available yet; remove this once the default constructor is rewired to the replacement facade"
-    )]
-    pub async fn create_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
-        let legacy_repo = self.legacy_repo()?;
-        let metadata = VectorMetadata::from_memory_input(input)?;
-        let mem_entry = legacy_repo.create_memory(metadata).await?;
-        Ok(mem_entry.into_public())
-    }
-
-    /// Creates multiple memory entries in a batch.
-    ///
-    /// Legacy flat vector-only batch create path retained for existing integration coverage until
-    /// the default production constructor is rewired to graph/vector composition.
-    #[deprecated(
-        note = "no public graph-authoritative replacement is available yet; remove this once the default constructor is rewired to the replacement facade"
-    )]
-    pub async fn bulk_create_memories(
-        &self,
-        inputs: &[MemoryInput],
-    ) -> Result<Vec<Memory>, CustomError> {
-        let legacy_repo = self.legacy_repo()?;
-        let metadata_list: Result<Vec<_>, _> = inputs
-            .iter()
-            .map(|input| VectorMetadata::from_memory_input(input.clone()))
-            .collect();
-        let metadata_list = metadata_list?;
-
-        let entries = legacy_repo.bulk_create_memories(&metadata_list).await?;
-        Ok(entries
-            .into_iter()
-            .map(|entry| entry.into_public())
-            .collect())
-    }
-
-    /// Retrieves a memory entry by its unique identifier.
-    ///
-    /// # Parameters
-    ///
-    /// - `id`: The UUID of the memory entry to retrieve
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A `Memory` containing the requested entry
-    /// - `Err`: A `CustomError` if the operation fails
-    pub async fn get_memory_by_id(&self, id: Uuid) -> Result<Memory, CustomError> {
-        let mem_entry = self.legacy_repo()?.get_memory_by_id(id).await?;
-        Ok(mem_entry.into_public())
-    }
-
-    /// Retrieves multiple memory entries by their unique identifiers.
-    ///
-    /// # Parameters
-    ///
-    /// - `ids`: A slice of UUIDs of the memory entries to retrieve
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A vector of `Memory` containing the requested entries
-    /// - `Err`: A `CustomError` if the operation fails
-    pub async fn get_memories_by_ids(&self, ids: &[Uuid]) -> Result<Vec<Memory>, CustomError> {
-        let mem_entries = self.legacy_repo()?.get_memories_by_ids(ids).await?;
-        Ok(mem_entries
-            .into_iter()
-            .map(|entry| entry.into_public())
-            .collect())
-    }
-
-    /// Searches for memory entries that are semantically similar to the query.
-    ///
-    /// # Parameters
-    ///
-    /// - `query`: The search query string to find similar memories
-    /// - `top_k`: The maximum number of results to return
-    /// - `filters`: Optional filters to apply to the search results
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A vector of `Memory` containing the search results
-    /// - `Err`: A `CustomError` if the operation fails
-    #[deprecated(
-        note = "this flat vector retrieval path will be replaced by a dedicated continuity retrieval facade"
-    )]
-    pub async fn search_memories(
-        &self,
-        query: &str,
-        top_k: usize,
-        filters: Option<MemoryFilters>,
-    ) -> Result<Vec<ScoredMemory>, CustomError> {
-        let entries = self
-            .legacy_repo()?
-            .search_memories(query, top_k, filters)
-            .await?;
-
-        Ok(entries
-            .into_iter()
-            .map(|entry| entry.into_public())
-            .collect())
-    }
-
-    /// Updates an existing memory entry.
-    ///
-    /// # Parameters
-    ///
-    /// - `input`: A `MemoryInput` containing the updated data and ID of the entry to update
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A `Memory` containing the updated entry
-    /// - `Err`: A `CustomError` if:
-    ///     - The input does not contain an ID
-    ///     - The update operation fails
-    #[deprecated(
-        note = "this flat update path will be replaced deliberately after graph-authoritative write behavior lands"
-    )]
-    pub async fn update_memory(&self, input: MemoryInput) -> Result<Memory, CustomError> {
-        let legacy_repo = self.legacy_repo()?;
-        let metadata = VectorMetadata::from_memory_input(input)?;
-        let mem_entry = legacy_repo.update_memory(metadata).await?;
-        Ok(mem_entry.into_public())
-    }
-
-    /// Deletes a memory entry by its unique identifier.
-    ///
-    /// # Parameters
-    ///
-    /// - `id`: The UUID of the memory entry to delete
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: Empty unit type if deletion succeeds
-    /// - `Err`: A `CustomError` if the operation fails
-    #[deprecated(
-        note = "this flat delete path will be replaced deliberately after graph-authoritative write behavior lands"
-    )]
-    pub async fn delete_memory(&self, id: Uuid) -> Result<(), CustomError> {
-        self.legacy_repo()?.delete_memory(id).await
-    }
-
-    fn legacy_repo(&self) -> Result<&MemoryRepository, CustomError> {
-        self.legacy_memory_repo.as_ref().ok_or_else(|| {
-            CustomError::UnsupportedOperation(
-                "legacy flat memory API is not available on injected graph/vector construction"
-                    .to_owned(),
-            )
-        })
-    }
-
-    // Remove this allow once public graph/vector construction or internal retrieval wiring
-    // consumes injected composition outside source-module tests.
-    #[allow(dead_code)]
-    fn memory_composition(&self) -> Result<&MemoryComposition, CustomError> {
-        self.memory_composition.as_ref().ok_or_else(|| {
-            CustomError::UnsupportedOperation(
-                "injected graph, vector, and embedder parts are required".to_owned(),
-            )
-        })
+    fn memory_composition(&self) -> &MemoryComposition {
+        &self.memory_composition
     }
 }
 
@@ -493,6 +297,7 @@ impl From<crate::internal::repositories::InternalVectorIndexingFailure> for Vect
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use secrecy::SecretString;
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, EntityType, ObjectType, RelationType};
@@ -564,50 +369,6 @@ mod tests {
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert_eq!(outcome.rationale.graph_verified_count, 1);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
-    }
-
-    #[tokio::test]
-    #[allow(deprecated)]
-    async fn injected_retrieve_is_isolated_from_legacy_flat_search() {
-        let (memory, fixtures) = retrieval_memory().await;
-
-        let legacy_error = memory
-            .search_memories("preference", 1, None)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(legacy_error, CustomError::UnsupportedOperation(message) if message.contains("legacy flat memory API is not available"))
-        );
-
-        let outcome = memory
-            .retrieve(RetrievalContext::new("preference"))
-            .await
-            .expect("retrieve facade should not require the legacy search path");
-
-        assert_eq!(
-            outcome.pack.preferences[0].memory.id,
-            fixtures.user_preference.id
-        );
-    }
-
-    #[tokio::test]
-    #[allow(deprecated)]
-    async fn injected_facade_does_not_expose_legacy_flat_create_path() {
-        let memory = injected_memory();
-        let input = MemoryInput {
-            id: None,
-            content: "legacy flat input".to_owned(),
-            memory_type: MemoryType::Episodic,
-            timestamp: None,
-            location_text: None,
-            participants: None,
-        };
-
-        let error = memory.create_memory(input).await.unwrap_err();
-
-        assert!(
-            matches!(error, CustomError::UnsupportedOperation(message) if message.contains("legacy flat memory API is not available"))
-        );
     }
 
     #[tokio::test]
@@ -876,52 +637,30 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(deprecated)]
-    async fn injected_lifecycle_facades_are_isolated_from_legacy_update_and_delete() {
-        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
-        let input = MemoryInput {
-            id: Some(fixtures.user_preference.id),
-            content: "legacy flat update should remain unavailable".to_owned(),
-            memory_type: MemoryType::Semantic,
-            timestamp: None,
-            location_text: None,
-            participants: None,
+    async fn constructor_rejects_embedding_provider_vector_size_mismatch_before_storage_init() {
+        let settings = Settings::new_for_tests(
+            SecretString::new("not-a-qdrant-url".into()),
+            SecretString::new("memory://local".into()),
+            SecretString::new("dummy-key".into()),
+            SecretString::new("text-embedding-3-small".into()),
+        );
+
+        let error = match CharacterMemory::new_with_embedding_provider(
+            settings,
+            "mismatched_provider_vectors".to_owned(),
+            Box::new(FixedEmbeddingProvider::new(8)),
+        )
+        .await
+        {
+            Ok(_) => panic!("constructor should reject mismatched provider vector size"),
+            Err(error) => error,
         };
 
-        let update_error = memory.update_memory(input).await.unwrap_err();
-        assert!(
-            matches!(update_error, CustomError::UnsupportedOperation(message) if message.contains("legacy flat memory API is not available"))
-        );
-        let delete_error = memory
-            .delete_memory(fixtures.user_preference.id)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(delete_error, CustomError::UnsupportedOperation(message) if message.contains("legacy flat memory API is not available"))
-        );
-
-        memory
-            .correct(derived_correction_draft(
-                &fixtures,
-                replacement_id,
-                fixtures.user_preference.id,
-            ))
-            .await
-            .expect("legacy update/delete isolation should not block lifecycle correction");
-        let outcome = memory
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::derived_memory(replacement_id),
-                "Suppress replacement via lifecycle forget.",
-            ))
-            .await
-            .expect("legacy update/delete isolation should not block lifecycle forget");
-
-        assert!(outcome
-            .graph_mutated_object_ids
-            .contains(&MemoryObjectRef::new(
-                ObjectType::DerivedMemory,
-                replacement_id,
-            )));
+        assert!(matches!(
+            error,
+            CustomError::EmbeddingInitializationError(message)
+                if message.contains("8") && message.contains("1536")
+        ));
     }
 
     fn injected_memory() -> CharacterMemory {
@@ -1084,6 +823,35 @@ mod tests {
             .chain(pack.commitments.iter())
             .chain(pack.character_signals.iter())
             .any(|included| included.memory.id == memory_id)
+    }
+
+    #[derive(Debug)]
+    struct FixedEmbeddingProvider {
+        vector_size: usize,
+    }
+
+    impl FixedEmbeddingProvider {
+        fn new(vector_size: usize) -> Self {
+            Self { vector_size }
+        }
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for FixedEmbeddingProvider {
+        fn vector_size(&self) -> usize {
+            self.vector_size
+        }
+
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![0.0; self.vector_size])
+        }
+
+        async fn bulk_generate_embeddings<'a>(
+            &self,
+            texts: &'a [&'a str],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            Ok(vec![vec![0.0; self.vector_size]; texts.len()])
+        }
     }
 
     #[derive(Debug)]

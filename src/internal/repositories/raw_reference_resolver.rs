@@ -1,6 +1,5 @@
-// Transitional repository contract: raw references are resolved by later
-// adapters/pipelines while raw storage remains consumer-owned. Remove once the
-// resolver is consumed directly, or prune unused DTO/method surface.
+// Raw-reference resolution boundary. Current graph/vector storage keeps
+// raw references as pointers; production raw storage can implement this later.
 #![allow(dead_code)]
 
 use async_trait::async_trait;

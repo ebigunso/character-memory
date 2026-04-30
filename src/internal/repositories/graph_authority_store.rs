@@ -1,6 +1,6 @@
-// Transitional repository contract: implemented before the live graph
-// adapter and retrieval pipeline. Remove once those chunks consume the full
-// contract surface, or prune unused query shapes.
+// Graph authority contract and provider-neutral expansion helpers.
+// Oxigraph is the default in-process authority; tests also use deterministic
+// fake stores.
 #![allow(dead_code)]
 
 use async_trait::async_trait;
@@ -498,7 +498,7 @@ pub(crate) fn bounded_expansion_node_set(
         || query.failure_policy != GraphExpansionFailurePolicy::default()
     {
         return Err(CustomError::MemoryValidation(
-            "bounded_expansion_node_set only supports legacy depth/node/object-type bounds"
+            "bounded_expansion_node_set only supports basic depth/node/object-type bounds"
                 .to_owned(),
         ));
     }

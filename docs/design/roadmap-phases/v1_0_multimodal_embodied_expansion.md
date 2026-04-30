@@ -173,7 +173,7 @@ A result or consequence of an action.
   "object_type": "outcome_observation",
   "episode_id": "ep_...",
   "related_action_id": "action_...",
-  "text": "The user accepted the YAGNI starter architecture but asked for old roadmap reconciliation.",
+  "text": "The user accepted the YAGNI starter architecture but asked for roadmap reconciliation.",
   "outcome_type": "accepted_with_revision_request"
 }
 ```
@@ -217,11 +217,9 @@ What has happened before that should shape behavior now?
 
 ---
 
-# 6. Relation to old roadmap
+# 6. Multimodal Scope
 
-The old roadmap had multimodal hooks as a storage-level extension. That idea is retained but delayed.
-
-v0.x keeps:
+Earlier phases keep:
 
 ```text
 modality

@@ -1,6 +1,6 @@
 # Roadmap: v0.1 Starter Episodic Memory Implementation
 
-- status: draft
+- status: completed
 - generated: 2026-04-27
 - last_updated: 2026-04-30
 - work_type: mixed
@@ -13,12 +13,12 @@
 - Preserve the handoff's constraints: Rust library crate, chat/voice-transcript scope, Qdrant for vector candidate recall, Oxigraph for graph authority, stable cross-store IDs, deterministic tests, and no required LLM dependency in core.
 
 ## Current State Assessment
-- The current public facade is `CharacterMemory` in `src/lib.rs`; crate-visible `remember`, typed `link`, and `retrieve` now use the v0.1 injected graph/vector/embedder path, while flat methods such as `create_memory`, `search_memories`, `update_memory`, and `delete_memory` are deprecated legacy surface rather than canonical v0.1 model.
+- The current public facade is `CharacterMemory` in `src/lib.rs`; public `remember`, typed `link`, `retrieve`, `correct`, and `forget` now use the graph/vector/embedder path.
 - Canonical v0.1 domain objects now live under `src/api/types/domain.rs`, with store/embedder contracts and deterministic fake-store fixtures under `src/internal/repositories/**`.
-- The old flat live persistence path remains legacy-shaped: `MemoryRepository` delegates to `VectorMemoryRepository`, and `QdrantVectorMemoryRepository` still serves the old flat facade.
+- The old flat live persistence path has been removed: `MemoryRepository`, `VectorMemoryRepository`, `QdrantVectorMemoryRepository`, flat DTO re-exports, and flat integration tests are no longer compiled.
 - The v0.1 vector foundation now has provider-neutral `VectorRecord` and natural-language embedding surfaces, plus Qdrant v0.1 payload mapping and `VectorCandidateStore::upsert_vector_records` support for full record payloads.
 - The v0.1 graph foundation now has RDF vocabulary/mapping and an embedded/in-memory `OxigraphGraphAuthorityStore` implementing `GraphAuthorityStore` for canonical objects, typed links, query, and bounded expansion foundation.
-- The current tests cover Qdrant-backed legacy behavior, v0.1 domain model behavior, draft DTO conversion, lifecycle DTOs, retrieval DTOs, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph retrieve/expansion/lifecycle smoke, bounded graph expansion, internal remember/link/retrieve/correction/forget pipelines, injected facade-level remember/link/retrieve/correction/forget behavior, lifecycle retrieval regression behavior, and live Qdrant candidate smoke when the service prerequisite is available.
+- The current tests cover v0.1 domain model behavior, draft DTO conversion, lifecycle DTOs, retrieval DTOs, deterministic fake-store support, v0.1 vector surfaces, Qdrant payload/candidate-store mapping, RDF/Oxigraph mapping, embedded Oxigraph retrieve/expansion/lifecycle smoke, bounded graph expansion, internal remember/link/retrieve/correction/forget pipelines, public facade-level remember/link/retrieve/correction/forget behavior, lifecycle retrieval regression behavior, and live Qdrant candidate smoke when the service prerequisite is available.
 - `Cargo.toml` includes the selected Qdrant and Oxigraph dependencies for the adapter foundation.
 
 ## Resolved Decisions
@@ -65,7 +65,7 @@
 ### Documentation, Migration Cleanup, And Release Validation
 - Purpose: update README and roadmap docs, remove or rewrite old flat memory examples, remove non-contributing legacy implementations, and run final deterministic plus gated integration validation.
 - Expected outcome: v0.1 is documented as chat-native episodic continuity memory, with Qdrant/Oxigraph responsibilities and old flat concepts clearly retired or removed.
-- Concrete plan: active draft in [docs/coding-agent/plans/active/v0-1-documentation-migration-cleanup-release-validation-plan.md](v0-1-documentation-migration-cleanup-release-validation-plan.md)
+- Concrete plan: completed in [docs/coding-agent/plans/completed/v0-1-documentation-migration-cleanup-release-validation-plan.md](../completed/v0-1-documentation-migration-cleanup-release-validation-plan.md)
 
 ## Cross-Cutting Validation Expectations
 - Every concrete implementation plan should include `cargo fmt --check`, `cargo check`, and `cargo test --no-run` unless explicitly waived.
@@ -117,6 +117,10 @@
   - Summary: Completed backend-free lifecycle DTOs, graph-authoritative correction/forget pipelines, source-provenance cascade, correction-origin provenance, injected crate-visible lifecycle facades, retrieval lifecycle regressions, and the next documentation/migration cleanup/release validation plan.
   - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, embedded Oxigraph lifecycle/retrieve smoke, `cargo clippy --all-targets -- -D warnings`, local live Qdrant candidate smoke, and final Reviewer approval passed; `cargo test --lib` reported 180 passed, 0 failed, 1 ignored, and the Qdrant smoke reported 1 passed, 0 failed.
   - Notes: The cleanup plan is active as a draft only; lifecycle plan has moved to completed.
+- 2026-04-30 Documentation, migration cleanup, and release validation completed.
+  - Summary: Public `CharacterMemory::new` and `new_with_embedding_provider` now construct graph/vector/embedder composition with Qdrant candidate recall and embedded in-memory Oxigraph graph authority. Public `remember`, `link`, `retrieve`, `correct`, and `forget` facades are graph-authoritative; legacy flat facades, flat DTO re-exports, legacy repositories, and legacy integration tests were removed.
+  - Validation evidence: `cargo fmt --check`, `cargo check`, `cargo test --no-run`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, embedded Oxigraph lifecycle/retrieve smoke filters, public v0.1 facade integration tests, local live Qdrant candidate smoke, and final Reviewer approval passed.
+  - Notes: Persistent Oxigraph storage configuration remains future work; current graph authority is embedded/in-memory.
 
 ## Decision Log
 
@@ -152,16 +156,20 @@
   - Plan delta: Moved the retrieve/context-pack concrete plan to completed plans and drafted the correction/forget lifecycle concrete plan as the next active chunk.
   - Tradeoffs considered: Correction/forget should mutate graph-authoritative lifecycle state before documentation/migration cleanup retires legacy flat update/delete examples.
   - User approval: directed by approved roadmap sequence.
+- 2026-04-30 Decision: Complete public migration during cleanup/release validation
+  - Trigger / new insight: User clarified that this step should leave the project fully migrated to the new architecture, and new implementation should be added if needed.
+  - Plan delta: Changed the cleanup plan from transitional legacy retention to public graph/vector/embedder constructor/facade migration plus legacy flat path removal.
+  - Tradeoffs considered: Removing the flat facade breaks old examples and tests, but avoids preserving incompatible hard update/delete and top-k flat search semantics as v0.1 compatibility surface.
+  - User approval: explicit clarification in implementation thread.
 
 ## Notes
 - Risks:
-  - Qdrant payload hints can drift from Oxigraph graph truth unless correction/forget flows update both sides predictably in later chunks.
-  - Production Oxigraph configuration remains future work; the current adapter foundation is embedded/in-memory.
+  - Qdrant candidates can outlive embedded in-memory Oxigraph graph state across process restarts until persistent Oxigraph configuration lands.
+  - Production persistent Oxigraph configuration remains future work; the current graph authority is embedded/in-memory.
   - Hub entities such as primary user/assistant can create unbounded graph expansion without strict fanout/depth tests.
-  - Existing integration tests may fail without local services even when compile/unit checks pass.
+  - Live Qdrant smoke tests require local service configuration even when deterministic compile/unit checks pass.
 - Deferred review findings:
-  - Replace or remove the legacy flat public facade as the v0.1 `remember`/`link`/`retrieve` surface lands; do not preserve it for compatibility alone.
-  - Retire or clearly split the old `QdrantVectorMemoryRepository` legacy mapping/I/O path when the v0.1 Qdrant candidate store becomes the active persistence path.
+  - Add persistent Oxigraph configuration and service/persistence validation when the project moves beyond embedded in-memory graph authority.
   - Split broad shared test support into narrower fake/fixture/embedder/raw-reference modules as future retrieval/lifecycle tests make stable ownership clearer.
 - Edge cases:
   - Observations should be salient excerpts, not every turn by default.

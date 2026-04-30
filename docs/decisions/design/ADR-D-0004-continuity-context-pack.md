@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -13,14 +13,14 @@ superseded_by: null
 
 ## Context and Problem Statement
 
-A flat ranked list of memories is suitable for ordinary RAG, but Character Memory needs to provide situated context for ongoing behavior. The assistant needs to know which memories are episodes, which are preferences, which are open loops, which are active threads, and why they were retrieved.
+A plain ranked list of memories is suitable for ordinary RAG, but Character Memory needs to provide situated context for ongoing behavior. The assistant needs to know which memories are episodes, which are preferences, which are open loops, which are active threads, and why they were retrieved.
 
 ## Decision Drivers
 
 - Retrieval should support continuity of behavior, not just similarity search.
 - Prompt/context integration should distinguish memory categories.
 - Developers should be able to inspect retrieval rationale.
-- Suppressed, superseded, or deleted memories should be filtered consistently.
+- Suppressed, archived, or superseded memories should be filtered consistently.
 
 ## Decision
 
@@ -39,7 +39,7 @@ relationship_notes
 rationale
 ```
 
-The system may internally use vector top-k and graph expansion, but the public result should not be only a flat top-k list.
+The system may internally use vector top-k and graph expansion, but the public result should not be only a plain top-k list.
 
 ## Character Memory Relevance
 

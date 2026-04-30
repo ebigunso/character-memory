@@ -4,7 +4,7 @@ Character Memory is a Rust library for giving LLM assistants memory that shapes 
 
 It is built for persistent AI assistants and companions that should remember past interactions, recognize recurring entities, and maintain character continuity across sessions.
 
-Instead of treating memory as a flat chat log or simple vector search, Character Memory stores episodic memories with temporal and relational structure.
+Instead of treating memory as a chat log or simple vector search, Character Memory stores episodic memories with temporal and relational structure.
 
 It helps an assistant remember:
 
@@ -40,12 +40,13 @@ Character Memory stores memories as episodes.
 
 An episode is a remembered event or interaction. Each episode can be connected to time, entities, and related memories.
 
-Retrieval is hybrid:
+Retrieval is graph-authoritative and hybrid:
 
-- **Semantic retrieval:** finds memories with similar meaning
-- **Temporal retrieval:** finds memories based on when they happened
-- **Entity-based retrieval:** finds memories involving the same people, projects, places, or concepts
-- **Relational retrieval:** helps connect memories through their relationships
+- **Vector candidate recall:** uses Qdrant to find semantically similar memory objects
+- **Graph expansion:** uses embedded Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
+- **Temporal retrieval:** includes memories based on when they happened
+- **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
+- **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
 This allows an assistant to retrieve memories in a way that is closer to human recall than plain vector search.
 
@@ -90,25 +91,26 @@ future interactions become more continuous
 
 ## Construction
 
-`CharacterMemory::new(settings, collection_name)` constructs the default memory system.
+`CharacterMemory::new(settings, collection_name).await?` constructs the default memory system.
 
 By default, this uses:
 
 - OpenAI for embeddings
-- Qdrant for vector storage
+- Qdrant for vector candidate recall and payload filtering
+- embedded Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
-let memory = CharacterMemory::new(settings, "my-assistant-memory");
+let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned()).await?;
 ```
 
 For deterministic tests or custom embedding backends, use:
 
 ```rust
-CharacterMemory::new_with_embedding_provider(
+let memory = CharacterMemory::new_with_embedding_provider(
     settings,
-    "my-assistant-memory",
+    "my-assistant-memory".to_owned(),
     embed_provider,
-);
+).await?;
 ```
 
 Your custom provider must implement `EmbeddingProvider`.
@@ -116,15 +118,17 @@ Your custom provider must implement `EmbeddingProvider`.
 This is useful when you want to:
 
 - use a local embedding model
-- avoid network calls in tests
+- avoid embedding-provider network calls in tests
 - make tests deterministic
 - integrate another embedding API
 
 ## Backends
 
-The default implementation is backed by Qdrant.
+The default implementation is backed by Qdrant and embedded, in-memory Oxigraph.
 
-Integration tests require a local Qdrant instance reachable over gRPC.
+Qdrant is used for vector candidate recall. Embedded Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering within the running process. Persistent Oxigraph storage configuration is future work.
+
+Integration tests that exercise external vector storage require a local Qdrant instance reachable over gRPC.
 
 The default gRPC port is `6334`.
 
@@ -166,4 +170,6 @@ Do not commit your `.env` file.
 
 Character Memory is under active development.
 
-The current focus is building a reliable memory layer for LLM assistants that need persistent episodic memory, temporal awareness, and entity-based recall.
+The v0.1 public architecture is graph-authoritative episodic continuity memory: public construction and facades compose an embedder, Qdrant candidate recall, and embedded Oxigraph graph authority.
+
+v0.1 does not store raw transcripts directly in graph/vector storage, run a reflection scheduler, implement a normalized belief ontology, support multimodal memory, or perform physical redaction/delete as a default lifecycle operation.

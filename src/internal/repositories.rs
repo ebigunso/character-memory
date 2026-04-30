@@ -2,28 +2,24 @@ mod correction_forget_pipeline;
 mod embedder;
 mod graph_authority_store;
 mod link_pipeline;
-mod memory_repository;
 mod raw_reference_resolver;
 mod remember_pipeline;
 mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vector_candidate_store;
-mod vector_memory_repository;
 
-// Transitional contract surface: remove this allow once adapter or
-// pipeline code consumes the embedder contract directly, or prune the re-export.
+// Internal contract surface. Pipelines, adapters, and test support consume
+// different subsets, so keep the module boundary stable.
 #[allow(unused_imports)]
 pub(crate) use embedder::MemoryEmbedder;
 
-// Transitional contract surface: remove this allow once facade wiring
-// consumes lifecycle mutation pipelines directly, or prune unused outcome types.
+// Lifecycle pipeline surface.
 #[allow(unused_imports)]
-pub(crate) use correction_forget_pipeline::{CorrectionForgetPipeline, LifecyclePipelineOutcome};
+pub(crate) use correction_forget_pipeline::CorrectionForgetPipeline;
 
-// Transitional contract surface: remove this allow once adapter or
-// pipeline code consumes the graph authority contract directly, or prune unused
-// exports.
+// Graph-authority contract surface. Retrieval and lifecycle code use
+// different subsets of the query/expansion helpers.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
     bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
@@ -34,33 +30,25 @@ pub(crate) use graph_authority_store::{
     GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
-// Transitional contract surface: remove this allow once facade wiring
-// consumes the link pipeline directly, or prune unused outcome types.
 #[allow(unused_imports)]
 pub(crate) use link_pipeline::LinkPipeline;
-pub(crate) use memory_repository::MemoryRepository;
 
-// Transitional contract surface: remove this allow once adapter or
-// pipeline code consumes raw-reference resolution directly, or prune unused
-// exports.
+// Raw-reference contracts remain internal until production raw storage lands.
 #[allow(unused_imports)]
 pub(crate) use raw_reference_resolver::{RawReference, RawReferenceResolver};
 
-// Transitional contract surface: remove this allow once facade wiring
-// consumes the remember pipeline directly, or prune unused outcome types.
+// Remember pipeline surface; outcome types are converted at the public
+// facade boundary.
 #[allow(unused_imports)]
 pub(crate) use remember_pipeline::{
     RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome,
     VectorIndexingFailure as InternalVectorIndexingFailure,
 };
 
-// Transitional contract surface: remove this allow once facade wiring
-// consumes the retrieve pipeline directly, or prune unused outcome helpers.
+// Continuity retrieval pipeline surface.
 #[allow(unused_imports)]
 pub(crate) use retrieve_pipeline::RetrievePipeline;
 
-// Transitional contract surface: remove this allow once adapter or
-// pipeline code consumes vector candidate storage directly, or prune the re-export.
+// Vector candidate recall contract surface.
 #[allow(unused_imports)]
 pub(crate) use vector_candidate_store::VectorCandidateStore;
-pub(crate) use vector_memory_repository::VectorMemoryRepository;
