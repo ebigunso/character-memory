@@ -1,6 +1,6 @@
 # Database Design Notes
 
-These documents explain the storage-schema rationale behind the v0.1
+These documents explain the storage-schema rationale behind the
 graph-authoritative architecture.
 
 - [Vector Database Payload Design](vector_db_metadata_schema.md): why Qdrant

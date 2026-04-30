@@ -1,6 +1,6 @@
 # Vector Database Payload Design
 
-This document describes the v0.1 Qdrant payload design for Character Memory.
+This document describes the Qdrant payload design for Character Memory.
 It is intentionally a design note, not a field-by-field copy of the Rust
 mapping code.
 
@@ -38,8 +38,8 @@ graph_uri  deterministic graph URI for joining to Oxigraph
 surface    semantic surface that was embedded
 ```
 
-The same object can have more than one surface over time, but the v0.1 mapping
-keeps the join key stable and explicit. This lets retrieval collect vector
+The same object can have more than one surface over time, but the mapping keeps
+the join key stable and explicit. This lets retrieval collect vector
 candidates, deduplicate by object identity, and ask the graph store for the
 authoritative object.
 
@@ -92,10 +92,10 @@ schema_version
 surface
 ```
 
-These fields make vector-to-graph joins deterministic and make future migration
-auditable. `object_type` and `record_type` are currently the same for v0.1, but
-both are retained so future vector records can diverge from domain object
-classes without changing the join contract.
+These fields make vector-to-graph joins deterministic and make migration
+auditable. `object_type` names the canonical memory object, while `record_type`
+is retained so future vector records can diverge from domain object classes
+without changing the join contract.
 
 ### Text Surfaces
 
@@ -161,9 +161,9 @@ stability
 These fields reduce work before graph verification. They also make lifecycle
 cleanup more visible during operational inspection.
 
-They are not sufficient for final inclusion. v0.1 explicitly supports the case
-where vector cleanup fails after graph mutation: retrieval should still exclude
-stale graph records even if Qdrant still returns them.
+They are not sufficient for final inclusion. The design explicitly supports the
+case where vector cleanup fails after graph mutation: retrieval should still
+exclude stale graph records even if Qdrant still returns them.
 
 ### Time Hints
 
@@ -187,8 +187,8 @@ raw_ref
 ```
 
 `raw_ref` preserves a pointer to source material without storing the full raw
-chat or voice transcript in Qdrant. This keeps v0.1 chat-native while avoiding a
-premature raw-storage policy.
+chat or voice transcript in Qdrant. This keeps the memory substrate
+transcript-compatible while avoiding a premature raw-storage policy.
 
 ## Indexing Policy
 
@@ -260,9 +260,9 @@ The previous schema described flat `episodic` and `semantic` memory entries with
 fields such as `memory_type`, `content`, `timestamp`, `location_text`, and
 `participants`.
 
-That no longer matches v0.1.
+That no longer matches the graph-authoritative architecture.
 
-v0.1 uses typed memory objects:
+The durable model uses typed memory objects:
 
 ```text
 Episode

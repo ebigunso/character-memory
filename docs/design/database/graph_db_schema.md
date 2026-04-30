@@ -1,6 +1,6 @@
 # Graph Database Schema Design
 
-This document describes the v0.1 Oxigraph/RDF graph schema design for Character
+This document describes the Oxigraph/RDF graph schema design for Character
 Memory. It focuses on why the graph is shaped this way, not on exhaustively
 restating the Rust mapping code.
 
@@ -29,8 +29,8 @@ bounded traversal.
 
 ## Backend Boundary
 
-v0.1 uses embedded in-memory Oxigraph as the default graph authority. Persistent
-Oxigraph storage configuration is future work.
+Embedded in-memory Oxigraph is the default graph authority. Persistent Oxigraph
+storage configuration is future work.
 
 The public domain model does not expose Oxigraph types. Domain objects are
 mapped into RDF at the infrastructure edge. This keeps the public API stable if
@@ -59,7 +59,7 @@ joined back to graph truth without guessing.
 
 ## Object Classes
 
-The v0.1 graph uses one RDF class per canonical memory object:
+The graph uses one RDF class per canonical memory object:
 
 ```text
 Episode
@@ -257,11 +257,11 @@ limits.
 
 ## Why Not Store Everything As Triples Only
 
-The current Oxigraph adapter also keeps canonical domain objects in memory for
-contract reads while materializing RDF triples. That is a v0.1 implementation
-choice, not a rejection of RDF.
+The embedded Oxigraph adapter also keeps canonical domain objects in memory for
+contract reads while materializing RDF triples. That is an implementation
+boundary, not a rejection of RDF.
 
-It keeps the first graph authority simple and deterministic:
+It keeps the graph authority simple and deterministic:
 
 - domain objects can round-trip without lossy RDF reconstruction
 - tests can validate graph behavior without committing to full SPARQL object
