@@ -149,24 +149,39 @@ src/
     mod.rs
     embedding.rs
     types/
-      memory.rs
-      memory_input.rs
-      memory_filters.rs
-      memory_type.rs
-      scored_memory.rs
+      domain.rs
+      draft.rs
+      lifecycle.rs
+      retrieval.rs
   internal/
     models/
-      memory/
-        mod.rs
       vector/
         mod.rs
+        candidate_record.rs
+        embedding_model.rs
+        embedding_surface.rs
+        record.rs
     repositories/
-      memory_repository.rs
-      vector_memory_repository.rs
+      graph_authority_store.rs
+      remember_pipeline.rs
+      link_pipeline.rs
+      retrieve_pipeline.rs
+      correction_forget_pipeline.rs
+      vector_candidate_store.rs
+      embedder.rs
+      raw_reference_resolver.rs
       mod.rs
     infrastructures/
       external_services/
         mod.rs
+        qdrant_payload.rs
+        qdrant_vector_candidate_store.rs
+        openai_embedding_provider.rs
+      graph/
+        mod.rs
+        rdf_mapping.rs
+        vocabulary.rs
+        oxigraph_authority_store.rs
       mod.rs
   repositories.rs
   models.rs

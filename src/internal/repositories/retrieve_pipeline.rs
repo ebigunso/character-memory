@@ -1,6 +1,6 @@
-// Transitional retrieve pipeline: facade wiring will consume this internal
-// service directly. Remove this allow once the public retrieve surface exercises
-// the service, or prune unused helpers then.
+// v0.1 continuity retrieval pipeline used by the public facade and internal
+// tests. Some helper APIs are intentionally reserved for focused retrieval
+// controls.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};

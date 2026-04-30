@@ -1,6 +1,5 @@
-// Transitional remember pipeline: later facade wiring will consume this
-// internal service directly. Remove this allow once the public remember surface
-// exercises the service, or prune unused outcome helpers then.
+// v0.1 remember pipeline used by the public facade and internal tests. Some
+// builders remain available for focused test/control paths.
 #![allow(dead_code)]
 
 use crate::api::types::{

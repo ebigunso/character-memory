@@ -1,6 +1,5 @@
-// Transitional contract model surface: some fields/builders are reserved
-// for adapter and pipeline chunks. Remove once those chunks consume the record
-// types directly, or prune unused members.
+// v0.1 vector candidate query surface. Some filters are exercised by live
+// adapters while deterministic tests use narrower subsets.
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};

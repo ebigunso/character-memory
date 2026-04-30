@@ -1,6 +1,6 @@
 # Roadmap: v0.1 Starter Episodic Memory Implementation
 
-- status: draft
+- status: completed
 - generated: 2026-04-27
 - last_updated: 2026-04-30
 - work_type: mixed

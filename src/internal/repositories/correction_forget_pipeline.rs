@@ -1,3 +1,6 @@
+// v0.1 correction/forget lifecycle pipeline used by the public facade and
+// internal tests. Some helper APIs are intentionally reserved for focused
+// lifecycle controls.
 #![allow(dead_code)]
 
 use chrono::Utc;

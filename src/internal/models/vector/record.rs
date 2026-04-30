@@ -1,6 +1,5 @@
-// Transitional record surface: downstream adapter chunks will consume all
-// fields and conversions after this provider-neutral foundation lands. Remove
-// once remember/link wiring consumes this surface, or prune unused fields then.
+// v0.1 provider-neutral vector record surface. Payload hints remain
+// denormalized recall/filter hints; graph state stays authoritative.
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};

@@ -1,6 +1,5 @@
-// Transitional test harness: exposes reusable fakes and fixtures for
-// downstream adapter/pipeline tests before every helper is used. Remove once
-// downstream tests consume the full support surface, or prune unused helpers.
+// v0.1 deterministic test harness shared by pipeline, adapter, and facade
+// tests.
 #![allow(dead_code)]
 
 use std::collections::HashSet;

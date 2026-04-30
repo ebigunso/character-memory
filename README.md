@@ -118,7 +118,7 @@ Your custom provider must implement `EmbeddingProvider`.
 This is useful when you want to:
 
 - use a local embedding model
-- avoid network calls in tests
+- avoid embedding-provider network calls in tests
 - make tests deterministic
 - integrate another embedding API
 

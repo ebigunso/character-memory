@@ -1,7 +1,5 @@
-// Transitional RDF mapping surface: kept string-based so public domain
-// and repository contracts remain free of RDF/Oxigraph-specific types. Remove
-// once production graph-store wiring consumes the mapping, or prune unused
-// helpers then.
+// v0.1 RDF mapping surface. Public domain objects stay independent from
+// Oxigraph types.
 #![allow(dead_code)]
 
 use chrono::{DateTime, SecondsFormat, Utc};

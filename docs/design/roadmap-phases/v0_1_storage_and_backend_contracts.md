@@ -310,13 +310,13 @@ Internal flow:
 4. Add thread/entity/provenance context.
 5. Filter by lifecycle state.
 6. Rerank.
-7. Return ContinuityContextPack.
+7. Return RetrieveOutcome with the assembled ContinuityContextPack plus rationale/trace metadata.
 ```
 
 Public API should expose:
 
 ```rust
-fn retrieve(&self, context: RetrievalContext) -> Result<ContinuityContextPack, MemoryError>;
+async fn retrieve(&self, context: RetrievalContext) -> Result<RetrieveOutcome, CustomError>;
 ```
 
 Optional debug trace:

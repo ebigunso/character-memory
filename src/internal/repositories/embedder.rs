@@ -1,6 +1,5 @@
-// Transitional repository contract: implemented first so later adapters
-// and pipelines can target a stable boundary. Remove once production consumers
-// exercise the full contract, or prune unused methods.
+// v0.1 provider-neutral embedding boundary used by remember, retrieve, and
+// lifecycle vector maintenance.
 #![allow(dead_code)]
 
 use async_trait::async_trait;

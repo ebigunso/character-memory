@@ -1,6 +1,5 @@
-// Transitional repository contract: vector adapters and pipelines will
-// consume this after the contract chunk. Remove once production consumers use
-// the full surface, or prune unused methods.
+// v0.1 vector candidate recall contract. Qdrant is the default adapter, while
+// tests use deterministic fake stores.
 #![allow(dead_code)]
 
 use async_trait::async_trait;

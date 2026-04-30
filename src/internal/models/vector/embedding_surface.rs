@@ -1,6 +1,5 @@
-// Transitional builder surface: adapter and pipeline chunks will consume
-// these builders after the provider-neutral record shape lands. Remove once the
-// remember/link pipeline consumes these builders, or prune unused builders then.
+// v0.1 embedding-surface builders for graph objects that participate in vector
+// candidate recall.
 #![allow(dead_code)]
 
 use crate::api::types::{
