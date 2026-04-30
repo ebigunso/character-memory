@@ -1,6 +1,6 @@
 # Plan: v0.1 SPARQL-Backed Oxigraph Query Helpers
 
-- status: draft
+- status: done
 - generated: 2026-05-01
 - last_updated: 2026-05-01
 - work_type: code
@@ -45,8 +45,8 @@
   - `docs/design/roadmap-phases/v0_1_1_persistent_graph_authority.md`
 
 ## Open Questions (max 3)
-- Q1: Should SPARQL helpers only return IDs/object refs and let the cache hydrate canonical objects for v0.1?
-- Q2: Should any literal values be upgraded to typed RDF literals now, or should SPARQL account for current simple-string literals?
+- Resolved: SPARQL helpers should return IDs/object refs and let the existing cache hydrate canonical objects for v0.1.
+- Resolved: Do not upgrade literal values to typed RDF literals in this plan; SPARQL should account for the current simple-string mapping.
 
 ## Assumptions
 - A1: SPARQL/Oxigraph types remain internal to `src/internal/infrastructures/graph/**`.
@@ -165,6 +165,26 @@
   - Validation evidence: Not run; plan only.
   - Notes: Awaiting user approval before implementation.
 
+- 2026-05-01 02:20 Wave 1 completed: [Task_1]
+  - Summary: Added a private SPARQL selector layer under graph infrastructure for object refs, provenance/thread/entity derived memories, lifecycle predicates, and supersession evidence.
+  - Validation evidence: Worker reported `cargo fmt --check` and `cargo test internal::infrastructures::graph::oxigraph_authority_store --lib` passed after formatting; optional selector-specific tests also passed.
+  - Notes: Selector queries use separate named-graph patterns where relation evidence may be owned by link graph URIs.
+
+- 2026-05-01 02:35 Wave 2 completed: [Task_2]
+  - Summary: Routed Oxigraph object, derived-memory provenance/thread, and bounded-expansion candidate selection through SPARQL selectors while preserving cache hydration.
+  - Validation evidence: Worker reported `cargo check`, `cargo test internal::infrastructures::graph::oxigraph_authority_store --lib`, and `cargo test internal::repositories::retrieve_pipeline --lib` passed.
+  - Notes: Derived-memory selector limits are cleared before existing Rust lifecycle filtering and final limits are applied.
+
+- 2026-05-01 02:50 Wave 3 completed: [Task_3]
+  - Summary: Added regression coverage for RDF/SPARQL selection, named graph ownership, lifecycle filtering, deterministic retrieval, and graph-only memory links.
+  - Validation evidence: Worker reported `cargo test internal::infrastructures::graph --lib` and `cargo test --no-run` passed; optional `cargo fmt --check` passed after formatting.
+  - Notes: Vocabulary URI tests now pin graph-selection and lifecycle predicates used by SPARQL selectors.
+
+- 2026-05-01 03:00 Wave 4 completed: [Task_4]
+  - Summary: Reviewer approved the SPARQL selector implementation with no findings.
+  - Validation evidence: Reviewer reran `cargo fmt --check`, `cargo test internal::infrastructures::graph --lib`, and `cargo test --no-run`.
+  - Notes: Residual risk is intentionally v0.1-scoped selector coverage backed by cache/domain filtering.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-05-01 00:00 Decision:
@@ -172,6 +192,12 @@
   - Plan delta (what changed): Created a standalone plan for SPARQL-backed query helpers and regression tests.
   - Tradeoffs considered: Full RDF-to-domain hydration is deferred to avoid expanding the feature beyond v0.1 query contracts.
   - User approval: no
+
+- 2026-05-01 02:10 Decision:
+  - Trigger / new insight: User approved implementation and resolved open questions before work.
+  - Plan delta (what changed): Marked the plan in progress; resolved selector helpers to return IDs/object refs and to preserve current simple-string literal mapping.
+  - Tradeoffs considered: Avoiding RDF-to-domain hydration and typed-literal migration keeps this plan focused on SPARQL-backed selection and regression coverage.
+  - User approval: yes
 
 ## Notes
 - Risks:
