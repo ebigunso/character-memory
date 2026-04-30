@@ -2,7 +2,6 @@ mod candidate_record;
 mod embedding_model;
 mod embedding_surface;
 mod record;
-mod vector_metadata;
 
 // Transitional contract surface: these re-exports are consumed by test
 // support before production adapters use all of them. Remove once adapter or
@@ -23,4 +22,3 @@ pub(crate) use embedding_surface::{
 pub(crate) use record::{
     VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
 };
-pub(crate) use vector_metadata::VectorMetadata;

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: implementation
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -70,6 +70,7 @@ This is low-cost early and high-value later.
 ## Validation
 
 - Fixture validation should assert schema version fields.
+- Schema-version fixture validation should cover persisted objects.
 - Integration tests should fail clearly if unsupported schema versions are loaded.
 - Migration notes should be required when schema versions change.
 

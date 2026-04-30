@@ -21,6 +21,31 @@ Purpose:
 
 ## Entries
 
+## 2026-04-30 - Treat Cleanup Chunks As Completion Work When Roadmap Says Migration Cleanup  [tags: planning, scope-owns, assumptions]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-documentation-migration-cleanup-release-validation-plan.md`
+- Task/Wave: pre-implementation plan review and replan
+- Roles involved: Orchestrator | Researcher | Worker | Reviewer
+
+Symptom:
+- Initially interpreted the documentation/migration cleanup step as retaining the legacy public constructor/create/search/read path while only removing or isolating the hardest update/delete conflicts.
+- User clarified that the step should leave the project fully migrated to the new architecture and that new implementation should be added if needed.
+
+Root cause:
+- Overweighted the current code shape and the active plan's transitional open questions instead of treating the roadmap phrase "migration cleanup" as a completion gate for the v0.1 public architecture.
+- Did not immediately convert the user's "implement the step" request into a requirement that the public surface match the landed internal graph/vector/embedder architecture.
+
+Fix applied:
+- Replanned Task_3 to require public graph/vector/embedder constructor/facade wiring, removal of the old flat public facade, deletion of legacy repository modules and flat DTO re-exports, and replacement of legacy integration tests with public v0.1 facade tests.
+
+Prevention:
+- Before executing a cleanup/release-validation chunk, explicitly ask: "What must no longer exist after this step?" and compare that against the roadmap expected outcome.
+- If the roadmap says old architecture concepts are retired or removed, do not preserve them as transitional unless the user explicitly accepts a deferred migration boundary.
+
+Evidence:
+- User correction on 2026-04-30 redirected the plan from transitional retention to full public migration, and the completed plan now records the scope correction.
+
 ## 2026-04-29 - Scan Complete PR Thread Payload Before Closeout  [tags: review, tooling, validation]
 
 Context:

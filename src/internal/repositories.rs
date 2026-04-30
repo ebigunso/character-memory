@@ -2,14 +2,12 @@ mod correction_forget_pipeline;
 mod embedder;
 mod graph_authority_store;
 mod link_pipeline;
-mod memory_repository;
 mod raw_reference_resolver;
 mod remember_pipeline;
 mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vector_candidate_store;
-mod vector_memory_repository;
 
 // Transitional contract surface: remove this allow once adapter or
 // pipeline code consumes the embedder contract directly, or prune the re-export.
@@ -34,11 +32,8 @@ pub(crate) use graph_authority_store::{
     GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
-// Transitional contract surface: remove this allow once facade wiring
-// consumes the link pipeline directly, or prune unused outcome types.
 #[allow(unused_imports)]
 pub(crate) use link_pipeline::LinkPipeline;
-pub(crate) use memory_repository::MemoryRepository;
 
 // Transitional contract surface: remove this allow once adapter or
 // pipeline code consumes raw-reference resolution directly, or prune unused
@@ -63,4 +58,3 @@ pub(crate) use retrieve_pipeline::RetrievePipeline;
 // pipeline code consumes vector candidate storage directly, or prune the re-export.
 #[allow(unused_imports)]
 pub(crate) use vector_candidate_store::VectorCandidateStore;
-pub(crate) use vector_memory_repository::VectorMemoryRepository;

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: implementation
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -27,19 +27,20 @@ The library needs both semantic recall and explicit relationship traversal. Qdra
 Use:
 
 ```text
-Qdrant   → vector embeddings and payload filtering
-Oxigraph → graph relationships and SPARQL queries
+Qdrant   → vector candidate recall and payload filtering
+Oxigraph → embedded graph-authoritative memory objects, relationships, provenance, lifecycle state, and expansion
 ```
 
-as the default v0.1 storage backends.
+as the default v0.1 storage backends. The current v0.1 public constructor uses embedded in-memory Oxigraph; persistent Oxigraph storage configuration is future work.
 
 The domain objects should not expose backend client types as their public shape. Backend-specific mappings live in storage modules.
 
 ## Implementation Impact
 
-- Implement Qdrant payload mapping for `Episode`, `Observation`, `DerivedMemory`, `MemoryThread`, and `Entity` records that are indexed.
+- Implement Qdrant candidate/payload mapping for `Episode`, `Observation`, `DerivedMemory`, `MemoryThread`, and `Entity` records that are indexed.
 - Implement Oxigraph/RDF mapping for domain objects and `MemoryLink` relations.
-- Provide integration tests for both stores and cross-store joins.
+- Public construction and facades should compose the embedder, Qdrant candidate store, and embedded Oxigraph graph authority.
+- Provide tests for store contracts, graph expansion, lifecycle filtering, and cross-store joins.
 
 ## Considered Options
 

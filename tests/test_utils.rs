@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
-use character_memory::{CharacterMemory, CustomError, EmbeddingProvider, Memory};
+use character_memory::{CharacterMemory, CustomError, EmbeddingProvider};
 use qdrant_client::Qdrant;
 use std::env;
 use std::sync::Once;
-use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 static INIT: Once = Once::new();
@@ -85,7 +84,7 @@ fn embedding_vector_size_from_env() -> usize {
 }
 
 // Setup CharacterMemory instance with a unique collection
-pub async fn setup_character_memory() -> (CharacterMemory, String) {
+pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), CustomError> {
     initialize();
 
     let collection_name = unique_collection_name();
@@ -101,31 +100,11 @@ pub async fn setup_character_memory() -> (CharacterMemory, String) {
         collection_name.clone(),
         embed_provider,
     )
-    .await
-    .expect("Failed to create CharacterMemory");
+    .await?;
 
-    character_memory
-        .init_storage()
-        .await
-        .expect("Failed to initialize storage");
+    character_memory.init_storage().await?;
 
-    (character_memory, collection_name)
-}
-
-#[allow(dead_code)]
-pub async fn wait_for_memory(character_memory: &CharacterMemory, memory_id: Uuid) -> Memory {
-    let mut last_error = None;
-
-    for _attempt in 0..20 {
-        match character_memory.get_memory_by_id(memory_id).await {
-            Ok(memory) => return memory,
-            Err(error) => last_error = Some(error),
-        }
-
-        sleep(Duration::from_millis(50)).await;
-    }
-
-    panic!("Memory {memory_id} was not visible in Qdrant after retries: {last_error:?}");
+    Ok((character_memory, collection_name))
 }
 
 // Cleanup after tests by deleting the collection

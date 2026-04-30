@@ -18,6 +18,8 @@ generic vector/RDF search over memory records
 
 The system should remember chat-native interactions, extract what matters, link those memories to entities and soft threads, and retrieve continuity context for future conversations.
 
+The public v0.1 architecture is graph-authoritative: Qdrant supplies vector candidates, while embedded Oxigraph owns memory objects, links, provenance, currentness, and lifecycle state within the running process. Persistent Oxigraph storage configuration is future work.
+
 ---
 
 # 1. Why this version comes first
@@ -48,11 +50,13 @@ separate Assertion / Claim / EvidenceLink / BeliefAssessment classes
 domain-scoped source credibility
 full relationship-state model
 sleep-like consolidation scheduler
+raw transcript storage in graph/vector stores
 multimodal event segmentation
 robotic situation frames
 heavy ontology reasoning
 complex spreading activation
 learned admission control
+physical redaction/delete as the default lifecycle path
 ```
 
 These are future layers.
@@ -296,8 +300,8 @@ extract/link Entities
 score salience
 link to existing MemoryThreads or create candidate thread
 create obvious DerivedMemories
-index selected records in vector store
-write graph links
+write authoritative objects and graph links
+index selected records in vector candidate store
 ```
 
 ## 4.3 Immediate persistence cases
@@ -338,9 +342,9 @@ Internal steps:
 
 ```text
 1. Build natural-language query surface from current context.
-2. Vector search over episode, observation, derived_memory, thread, and entity records.
-3. Graph expand by entity, thread, and provenance.
-4. Filter suppressed/deleted/non-current records.
+2. Use Qdrant to find candidate episode, observation, derived_memory, thread, and entity records.
+3. Resolve and expand candidates through Oxigraph by entity, thread, lifecycle state, and provenance.
+4. Filter suppressed/archived/non-current records.
 5. Rerank by semantic similarity, thread match, entity overlap, recency, salience, and open-loop priority.
 6. Format a compact continuity context pack.
 ```
@@ -350,23 +354,20 @@ Internal steps:
 # 6. Starter public API
 
 ```rust
-fn remember(&self, interaction: MemoryInput) -> Result<Memory, MemoryError>;
-fn retrieve(&self, context: RetrievalContext) -> Result<ContinuityContextPack, MemoryError>;
-fn correct(&self, target_id: &str, correction: MemoryCorrection) -> Result<Memory, MemoryError>;
-fn forget(&self, target_id: &str, mode: ForgetMode) -> Result<(), MemoryError>;
-fn link(&self, from_id: &str, to_id: &str, relation: MemoryRelation) -> Result<MemoryLink, MemoryError>;
-fn get_by_id(&self, id: &str) -> Result<Option<Memory>, MemoryError>;
+async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError>;
+async fn retrieve(&self, context: RetrievalContext) -> Result<RetrieveOutcome, CustomError>;
+async fn correct(&self, draft: CorrectMemoryDraft) -> Result<LifecycleMutationOutcome, CustomError>;
+async fn forget(&self, draft: ForgetMemoryDraft) -> Result<LifecycleMutationOutcome, CustomError>;
+async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError>;
 ```
 
-Optional low-level APIs:
+Optional low-level diagnostics:
 
 ```rust
-fn graph_query(&self, query: GraphQuery) -> Result<GraphQueryResult, MemoryError>;
-fn vector_search(&self, request: VectorSearchRequest) -> Result<Vec<ScoredMemory>, MemoryError>;
-fn trace_retrieval(&self, trace_id: &str) -> Result<RetrievalTrace, MemoryError>;
+RetrieveOutcome may include a RetrievalTrace when the caller enables trace output.
 ```
 
-Low-level APIs should be available for debugging but not required for normal use.
+Low-level graph/vector APIs are internal in v0.1; public diagnostics are exposed through optional retrieval trace output.
 
 ---
 
@@ -387,7 +388,7 @@ Thread links can be created, confidence-scored, and revised.
 ```text
 retrieve() returns ContinuityContextPack.
 Pack includes rationale for included memories.
-Suppressed/deleted memories are excluded.
+Suppressed/archived memories are excluded.
 Current derived memories outrank superseded ones.
 Thread and entity matches influence ranking.
 ```

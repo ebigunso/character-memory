@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -19,7 +19,7 @@ Persistent memory must support correction and forgetting. If old memories are ov
 
 - Preserve correction history where appropriate.
 - Prevent suppressed or forgotten memories from influencing default retrieval.
-- Support user-controlled deletion or redaction when required.
+- Leave room for later user-controlled deletion or redaction when required.
 - Avoid rewriting historical episodes as if they never happened.
 
 ## Decision
@@ -30,11 +30,10 @@ The default lifecycle operations are:
 supersede
 suppress
 archive
-redact
-delete only when explicitly required
+defer destructive redaction/delete until explicit production policy support exists
 ```
 
-Corrections should normally create new records and link them to old records via `supersedes` or equivalent relations. Forgetting should normally suppress or archive records from default retrieval unless policy or user request requires deletion or redaction.
+Corrections should normally create new records and link them to old records via `supersedes` or equivalent relations. Forgetting should normally suppress or archive records from default retrieval. Physical redaction/delete remains outside v0.1 production support until explicit policy and storage behavior are implemented.
 
 ## Character Memory Relevance
 
@@ -43,18 +42,18 @@ Character continuity includes mistakes, corrections, and changed understanding. 
 ## Implementation Impact
 
 - Add lifecycle fields such as `retention_state`, `is_current`, `supersedes`, and/or `superseded_by`.
-- Default retrieval filters must exclude suppressed, redacted, deleted, and superseded records unless explicitly requested.
+- Default retrieval filters must exclude suppressed, archived, and superseded records unless explicitly requested.
 - Correction APIs should avoid overwriting records in place when supersession is more appropriate.
 
 ## Considered Options
 
 1. Overwrite memories on correction.
 2. Hard-delete by default when corrected or forgotten.
-3. Supersede or suppress by default, with deletion/redaction as explicit operations.
+3. Supersede or suppress by default, with destructive redaction/delete deferred to explicit later policy support.
 
 ## Decision Outcome
 
-Chosen option: **3. Supersede or suppress by default, with deletion/redaction as explicit operations**.
+Chosen option: **3. Supersede or suppress by default, with destructive redaction/delete deferred to explicit later policy support**.
 
 This preserves continuity and auditability while respecting forgetting and correction needs.
 
@@ -70,13 +69,13 @@ This preserves continuity and auditability while respecting forgetting and corre
 
 - Requires lifecycle filtering in retrieval.
 - Storage grows unless retention policies later archive or delete old material.
-- User-facing deletion semantics must be clear.
+- User-facing deletion semantics must remain clear that v0.1 lifecycle forgetting is non-destructive.
 
 ## Validation
 
 - Retrieval tests should verify that suppressed and superseded records are excluded by default.
 - Correction tests should verify supersession links.
-- Forget tests should cover suppress, archive, redact, and delete modes where implemented.
+- Forget tests should cover suppress and archive modes; redaction/delete require separate production policy support before being documented as implemented.
 
 ## Revisit When
 
