@@ -39,18 +39,27 @@ mod tests {
 
     #[derive(Debug)]
     struct StaticRawReferenceResolver {
-        result: Result<Option<RawReference>, CustomError>,
+        result: StaticRawReferenceResult,
+    }
+
+    #[derive(Debug)]
+    enum StaticRawReferenceResult {
+        Resolved(Option<RawReference>),
+        DatabaseError(String),
+        MemoryValidation(String),
     }
 
     #[async_trait]
     impl RawReferenceResolver for StaticRawReferenceResolver {
         async fn resolve(&self, _reference: &str) -> Result<Option<RawReference>, CustomError> {
             match &self.result {
-                Ok(raw_reference) => Ok(raw_reference.clone()),
-                Err(CustomError::DatabaseError(message)) => {
+                StaticRawReferenceResult::Resolved(raw_reference) => Ok(raw_reference.clone()),
+                StaticRawReferenceResult::DatabaseError(message) => {
                     Err(CustomError::DatabaseError(message.clone()))
                 }
-                Err(error) => panic!("unexpected fixture error variant: {error}"),
+                StaticRawReferenceResult::MemoryValidation(message) => {
+                    Err(CustomError::MemoryValidation(message.clone()))
+                }
             }
         }
     }
@@ -66,7 +75,7 @@ mod tests {
     #[tokio::test]
     async fn raw_reference_resolver_can_resolve_internal_source_content() {
         let resolver = StaticRawReferenceResolver {
-            result: Ok(Some(RawReference::new(
+            result: StaticRawReferenceResult::Resolved(Some(RawReference::new(
                 "raw://conversation/1#turn=2",
                 "resolved fixture text",
             ))),
@@ -84,7 +93,9 @@ mod tests {
 
     #[tokio::test]
     async fn raw_reference_resolver_reports_unavailable_reference_as_none() {
-        let resolver = StaticRawReferenceResolver { result: Ok(None) };
+        let resolver = StaticRawReferenceResolver {
+            result: StaticRawReferenceResult::Resolved(None),
+        };
 
         let resolved = resolver
             .resolve("raw://conversation/missing#turn=9")
@@ -97,9 +108,7 @@ mod tests {
     #[tokio::test]
     async fn raw_reference_resolver_propagates_resolver_failures_as_errors() {
         let resolver = StaticRawReferenceResolver {
-            result: Err(CustomError::DatabaseError(
-                "resolver unavailable".to_owned(),
-            )),
+            result: StaticRawReferenceResult::DatabaseError("resolver unavailable".to_owned()),
         };
 
         let error = resolver
@@ -110,6 +119,23 @@ mod tests {
         assert!(matches!(
             error,
             CustomError::DatabaseError(message) if message == "resolver unavailable"
+        ));
+    }
+
+    #[tokio::test]
+    async fn raw_reference_resolver_fixture_can_return_non_database_errors() {
+        let resolver = StaticRawReferenceResolver {
+            result: StaticRawReferenceResult::MemoryValidation("invalid raw ref".to_owned()),
+        };
+
+        let error = resolver
+            .resolve("raw://conversation/1#turn=2")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::MemoryValidation(message) if message == "invalid raw ref"
         ));
     }
 }

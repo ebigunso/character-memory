@@ -510,12 +510,8 @@ mod tests {
             vocab::RAW_REF,
             "file:fixtures/raw/source-observation.txt",
         );
-        assert!(!episode_triples
-            .iter()
-            .any(|triple| triple.predicate.contains("rawTranscript")));
-        assert!(!observation_triples
-            .iter()
-            .any(|triple| triple.predicate.contains("rawTranscript")));
+        assert_no_raw_content_predicates(&episode_triples);
+        assert_no_raw_content_predicates(&observation_triples);
     }
 
     #[test]
@@ -587,6 +583,15 @@ mod tests {
     fn assert_contains_resource(triples: &[RdfTriple], predicate: &'static str, value: &str) {
         assert!(triples.iter().any(|triple| {
             triple.predicate == predicate && triple.object == RdfObject::Resource(value.to_owned())
+        }));
+    }
+
+    fn assert_no_raw_content_predicates(triples: &[RdfTriple]) {
+        assert!(triples.iter().all(|triple| {
+            let predicate = triple.predicate.as_str();
+            let normalized = predicate.to_ascii_lowercase();
+            predicate == vocab::RAW_REF
+                || (!normalized.contains("raw") && !normalized.contains("transcript"))
         }));
     }
 
