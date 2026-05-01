@@ -29,6 +29,13 @@ pub enum CustomError {
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
 
+    #[error("Unsupported schema version for {context}: expected {expected}, got {actual}")]
+    UnsupportedSchemaVersion {
+        context: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
+
     #[error("Graph expansion root not found: {object_type:?} {object_id}")]
     GraphExpansionRootNotFound {
         object_type: ObjectType,
