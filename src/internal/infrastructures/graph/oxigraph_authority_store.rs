@@ -316,13 +316,25 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
+        let selectors = SparqlGraphSelectors::new(&self.store);
+        let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
+        let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
+        if root_refs.is_empty() {
+            return Err(CustomError::GraphExpansionRootNotFound {
+                object_type: query.root_type,
+                object_id: query.root_id,
+            });
+        }
+
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
+        let expansion = bounded_expansion(
+            query,
+            objects.clone().into_values(),
+            links.clone().into_values(),
+        )?;
         let graph_refs =
-            SparqlGraphSelectors::new(&self.store).select_objects(&GraphObjectQuery {
-                object_refs: Vec::new(),
-                object_ids: Vec::new(),
-                object_types: Vec::new(),
-                limit: None,
-            })?;
+            selectors.select_objects(&GraphObjectQuery::by_refs(expansion_refs(&expansion)))?;
         let graph_ref_set = graph_refs.iter().copied().collect::<HashSet<_>>();
         let graph_link_ids = graph_refs
             .iter()
@@ -330,8 +342,6 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             .map(|object_ref| object_ref.object_id)
             .collect::<HashSet<_>>();
 
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
         bounded_expansion(
             query,
             objects
@@ -357,11 +367,50 @@ fn hydrate_objects_by_refs(
 ) -> Vec<MemoryObject> {
     refs.iter()
         .filter_map(|object_ref| {
-            objects
-                .get(&(object_ref.object_id, object_ref.object_type))
-                .cloned()
+            match objects.get(&(object_ref.object_id, object_ref.object_type)) {
+                Some(object) => Some(object.clone()),
+                None if object_ref.object_type == ObjectType::MemoryLink => None,
+                None => {
+                    debug_assert!(
+                        false,
+                        "SPARQL selected {object_ref:?} but canonical object cache could not hydrate it"
+                    );
+                    None
+                }
+            }
         })
         .collect()
+}
+
+fn expansion_refs(expansion: &GraphExpansion) -> Vec<GraphObjectRef> {
+    let mut refs = expansion
+        .objects
+        .iter()
+        .map(graph_object_ref)
+        .collect::<Vec<_>>();
+    refs.extend(
+        expansion
+            .links
+            .iter()
+            .map(|link| GraphObjectRef::new(link.id, ObjectType::MemoryLink)),
+    );
+    refs.extend(
+        expansion
+            .filtered_nodes
+            .iter()
+            .map(|filtered| filtered.object_ref),
+    );
+    for relation in &expansion.relations {
+        refs.push(relation.from);
+        refs.push(relation.to);
+        refs.push(GraphObjectRef::new(
+            relation.link_id,
+            ObjectType::MemoryLink,
+        ));
+    }
+    refs.sort_by_key(|object_ref| stable_node_key((object_ref.object_id, object_ref.object_type)));
+    refs.dedup();
+    refs
 }
 
 fn quad_for_triple(owner_graph_uri: &str, triple: &RdfTriple) -> Result<Quad, CustomError> {
