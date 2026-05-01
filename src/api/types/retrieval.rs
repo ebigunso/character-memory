@@ -579,7 +579,6 @@ mod tests {
     #[test]
     fn context_pack_preserves_source_references_without_raw_transcript_storage() {
         let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442030");
-        let raw_transcript = "verbatim raw transcript text should not be packed";
         let derived = derived_memory(
             memory_id("550e8400-e29b-41d4-a716-446655442031"),
             episode_id,
@@ -593,6 +592,7 @@ mod tests {
         ));
         pack.preferences.push(included);
 
+        let encoded_value = serde_json::to_value(&pack).unwrap();
         let encoded = serde_json::to_string(&pack).unwrap();
         let decoded: ContinuityContextPack = serde_json::from_str(&encoded).unwrap();
 
@@ -610,11 +610,27 @@ mod tests {
             derived.derived_from_observation_ids
         );
         assert_eq!(decoded.preferences[0].memory.text, derived.text);
-        assert!(decoded
-            .salient_observations
-            .iter()
-            .all(|observation| observation.raw_ref.as_deref() != Some(raw_transcript)));
-        assert!(!encoded.contains(raw_transcript));
+        for raw_content_key in [
+            "raw_transcript",
+            "raw_text",
+            "transcript",
+            "source_transcript",
+        ] {
+            assert!(!json_contains_key(&encoded_value, raw_content_key));
+        }
+    }
+
+    fn json_contains_key(value: &serde_json::Value, key: &str) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                object.contains_key(key)
+                    || object.values().any(|value| json_contains_key(value, key))
+            }
+            serde_json::Value::Array(values) => {
+                values.iter().any(|value| json_contains_key(value, key))
+            }
+            _ => false,
+        }
     }
 
     #[test]

@@ -383,9 +383,6 @@ mod tests {
         assert!(payload.get("raw_text").is_none());
         assert!(payload.get("transcript").is_none());
         assert!(payload.get("source_transcript").is_none());
-        assert!(!payload
-            .values()
-            .any(|value| value == "verbatim raw transcript text"));
     }
 
     #[test]

@@ -488,7 +488,6 @@ mod tests {
     #[test]
     fn rdf_mapping_preserves_source_pointers_without_raw_transcript_literals() {
         let fixtures = representative_fixtures();
-        let raw_transcript = "verbatim raw transcript text must remain external";
         let mut episode = fixtures.episode.clone();
         episode.raw_ref = Some("file:fixtures/raw/source-episode.txt".to_owned());
         episode.summary = "Summarized source episode.".to_owned();
@@ -511,8 +510,6 @@ mod tests {
             vocab::RAW_REF,
             "file:fixtures/raw/source-observation.txt",
         );
-        assert_no_literal_value_contains(&episode_triples, raw_transcript);
-        assert_no_literal_value_contains(&observation_triples, raw_transcript);
         assert!(!episode_triples
             .iter()
             .any(|triple| triple.predicate.contains("rawTranscript")));
@@ -590,13 +587,6 @@ mod tests {
     fn assert_contains_resource(triples: &[RdfTriple], predicate: &'static str, value: &str) {
         assert!(triples.iter().any(|triple| {
             triple.predicate == predicate && triple.object == RdfObject::Resource(value.to_owned())
-        }));
-    }
-
-    fn assert_no_literal_value_contains(triples: &[RdfTriple], forbidden: &str) {
-        assert!(triples.iter().all(|triple| match &triple.object {
-            RdfObject::Literal(value) => !value.contains(forbidden),
-            RdfObject::Resource(_) => true,
         }));
     }
 
