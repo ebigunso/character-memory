@@ -326,33 +326,37 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             });
         }
 
-        let (graph_ref_set, graph_link_ids, lifecycle_link_ids) =
-            bounded_graph_visible_refs(&selectors, root_ref, query)?;
+        let visibility = bounded_graph_visible_refs(&selectors, root_ref, query)?;
         let objects = {
             let objects = lock(&self.objects)?;
-            hydrate_objects_by_ref_set(&graph_ref_set, &objects)
+            hydrate_objects_by_ref_set(&visibility.object_refs, &objects)
         };
         let links = {
             let links = lock(&self.links)?;
-            hydrate_links_by_id_sets(&graph_link_ids, &lifecycle_link_ids, &graph_ref_set, &links)
+            hydrate_links_by_id_sets(
+                &visibility.traversal_link_ids,
+                &visibility.lifecycle_link_ids,
+                &visibility.object_refs,
+                &links,
+            )
         };
 
         bounded_expansion(query, objects, links)
     }
 }
 
+#[derive(Debug, Default)]
+struct BoundedGraphVisibility {
+    object_refs: HashSet<GraphObjectRef>,
+    traversal_link_ids: HashSet<MemoryId>,
+    lifecycle_link_ids: HashSet<MemoryId>,
+}
+
 fn bounded_graph_visible_refs(
     selectors: &SparqlGraphSelectors<'_>,
     root_ref: GraphObjectRef,
     query: &GraphExpansionQuery,
-) -> Result<
-    (
-        HashSet<GraphObjectRef>,
-        HashSet<MemoryId>,
-        HashSet<MemoryId>,
-    ),
-    CustomError,
-> {
+) -> Result<BoundedGraphVisibility, CustomError> {
     let mut graph_refs = HashSet::from([root_ref]);
     let mut graph_link_ids = HashSet::new();
     let mut frontier = vec![root_ref];
@@ -387,7 +391,11 @@ fn bounded_graph_visible_refs(
         .map(|link_ref| link_ref.link_id)
         .collect::<HashSet<_>>();
 
-    Ok((graph_refs, graph_link_ids, lifecycle_link_ids))
+    Ok(BoundedGraphVisibility {
+        object_refs: graph_refs,
+        traversal_link_ids: graph_link_ids,
+        lifecycle_link_ids,
+    })
 }
 
 fn hydrate_objects_by_ref_set(
