@@ -318,45 +318,109 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     ) -> Result<GraphExpansion, CustomError> {
         let selectors = SparqlGraphSelectors::new(&self.store);
         let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
-        let graph_refs = selectors.select_objects(&GraphObjectQuery::by_types(
-            vec![
-                ObjectType::Episode,
-                ObjectType::Observation,
-                ObjectType::Entity,
-                ObjectType::MemoryThread,
-                ObjectType::DerivedMemory,
-                ObjectType::MemoryLink,
-            ],
-            None,
-        ))?;
-        let graph_ref_set = graph_refs.iter().copied().collect::<HashSet<_>>();
-        if !graph_ref_set.contains(&root_ref) {
+        let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
+        if root_refs.is_empty() {
             return Err(CustomError::GraphExpansionRootNotFound {
                 object_type: query.root_type,
                 object_id: query.root_id,
             });
         }
 
-        let graph_link_ids = graph_refs
-            .iter()
-            .filter(|object_ref| object_ref.object_type == ObjectType::MemoryLink)
-            .map(|object_ref| object_ref.object_id)
-            .collect::<HashSet<_>>();
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
+        let (graph_ref_set, graph_link_ids, lifecycle_link_ids) =
+            bounded_graph_visible_refs(&selectors, root_ref, query)?;
+        let objects = {
+            let objects = lock(&self.objects)?;
+            hydrate_objects_by_ref_set(&graph_ref_set, &objects)
+        };
+        let links = {
+            let links = lock(&self.links)?;
+            hydrate_links_by_id_sets(&graph_link_ids, &lifecycle_link_ids, &graph_ref_set, &links)
+        };
 
-        bounded_expansion(
-            query,
-            objects
-                .into_values()
-                .filter(|object| graph_ref_set.contains(&graph_object_ref(object))),
-            links.into_values().filter(|link| {
-                graph_link_ids.contains(&link.id)
-                    && graph_ref_set.contains(&GraphObjectRef::new(link.from_id, link.from_type))
-                    && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type))
-            }),
-        )
+        bounded_expansion(query, objects, links)
     }
+}
+
+fn bounded_graph_visible_refs(
+    selectors: &SparqlGraphSelectors<'_>,
+    root_ref: GraphObjectRef,
+    query: &GraphExpansionQuery,
+) -> Result<
+    (
+        HashSet<GraphObjectRef>,
+        HashSet<MemoryId>,
+        HashSet<MemoryId>,
+    ),
+    CustomError,
+> {
+    let mut graph_refs = HashSet::from([root_ref]);
+    let mut graph_link_ids = HashSet::new();
+    let mut frontier = vec![root_ref];
+
+    for _ in 0..query.max_depth {
+        let link_refs = selectors.select_links_touching(&frontier)?;
+        let mut next_frontier = Vec::new();
+        for link_ref in link_refs {
+            graph_link_ids.insert(link_ref.link_id);
+            for endpoint in [link_ref.from, link_ref.to] {
+                if graph_refs.insert(endpoint) {
+                    next_frontier.push(endpoint);
+                }
+            }
+        }
+
+        if next_frontier.is_empty() {
+            break;
+        }
+        frontier = next_frontier;
+    }
+
+    let candidate_refs = graph_refs.iter().copied().collect::<Vec<_>>();
+    let lifecycle_link_ids = selectors
+        .select_links_touching(&candidate_refs)?
+        .into_iter()
+        .filter(|link_ref| {
+            link_ref.relation == crate::api::types::RelationType::Supersedes
+                && link_ref.to.object_type == ObjectType::DerivedMemory
+                && graph_refs.contains(&link_ref.to)
+        })
+        .map(|link_ref| link_ref.link_id)
+        .collect::<HashSet<_>>();
+
+    Ok((graph_refs, graph_link_ids, lifecycle_link_ids))
+}
+
+fn hydrate_objects_by_ref_set(
+    refs: &HashSet<GraphObjectRef>,
+    objects: &HashMap<(MemoryId, ObjectType), MemoryObject>,
+) -> Vec<MemoryObject> {
+    refs.iter()
+        .filter_map(|object_ref| {
+            objects
+                .get(&(object_ref.object_id, object_ref.object_type))
+                .cloned()
+        })
+        .collect()
+}
+
+fn hydrate_links_by_id_sets(
+    graph_link_ids: &HashSet<MemoryId>,
+    lifecycle_link_ids: &HashSet<MemoryId>,
+    graph_ref_set: &HashSet<GraphObjectRef>,
+    links: &HashMap<MemoryId, MemoryLink>,
+) -> Vec<MemoryLink> {
+    graph_link_ids
+        .union(lifecycle_link_ids)
+        .filter_map(|link_id| links.get(link_id))
+        .filter(|link| {
+            let endpoints_in_graph = graph_ref_set
+                .contains(&GraphObjectRef::new(link.from_id, link.from_type))
+                && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type));
+            (graph_link_ids.contains(&link.id) && endpoints_in_graph)
+                || lifecycle_link_ids.contains(&link.id)
+        })
+        .cloned()
+        .collect()
 }
 
 fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
@@ -958,6 +1022,104 @@ mod tests {
         assert!(expansion.objects.contains(&MemoryObject::DerivedMemory(
             fixtures.derived_reflection.clone()
         )));
+    }
+
+    #[tokio::test]
+    async fn oxigraph_expansion_uses_targeted_supersession_evidence_outside_frontier() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let superseded_memory = fixtures.user_preference.clone();
+        let replacement = fixtures.correction.clone();
+        let hub_link = crate::api::types::MemoryLink {
+            id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0002),
+            object_type: ObjectType::MemoryLink,
+            from_id: fixtures.hub_entity.id,
+            from_type: ObjectType::Entity,
+            to_id: superseded_memory.id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::About,
+            confidence: 1.0,
+            rationale: Some("Hub reaches a superseded memory.".to_owned()),
+            created_at: superseded_memory.created_at,
+            schema_version: superseded_memory.schema_version.clone(),
+        };
+        let supersedes_link = crate::api::types::MemoryLink {
+            id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0003),
+            object_type: ObjectType::MemoryLink,
+            from_id: replacement.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: superseded_memory.id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::Supersedes,
+            confidence: 1.0,
+            rationale: Some("Replacement supersedes candidate memory.".to_owned()),
+            created_at: replacement.created_at,
+            schema_version: replacement.schema_version.clone(),
+        };
+
+        store
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::DerivedMemory(superseded_memory.clone()),
+                MemoryObject::DerivedMemory(replacement.clone()),
+            ])
+            .await
+            .unwrap();
+        store
+            .upsert_links(&[hub_link.clone(), supersedes_link])
+            .await
+            .unwrap();
+
+        let depth_zero_root = store
+            .expand_bounded(&GraphExpansionQuery::new(
+                superseded_memory.id,
+                ObjectType::DerivedMemory,
+                0,
+                3,
+            ))
+            .await
+            .unwrap();
+        assert!(depth_zero_root.objects.is_empty());
+        assert!(depth_zero_root.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref
+                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                && filtered.reason == GraphExpansionFilteredReason::Superseded
+        }));
+
+        let depth_one_neighbor = store
+            .expand_bounded(&GraphExpansionQuery::new(
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                1,
+                3,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            depth_one_neighbor.objects,
+            vec![MemoryObject::Entity(fixtures.hub_entity.clone())]
+        );
+        assert!(depth_one_neighbor.links.is_empty());
+        assert!(depth_one_neighbor.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref
+                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                && filtered.reason == GraphExpansionFilteredReason::Superseded
+        }));
+
+        let historical_neighbor = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 3)
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
+                        include_superseded: true,
+                        ..GraphExpansionLifecyclePolicy::default()
+                    }),
+            )
+            .await
+            .unwrap();
+        assert!(historical_neighbor
+            .objects
+            .contains(&MemoryObject::DerivedMemory(superseded_memory)));
+        assert_eq!(historical_neighbor.links, vec![hub_link]);
     }
 
     #[tokio::test]

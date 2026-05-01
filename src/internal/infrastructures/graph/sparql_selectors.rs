@@ -10,7 +10,7 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::api::types::{graph_uri, MemoryId, ObjectType};
+use crate::api::types::{graph_uri, MemoryId, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
@@ -21,6 +21,14 @@ use super::vocabulary as vocab;
 
 pub(crate) struct SparqlGraphSelectors<'a> {
     store: &'a Store,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SparqlLinkRef {
+    pub(crate) link_id: MemoryId,
+    pub(crate) from: GraphObjectRef,
+    pub(crate) to: GraphObjectRef,
+    pub(crate) relation: RelationType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,6 +219,81 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_memory_ids(&query_text, None)
     }
 
+    pub(crate) fn select_links_touching(
+        &self,
+        object_refs: &[GraphObjectRef],
+    ) -> Result<Vec<SparqlLinkRef>, CustomError> {
+        if object_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let node_values = sparql_node_iri_values("node", object_refs);
+        let query_text = format!(
+            r#"
+            SELECT DISTINCT ?linkId ?fromId ?fromType ?toId ?toType ?relation WHERE {{
+              {node_values}
+              GRAPH ?linkGraph {{
+                ?link a <{link_class}> ;
+                      <{object_id}> ?linkId ;
+                      <{from}> ?from ;
+                      <{to}> ?to ;
+                      <{relation}> ?relation .
+                {{
+                  ?link <{from}> ?node .
+                }} UNION {{
+                  ?link <{to}> ?node .
+                }}
+              }}
+              GRAPH ?fromGraph {{
+                ?from <{object_id}> ?fromId ;
+                      <{object_type}> ?fromType .
+              }}
+              GRAPH ?toGraph {{
+                ?to <{object_id}> ?toId ;
+                    <{object_type}> ?toType .
+              }}
+            }}
+            "#,
+            link_class = vocab::CLASS_MEMORY_LINK,
+            object_id = vocab::OBJECT_ID,
+            object_type = vocab::OBJECT_TYPE,
+            from = vocab::FROM,
+            to = vocab::TO,
+            relation = vocab::RELATION,
+        );
+
+        let mut refs = Vec::new();
+        let mut seen = HashSet::new();
+        for solution in self.query_solutions(&query_text)? {
+            let link_ref = SparqlLinkRef {
+                link_id: memory_id_binding(&solution, "linkId")?,
+                from: GraphObjectRef::new(
+                    memory_id_binding(&solution, "fromId")?,
+                    enum_binding(&solution, "fromType")?,
+                ),
+                to: GraphObjectRef::new(
+                    memory_id_binding(&solution, "toId")?,
+                    enum_binding(&solution, "toType")?,
+                ),
+                relation: enum_binding(&solution, "relation")?,
+            };
+            if seen.insert(link_ref) {
+                refs.push(link_ref);
+            }
+        }
+        refs.sort_by_key(|link_ref| {
+            (
+                link_ref.to.object_id,
+                link_ref.from.object_id,
+                link_ref.link_id,
+                object_type_rank(link_ref.to.object_type),
+                object_type_rank(link_ref.from.object_type),
+                relation_type_rank(link_ref.relation),
+            )
+        });
+        Ok(refs)
+    }
+
     fn select_derived_memories_by_resource_predicate<'b>(
         &self,
         predicate: &str,
@@ -337,6 +420,21 @@ fn sparql_iri_values<'a>(variable: &str, values: impl Iterator<Item = &'a str>) 
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
+fn sparql_node_iri_values(variable: &str, object_refs: &[GraphObjectRef]) -> String {
+    let values = object_refs
+        .iter()
+        .map(|object_ref| {
+            let graph_uri = graph_uri(object_ref.object_type, object_ref.object_id);
+            format!("<{}>", sparql_iri(&graph_uri))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if values.is_empty() {
+        return String::new();
+    }
+    format!("VALUES ?{variable} {{ {values} }}")
+}
+
 fn sparql_iri(value: &str) -> String {
     value.replace('>', "%3E")
 }
@@ -397,6 +495,25 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
         ObjectType::MemoryThread => 3,
         ObjectType::DerivedMemory => 4,
         ObjectType::MemoryLink => 5,
+    }
+}
+
+fn relation_type_rank(relation_type: RelationType) -> u8 {
+    match relation_type {
+        RelationType::HasObservation => 0,
+        RelationType::ObservedIn => 1,
+        RelationType::Mentions => 2,
+        RelationType::Involves => 3,
+        RelationType::About => 4,
+        RelationType::DerivedFrom => 5,
+        RelationType::PartOfThread => 6,
+        RelationType::Supports => 7,
+        RelationType::Contradicts => 8,
+        RelationType::Supersedes => 9,
+        RelationType::Resolves => 10,
+        RelationType::CreatesOpenLoop => 11,
+        RelationType::FulfillsCommitment => 12,
+        RelationType::AssociatedWith => 13,
     }
 }
 
@@ -518,6 +635,31 @@ mod tests {
         assert!(by_provenance.contains(&fixtures.derived_reflection.id));
         assert!(by_thread.contains(&fixtures.correction.id));
         assert!(by_entity.contains(&fixtures.correction.id));
+    }
+
+    #[test]
+    fn sparql_selectors_find_only_links_touching_frontier_refs() {
+        let store = store_with_representative_fixture();
+        let fixtures = representative_fixtures();
+        let selected = SparqlGraphSelectors::new(&store)
+            .select_links_touching(&[GraphObjectRef::new(
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+            )])
+            .unwrap();
+
+        let selected_ids = selected
+            .iter()
+            .map(|link_ref| link_ref.link_id)
+            .collect::<Vec<_>>();
+
+        assert!(selected_ids.contains(&fixtures.hub_links[0].id));
+        assert!(selected_ids.contains(&fixtures.hub_links[1].id));
+        assert!(!selected_ids.contains(&fixtures.soft_thread_link.id));
+        assert!(selected.iter().all(|link_ref| {
+            link_ref.from == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
+                || link_ref.to == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
+        }));
     }
 
     #[test]
