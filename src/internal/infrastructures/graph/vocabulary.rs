@@ -54,6 +54,7 @@ pub(crate) const TO: &str = "urn:cmem:vocab:to";
 pub(crate) const TO_TYPE: &str = "urn:cmem:vocab:toType";
 pub(crate) const RELATION: &str = "urn:cmem:vocab:relation";
 pub(crate) const RATIONALE: &str = "urn:cmem:vocab:rationale";
+pub(crate) const RELATION_SUPERSEDES: &str = "urn:cmem:relation:supersedes";
 
 pub(crate) fn relation_predicate(name: &str) -> String {
     format!("urn:cmem:relation:{name}")
@@ -82,10 +83,8 @@ mod tests {
         assert_eq!(ABOUT_ENTITY, "urn:cmem:vocab:aboutEntity");
         assert_eq!(IS_CURRENT, "urn:cmem:vocab:isCurrent");
         assert_eq!(SUPERSEDES, "urn:cmem:vocab:supersedes");
-        assert_eq!(
-            relation_predicate("supersedes"),
-            "urn:cmem:relation:supersedes"
-        );
+        assert_eq!(relation_predicate("supersedes"), RELATION_SUPERSEDES);
+        assert_eq!(RELATION_SUPERSEDES, "urn:cmem:relation:supersedes");
         assert_eq!(
             relation_predicate("part_of_thread"),
             "urn:cmem:relation:part_of_thread"

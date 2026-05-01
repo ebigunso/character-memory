@@ -41,16 +41,39 @@ impl<'a> SparqlGraphSelectors<'a> {
         &self,
         query: &GraphObjectQuery,
     ) -> Result<Vec<GraphObjectRef>, CustomError> {
-        let mut refs = self.select_object_refs(
+        let id_values =
+            sparql_literal_values("id", query.object_ids.iter().map(|id| id.to_string()));
+        let type_values = sparql_literal_values(
+            "objectType",
+            query
+                .object_types
+                .iter()
+                .map(|object_type| enum_value(*object_type)),
+        );
+        let ref_values = sparql_object_ref_values(&query.object_refs);
+        let limit_clause = query
+            .limit
+            .map(|limit| format!("LIMIT {limit}"))
+            .unwrap_or_default();
+        let select_query = format!(
             r#"
-            SELECT DISTINCT ?id ?objectType WHERE {
-              GRAPH ?g {
-                ?subject <urn:cmem:vocab:objectId> ?id ;
-                         <urn:cmem:vocab:objectType> ?objectType .
-              }
-            }
+            SELECT DISTINCT ?id ?objectType WHERE {{
+              {id_values}
+              {type_values}
+              {ref_values}
+              GRAPH ?g {{
+                ?subject <{object_id}> ?id ;
+                         <{object_type}> ?objectType .
+              }}
+            }}
+            ORDER BY ?id ?objectType
+            {limit_clause}
             "#,
-        )?;
+            object_id = vocab::OBJECT_ID,
+            object_type = vocab::OBJECT_TYPE,
+        );
+
+        let mut refs = self.select_object_refs(&select_query)?;
 
         refs.retain(|object_ref| object_matches_query(*object_ref, query));
         sort_object_refs(&mut refs);
@@ -161,7 +184,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             is_current: vocab::IS_CURRENT,
             thread_status: vocab::THREAD_STATUS,
             supersedes: vocab::SUPERSEDES,
-            supersedes_relation: "urn:cmem:relation:supersedes",
+            supersedes_relation: vocab::RELATION_SUPERSEDES,
         }
     }
 
@@ -187,7 +210,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
             supersedes = vocab::SUPERSEDES,
-            supersedes_relation = vocab::relation_predicate("supersedes"),
+            supersedes_relation = vocab::RELATION_SUPERSEDES,
         );
 
         self.select_memory_ids(&query_text, None)
@@ -313,11 +336,54 @@ fn sparql_iri_values<'a>(variable: &str, values: impl Iterator<Item = &'a str>) 
         .map(|value| format!("<{}>", sparql_iri(value)))
         .collect::<Vec<_>>()
         .join(" ");
+    if values.is_empty() {
+        return String::new();
+    }
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
 fn sparql_iri(value: &str) -> String {
     value.replace('>', "%3E")
+}
+
+fn sparql_literal_values(variable: &str, values: impl Iterator<Item = String>) -> String {
+    let values = values
+        .map(|value| sparql_string_literal(&value))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if values.is_empty() {
+        return String::new();
+    }
+    format!("VALUES ?{variable} {{ {values} }}")
+}
+
+fn sparql_object_ref_values(object_refs: &[GraphObjectRef]) -> String {
+    let values = object_refs
+        .iter()
+        .map(|object_ref| {
+            format!(
+                "({} {})",
+                sparql_string_literal(&object_ref.object_id.to_string()),
+                sparql_string_literal(&enum_value(object_ref.object_type)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if values.is_empty() {
+        return String::new();
+    }
+    format!("VALUES (?id ?objectType) {{ {values} }}")
+}
+
+fn sparql_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("serializing a SPARQL string literal cannot fail")
+}
+
+fn enum_value(value: impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default()
 }
 
 fn sort_object_refs(refs: &mut [GraphObjectRef]) {
@@ -434,10 +500,7 @@ mod tests {
         assert_eq!(predicates.is_current, vocab::IS_CURRENT);
         assert_eq!(predicates.thread_status, vocab::THREAD_STATUS);
         assert_eq!(predicates.supersedes, vocab::SUPERSEDES);
-        assert_eq!(
-            predicates.supersedes_relation,
-            "urn:cmem:relation:supersedes"
-        );
+        assert_eq!(predicates.supersedes_relation, vocab::RELATION_SUPERSEDES);
         assert!(selectors
             .select_superseded_derived_memory_ids()
             .unwrap()
