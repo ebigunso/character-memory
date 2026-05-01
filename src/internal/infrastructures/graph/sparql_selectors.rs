@@ -51,10 +51,6 @@ impl<'a> SparqlGraphSelectors<'a> {
                 .map(|object_type| enum_value(*object_type)),
         );
         let ref_values = sparql_object_ref_values(&query.object_refs);
-        let limit_clause = query
-            .limit
-            .map(|limit| format!("LIMIT {limit}"))
-            .unwrap_or_default();
         let select_query = format!(
             r#"
             SELECT DISTINCT ?id ?objectType WHERE {{
@@ -67,7 +63,6 @@ impl<'a> SparqlGraphSelectors<'a> {
               }}
             }}
             ORDER BY ?id ?objectType
-            {limit_clause}
             "#,
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
@@ -441,6 +436,42 @@ mod tests {
                 GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
                 GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
             ]
+        );
+    }
+
+    #[test]
+    fn sparql_selectors_apply_limit_after_stable_rust_ordering() {
+        let store = Store::new().unwrap();
+        let fixtures = representative_fixtures();
+        let mut entity_with_episode_id = fixtures.project_entity.clone();
+        entity_with_episode_id.id = fixtures.episode.id;
+
+        insert_triples(
+            &store,
+            &graph_uri(ObjectType::Episode, fixtures.episode.id),
+            &rdf_triples_for_object(&MemoryObject::Episode(fixtures.episode.clone())).unwrap(),
+        );
+        insert_triples(
+            &store,
+            &graph_uri(ObjectType::Entity, entity_with_episode_id.id),
+            &rdf_triples_for_object(&MemoryObject::Entity(entity_with_episode_id)).unwrap(),
+        );
+
+        let selected = SparqlGraphSelectors::new(&store)
+            .select_objects(&GraphObjectQuery {
+                object_refs: Vec::new(),
+                object_ids: vec![fixtures.episode.id],
+                object_types: vec![ObjectType::Episode, ObjectType::Entity],
+                limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(
+            selected,
+            vec![GraphObjectRef::new(
+                fixtures.episode.id,
+                ObjectType::Episode
+            )]
         );
     }
 

@@ -318,29 +318,32 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     ) -> Result<GraphExpansion, CustomError> {
         let selectors = SparqlGraphSelectors::new(&self.store);
         let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
-        let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
-        if root_refs.is_empty() {
+        let graph_refs = selectors.select_objects(&GraphObjectQuery::by_types(
+            vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::Entity,
+                ObjectType::MemoryThread,
+                ObjectType::DerivedMemory,
+                ObjectType::MemoryLink,
+            ],
+            None,
+        ))?;
+        let graph_ref_set = graph_refs.iter().copied().collect::<HashSet<_>>();
+        if !graph_ref_set.contains(&root_ref) {
             return Err(CustomError::GraphExpansionRootNotFound {
                 object_type: query.root_type,
                 object_id: query.root_id,
             });
         }
 
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
-        let expansion = bounded_expansion(
-            query,
-            objects.clone().into_values(),
-            links.clone().into_values(),
-        )?;
-        let graph_refs =
-            selectors.select_objects(&GraphObjectQuery::by_refs(expansion_refs(&expansion)))?;
-        let graph_ref_set = graph_refs.iter().copied().collect::<HashSet<_>>();
         let graph_link_ids = graph_refs
             .iter()
             .filter(|object_ref| object_ref.object_type == ObjectType::MemoryLink)
             .map(|object_ref| object_ref.object_id)
             .collect::<HashSet<_>>();
+        let objects = lock(&self.objects)?.clone();
+        let links = lock(&self.links)?.clone();
 
         bounded_expansion(
             query,
@@ -380,37 +383,6 @@ fn hydrate_objects_by_refs(
             }
         })
         .collect()
-}
-
-fn expansion_refs(expansion: &GraphExpansion) -> Vec<GraphObjectRef> {
-    let mut refs = expansion
-        .objects
-        .iter()
-        .map(graph_object_ref)
-        .collect::<Vec<_>>();
-    refs.extend(
-        expansion
-            .links
-            .iter()
-            .map(|link| GraphObjectRef::new(link.id, ObjectType::MemoryLink)),
-    );
-    refs.extend(
-        expansion
-            .filtered_nodes
-            .iter()
-            .map(|filtered| filtered.object_ref),
-    );
-    for relation in &expansion.relations {
-        refs.push(relation.from);
-        refs.push(relation.to);
-        refs.push(GraphObjectRef::new(
-            relation.link_id,
-            ObjectType::MemoryLink,
-        ));
-    }
-    refs.sort_by_key(|object_ref| stable_node_key((object_ref.object_id, object_ref.object_type)));
-    refs.dedup();
-    refs
 }
 
 fn quad_for_triple(owner_graph_uri: &str, triple: &RdfTriple) -> Result<Quad, CustomError> {
@@ -946,6 +918,46 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![traversed_link.id]
         );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_expansion_applies_bounds_after_graph_visibility_filtering() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let graph_visible_link = fixtures.hub_links[1].clone();
+        let mut stale_cache_only_link = graph_visible_link.clone();
+        stale_cache_only_link.id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0001);
+        stale_cache_only_link.to_id = fixtures.episode.id;
+        stale_cache_only_link.to_type = ObjectType::Episode;
+        stale_cache_only_link.relation = RelationType::About;
+        stale_cache_only_link.rationale =
+            Some("Cache-only stale link should not consume fanout.".to_owned());
+
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store
+            .upsert_links(std::slice::from_ref(&graph_visible_link))
+            .await
+            .unwrap();
+        lock(&store.links)
+            .unwrap()
+            .insert(stale_cache_only_link.id, stale_cache_only_link.clone());
+
+        let expansion = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 3)
+                    .with_max_fanout_per_node(1),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(expansion.links, vec![graph_visible_link.clone()]);
+        assert!(!expansion.links.contains(&stale_cache_only_link));
+        assert!(expansion
+            .objects
+            .contains(&MemoryObject::Entity(fixtures.hub_entity.clone())));
+        assert!(expansion.objects.contains(&MemoryObject::DerivedMemory(
+            fixtures.derived_reflection.clone()
+        )));
     }
 
     #[tokio::test]
