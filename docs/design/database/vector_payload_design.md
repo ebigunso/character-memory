@@ -84,7 +84,7 @@ content_text
 
 `embedding_text` is the exact text used to generate the vector. `content_text` is a compact readable payload for debugging, inspection, and possible re-indexing workflows. Neither field is a raw transcript store.
 
-Raw interaction material should be addressed through `raw_ref` pointers owned by a raw store or caller-managed transcript system.
+Raw interaction material should be addressed through `raw_ref` pointers owned by a caller-managed transcript system. Production raw storage is deferred in v0.1 and is not part of the Qdrant payload contract.
 
 ### Object-Specific Filter Hints
 
@@ -149,7 +149,7 @@ Time filters support recency and episode/thread constraints without embedding ti
 raw_ref
 ```
 
-`raw_ref` preserves a pointer to source material without storing the full raw chat or voice transcript in Qdrant. This keeps the memory substrate transcript-compatible while avoiding a premature raw-storage policy.
+`raw_ref` preserves a pointer to source material without storing the full raw chat or voice transcript in Qdrant. The pointer is provenance metadata, not raw transcript content, and it does not promise that the vector layer can resolve the source publicly.
 
 ## Indexing Policy
 
@@ -214,7 +214,7 @@ If Qdrant is stale, retrieval may do extra work, but it should not return stale 
 
 Revisit this design when:
 
-- persistent Oxigraph configuration lands and cross-process graph/vector consistency needs stronger operational guarantees
+- v0.1.1 persistent Oxigraph configuration lands and cross-process graph/vector reconciliation needs stronger operational guarantees
 - multiple vector surfaces per object become common enough to require public surface policy
 - spatial/location retrieval becomes a real product requirement
 - a belief/claim subsystem introduces new indexable object types

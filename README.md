@@ -126,7 +126,9 @@ This is useful when you want to:
 
 The default implementation is backed by Qdrant and embedded, in-memory Oxigraph.
 
-Qdrant is used for vector candidate recall. Embedded Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering within the running process. Persistent Oxigraph storage configuration is future work.
+Qdrant is used for vector candidate recall. Embedded Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering within the running process. Persistent Oxigraph storage configuration is v0.1.1 future work.
+
+Raw source material, such as chat or voice transcripts, is caller-owned in v0.1 and is not stored by the default graph/vector backends. Memory objects may preserve `raw_ref` source pointers for provenance, but those pointers are not the transcript content and do not imply a public raw-resolution API.
 
 Integration tests that exercise external vector storage require a local Qdrant instance reachable over gRPC.
 
@@ -173,3 +175,5 @@ Character Memory is under active development.
 The v0.1 public architecture is graph-authoritative episodic continuity memory: public construction and facades compose an embedder, Qdrant candidate recall, and embedded Oxigraph graph authority.
 
 v0.1 does not store raw transcripts directly in graph/vector storage, run a reflection scheduler, implement a normalized belief ontology, support multimodal memory, or perform physical redaction/delete as a default lifecycle operation.
+
+Production raw transcript storage is caller-owned and deferred. No public raw-reference resolution API is part of v0.1. Persistent graph storage authority and graph/vector reconciliation remain v0.1.1 future work rather than v0.1 behavior.

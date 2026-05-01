@@ -486,6 +486,35 @@ mod tests {
     }
 
     #[test]
+    fn rdf_mapping_preserves_source_pointers_without_raw_transcript_literals() {
+        let fixtures = representative_fixtures();
+        let mut episode = fixtures.episode.clone();
+        episode.raw_ref = Some("file:fixtures/raw/source-episode.txt".to_owned());
+        episode.summary = "Summarized source episode.".to_owned();
+        let mut observation = fixtures.salient_observation.clone();
+        observation.raw_ref = Some("file:fixtures/raw/source-observation.txt".to_owned());
+        observation.text = "A concise observation excerpt.".to_owned();
+
+        let episode_triples =
+            rdf_triples_for_object(&MemoryObject::Episode(episode)).expect("current schema maps");
+        let observation_triples = rdf_triples_for_object(&MemoryObject::Observation(observation))
+            .expect("current schema maps");
+
+        assert_contains_literal(
+            &episode_triples,
+            vocab::RAW_REF,
+            "file:fixtures/raw/source-episode.txt",
+        );
+        assert_contains_literal(
+            &observation_triples,
+            vocab::RAW_REF,
+            "file:fixtures/raw/source-observation.txt",
+        );
+        assert_no_raw_content_predicates(&episode_triples);
+        assert_no_raw_content_predicates(&observation_triples);
+    }
+
+    #[test]
     fn rdf_mapping_reifies_memory_links_and_adds_typed_relation_triples() {
         let fixtures = representative_fixtures();
         let link = fixtures.soft_thread_link;
@@ -554,6 +583,15 @@ mod tests {
     fn assert_contains_resource(triples: &[RdfTriple], predicate: &'static str, value: &str) {
         assert!(triples.iter().any(|triple| {
             triple.predicate == predicate && triple.object == RdfObject::Resource(value.to_owned())
+        }));
+    }
+
+    fn assert_no_raw_content_predicates(triples: &[RdfTriple]) {
+        assert!(triples.iter().all(|triple| {
+            let predicate = triple.predicate.as_str();
+            let normalized = predicate.to_ascii_lowercase();
+            predicate == vocab::RAW_REF
+                || (!normalized.contains("raw") && !normalized.contains("transcript"))
         }));
     }
 

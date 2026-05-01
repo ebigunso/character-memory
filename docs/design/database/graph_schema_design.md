@@ -21,9 +21,11 @@ Those questions are graph questions. The schema therefore prioritizes stable ide
 
 ## Backend Boundary
 
-Embedded in-memory Oxigraph is the default graph authority. Persistent Oxigraph storage configuration is future work.
+Embedded in-memory Oxigraph is the default graph authority. Persistent Oxigraph storage configuration is v0.1.1 future work.
 
 The public domain model does not expose Oxigraph types. Domain objects are mapped into RDF at the infrastructure edge. This keeps the public API stable if the backing graph implementation changes later.
+
+Raw transcript storage remains outside the graph boundary in v0.1. The graph may carry source pointers, but production raw storage is caller-owned/deferred and raw-reference resolution is not a public graph API.
 
 ## Identity Model
 
@@ -94,7 +96,7 @@ derivedFromObservation
 
 This is intentionally narrower than a generic "source" blob. Corrections and forget operations need to find derived memories affected by a source episode or source observation. Dedicated provenance predicates make that query direct and keep source-cascade behavior deterministic.
 
-Raw source material is not stored in the graph. Objects may carry `rawRef` pointers so callers can resolve original transcript material elsewhere.
+Raw source material is not stored in the graph. Objects may carry `rawRef` pointers so callers can associate memories with original transcript material elsewhere. A `rawRef` is a source pointer, not the transcript content.
 
 ## Lifecycle Shape
 
@@ -223,7 +225,7 @@ It keeps the graph authority simple and deterministic:
 - tests can validate graph behavior without committing to full SPARQL object hydration yet
 - RDF triples still exist for relationship mapping and future query expansion
 
-Persistent graph storage can later move more responsibility into SPARQL-backed queries without changing the public object model.
+Persistent graph storage can later move more responsibility into SPARQL-backed queries without changing the public object model. That persistent authority work remains scoped to v0.1.1-era follow-up, not the v0.1 in-memory boundary.
 
 ## Cross-Store Contract
 
@@ -240,7 +242,7 @@ This is why the vector payload intentionally duplicates some graph-derived hints
 
 Revisit this design when:
 
-- persistent Oxigraph storage becomes configurable
+- v0.1.1 persistent Oxigraph storage becomes configurable
 - SPARQL query helpers replace more in-memory object-side reads
 - belief/claim tracking adds richer factual rigor semantics
 - some relation types become important enough to deserve specialized objects

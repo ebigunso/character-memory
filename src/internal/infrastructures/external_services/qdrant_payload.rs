@@ -380,7 +380,9 @@ mod tests {
             json!("raw://conversation/chat_123#turn_42")
         );
         assert!(payload.get("raw_transcript").is_none());
+        assert!(payload.get("raw_text").is_none());
         assert!(payload.get("transcript").is_none());
+        assert!(payload.get("source_transcript").is_none());
     }
 
     #[test]

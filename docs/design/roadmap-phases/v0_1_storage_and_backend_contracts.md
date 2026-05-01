@@ -9,20 +9,20 @@ Default stack:
 ```text
 Qdrant   = vector candidate recall + payload filtering
 Oxigraph = embedded in-memory RDF/SPARQL graph authority
-RawStore = source conversation/transcript references
+Raw refs = stable pointers to caller-owned source material
 ```
 
 The implementation should remain backend-abstract where practical.
 
-Public construction and facades compose an embedder, a Qdrant vector candidate store, and an embedded in-memory Oxigraph graph authority store. Qdrant results are candidates only; Oxigraph is authoritative for memory objects and relationships within the running process. Persistent Oxigraph storage configuration remains future work.
+Public construction and facades compose an embedder, a Qdrant vector candidate store, and an embedded in-memory Oxigraph graph authority store. Qdrant results are candidates only; Oxigraph is authoritative for memory objects and relationships within the running process. Persistent Oxigraph storage configuration remains v0.1.1 future work.
 
 ---
 
 # 1. Store responsibilities
 
-## 1.1 Raw store
+## 1.1 Raw source material
 
-Stores or references original interaction material outside the graph/vector memory stores.
+Production raw storage is caller-owned and deferred in v0.1. The graph/vector memory stores preserve source pointers, but they do not own the original interaction material.
 
 Examples:
 
@@ -33,7 +33,7 @@ source conversation log
 selected excerpts
 ```
 
-The graph/vector layer does not store raw transcripts as v0.1 memory content. It stores summaries, excerpts, derived memories, and stable pointers.
+The graph/vector layer does not store raw transcripts as v0.1 memory content. It stores summaries, excerpts, derived memories, and stable `raw_ref` pointers. A `raw_ref` identifies where source material can be found by the caller's transcript system; it is not the transcript content itself.
 
 ```json
 {
@@ -56,7 +56,7 @@ retention state
 currentness
 ```
 
-Default: embedded in-memory Oxigraph RDF/SPARQL. Persistent Oxigraph storage configuration remains future work.
+Default: embedded in-memory Oxigraph RDF/SPARQL. Persistent Oxigraph storage configuration remains v0.1.1 future work.
 
 ## 1.3 Vector store
 
@@ -113,7 +113,7 @@ Acceptance criteria:
 ```text
 same object always maps to same graph URI
 vector payload stores graph_uri and object id
-raw_ref can be resolved or reported unavailable
+raw_ref pointers are preserved and unresolved refs remain representable
 ```
 
 ---
