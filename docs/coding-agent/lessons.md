@@ -21,6 +21,63 @@ Purpose:
 
 ## Entries
 
+## 2026-05-01 - Verify Copilot Re-Review Requests Against Repo Rule Before Trusting Them  [tags: tooling, review, git, workflow]
+
+Context:
+- Plan: PR #38 and PR #39 Copilot review-fix loop
+- Task/Wave: post-fix re-review request
+- Roles involved: Orchestrator
+
+Symptom:
+- Initially re-requested Copilot review with `gh pr edit --add-reviewer '@copilot'` and treated the successful exit as meaningful.
+- Then retried GraphQL `requestReviewsByLogin` but omitted the repo-recorded `union: true` input before checking the existing lesson.
+
+Root cause:
+- Did not consult the repo lessons/orchestrator guidance before performing a known-special Copilot re-review workflow.
+- Verified too late that `reviewRequests` and `latestReviews` had not changed for the current PR heads.
+
+Fix applied:
+- Switched to GitHub GraphQL `requestReviewsByLogin` with `userLogins: ["copilot-pull-request-reviewer"]` and retried with the repo-recorded `union: true` input.
+- Verified `reviewRequests`, `latestReviews`, and review-thread state through GraphQL instead of relying on `gh pr edit` exit code.
+
+Prevention:
+- Before any Copilot re-review request, search `docs/coding-agent/lessons.md` and repo orchestrator rules for the current required command shape.
+- Treat a Copilot review request as unverified until GraphQL shows either a queued `reviewRequests` entry or a new `latestReviews` entry on the current head SHA.
+- If GraphQL returns success but neither signal appears after polling, report that no fresh Copilot review was observed instead of claiming one happened.
+
+Evidence:
+- PR #38 current head `87ced4dcf60f3fa572435b306660f5f7081ec4a9` had all Copilot threads resolved; GraphQL retries produced a Copilot internal-error review at `2026-05-01T07:37:52Z` rather than a usable review.
+- PR #39 current head `704d39f04120d434e28a79713ea1c5090d73a38b` had all Copilot threads resolved; GraphQL retries produced a Copilot internal-error review at `2026-05-01T07:37:53Z` rather than a usable review.
+
+## 2026-05-01 - Follow Repository Branch Naming Over Generic Agent Prefix  [tags: git, tooling, assumptions]
+
+Context:
+- Plan: none
+- Task/Wave: branch creation for separate plan commits
+- Roles involved: Orchestrator
+
+Symptom:
+- Started creating a branch with a generic Codex-style name for plan commits.
+- User corrected the workflow to follow the repository's branch naming conventions instead.
+
+Root cause:
+- Applied the desktop default branch prefix before checking the repo's visible branch naming pattern.
+- The current branch already showed the local convention: `feature/YYYY-MM-DD/<slug>`.
+
+Fix applied:
+- Switched to repository-convention branch names for the remaining branch/commit work.
+- Treat the temporary generic branch name as a misstep to rename or replace before committing.
+
+Prevention:
+- Repo rule candidate:
+  - audience: orchestrator
+  - proposed rule: Before creating branches, inspect existing local branch naming patterns and follow the repository convention over generic tool defaults unless the user requests otherwise.
+- Dispatch/plan guardrail:
+  - For branch creation tasks, record the selected branch naming pattern before the first branch mutation.
+
+Evidence:
+- User correction on 2026-05-01: "Actually, follow the branch name conventions rather than using the codex name."
+
 ## 2026-04-30 - Re-request Copilot PR Review Through GraphQL When Add-Reviewer Is A No-Op  [tags: tooling, review, git]
 
 Context:

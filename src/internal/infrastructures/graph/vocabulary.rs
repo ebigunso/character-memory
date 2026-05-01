@@ -54,7 +54,40 @@ pub(crate) const TO: &str = "urn:cmem:vocab:to";
 pub(crate) const TO_TYPE: &str = "urn:cmem:vocab:toType";
 pub(crate) const RELATION: &str = "urn:cmem:vocab:relation";
 pub(crate) const RATIONALE: &str = "urn:cmem:vocab:rationale";
+pub(crate) const RELATION_SUPERSEDES: &str = "urn:cmem:relation:supersedes";
 
 pub(crate) fn relation_predicate(name: &str) -> String {
     format!("urn:cmem:relation:{name}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vocabulary_uris_pin_graph_selection_and_lifecycle_contract() {
+        assert_eq!(RDF_TYPE, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+        assert_eq!(CLASS_DERIVED_MEMORY, "urn:cmem:vocab:DerivedMemory");
+        assert_eq!(CLASS_MEMORY_LINK, "urn:cmem:vocab:MemoryLink");
+        assert_eq!(OBJECT_ID, "urn:cmem:vocab:objectId");
+        assert_eq!(OBJECT_TYPE, "urn:cmem:vocab:objectType");
+        assert_eq!(GRAPH_URI, "urn:cmem:vocab:graphUri");
+        assert_eq!(RETENTION_STATE, "urn:cmem:vocab:retentionState");
+        assert_eq!(THREAD_STATUS, "urn:cmem:vocab:threadStatus");
+        assert_eq!(DERIVED_FROM_EPISODE, "urn:cmem:vocab:derivedFromEpisode");
+        assert_eq!(
+            DERIVED_FROM_OBSERVATION,
+            "urn:cmem:vocab:derivedFromObservation"
+        );
+        assert_eq!(PART_OF_THREAD, "urn:cmem:vocab:partOfThread");
+        assert_eq!(ABOUT_ENTITY, "urn:cmem:vocab:aboutEntity");
+        assert_eq!(IS_CURRENT, "urn:cmem:vocab:isCurrent");
+        assert_eq!(SUPERSEDES, "urn:cmem:vocab:supersedes");
+        assert_eq!(relation_predicate("supersedes"), RELATION_SUPERSEDES);
+        assert_eq!(RELATION_SUPERSEDES, "urn:cmem:relation:supersedes");
+        assert_eq!(
+            relation_predicate("part_of_thread"),
+            "urn:cmem:relation:part_of_thread"
+        );
+    }
 }
