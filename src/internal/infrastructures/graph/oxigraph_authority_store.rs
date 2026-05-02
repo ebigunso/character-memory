@@ -335,6 +335,9 @@ impl OxigraphHttpGraphAuthorityStore {
     }
 
     async fn snapshot_store(&self) -> Result<Store, CustomError> {
+        // Initial service-mode bridge: keep RDF hydration shared with embedded
+        // Oxigraph by snapshotting named graphs locally. Replace with targeted
+        // remote SPARQL before using service mode for large graph datasets.
         let response = self
             .client
             .post(format!("{}/query", self.endpoint))
@@ -2509,6 +2512,7 @@ mod tests {
     ) -> Result<(), CustomError> {
         let endpoint = std::env::var("OXIGRAPH_TEST_CONNECTION_STRING")
             .unwrap_or_else(|_| "http://localhost:7879".to_owned());
+        ensure_live_smoke_test_endpoint(&endpoint)?;
         let store = OxigraphHttpGraphAuthorityStore::new(endpoint)?;
         let fixtures = representative_fixtures();
         let smoke_graph_uris = fixtures
@@ -2605,6 +2609,35 @@ mod tests {
             )));
         }
         test_result
+    }
+
+    fn ensure_live_smoke_test_endpoint(endpoint: &str) -> Result<(), CustomError> {
+        let parsed = reqwest::Url::parse(endpoint).map_err(|error| {
+            CustomError::ConfigParseError(format!(
+                "OXIGRAPH_TEST_CONNECTION_STRING must be a valid test endpoint URL: {error}"
+            ))
+        })?;
+        let host = parsed.host_str().unwrap_or_default();
+        let is_local_test_endpoint = parsed.scheme() == "http"
+            && matches!(host, "localhost" | "127.0.0.1" | "::1")
+            && parsed.port_or_known_default() == Some(7879);
+        if is_local_test_endpoint {
+            return Ok(());
+        }
+
+        Err(CustomError::ConfigParseError(
+            "Refusing live Oxigraph smoke cleanup outside the local test endpoint http://localhost:7879"
+            .to_owned(),
+        ))
+    }
+
+    #[test]
+    fn live_smoke_endpoint_guard_allows_only_local_test_service() {
+        assert!(ensure_live_smoke_test_endpoint("http://localhost:7879").is_ok());
+        assert!(ensure_live_smoke_test_endpoint("http://127.0.0.1:7879").is_ok());
+        assert!(ensure_live_smoke_test_endpoint("http://localhost:7878").is_err());
+        assert!(ensure_live_smoke_test_endpoint("https://localhost:7879").is_err());
+        assert!(ensure_live_smoke_test_endpoint("http://example.com:7879").is_err());
     }
 
     #[tokio::test]

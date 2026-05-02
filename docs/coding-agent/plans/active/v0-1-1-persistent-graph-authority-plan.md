@@ -563,6 +563,7 @@
 - Risks:
   - Oxigraph persistence requires a dependency feature decision and may affect build behavior.
   - Oxigraph service mode requires HTTP snapshot/write behavior to remain graph-authoritative and may need live smoke validation against the official container before closeout.
+  - Current Oxigraph service reads snapshot all named graphs into a local Oxigraph store before applying bounded selectors. This preserves RDF-backed authority for the phase, but targeted remote SPARQL reads should replace it before service mode is treated as large-dataset production-ready.
   - RDF/Oxigraph-to-domain hydration is the main architectural risk.
   - Reconciliation diagnostic access is now implemented but still requires Cargo/test validation after the native RocksDB build blocker is resolved.
   - Live Qdrant smoke tests require Docker and `QDRANT_CONNECTION_STRING`.
