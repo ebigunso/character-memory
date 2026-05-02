@@ -1,6 +1,6 @@
 services:
   oxigraph-test:
-    image: ghcr.io/oxigraph/oxigraph:0.5.7
+    image: ghcr.io/oxigraph/oxigraph:0.5.8
     command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
     ports:
       - "7879:7878" # Dedicated live-test Oxigraph endpoint

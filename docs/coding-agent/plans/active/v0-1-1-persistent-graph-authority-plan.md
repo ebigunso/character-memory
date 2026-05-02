@@ -91,6 +91,7 @@
 - `OXIGRAPH_CONNECTION_STRING` is treated as the Oxigraph HTTP endpoint for service graph mode and as the filesystem path only for embedded persistent graph mode.
   - `OXIGRAPH_TEST_CONNECTION_STRING` is treated as the Oxigraph HTTP endpoint for live smoke tests and defaults to a separate local test service.
 - Tests that create durable external-service or filesystem-backed data must clean up the data they created, either per test case or within an explicitly bounded test case group.
+- Docker-backed Oxigraph services use `ghcr.io/oxigraph/oxigraph:0.5.8`.
 - `GRAPH_STORE_MODE=service` is the default application mode.
 - `GRAPH_STORE_MODE=persistent` is the explicit embedded filesystem-backed persistent mode.
 - `GRAPH_STORE_MODE=in_memory` is the explicit environment/config override for in-memory graph authority.
@@ -473,11 +474,10 @@
   - Validation evidence: `docker compose -f docker-compose.oxigraph.test.yml config` passed; `docker compose -f docker-compose.oxigraph.test.yml up -d` started `charactermemory-oxigraph-test-1` on `0.0.0.0:7879->7878/tcp`; `OXIGRAPH_TEST_CONNECTION_STRING=http://localhost:7879 cargo test --lib oxigraph_http_service_live_smoke_upserts_queries_and_filters -- --ignored` passed with 1 passed; `SELECT (COUNT(*) AS ?count) WHERE { GRAPH ?g { ?s ?p ?o } }` against `http://localhost:7879/query` returned `0` after the smoke; `cargo fmt --check`, `cargo check`, `cargo test internal::infrastructures::graph::oxigraph_authority_store --lib`, `cargo test --lib`, and `cargo clippy --all-targets -- -D warnings` passed.
   - Notes: The production/default service on port 7878 and the test service on port 7879 are separate containers and volumes. Both containers remain running after verification.
 
-- 2026-05-03 00:00 Decision:
-  - Trigger / new insight: User asked whether production usage and tests can go to different Docker containers.
-  - Plan delta (what changed): Added a separate Oxigraph test Docker service and endpoint variable for live smoke tests so test writes do not target the application/default Oxigraph service, and required tests to clean up the durable data they create.
-  - Tradeoffs considered: A separate test container/volume plus per-test cleanup is safer than deleting known fixture graphs from the application service because it avoids accidental cleanup against production-like data and avoids accumulating test residue.
-  - User approval: yes
+- 2026-05-03 00:00 Follow-up image/doc-scope correction applied.
+  - Summary: Updated Docker-backed Oxigraph services to `ghcr.io/oxigraph/oxigraph:0.5.8` and removed runtime graph-store configuration settings from the schema cheat sheet.
+  - Validation evidence: `docker compose -f docker-compose.oxigraph.yml config` and `docker compose -f docker-compose.oxigraph.test.yml config` both resolve `ghcr.io/oxigraph/oxigraph:0.5.8`; stale schema-cheat-sheet config grep found no `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`; `docker compose -f docker-compose.oxigraph.test.yml up -d` pulled/recreated the test service with `0.5.8`; `OXIGRAPH_TEST_CONNECTION_STRING=http://localhost:7879 cargo test --lib oxigraph_http_service_live_smoke_upserts_queries_and_filters -- --ignored` passed with 1 passed; test endpoint count returned `0` quads after smoke cleanup; `docker compose -f docker-compose.oxigraph.yml up -d` recreated the default service with `0.5.8`; default endpoint responded to SPARQL `ASK`; both default and test containers report image `ghcr.io/oxigraph/oxigraph:0.5.8`.
+  - Notes: Runtime configuration belongs in README/env/operational docs and the active phase plan, not in the schema cheat sheet.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -545,6 +545,18 @@
   - Trigger / new insight: User corrected the workflow after implementation started drifting ahead of the active plan.
   - Plan delta (what changed): Updated plan scope, decisions, task acceptance, validation expectations, and progress log before continuing further implementation/validation.
   - Tradeoffs considered: Continuing code edits without plan alignment would make validation evidence ambiguous and violate the harness workflow.
+  - User approval: yes
+
+- 2026-05-03 00:00 Decision:
+  - Trigger / new insight: User asked whether production usage and tests can go to different Docker containers.
+  - Plan delta (what changed): Added a separate Oxigraph test Docker service and endpoint variable for live smoke tests so test writes do not target the application/default Oxigraph service, and required tests to clean up the durable data they create.
+  - Tradeoffs considered: A separate test container/volume plus per-test cleanup is safer than deleting known fixture graphs from the application service because it avoids accidental cleanup against production-like data and avoids accumulating test residue.
+  - User approval: yes
+
+- 2026-05-03 00:00 Decision:
+  - Trigger / new insight: User requested Oxigraph container version `0.5.8` and clarified that schema cheat sheet should not carry runtime configuration explanations.
+  - Plan delta (what changed): Docker Compose Oxigraph image tags are updated to `ghcr.io/oxigraph/oxigraph:0.5.8`; schema cheat sheet is restored to database schema/design reference scope.
+  - Tradeoffs considered: Keeping configuration in operational docs avoids diluting the schema reference and makes service setup easier to find in README/env docs.
   - User approval: yes
 
 ## Notes

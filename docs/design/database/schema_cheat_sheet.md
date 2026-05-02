@@ -13,13 +13,6 @@ This is the compact schema reference. The companion design notes explain why the
 | Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking |
 | Raw store / caller storage | Source material | Raw transcript or source content behind `raw_ref` | Canonical memory state |
 
-## Graph Store Configuration
-
-| Setting | Default | Notes |
-|---|---|---|
-| `GRAPH_STORE_MODE` | `service` | Use `persistent` for embedded filesystem persistence or `in_memory` for tests/fixtures. |
-| `OXIGRAPH_CONNECTION_STRING` | `http://localhost:7878` in `.env.example` | HTTP endpoint in service mode; filesystem path only in embedded persistent mode. |
-
 ## Cross-Store Join Keys
 
 | Field | Stored In | Purpose |

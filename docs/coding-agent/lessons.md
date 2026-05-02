@@ -21,6 +21,30 @@ Purpose:
 
 ## Entries
 
+## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
+
+Context:
+- Plan: v0.1.1 persistent graph authority
+- Task/Wave: documentation follow-up after PR creation
+- Roles involved: Orchestrator
+
+Symptom:
+- Added `GRAPH_STORE_MODE` and `OXIGRAPH_CONNECTION_STRING` explanations to `docs/design/database/schema_cheat_sheet.md`.
+- User clarified that the schema cheat sheet should reference actual database designs, not general database-related configuration.
+
+Root cause:
+- Treated all database-adjacent setup information as acceptable for the schema reference instead of preserving the document's narrower database-design purpose.
+
+Fix applied:
+- Removed graph-store configuration settings from the schema cheat sheet and left configuration explanation in README/design/roadmap planning docs.
+
+Prevention:
+- Keep schema reference docs focused on stored fields, graph classes/predicates, join keys, authority boundaries, and retrieval rules.
+- Put runtime service/configuration instructions in README, environment examples, operational docs, or phase plans.
+
+Evidence:
+- `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
+
 ## 2026-05-02 - Replan Before Implementation Direction Changes  [tags: workflow, planning, scope-ownership, validation]
 
 Context:
