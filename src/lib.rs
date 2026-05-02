@@ -7,11 +7,13 @@ mod internal;
 
 use async_trait::async_trait;
 
-use crate::config::settings::EmbeddingProviderSettings;
+use crate::config::settings::{EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode};
 use crate::internal::infrastructures::external_services::{
     OpenAIEmbeddingProvider, QdrantVectorCandidateStore,
 };
-use crate::internal::infrastructures::graph::OxigraphGraphAuthorityStore;
+use crate::internal::infrastructures::graph::{
+    OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore,
+};
 use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
     CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
@@ -40,7 +42,7 @@ pub use crate::api::types::{
     ThreadStatus, VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure,
     CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
-pub use crate::config::settings::Settings;
+pub use crate::config::settings::{GraphStoreMode, Settings};
 pub use crate::errors::CustomError;
 
 // Re-export for integration tests
@@ -167,8 +169,20 @@ impl CharacterMemory {
             expected_vector_size as u64,
         )?;
         vector_store.init_collection().await?;
+        let graph_store = match settings.get_graph_store_mode() {
+            ConfigGraphStoreMode::Service => Box::new(OxigraphHttpGraphAuthorityStore::new(
+                settings.get_oxigraph_endpoint()?,
+            )?) as Box<dyn GraphAuthorityStore>,
+            ConfigGraphStoreMode::Persistent => Box::new(
+                OxigraphGraphAuthorityStore::new_persistent(settings.get_oxigraph_path()?)?,
+            ),
+            ConfigGraphStoreMode::InMemory => {
+                Box::new(OxigraphGraphAuthorityStore::new_in_memory()?)
+            }
+        };
+
         Ok(Self::from_parts(
-            Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
+            graph_store,
             Box::new(vector_store),
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
         ))
@@ -906,6 +920,15 @@ mod tests {
             let mut candidates = self.candidates.clone();
             candidates.truncate(query.limit);
             Ok(candidates)
+        }
+
+        async fn list_candidate_diagnostics(
+            &self,
+        ) -> Result<
+            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
+            CustomError,
+        > {
+            Ok(Vec::new())
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

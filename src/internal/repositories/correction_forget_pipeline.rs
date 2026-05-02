@@ -2311,6 +2311,14 @@ mod tests {
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
         }
+
+        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(lock(&self.objects).clone())
+        }
+
+        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(lock(&self.links).clone())
+        }
     }
 
     #[derive(Debug, Default)]
@@ -2349,6 +2357,15 @@ mod tests {
             &self,
             _query: &VectorCandidateSearch,
         ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_candidate_diagnostics(
+            &self,
+        ) -> Result<
+            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
+            CustomError,
+        > {
             Ok(Vec::new())
         }
 
@@ -2418,6 +2435,15 @@ mod tests {
             query: &VectorCandidateSearch,
         ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
             self.inner.search_candidates(query).await
+        }
+
+        async fn list_candidate_diagnostics(
+            &self,
+        ) -> Result<
+            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
+            CustomError,
+        > {
+            self.inner.list_candidate_diagnostics().await
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

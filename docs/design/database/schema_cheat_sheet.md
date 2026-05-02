@@ -191,3 +191,7 @@ Qdrant narrows candidates.
 Oxigraph verifies graph truth.
 The final context pack follows Oxigraph state.
 ```
+
+## Reconciliation Diagnostics
+
+Internal diagnostics can report vector-only records, graph-only records, graph URI mismatch, stale lifecycle/currentness hints, unsupported vector schema versions, and graph records with missing required provenance. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API.

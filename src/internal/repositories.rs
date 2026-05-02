@@ -3,6 +3,7 @@ mod embedder;
 mod graph_authority_store;
 mod link_pipeline;
 mod raw_reference_resolver;
+mod reconciliation;
 mod remember_pipeline;
 mod retrieve_pipeline;
 #[cfg(test)]
@@ -36,6 +37,14 @@ pub(crate) use link_pipeline::LinkPipeline;
 // Raw-reference contracts remain internal until production raw storage lands.
 #[allow(unused_imports)]
 pub(crate) use raw_reference_resolver::{RawReference, RawReferenceResolver};
+
+// Internal/admin reconciliation diagnostics. These remain out of the public
+// CharacterMemory facade until a governance surface is planned.
+#[allow(unused_imports)]
+pub(crate) use reconciliation::{
+    reconcile_graph_vector_stores, ReconciliationDiagnostic, ReconciliationDriftKind,
+    ReconciliationReport,
+};
 
 // Remember pipeline surface; outcome types are converted at the public
 // facade boundary.

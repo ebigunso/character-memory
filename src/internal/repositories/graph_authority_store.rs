@@ -1,6 +1,6 @@
 // Graph authority contract and provider-neutral expansion helpers.
-// Oxigraph is the default in-process authority; tests also use deterministic
-// fake stores.
+// Oxigraph service mode is the application default; embedded and fake stores
+// keep tests and explicit fixture runs deterministic.
 #![allow(dead_code)]
 
 use async_trait::async_trait;
@@ -997,6 +997,10 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError>;
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError>;
 }
 
 #[async_trait]
@@ -1043,6 +1047,14 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
         (**self).expand_bounded(query).await
+    }
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+        (**self).list_diagnostic_objects().await
+    }
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+        (**self).list_diagnostic_links().await
     }
 }
 

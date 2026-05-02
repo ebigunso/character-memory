@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use crate::api::types::MemoryId;
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
-    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+    VectorCandidateDiagnosticRecord, VectorCandidateMatch, VectorCandidateSearch,
+    VectorRecordEmbedding,
 };
 
 #[async_trait]
@@ -21,6 +22,10 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<Vec<VectorCandidateMatch>, CustomError>;
+
+    async fn list_candidate_diagnostics(
+        &self,
+    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError>;
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError>;
 }
@@ -39,6 +44,12 @@ impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
         query: &VectorCandidateSearch,
     ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
         (**self).search_candidates(query).await
+    }
+
+    async fn list_candidate_diagnostics(
+        &self,
+    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
+        (**self).list_candidate_diagnostics().await
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {

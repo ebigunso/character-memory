@@ -1,15 +1,22 @@
-// Embedded Oxigraph graph authority. Canonical domain objects are retained
-// for contract reads while RDF triples are materialized into Oxigraph.
+// Oxigraph graph authority. Canonical domain objects and links are written to
+// RDF and hydrated from Oxigraph.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
+use serde::{de::DeserializeOwned, Deserialize};
 
-use crate::api::types::{graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType};
+use crate::api::types::{
+    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
+    ObjectType, Observation,
+};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -22,9 +29,12 @@ use super::sparql_selectors::SparqlGraphSelectors;
 
 pub(crate) struct OxigraphGraphAuthorityStore {
     store: Store,
-    objects: Mutex<HashMap<(MemoryId, ObjectType), MemoryObject>>,
-    links: Mutex<HashMap<MemoryId, MemoryLink>>,
     inserted_quads: Mutex<HashMap<String, Vec<Quad>>>,
+}
+
+pub(crate) struct OxigraphHttpGraphAuthorityStore {
+    endpoint: String,
+    client: reqwest::Client,
 }
 
 impl OxigraphGraphAuthorityStore {
@@ -32,8 +42,26 @@ impl OxigraphGraphAuthorityStore {
         let store = Store::new().map_err(oxigraph_error)?;
         Ok(Self {
             store,
-            objects: Mutex::new(HashMap::new()),
-            links: Mutex::new(HashMap::new()),
+            inserted_quads: Mutex::new(HashMap::new()),
+        })
+    }
+
+    pub(crate) fn new_persistent(path: impl AsRef<Path>) -> Result<Self, CustomError> {
+        let path = path.as_ref();
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| {
+                CustomError::DatabaseError(format!(
+                    "Failed to create Oxigraph graph store parent directory {}: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+        let store = Store::open(path).map_err(oxigraph_error)?;
+        Ok(Self {
+            store,
             inserted_quads: Mutex::new(HashMap::new()),
         })
     }
@@ -61,6 +89,10 @@ impl OxigraphGraphAuthorityStore {
         for (owner_graph_uri, _) in &replacements {
             if let Some(previous_quads) = inserted_quads.get(owner_graph_uri) {
                 for quad in previous_quads {
+                    transaction.remove(quad.as_ref());
+                }
+            } else {
+                for quad in self.quads_in_graph(owner_graph_uri)? {
                     transaction.remove(quad.as_ref());
                 }
             }
@@ -91,6 +123,18 @@ impl OxigraphGraphAuthorityStore {
             self.store.remove(quad).map_err(oxigraph_error)?;
         }
         Ok(())
+    }
+
+    fn quads_in_graph(&self, owner_graph_uri: &str) -> Result<Vec<Quad>, CustomError> {
+        let graph_name = GraphName::NamedNode(NamedNode::new(owner_graph_uri)?);
+        self.store
+            .iter()
+            .filter_map(|quad| match quad {
+                Ok(quad) if quad.graph_name == graph_name => Some(Ok(quad)),
+                Ok(_) => None,
+                Err(error) => Some(Err(oxigraph_error(error))),
+            })
+            .collect()
     }
 
     #[cfg(test)]
@@ -161,6 +205,171 @@ impl OxigraphGraphAuthorityStore {
     }
 }
 
+impl OxigraphHttpGraphAuthorityStore {
+    pub(crate) fn new(endpoint: impl AsRef<str>) -> Result<Self, CustomError> {
+        let endpoint = endpoint.as_ref().trim().trim_end_matches('/');
+        if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+            return Err(CustomError::ConfigParseError(
+                "Oxigraph service endpoint must start with http:// or https://".to_owned(),
+            ));
+        }
+        Ok(Self {
+            endpoint: endpoint.to_owned(),
+            client: reqwest::Client::new(),
+        })
+    }
+
+    async fn replace_triples_batch(
+        &self,
+        replacements: Vec<(String, Vec<Quad>)>,
+    ) -> Result<(), CustomError> {
+        if replacements.is_empty() {
+            return Ok(());
+        }
+
+        let mut update = String::new();
+        for (owner_graph_uri, _) in &replacements {
+            update.push_str("DELETE { GRAPH <");
+            update.push_str(owner_graph_uri);
+            update.push_str("> { ?s ?p ?o } } WHERE { GRAPH <");
+            update.push_str(owner_graph_uri);
+            update.push_str("> { ?s ?p ?o } };\n");
+        }
+        update.push_str("INSERT DATA {\n");
+        for (_, quads) in &replacements {
+            for quad in quads {
+                update.push_str(&sparql_quad(quad)?);
+                update.push('\n');
+            }
+        }
+        update.push_str("}\n");
+
+        self.post_update(update).await
+    }
+
+    async fn post_update(&self, update: String) -> Result<(), CustomError> {
+        let response = self
+            .client
+            .post(format!("{}/update", self.endpoint))
+            .header("content-type", "application/sparql-update")
+            .body(update)
+            .send()
+            .await
+            .map_err(oxigraph_http_error)?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            Err(CustomError::DatabaseError(format!(
+                "Oxigraph update failed with {status}: {body}"
+            )))
+        }
+    }
+
+    #[cfg(test)]
+    async fn delete_named_graphs(&self, graph_uris: &[String]) -> Result<(), CustomError> {
+        if graph_uris.is_empty() {
+            return Ok(());
+        }
+
+        let mut update = String::new();
+        for graph_uri in graph_uris {
+            update.push_str("DROP SILENT GRAPH <");
+            update.push_str(graph_uri);
+            update.push_str(">;\n");
+        }
+        self.post_update(update).await
+    }
+
+    #[cfg(test)]
+    async fn named_graph_quad_count(&self, graph_uris: &[String]) -> Result<usize, CustomError> {
+        if graph_uris.is_empty() {
+            return Ok(0);
+        }
+
+        let mut query = String::from("SELECT (COUNT(*) AS ?count) WHERE { VALUES ?g {");
+        for graph_uri in graph_uris {
+            query.push_str(" <");
+            query.push_str(graph_uri);
+            query.push('>');
+        }
+        query.push_str(" } GRAPH ?g { ?s ?p ?o } }");
+
+        let response = self
+            .client
+            .post(format!("{}/query", self.endpoint))
+            .header("accept", "application/sparql-results+json")
+            .header("content-type", "application/sparql-query")
+            .body(query)
+            .send()
+            .await
+            .map_err(oxigraph_http_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(CustomError::DatabaseError(format!(
+                "Oxigraph query failed with {status}: {body}"
+            )));
+        }
+
+        let result = response
+            .json::<SparqlSelectResponse>()
+            .await
+            .map_err(oxigraph_http_error)?;
+        let count = result
+            .results
+            .bindings
+            .first()
+            .and_then(|binding| binding.get("count"))
+            .ok_or_else(|| {
+                CustomError::DatabaseError(
+                    "Oxigraph SPARQL count result is missing count binding".to_owned(),
+                )
+            })?;
+        count.value.parse().map_err(|error| {
+            CustomError::DatabaseError(format!("Invalid Oxigraph SPARQL count literal: {error}"))
+        })
+    }
+
+    async fn snapshot_store(&self) -> Result<Store, CustomError> {
+        // Initial service-mode bridge: keep RDF hydration shared with embedded
+        // Oxigraph by snapshotting named graphs locally. Replace with targeted
+        // remote SPARQL before using service mode for large graph datasets.
+        let response = self
+            .client
+            .post(format!("{}/query", self.endpoint))
+            .header("accept", "application/sparql-results+json")
+            .header("content-type", "application/sparql-query")
+            .body("SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }".to_owned())
+            .send()
+            .await
+            .map_err(oxigraph_http_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(CustomError::DatabaseError(format!(
+                "Oxigraph query failed with {status}: {body}"
+            )));
+        }
+
+        let result = response
+            .json::<SparqlSelectResponse>()
+            .await
+            .map_err(oxigraph_http_error)?;
+        let store = Store::new().map_err(oxigraph_error)?;
+        for binding in result.results.bindings {
+            store
+                .insert(&quad_from_sparql_binding(&binding)?)
+                .map_err(oxigraph_error)?;
+        }
+        Ok(store)
+    }
+}
+
 fn quads_for_triples(
     owner_graph_uri: &str,
     triples: &[RdfTriple],
@@ -169,6 +378,117 @@ fn quads_for_triples(
         .iter()
         .map(|triple| quad_for_triple(owner_graph_uri, triple))
         .collect()
+}
+
+fn sparql_quad(quad: &Quad) -> Result<String, CustomError> {
+    let GraphName::NamedNode(graph_name) = &quad.graph_name else {
+        return Err(CustomError::DatabaseError(
+            "Oxigraph service writes require named graphs".to_owned(),
+        ));
+    };
+    let NamedOrBlankNode::NamedNode(subject) = &quad.subject else {
+        return Err(CustomError::DatabaseError(
+            "Oxigraph service writes require named-node subjects".to_owned(),
+        ));
+    };
+
+    Ok(format!(
+        "GRAPH <{}> {{ <{}> <{}> {} . }}",
+        graph_name.as_str(),
+        subject.as_str(),
+        quad.predicate.as_str(),
+        sparql_term(&quad.object)?
+    ))
+}
+
+fn sparql_term(term: &Term) -> Result<String, CustomError> {
+    match term {
+        Term::NamedNode(value) => Ok(format!("<{}>", value.as_str())),
+        Term::Literal(value) => Ok(format!("\"{}\"", sparql_escape_literal(value.value()))),
+        Term::BlankNode(_) => Err(CustomError::DatabaseError(
+            "Oxigraph service writes do not support blank-node objects".to_owned(),
+        )),
+    }
+}
+
+fn sparql_escape_literal(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+#[derive(Debug, Deserialize)]
+struct SparqlSelectResponse {
+    results: SparqlResults,
+}
+
+#[derive(Debug, Deserialize)]
+struct SparqlResults {
+    bindings: Vec<HashMap<String, SparqlBinding>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SparqlBinding {
+    #[serde(rename = "type")]
+    kind: String,
+    value: String,
+}
+
+fn quad_from_sparql_binding(binding: &HashMap<String, SparqlBinding>) -> Result<Quad, CustomError> {
+    let graph = named_node_binding(binding, "g")?;
+    let subject = named_node_binding(binding, "s")?;
+    let predicate = named_node_binding(binding, "p")?;
+    let object = term_binding(binding, "o")?;
+
+    Ok(Quad::new(
+        NamedOrBlankNode::NamedNode(subject),
+        predicate,
+        object,
+        GraphName::NamedNode(graph),
+    ))
+}
+
+fn named_node_binding(
+    binding: &HashMap<String, SparqlBinding>,
+    name: &'static str,
+) -> Result<NamedNode, CustomError> {
+    let value = binding.get(name).ok_or_else(|| {
+        CustomError::DatabaseError(format!("Oxigraph SPARQL result is missing binding {name}"))
+    })?;
+    if value.kind != "uri" {
+        return Err(CustomError::DatabaseError(format!(
+            "Oxigraph SPARQL binding {name} must be a uri, got {}",
+            value.kind
+        )));
+    }
+    NamedNode::new(value.value.as_str()).map_err(CustomError::from)
+}
+
+fn term_binding(
+    binding: &HashMap<String, SparqlBinding>,
+    name: &'static str,
+) -> Result<Term, CustomError> {
+    let value = binding.get(name).ok_or_else(|| {
+        CustomError::DatabaseError(format!("Oxigraph SPARQL result is missing binding {name}"))
+    })?;
+    match value.kind.as_str() {
+        "uri" => Ok(Term::NamedNode(NamedNode::new(value.value.as_str())?)),
+        "literal" | "typed-literal" => Ok(Term::Literal(Literal::new_simple_literal(
+            value.value.as_str(),
+        ))),
+        other => Err(CustomError::DatabaseError(format!(
+            "Oxigraph SPARQL binding {name} has unsupported term type {other}"
+        ))),
+    }
 }
 
 #[async_trait]
@@ -189,10 +509,6 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
 
         self.replace_triples_batch(replacements)?;
 
-        let mut stored = lock(&self.objects)?;
-        for object in objects {
-            stored.insert(object_identity(object), object.clone());
-        }
         Ok(())
     }
 
@@ -210,10 +526,6 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
 
         self.replace_triples_batch(replacements)?;
 
-        let mut stored = lock(&self.links)?;
-        for link in links {
-            stored.insert(link.id, link.clone());
-        }
         Ok(())
     }
 
@@ -247,15 +559,6 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
 
         self.replace_triples_batch(replacements)?;
 
-        let mut stored_objects = lock(&self.objects)?;
-        for object in objects {
-            stored_objects.insert(object_identity(object), object.clone());
-        }
-        let mut stored_links = lock(&self.links)?;
-        for link in links {
-            stored_links.insert(link.id, link.clone());
-        }
-
         Ok(())
     }
 
@@ -264,8 +567,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError> {
         let selected_refs = SparqlGraphSelectors::new(&self.store).select_objects(query)?;
-        let objects = lock(&self.objects)?;
-        Ok(hydrate_objects_by_refs(&selected_refs, &objects))
+        hydrate_objects_by_refs_from_store(&self.store, &selected_refs)
     }
 
     async fn query_derived_memories_by_provenance(
@@ -279,14 +581,21 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             .into_iter()
             .collect::<HashSet<_>>();
 
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
+        let objects = hydrate_objects_by_refs_from_store(
+            &self.store,
+            &selected_ids
+                .iter()
+                .copied()
+                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_all_links_from_store(&self.store)?;
         Ok(derived_memories_by_provenance(
             query,
-            objects
-                .into_values()
-                .filter(|object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id))),
-            links.into_values(),
+            objects.into_iter().filter(
+                |object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id)),
+            ),
+            links,
         ))
     }
 
@@ -301,14 +610,21 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             .into_iter()
             .collect::<HashSet<_>>();
 
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
+        let objects = hydrate_objects_by_refs_from_store(
+            &self.store,
+            &selected_ids
+                .iter()
+                .copied()
+                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_all_links_from_store(&self.store)?;
         Ok(derived_memories_by_thread(
             query,
-            objects
-                .into_values()
-                .filter(|object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id))),
-            links.into_values(),
+            objects.into_iter().filter(
+                |object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id)),
+            ),
+            links,
         ))
     }
 
@@ -327,22 +643,588 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         }
 
         let visibility = bounded_graph_visible_refs(&selectors, root_ref, query)?;
-        let objects = {
-            let objects = lock(&self.objects)?;
-            hydrate_objects_by_ref_set(&visibility.object_refs, &objects)
-        };
-        let links = {
-            let links = lock(&self.links)?;
-            hydrate_links_by_id_sets(
-                &visibility.traversal_link_ids,
-                &visibility.lifecycle_link_ids,
-                &visibility.object_refs,
-                &links,
-            )
-        };
+        let objects = hydrate_objects_by_refs_from_store(
+            &self.store,
+            &visibility.object_refs.iter().copied().collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_id_sets_from_store(
+            &self.store,
+            &visibility.traversal_link_ids,
+            &visibility.lifecycle_link_ids,
+            &visibility.object_refs,
+        )?;
 
         bounded_expansion(query, objects, links)
     }
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+        let object_types = [
+            ObjectType::Episode,
+            ObjectType::Observation,
+            ObjectType::Entity,
+            ObjectType::MemoryThread,
+            ObjectType::DerivedMemory,
+        ];
+        let object_refs = SparqlGraphSelectors::new(&self.store)
+            .select_objects(&GraphObjectQuery::by_types(object_types.to_vec(), None))?;
+        hydrate_objects_by_refs_from_store(&self.store, &object_refs)
+    }
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+        hydrate_all_links_from_store(&self.store)
+    }
+}
+
+#[async_trait]
+impl GraphAuthorityStore for OxigraphHttpGraphAuthorityStore {
+    async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
+        let mut replacements = Vec::new();
+        for object in objects {
+            object
+                .validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            let (object_id, object_type) = object_identity(object);
+            let owner_graph_uri = graph_uri(object_type, object_id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
+            ));
+        }
+
+        self.replace_triples_batch(replacements).await
+    }
+
+    async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+        let mut replacements = Vec::new();
+        for link in links {
+            link.validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link)?)?,
+            ));
+        }
+
+        self.replace_triples_batch(replacements).await
+    }
+
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        let mut replacements = Vec::new();
+        for object in objects {
+            object
+                .validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            let (object_id, object_type) = object_identity(object);
+            let owner_graph_uri = graph_uri(object_type, object_id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
+            ));
+        }
+
+        for link in links {
+            link.validate()
+                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
+            replacements.push((
+                owner_graph_uri.clone(),
+                quads_for_triples(&owner_graph_uri, &rdf_triples_for_link(link)?)?,
+            ));
+        }
+
+        self.replace_triples_batch(replacements).await
+    }
+
+    async fn query_objects(
+        &self,
+        query: &GraphObjectQuery,
+    ) -> Result<Vec<MemoryObject>, CustomError> {
+        let store = self.snapshot_store().await?;
+        let selected_refs = SparqlGraphSelectors::new(&store).select_objects(query)?;
+        hydrate_objects_by_refs_from_store(&store, &selected_refs)
+    }
+
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let store = self.snapshot_store().await?;
+        let mut selector_query = query.clone();
+        selector_query.limit = None;
+        let selected_ids = SparqlGraphSelectors::new(&store)
+            .select_derived_memories_by_provenance(&selector_query)?
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let objects = hydrate_objects_by_refs_from_store(
+            &store,
+            &selected_ids
+                .iter()
+                .copied()
+                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_all_links_from_store(&store)?;
+        Ok(derived_memories_by_provenance(
+            query,
+            objects.into_iter().filter(
+                |object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id)),
+            ),
+            links,
+        ))
+    }
+
+    async fn query_derived_memories_by_thread(
+        &self,
+        query: &GraphDerivedMemoryThreadQuery,
+    ) -> Result<Vec<DerivedMemory>, CustomError> {
+        let store = self.snapshot_store().await?;
+        let mut selector_query = query.clone();
+        selector_query.limit = None;
+        let selected_ids = SparqlGraphSelectors::new(&store)
+            .select_derived_memories_by_thread(&selector_query)?
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let objects = hydrate_objects_by_refs_from_store(
+            &store,
+            &selected_ids
+                .iter()
+                .copied()
+                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_all_links_from_store(&store)?;
+        Ok(derived_memories_by_thread(
+            query,
+            objects.into_iter().filter(
+                |object| matches!(object, MemoryObject::DerivedMemory(memory) if selected_ids.contains(&memory.id)),
+            ),
+            links,
+        ))
+    }
+
+    async fn expand_bounded(
+        &self,
+        query: &GraphExpansionQuery,
+    ) -> Result<GraphExpansion, CustomError> {
+        let store = self.snapshot_store().await?;
+        let selectors = SparqlGraphSelectors::new(&store);
+        let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
+        let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
+        if root_refs.is_empty() {
+            return Err(CustomError::GraphExpansionRootNotFound {
+                object_type: query.root_type,
+                object_id: query.root_id,
+            });
+        }
+
+        let visibility = bounded_graph_visible_refs(&selectors, root_ref, query)?;
+        let objects = hydrate_objects_by_refs_from_store(
+            &store,
+            &visibility.object_refs.iter().copied().collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_id_sets_from_store(
+            &store,
+            &visibility.traversal_link_ids,
+            &visibility.lifecycle_link_ids,
+            &visibility.object_refs,
+        )?;
+
+        bounded_expansion(query, objects, links)
+    }
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+        let store = self.snapshot_store().await?;
+        let object_types = [
+            ObjectType::Episode,
+            ObjectType::Observation,
+            ObjectType::Entity,
+            ObjectType::MemoryThread,
+            ObjectType::DerivedMemory,
+        ];
+        let object_refs = SparqlGraphSelectors::new(&store)
+            .select_objects(&GraphObjectQuery::by_types(object_types.to_vec(), None))?;
+        hydrate_objects_by_refs_from_store(&store, &object_refs)
+    }
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+        let store = self.snapshot_store().await?;
+        hydrate_all_links_from_store(&store)
+    }
+}
+
+#[derive(Debug, Default)]
+struct RdfSubjectValues {
+    literals: HashMap<String, Vec<String>>,
+    resources: HashMap<String, Vec<String>>,
+}
+
+impl RdfSubjectValues {
+    fn push_literal(&mut self, predicate: String, value: String) {
+        self.literals.entry(predicate).or_default().push(value);
+    }
+
+    fn push_resource(&mut self, predicate: String, value: String) {
+        self.resources.entry(predicate).or_default().push(value);
+    }
+
+    fn literal(&self, subject: &str, predicate: &'static str) -> Result<String, CustomError> {
+        self.literals
+            .get(predicate)
+            .and_then(|values| values.first())
+            .cloned()
+            .ok_or_else(|| missing_rdf_value(subject, predicate))
+    }
+
+    fn optional_literal(&self, predicate: &'static str) -> Option<String> {
+        self.literals
+            .get(predicate)
+            .and_then(|values| values.first())
+            .cloned()
+    }
+
+    fn literal_values(&self, predicate: &'static str) -> Vec<String> {
+        self.literals.get(predicate).cloned().unwrap_or_default()
+    }
+
+    fn resource(&self, subject: &str, predicate: &'static str) -> Result<String, CustomError> {
+        self.resources
+            .get(predicate)
+            .and_then(|values| values.first())
+            .cloned()
+            .ok_or_else(|| missing_rdf_value(subject, predicate))
+    }
+
+    fn resource_values(&self, predicate: &'static str) -> Vec<String> {
+        self.resources.get(predicate).cloned().unwrap_or_default()
+    }
+}
+
+fn hydrate_objects_by_refs_from_store(
+    store: &Store,
+    refs: &[GraphObjectRef],
+) -> Result<Vec<MemoryObject>, CustomError> {
+    let subjects = rdf_subject_values(store)?;
+    let mut objects = Vec::new();
+    for object_ref in refs {
+        if object_ref.object_type == ObjectType::MemoryLink {
+            continue;
+        }
+        let subject = graph_uri(object_ref.object_type, object_ref.object_id);
+        if let Some(values) = subjects.get(&subject) {
+            objects.push(memory_object_from_rdf(
+                &subject,
+                values,
+                object_ref.object_type,
+            )?);
+        }
+    }
+    sort_objects(&mut objects);
+    Ok(objects)
+}
+
+fn hydrate_all_links_from_store(store: &Store) -> Result<Vec<MemoryLink>, CustomError> {
+    let subjects = rdf_subject_values(store)?;
+    let mut links = subjects
+        .iter()
+        .filter_map(|(subject, values)| {
+            let object_type = values
+                .optional_literal(super::vocabulary::OBJECT_TYPE)
+                .and_then(|value| enum_value_from_literal::<ObjectType>(&value).ok());
+            match object_type {
+                Some(ObjectType::MemoryLink) => Some(memory_link_from_rdf(subject, values)),
+                _ => None,
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    links.sort_by_key(|link| link.id);
+    Ok(links)
+}
+
+fn hydrate_links_by_id_sets_from_store(
+    store: &Store,
+    graph_link_ids: &HashSet<MemoryId>,
+    lifecycle_link_ids: &HashSet<MemoryId>,
+    graph_ref_set: &HashSet<GraphObjectRef>,
+) -> Result<Vec<MemoryLink>, CustomError> {
+    let links = hydrate_all_links_from_store(store)?;
+    Ok(links
+        .into_iter()
+        .filter(|link| graph_link_ids.contains(&link.id) || lifecycle_link_ids.contains(&link.id))
+        .filter(|link| {
+            let endpoints_in_graph = graph_ref_set
+                .contains(&GraphObjectRef::new(link.from_id, link.from_type))
+                && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type));
+            (graph_link_ids.contains(&link.id) && endpoints_in_graph)
+                || lifecycle_link_ids.contains(&link.id)
+        })
+        .collect())
+}
+
+fn rdf_subject_values(store: &Store) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
+    let mut subjects = HashMap::<String, RdfSubjectValues>::new();
+    for quad in store.iter() {
+        let quad = quad.map_err(oxigraph_error)?;
+        if !matches!(quad.graph_name, GraphName::NamedNode(_)) {
+            continue;
+        }
+        let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
+            continue;
+        };
+        let values = subjects.entry(subject.as_str().to_owned()).or_default();
+        match quad.object {
+            Term::NamedNode(value) => values.push_resource(
+                quad.predicate.as_str().to_owned(),
+                value.as_str().to_owned(),
+            ),
+            Term::Literal(value) => {
+                values.push_literal(quad.predicate.as_str().to_owned(), value.value().to_owned())
+            }
+            Term::BlankNode(_) => {}
+        }
+    }
+    Ok(subjects)
+}
+
+fn memory_object_from_rdf(
+    subject: &str,
+    values: &RdfSubjectValues,
+    object_type: ObjectType,
+) -> Result<MemoryObject, CustomError> {
+    match object_type {
+        ObjectType::Episode => Ok(MemoryObject::Episode(Episode {
+            id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+            object_type,
+            modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
+            source_conversation_id: values
+                .optional_literal(super::vocabulary::SOURCE_CONVERSATION_ID),
+            started_at: optional_timestamp_literal(values, super::vocabulary::STARTED_AT)?,
+            ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
+            participant_entity_ids: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::PARTICIPANT_ENTITY),
+            )?,
+            summary: values.literal(subject, super::vocabulary::SUMMARY)?,
+            raw_ref: values.optional_literal(super::vocabulary::RAW_REF),
+            salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
+            retention_state: enum_literal(subject, values, super::vocabulary::RETENTION_STATE)?,
+            created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+            schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+        })),
+        ObjectType::Observation => Ok(MemoryObject::Observation(Observation {
+            id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+            object_type,
+            episode_id: memory_id_from_resource(
+                &values.resource(subject, super::vocabulary::EPISODE)?,
+            )?,
+            speaker_entity_id: values
+                .resource_values(super::vocabulary::SPEAKER_ENTITY)
+                .first()
+                .map(|value| memory_id_from_resource(value))
+                .transpose()?,
+            observed_at: optional_timestamp_literal(values, super::vocabulary::OBSERVED_AT)?,
+            modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
+            text: values.literal(subject, super::vocabulary::TEXT)?,
+            raw_ref: values.optional_literal(super::vocabulary::RAW_REF),
+            salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
+            retention_state: enum_literal(subject, values, super::vocabulary::RETENTION_STATE)?,
+            created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+            schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+        })),
+        ObjectType::Entity => Ok(MemoryObject::Entity(Entity {
+            id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+            object_type,
+            entity_type: enum_literal(subject, values, super::vocabulary::ENTITY_TYPE)?,
+            name: values.literal(subject, super::vocabulary::NAME)?,
+            aliases: values.literal_values(super::vocabulary::ALIAS),
+            canonical_key: values.optional_literal(super::vocabulary::CANONICAL_KEY),
+            summary: values.optional_literal(super::vocabulary::SUMMARY),
+            created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+            updated_at: timestamp_literal(subject, values, super::vocabulary::UPDATED_AT)?,
+            schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+        })),
+        ObjectType::MemoryThread => Ok(MemoryObject::MemoryThread(MemoryThread {
+            id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+            object_type,
+            title: values.literal(subject, super::vocabulary::TITLE)?,
+            summary: values.literal(subject, super::vocabulary::SUMMARY)?,
+            status: enum_literal(subject, values, super::vocabulary::THREAD_STATUS)?,
+            last_touched_at: timestamp_literal(
+                subject,
+                values,
+                super::vocabulary::LAST_TOUCHED_AT,
+            )?,
+            salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
+            canonical_key: values.optional_literal(super::vocabulary::CANONICAL_KEY),
+            created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+            updated_at: timestamp_literal(subject, values, super::vocabulary::UPDATED_AT)?,
+            schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+        })),
+        ObjectType::DerivedMemory => Ok(MemoryObject::DerivedMemory(DerivedMemory {
+            id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+            object_type,
+            derived_type: enum_literal(subject, values, super::vocabulary::DERIVED_TYPE)?,
+            text: values.literal(subject, super::vocabulary::TEXT)?,
+            derived_from_episode_ids: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::DERIVED_FROM_EPISODE),
+            )?,
+            derived_from_observation_ids: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::DERIVED_FROM_OBSERVATION),
+            )?,
+            thread_ids: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::PART_OF_THREAD),
+            )?,
+            entity_ids: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::ABOUT_ENTITY),
+            )?,
+            confidence: f32_literal(subject, values, super::vocabulary::CONFIDENCE)?,
+            salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
+            stability: enum_literal(subject, values, super::vocabulary::STABILITY)?,
+            is_current: bool_literal(subject, values, super::vocabulary::IS_CURRENT)?,
+            supersedes: memory_ids_from_resources(
+                values.resource_values(super::vocabulary::SUPERSEDES),
+            )?,
+            retention_state: enum_literal(subject, values, super::vocabulary::RETENTION_STATE)?,
+            created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+            updated_at: timestamp_literal(subject, values, super::vocabulary::UPDATED_AT)?,
+            schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+        })),
+        ObjectType::MemoryLink => Ok(MemoryObject::MemoryLink(memory_link_from_rdf(
+            subject, values,
+        )?)),
+    }
+}
+
+fn memory_link_from_rdf(
+    subject: &str,
+    values: &RdfSubjectValues,
+) -> Result<MemoryLink, CustomError> {
+    Ok(MemoryLink {
+        id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
+        object_type: ObjectType::MemoryLink,
+        from_id: memory_id_from_resource(&values.resource(subject, super::vocabulary::FROM)?)?,
+        from_type: enum_literal(subject, values, super::vocabulary::FROM_TYPE)?,
+        to_id: memory_id_from_resource(&values.resource(subject, super::vocabulary::TO)?)?,
+        to_type: enum_literal(subject, values, super::vocabulary::TO_TYPE)?,
+        relation: enum_literal(subject, values, super::vocabulary::RELATION)?,
+        confidence: f32_literal(subject, values, super::vocabulary::CONFIDENCE)?,
+        rationale: values.optional_literal(super::vocabulary::RATIONALE),
+        created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
+        schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
+    })
+}
+
+fn memory_id_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<MemoryId, CustomError> {
+    values
+        .literal(subject, predicate)?
+        .parse()
+        .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn memory_id_from_resource(value: &str) -> Result<MemoryId, CustomError> {
+    value
+        .rsplit(':')
+        .next()
+        .ok_or_else(|| CustomError::DatabaseError(format!("Invalid graph URI resource: {value}")))?
+        .parse()
+        .map_err(|error| CustomError::DatabaseError(format!("Invalid graph URI MemoryId: {error}")))
+}
+
+fn memory_ids_from_resources(values: Vec<String>) -> Result<Vec<MemoryId>, CustomError> {
+    let mut ids = values
+        .iter()
+        .map(|value| memory_id_from_resource(value))
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.sort();
+    Ok(ids)
+}
+
+fn enum_literal<T: DeserializeOwned>(
+    subject: &str,
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<T, CustomError> {
+    enum_value_from_literal(&values.literal(subject, predicate)?)
+        .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn enum_value_from_literal<T: DeserializeOwned>(value: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_value(serde_json::Value::String(value.to_owned()))
+}
+
+fn f32_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<f32, CustomError> {
+    values
+        .literal(subject, predicate)?
+        .parse()
+        .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn bool_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<bool, CustomError> {
+    values
+        .literal(subject, predicate)?
+        .parse()
+        .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn timestamp_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<DateTime<Utc>, CustomError> {
+    parse_timestamp(subject, predicate, &values.literal(subject, predicate)?)
+}
+
+fn optional_timestamp_literal(
+    values: &RdfSubjectValues,
+    predicate: &'static str,
+) -> Result<Option<DateTime<Utc>>, CustomError> {
+    values
+        .optional_literal(predicate)
+        .map(|value| parse_timestamp("<optional>", predicate, &value))
+        .transpose()
+}
+
+fn parse_timestamp(
+    subject: &str,
+    predicate: &'static str,
+    value: &str,
+) -> Result<DateTime<Utc>, CustomError> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn missing_rdf_value(subject: &str, predicate: &'static str) -> CustomError {
+    CustomError::DatabaseError(format!(
+        "Oxigraph RDF object {subject} is missing required predicate {predicate}"
+    ))
+}
+
+fn rdf_parse_error(
+    subject: &str,
+    predicate: &'static str,
+    error: impl std::fmt::Display,
+) -> CustomError {
+    CustomError::DatabaseError(format!(
+        "Oxigraph RDF object {subject} has invalid predicate {predicate}: {error}"
+    ))
 }
 
 #[derive(Debug, Default)]
@@ -398,63 +1280,9 @@ fn bounded_graph_visible_refs(
     })
 }
 
-fn hydrate_objects_by_ref_set(
-    refs: &HashSet<GraphObjectRef>,
-    objects: &HashMap<(MemoryId, ObjectType), MemoryObject>,
-) -> Vec<MemoryObject> {
-    refs.iter()
-        .filter_map(|object_ref| {
-            objects
-                .get(&(object_ref.object_id, object_ref.object_type))
-                .cloned()
-        })
-        .collect()
-}
-
-fn hydrate_links_by_id_sets(
-    graph_link_ids: &HashSet<MemoryId>,
-    lifecycle_link_ids: &HashSet<MemoryId>,
-    graph_ref_set: &HashSet<GraphObjectRef>,
-    links: &HashMap<MemoryId, MemoryLink>,
-) -> Vec<MemoryLink> {
-    graph_link_ids
-        .union(lifecycle_link_ids)
-        .filter_map(|link_id| links.get(link_id))
-        .filter(|link| {
-            let endpoints_in_graph = graph_ref_set
-                .contains(&GraphObjectRef::new(link.from_id, link.from_type))
-                && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type));
-            (graph_link_ids.contains(&link.id) && endpoints_in_graph)
-                || lifecycle_link_ids.contains(&link.id)
-        })
-        .cloned()
-        .collect()
-}
-
 fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
     let (object_id, object_type) = object_identity(object);
     GraphObjectRef::new(object_id, object_type)
-}
-
-fn hydrate_objects_by_refs(
-    refs: &[GraphObjectRef],
-    objects: &HashMap<(MemoryId, ObjectType), MemoryObject>,
-) -> Vec<MemoryObject> {
-    refs.iter()
-        .filter_map(|object_ref| {
-            match objects.get(&(object_ref.object_id, object_ref.object_type)) {
-                Some(object) => Some(object.clone()),
-                None if object_ref.object_type == ObjectType::MemoryLink => None,
-                None => {
-                    debug_assert!(
-                        false,
-                        "SPARQL selected {object_ref:?} but canonical object cache could not hydrate it"
-                    );
-                    None
-                }
-            }
-        })
-        .collect()
 }
 
 fn quad_for_triple(owner_graph_uri: &str, triple: &RdfTriple) -> Result<Quad, CustomError> {
@@ -482,6 +1310,10 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
 
 fn oxigraph_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph graph store error: {error}"))
+}
+
+fn oxigraph_http_error(error: impl std::fmt::Display) -> CustomError {
+    CustomError::DatabaseError(format!("Oxigraph service error: {error}"))
 }
 
 fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
@@ -543,6 +1375,29 @@ mod tests {
         GraphObjectRef,
     };
     use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
+    use std::path::{Path, PathBuf};
+
+    struct TempGraphDir {
+        path: PathBuf,
+    }
+
+    impl TempGraphDir {
+        fn new() -> Self {
+            Self {
+                path: std::env::temp_dir().join(format!("cmem-oxigraph-{}", MemoryId::new_v4())),
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempGraphDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[tokio::test]
     async fn oxigraph_store_upserts_and_queries_canonical_objects() {
@@ -653,7 +1508,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oxigraph_queries_select_from_rdf_before_cache_hydration() {
+    async fn oxigraph_queries_hydrate_from_rdf() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let episode_graph = graph_uri(ObjectType::Episode, fixtures.episode.id);
@@ -729,7 +1584,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oxigraph_upsert_objects_and_links_replaces_rdf_and_caches_atomically() {
+    async fn oxigraph_upsert_objects_and_links_replaces_rdf_atomically() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let mut updated_memory = fixtures.derived_reflection.clone();
@@ -997,22 +1852,11 @@ mod tests {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let graph_visible_link = fixtures.hub_links[1].clone();
-        let mut stale_cache_only_link = graph_visible_link.clone();
-        stale_cache_only_link.id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0001);
-        stale_cache_only_link.to_id = fixtures.episode.id;
-        stale_cache_only_link.to_type = ObjectType::Episode;
-        stale_cache_only_link.relation = RelationType::About;
-        stale_cache_only_link.rationale =
-            Some("Cache-only stale link should not consume fanout.".to_owned());
-
         store.upsert_objects(&fixtures.objects()).await.unwrap();
         store
             .upsert_links(std::slice::from_ref(&graph_visible_link))
             .await
             .unwrap();
-        lock(&store.links)
-            .unwrap()
-            .insert(stale_cache_only_link.id, stale_cache_only_link.clone());
 
         let expansion = store
             .expand_bounded(
@@ -1023,7 +1867,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(expansion.links, vec![graph_visible_link.clone()]);
-        assert!(!expansion.links.contains(&stale_cache_only_link));
         assert!(expansion
             .objects
             .contains(&MemoryObject::Entity(fixtures.hub_entity.clone())));
@@ -1664,6 +2507,228 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires local test Oxigraph: docker compose -f docker-compose.oxigraph.test.yml up -d and OXIGRAPH_TEST_CONNECTION_STRING"]
+    async fn oxigraph_http_service_live_smoke_upserts_queries_and_filters(
+    ) -> Result<(), CustomError> {
+        let endpoint = std::env::var("OXIGRAPH_TEST_CONNECTION_STRING")
+            .unwrap_or_else(|_| "http://localhost:7879".to_owned());
+        ensure_live_smoke_test_endpoint(&endpoint)?;
+        let store = OxigraphHttpGraphAuthorityStore::new(endpoint)?;
+        let fixtures = representative_fixtures();
+        let smoke_graph_uris = fixtures
+            .objects()
+            .into_iter()
+            .map(|object| {
+                let (id, object_type) = object_identity(&object);
+                graph_uri(object_type, id)
+            })
+            .chain(
+                fixtures
+                    .links()
+                    .into_iter()
+                    .map(|link| graph_uri(ObjectType::MemoryLink, link.id)),
+            )
+            .collect::<Vec<_>>();
+
+        let test_result: Result<(), CustomError> = async {
+            store.upsert_objects(&fixtures.objects()).await?;
+            store.upsert_links(&fixtures.links()).await?;
+
+            let queried = store
+                .query_objects(&GraphObjectQuery::by_refs(vec![
+                    GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                    GraphObjectRef::new(fixtures.derived_reflection.id, ObjectType::DerivedMemory),
+                ]))
+                .await?;
+            if !queried.contains(&MemoryObject::Episode(fixtures.episode.clone())) {
+                return Err(CustomError::DatabaseError(
+                    "Oxigraph smoke did not return the stored episode".to_owned(),
+                ));
+            }
+            if !queried.contains(&MemoryObject::DerivedMemory(
+                fixtures.derived_reflection.clone(),
+            )) {
+                return Err(CustomError::DatabaseError(
+                    "Oxigraph smoke did not return the stored derived memory".to_owned(),
+                ));
+            }
+
+            let vector = FixedVectorStore::new(vec![
+                VectorCandidateMatch::new(
+                    fixtures.derived_reflection.id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::Summary,
+                    0.99,
+                ),
+                VectorCandidateMatch::new(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::Summary,
+                    0.98,
+                ),
+            ]);
+            let embedder = FixedEmbedder::new(vec![1.0, 0.0]);
+            let pipeline = RetrievePipeline::new(&store, &vector, &embedder);
+
+            let outcome = pipeline
+                .retrieve(RetrievalContext::new("service graph authority"))
+                .await?;
+            if !outcome
+                .pack
+                .derived_memories
+                .iter()
+                .any(|included| included.memory.id == fixtures.derived_reflection.id)
+            {
+                return Err(CustomError::DatabaseError(
+                    "Oxigraph smoke retrieval did not include the current derived memory"
+                        .to_owned(),
+                ));
+            }
+            if outcome
+                .pack
+                .derived_memories
+                .iter()
+                .chain(outcome.pack.preferences.iter())
+                .any(|included| included.memory.id == fixtures.suppressed_seed.id)
+            {
+                return Err(CustomError::DatabaseError(
+                    "Oxigraph smoke retrieval included a suppressed derived memory".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+        .await;
+
+        let cleanup_result = store.delete_named_graphs(&smoke_graph_uris).await;
+        let remaining_result = store.named_graph_quad_count(&smoke_graph_uris).await;
+        cleanup_result?;
+        let remaining = remaining_result?;
+        if remaining != 0 {
+            return Err(CustomError::DatabaseError(format!(
+                "Oxigraph smoke cleanup left {remaining} quads in smoke graphs"
+            )));
+        }
+        test_result
+    }
+
+    fn ensure_live_smoke_test_endpoint(endpoint: &str) -> Result<(), CustomError> {
+        let parsed = reqwest::Url::parse(endpoint).map_err(|error| {
+            CustomError::ConfigParseError(format!(
+                "OXIGRAPH_TEST_CONNECTION_STRING must be a valid test endpoint URL: {error}"
+            ))
+        })?;
+        let host = parsed.host_str().unwrap_or_default();
+        let is_local_test_endpoint = parsed.scheme() == "http"
+            && matches!(host, "localhost" | "127.0.0.1" | "::1")
+            && parsed.port_or_known_default() == Some(7879);
+        if is_local_test_endpoint {
+            return Ok(());
+        }
+
+        Err(CustomError::ConfigParseError(
+            "Refusing live Oxigraph smoke cleanup outside the local test endpoint http://localhost:7879"
+            .to_owned(),
+        ))
+    }
+
+    #[test]
+    fn live_smoke_endpoint_guard_allows_only_local_test_service() {
+        assert!(ensure_live_smoke_test_endpoint("http://localhost:7879").is_ok());
+        assert!(ensure_live_smoke_test_endpoint("http://127.0.0.1:7879").is_ok());
+        assert!(ensure_live_smoke_test_endpoint("http://localhost:7878").is_err());
+        assert!(ensure_live_smoke_test_endpoint("https://localhost:7879").is_err());
+        assert!(ensure_live_smoke_test_endpoint("http://example.com:7879").is_err());
+    }
+
+    #[tokio::test]
+    async fn persistent_oxigraph_reopens_and_hydrates_objects_links_and_lifecycle_from_rdf() {
+        let graph_dir = TempGraphDir::new();
+        let fixtures = representative_fixtures();
+        let mut archived_thread = fixtures.soft_thread.clone();
+        archived_thread.status = ThreadStatus::Archived;
+
+        {
+            let store = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+            store
+                .upsert_objects(&[
+                    MemoryObject::Episode(fixtures.episode.clone()),
+                    MemoryObject::Observation(fixtures.salient_observation.clone()),
+                    MemoryObject::Entity(fixtures.user_entity.clone()),
+                    MemoryObject::MemoryThread(archived_thread.clone()),
+                    MemoryObject::DerivedMemory(fixtures.correction.clone()),
+                    MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+                ])
+                .await
+                .unwrap();
+            store.upsert_links(&fixtures.links()).await.unwrap();
+        }
+
+        {
+            let reopened = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+            let queried = reopened
+                .query_objects(&GraphObjectQuery::by_refs(vec![
+                    GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                    GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation),
+                    GraphObjectRef::new(fixtures.user_entity.id, ObjectType::Entity),
+                    GraphObjectRef::new(archived_thread.id, ObjectType::MemoryThread),
+                    GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
+                    GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
+                ]))
+                .await
+                .unwrap();
+
+            assert!(queried.contains(&MemoryObject::Episode(fixtures.episode.clone())));
+            assert!(queried.contains(&MemoryObject::Observation(
+                fixtures.salient_observation.clone()
+            )));
+            assert!(queried.contains(&MemoryObject::Entity(fixtures.user_entity.clone())));
+            assert!(queried.contains(&MemoryObject::MemoryThread(archived_thread.clone())));
+            assert!(queried.contains(&MemoryObject::DerivedMemory(fixtures.correction.clone())));
+            assert!(queried.contains(&MemoryObject::DerivedMemory(
+                fixtures.suppressed_seed.clone()
+            )));
+
+            let by_provenance = reopened
+                .query_derived_memories_by_provenance(
+                    &GraphDerivedMemoryProvenanceQuery::by_sources(
+                        vec![fixtures.episode.id],
+                        vec![fixtures.salient_observation.id],
+                    ),
+                )
+                .await
+                .unwrap();
+            assert!(by_provenance
+                .iter()
+                .any(|memory| memory.id == fixtures.correction.id));
+            assert!(!by_provenance
+                .iter()
+                .any(|memory| memory.id == fixtures.suppressed_seed.id));
+
+            let default_expansion = reopened
+                .expand_bounded(&GraphExpansionQuery::new(
+                    fixtures.correction.id,
+                    ObjectType::DerivedMemory,
+                    1,
+                    5,
+                ))
+                .await
+                .unwrap();
+            assert!(default_expansion
+                .objects
+                .contains(&MemoryObject::DerivedMemory(fixtures.correction.clone())));
+            assert!(!default_expansion
+                .objects
+                .contains(&MemoryObject::DerivedMemory(
+                    fixtures.suppressed_seed.clone()
+                )));
+            assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
+                filtered.object_ref
+                    == GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+            }));
+        }
+    }
+
+    #[tokio::test]
     async fn retrieve_pipeline_expands_fixed_vector_candidate_with_embedded_oxigraph() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
@@ -1751,6 +2816,70 @@ mod tests {
             assignment.object.id == fixtures.derived_reflection.id
                 && assignment.section == ContextPackSection::DerivedMemories
         }));
+    }
+
+    #[tokio::test]
+    async fn retrieve_pipeline_after_persistent_reopen_uses_graph_authority_filters() {
+        let graph_dir = TempGraphDir::new();
+        let fixtures = representative_fixtures();
+        let missing_vector_only_id = MemoryId::new_v4();
+
+        {
+            let store = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+            store.upsert_objects(&fixtures.objects()).await.unwrap();
+            store.upsert_links(&fixtures.links()).await.unwrap();
+        }
+
+        {
+            let reopened = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+            let vector = FixedVectorStore::new(vec![
+                VectorCandidateMatch::new(
+                    fixtures.derived_reflection.id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::Summary,
+                    0.99,
+                ),
+                VectorCandidateMatch::new(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::Summary,
+                    0.98,
+                ),
+                VectorCandidateMatch::new(
+                    missing_vector_only_id,
+                    ObjectType::DerivedMemory,
+                    VectorSurface::Summary,
+                    0.97,
+                ),
+            ]);
+            let embedder = FixedEmbedder::new(vec![1.0, 0.0]);
+            let pipeline = RetrievePipeline::new(&reopened, &vector, &embedder);
+
+            let outcome = pipeline
+                .retrieve(RetrievalContext::new("restart graph authority").with_trace())
+                .await
+                .unwrap();
+            let retrieved_ids = outcome
+                .pack
+                .derived_memories
+                .iter()
+                .chain(outcome.pack.preferences.iter())
+                .map(|included| included.memory.id)
+                .collect::<HashSet<_>>();
+
+            assert!(retrieved_ids.contains(&fixtures.derived_reflection.id));
+            assert!(!retrieved_ids.contains(&fixtures.suppressed_seed.id));
+            assert!(!retrieved_ids.contains(&missing_vector_only_id));
+            let trace = outcome.trace.as_ref().unwrap();
+            assert!(trace.vector_candidates.iter().any(|candidate| {
+                candidate.object.id == missing_vector_only_id
+                    && candidate.object.object_type == ObjectType::DerivedMemory
+            }));
+            assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+                decision.object.id == fixtures.suppressed_seed.id
+                    && decision.action == LifecycleFilterAction::Omitted
+            }));
+        }
     }
 
     #[tokio::test]
@@ -1842,6 +2971,15 @@ mod tests {
             let mut candidates = self.candidates.clone();
             candidates.truncate(query.limit);
             Ok(candidates)
+        }
+
+        async fn list_candidate_diagnostics(
+            &self,
+        ) -> Result<
+            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
+            CustomError,
+        > {
+            Ok(Vec::new())
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

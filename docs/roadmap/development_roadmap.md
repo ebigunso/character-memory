@@ -133,7 +133,7 @@ Set up the project so v0.1 can remain lean but future versions do not require br
 Core model package
 Storage interfaces
 Default Qdrant candidate-recall adapter
-Default embedded Oxigraph graph-authority adapter
+Default Oxigraph graph-authority adapter
 Raw store interface
 Schema/versioning utilities
 Stable ID/IRI utilities
@@ -295,7 +295,7 @@ This phase closes the gap where Qdrant candidates may survive restart while the 
 ## Goals
 
 ```text
-support persistent Oxigraph storage configuration
+support Docker-backed Oxigraph service configuration and embedded persistent storage configuration
 preserve graph-authoritative state across process restarts
 keep in-memory graph mode available for deterministic tests
 validate restart-safe retrieval
@@ -303,6 +303,8 @@ detect Qdrant/Oxigraph drift
 prevent vector-only candidates from becoming behavior-influencing memory
 document persistence configuration and operational expectations
 ```
+
+Oxigraph service mode is the application default. Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
 
 ## Non-goals
 
@@ -321,7 +323,7 @@ distributed transactions across Qdrant and Oxigraph
 
 ```text
 configurable Oxigraph graph store mode
-persistent Oxigraph graph authority implementation
+service-backed and embedded persistent Oxigraph graph authority implementation
 restart-safe graph authority tests
 retrieval behavior tests after graph restart
 Qdrant/Oxigraph reconciliation diagnostics

@@ -12,7 +12,7 @@ static INIT: Once = Once::new();
 // Initialize environment once for all tests
 pub fn initialize() {
     INIT.call_once(|| {
-        // Any global setup can go here
+        std::env::set_var("GRAPH_STORE_MODE", "in_memory");
     });
 }
 

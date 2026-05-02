@@ -21,6 +21,78 @@ Purpose:
 
 ## Entries
 
+## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
+
+Context:
+- Plan: v0.1.1 persistent graph authority
+- Task/Wave: documentation follow-up after PR creation
+- Roles involved: Orchestrator
+
+Symptom:
+- Added `GRAPH_STORE_MODE` and `OXIGRAPH_CONNECTION_STRING` explanations to `docs/design/database/schema_cheat_sheet.md`.
+- User clarified that the schema cheat sheet should reference actual database designs, not general database-related configuration.
+
+Root cause:
+- Treated all database-adjacent setup information as acceptable for the schema reference instead of preserving the document's narrower database-design purpose.
+
+Fix applied:
+- Removed graph-store configuration settings from the schema cheat sheet and left configuration explanation in README/design/roadmap planning docs.
+
+Prevention:
+- Keep schema reference docs focused on stored fields, graph classes/predicates, join keys, authority boundaries, and retrieval rules.
+- Put runtime service/configuration instructions in README, environment examples, operational docs, or phase plans.
+
+Evidence:
+- `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
+
+## 2026-05-02 - Replan Before Implementation Direction Changes  [tags: workflow, planning, scope-ownership, validation]
+
+Context:
+- Plan: v0.1.1 persistent graph authority
+- Task/Wave: follow-up change from embedded persistence default to Docker-backed Oxigraph service default
+- Roles involved: Orchestrator
+
+Symptom:
+- Began changing code for Oxigraph service mode before updating the active execution plan.
+- User corrected the workflow: "Apply the required adjustments to the plan as well. Don't veer off plan and be fine with it."
+
+Root cause:
+- Treated a follow-up implementation preference as a local adjustment instead of a plan-changing requirement under the active harness workflow.
+
+Fix applied:
+- Updated the active plan scope, resolved decisions, task acceptance criteria, validation expectations, progress log, and decision log to make Oxigraph service mode the default and embedded filesystem persistence explicit.
+
+Prevention:
+- When a user changes implementation direction under an active plan, stop implementation first and update the plan's decisions, owns scopes, acceptance criteria, and validation gates before further code edits.
+- Do not treat passing local checks as sufficient if the plan no longer describes the current implementation direction.
+
+Evidence:
+- Active plan now records Docker-backed Oxigraph service mode, explicit embedded persistent mode, and prerequisite-gated live Oxigraph smoke validation.
+
+## 2026-05-01 - Confirm Repository Branch Convention Before Branch Creation  [tags: git, tooling, workflow]
+
+Context:
+- Plan: persistent graph authority planning branch
+- Task/Wave: branch creation before plan drafting
+- Roles involved: Orchestrator
+
+Symptom:
+- Tried generic agent-style branch names before following the repository branch naming convention.
+- User corrected the workflow: "Follow the repository branch name conventions."
+
+Root cause:
+- Used the desktop default branch prefix before consulting repo-local lessons and branch naming history.
+
+Fix applied:
+- Created the plan branch with the repository convention: `feature/2026-05-01/persistent-graph-authority-plan`.
+
+Prevention:
+- Before creating a branch, inspect repo-local rules, lessons, and visible branch naming patterns.
+- Prefer the repository convention over generic agent defaults unless the user explicitly asks for a different branch name.
+
+Evidence:
+- Current branch: `feature/2026-05-01/persistent-graph-authority-plan`.
+
 ## 2026-05-01 - Verify Copilot Re-Review Requests Against Repo Rule Before Trusting Them  [tags: tooling, review, git, workflow]
 
 Context:

@@ -120,24 +120,40 @@ documentation for persistent graph setup
 
 # 4. Configuration direction
 
-The graph authority should support at least two modes:
+The graph authority should support three modes:
 
 ```rust
-GraphStoreMode::InMemory
+GraphStoreMode::Service { endpoint: Url }
 GraphStoreMode::Persistent { path: PathBuf }
+GraphStoreMode::InMemory
 ```
 
 or equivalent settings:
 
 ```toml
 [graph]
-mode = "persistent"
-path = "./data/oxigraph"
+mode = "service"
+endpoint = "http://localhost:7878"
 ```
 
 In-memory mode remains useful for deterministic unit tests and local fast fixtures.
 
-Persistent mode is the default recommendation for applications that expect memory to survive process restart.
+Service mode is the default recommendation for applications that expect memory to survive process restart. Embedded filesystem persistence remains available for explicit local or isolated deployments.
+
+Implemented default service configuration:
+
+```text
+GRAPH_STORE_MODE=service
+OXIGRAPH_CONNECTION_STRING=http://localhost:7878
+```
+
+Start the local service with:
+
+```text
+docker compose -f docker-compose.oxigraph.yml up -d
+```
+
+`GRAPH_STORE_MODE=persistent` is the explicit embedded filesystem-backed mode, where `OXIGRAPH_CONNECTION_STRING` is a local path such as `./data/oxigraph`. `GRAPH_STORE_MODE=in_memory` is the explicit test/fixture override.
 
 ---
 
@@ -189,6 +205,8 @@ graph object has missing required provenance
 ```
 
 Initial reconciliation may report rather than fully repair all cases.
+
+This phase keeps reconciliation internal/admin-facing. It does not expose diagnostics through the public `CharacterMemory` facade.
 
 Minimum behavior:
 
