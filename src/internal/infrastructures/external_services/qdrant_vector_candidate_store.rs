@@ -10,25 +10,26 @@ use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::{
     points_selector::PointsSelectorOneOf, value::Kind, vectors_config, Condition,
     CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DatetimeRange, DeletePointsBuilder,
-    Distance, Filter, PointStruct, ScoredPoint, SearchPointsBuilder, Timestamp,
-    UpsertPointsBuilder, VectorParams, VectorsConfig,
+    Distance, Filter, PointId, PointStruct, RetrievedPoint, ScoredPoint, ScrollPointsBuilder,
+    SearchPointsBuilder, Timestamp, UpsertPointsBuilder, VectorParams, VectorsConfig,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant};
 
 use crate::api::types::{MemoryId, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
-    VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
-    VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+    VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
+    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
+    VectorTimeRangeFilter,
 };
 use crate::internal::repositories::VectorCandidateStore;
 
 use super::qdrant_payload::{
     qdrant_payload_index_fields, qdrant_payload_map, CREATED_AT_FIELD, ENDED_AT_FIELD,
-    ENTITY_IDS_FIELD, EPISODE_IDS_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD,
+    ENTITY_IDS_FIELD, EPISODE_IDS_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD,
     LAST_TOUCHED_AT_FIELD, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, OBSERVED_AT_FIELD,
-    PARTICIPANT_ENTITY_IDS_FIELD, RETENTION_STATE_FIELD, SPEAKER_ENTITY_ID_FIELD, STARTED_AT_FIELD,
-    SURFACE_FIELD, THREAD_IDS_FIELD, UPDATED_AT_FIELD,
+    PARTICIPANT_ENTITY_IDS_FIELD, RETENTION_STATE_FIELD, SCHEMA_VERSION_FIELD,
+    SPEAKER_ENTITY_ID_FIELD, STARTED_AT_FIELD, SURFACE_FIELD, THREAD_IDS_FIELD, UPDATED_AT_FIELD,
 };
 
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
@@ -211,6 +212,41 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             .into_iter()
             .map(scored_point_to_match)
             .collect()
+    }
+
+    async fn list_candidate_diagnostics(
+        &self,
+    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
+        let mut records = Vec::new();
+        let mut offset: Option<PointId> = None;
+
+        loop {
+            let mut builder = ScrollPointsBuilder::new(&self.collection_name)
+                .limit(256)
+                .with_payload(true)
+                .with_vectors(false)
+                .timeout(QDRANT_CANDIDATE_TIMEOUT_SECS);
+            if let Some(next_offset) = offset {
+                builder = builder.offset(next_offset);
+            }
+
+            let response = self.client.scroll(builder).await?;
+            records.extend(
+                response
+                    .result
+                    .into_iter()
+                    .map(retrieved_point_to_diagnostic_record)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+
+            offset = response.next_page_offset;
+            if offset.is_none() {
+                break;
+            }
+        }
+
+        records.sort_by_key(|record| (record.object_id, object_type_rank(record.object_type)));
+        Ok(records)
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -458,6 +494,30 @@ fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, Cus
     ))
 }
 
+fn retrieved_point_to_diagnostic_record(
+    point: RetrievedPoint,
+) -> Result<VectorCandidateDiagnosticRecord, CustomError> {
+    let object_id = payload_string(&point.payload, OBJECT_ID_FIELD)?;
+    let object_id = uuid::Uuid::parse_str(&object_id).map_err(|error| {
+        CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
+    })?;
+    let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
+    let surface = parse_vector_surface(payload_string(&point.payload, SURFACE_FIELD)?)?;
+
+    Ok(VectorCandidateDiagnosticRecord {
+        object_id,
+        object_type,
+        graph_uri: payload_string(&point.payload, GRAPH_URI_FIELD)?,
+        surface,
+        schema_version: payload_string(&point.payload, SCHEMA_VERSION_FIELD)?,
+        retention_state: optional_payload_string(&point.payload, RETENTION_STATE_FIELD)
+            .map(parse_retention_state)
+            .transpose()?,
+        is_current: optional_payload_bool(&point.payload, IS_CURRENT_FIELD)?,
+        is_superseded: optional_payload_bool(&point.payload, IS_SUPERSEDED_FIELD)?,
+    })
+}
+
 fn qdrant_point_id(record: &crate::internal::models::vector::VectorRecord) -> uuid::Uuid {
     let mut first = 0xcbf29ce484222325_u64;
     let mut second = 0x9e3779b97f4a7c15_u64;
@@ -495,6 +555,29 @@ fn payload_string(
     }
 }
 
+fn optional_payload_string(
+    payload: &HashMap<String, qdrant_client::qdrant::Value>,
+    field: &str,
+) -> Option<String> {
+    match payload.get(field).and_then(|value| value.kind.as_ref()) {
+        Some(Kind::StringValue(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn optional_payload_bool(
+    payload: &HashMap<String, qdrant_client::qdrant::Value>,
+    field: &str,
+) -> Result<Option<bool>, CustomError> {
+    match payload.get(field).and_then(|value| value.kind.as_ref()) {
+        Some(Kind::BoolValue(value)) => Ok(Some(*value)),
+        None => Ok(None),
+        _ => Err(CustomError::DatabaseError(format!(
+            "Invalid boolean field in Qdrant payload: {field}"
+        ))),
+    }
+}
+
 fn object_type_name(object_type: ObjectType) -> &'static str {
     match object_type {
         ObjectType::Episode => "episode",
@@ -503,6 +586,17 @@ fn object_type_name(object_type: ObjectType) -> &'static str {
         ObjectType::MemoryThread => "memory_thread",
         ObjectType::DerivedMemory => "derived_memory",
         ObjectType::MemoryLink => "memory_link",
+    }
+}
+
+fn object_type_rank(object_type: ObjectType) -> u8 {
+    match object_type {
+        ObjectType::Episode => 0,
+        ObjectType::Observation => 1,
+        ObjectType::Entity => 2,
+        ObjectType::MemoryThread => 3,
+        ObjectType::DerivedMemory => 4,
+        ObjectType::MemoryLink => 5,
     }
 }
 
@@ -546,6 +640,18 @@ fn parse_object_type(value: String) -> Result<ObjectType, CustomError> {
         "memory_link" => Ok(ObjectType::MemoryLink),
         _ => Err(CustomError::DatabaseError(format!(
             "Unknown Qdrant object_type payload value: {value}"
+        ))),
+    }
+}
+
+fn parse_retention_state(value: String) -> Result<crate::api::types::RetentionState, CustomError> {
+    match value.as_str() {
+        "active" => Ok(crate::api::types::RetentionState::Active),
+        "suppressed" => Ok(crate::api::types::RetentionState::Suppressed),
+        "archived" => Ok(crate::api::types::RetentionState::Archived),
+        "deleted" => Ok(crate::api::types::RetentionState::Deleted),
+        _ => Err(CustomError::DatabaseError(format!(
+            "Unknown Qdrant retention_state payload value: {value}"
         ))),
     }
 }

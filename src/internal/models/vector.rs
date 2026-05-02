@@ -19,5 +19,6 @@ pub(crate) use embedding_surface::{
 };
 #[allow(unused_imports)]
 pub(crate) use record::{
-    VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
+    VectorCandidateDiagnosticRecord, VectorPayloadHints, VectorRecord, VectorRecordEmbedding,
+    VectorRelationshipHints,
 };

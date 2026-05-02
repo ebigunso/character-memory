@@ -1,5 +1,5 @@
 // Internal SPARQL selectors for the embedded Oxigraph authority. These helpers
-// return backend-neutral IDs/refs; canonical object hydration stays in the cache.
+// return backend-neutral IDs/refs; canonical object hydration reads RDF state.
 #![allow(dead_code)]
 
 use std::collections::HashSet;

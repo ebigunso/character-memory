@@ -997,6 +997,24 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+        self.query_objects(&GraphObjectQuery::by_types(
+            vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::Entity,
+                ObjectType::MemoryThread,
+                ObjectType::DerivedMemory,
+            ],
+            None,
+        ))
+        .await
+    }
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
@@ -1043,6 +1061,14 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
         (**self).expand_bounded(query).await
+    }
+
+    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+        (**self).list_diagnostic_objects().await
+    }
+
+    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+        (**self).list_diagnostic_links().await
     }
 }
 

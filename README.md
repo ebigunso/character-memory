@@ -43,7 +43,7 @@ An episode is a remembered event or interaction. Each episode can be connected t
 Retrieval is graph-authoritative and hybrid:
 
 - **Vector candidate recall:** uses Qdrant to find semantically similar memory objects
-- **Graph expansion:** uses embedded Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
+- **Graph expansion:** uses Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
 - **Temporal retrieval:** includes memories based on when they happened
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
@@ -97,7 +97,7 @@ By default, this uses:
 
 - OpenAI for embeddings
 - Qdrant for vector candidate recall and payload filtering
-- embedded Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
+- Oxigraph service mode for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
 let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned()).await?;
@@ -124,9 +124,9 @@ This is useful when you want to:
 
 ## Backends
 
-The default implementation is backed by Qdrant and embedded, in-memory Oxigraph.
+The default implementation is backed by Qdrant and an Oxigraph HTTP service.
 
-Qdrant is used for vector candidate recall. Embedded Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering within the running process. Persistent Oxigraph storage configuration is v0.1.1 future work.
+Qdrant is used for vector candidate recall. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=service` with `OXIGRAPH_CONNECTION_STRING=http://localhost:7878`. Embedded filesystem persistence remains available with `GRAPH_STORE_MODE=persistent`; deterministic tests and fixtures use `GRAPH_STORE_MODE=in_memory`.
 
 Raw source material, such as chat or voice transcripts, is caller-owned in v0.1 and is not stored by the default graph/vector backends. Memory objects may preserve `raw_ref` source pointers for provenance, but those pointers are not the transcript content and do not imply a public raw-resolution API.
 
@@ -150,6 +150,22 @@ Or using Docker Compose:
 docker compose -f docker-compose.qdrant.yml up -d
 ```
 
+### Start Oxigraph with Docker
+
+```sh
+docker compose -f docker-compose.oxigraph.yml up -d
+```
+
+The default Oxigraph HTTP endpoint is `http://localhost:7878`.
+
+Live Oxigraph smoke tests use a separate container, port, and volume:
+
+```sh
+docker compose -f docker-compose.oxigraph.test.yml up -d
+```
+
+The default live-test Oxigraph endpoint is `http://localhost:7879`. The smoke test cleans up the named graphs it creates.
+
 ## Running tests
 
 1. Copy `.env.example` to `.env`:
@@ -172,8 +188,8 @@ Do not commit your `.env` file.
 
 Character Memory is under active development.
 
-The v0.1 public architecture is graph-authoritative episodic continuity memory: public construction and facades compose an embedder, Qdrant candidate recall, and embedded Oxigraph graph authority.
+The v0.1 public architecture is graph-authoritative episodic continuity memory: public construction and facades compose an embedder, Qdrant candidate recall, and Oxigraph graph authority.
 
 v0.1 does not store raw transcripts directly in graph/vector storage, run a reflection scheduler, implement a normalized belief ontology, support multimodal memory, or perform physical redaction/delete as a default lifecycle operation.
 
-Production raw transcript storage is caller-owned and deferred. No public raw-reference resolution API is part of v0.1. Persistent graph storage authority and graph/vector reconciliation remain v0.1.1 future work rather than v0.1 behavior.
+Production raw transcript storage is caller-owned and deferred. No public raw-reference resolution API is part of v0.1.

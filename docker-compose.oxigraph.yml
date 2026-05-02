@@ -1,0 +1,11 @@
+services:
+  oxigraph:
+    image: ghcr.io/oxigraph/oxigraph:0.5.7
+    command: ["serve", "--location", "/data", "--bind", "0.0.0.0:7878"]
+    ports:
+      - "7878:7878" # SPARQL and Graph Store HTTP Protocol
+    volumes:
+      - oxigraph_storage:/data
+
+volumes:
+  oxigraph_storage:

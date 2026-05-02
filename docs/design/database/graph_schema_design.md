@@ -21,7 +21,9 @@ Those questions are graph questions. The schema therefore prioritizes stable ide
 
 ## Backend Boundary
 
-Embedded in-memory Oxigraph is the default graph authority. Persistent Oxigraph storage configuration is v0.1.1 future work.
+Oxigraph service mode is the default graph authority for application construction. It is configured with `OXIGRAPH_CONNECTION_STRING` as an HTTP endpoint, for example `http://localhost:7878`, and can be started with `docker compose -f docker-compose.oxigraph.yml up -d`.
+
+Embedded filesystem persistence remains available by setting `GRAPH_STORE_MODE=persistent` and using `OXIGRAPH_CONNECTION_STRING` as a local path, for example `./data/oxigraph`. In-memory Oxigraph remains available for deterministic tests and explicit fixture runs by setting `GRAPH_STORE_MODE=in_memory`.
 
 The public domain model does not expose Oxigraph types. Domain objects are mapped into RDF at the infrastructure edge. This keeps the public API stable if the backing graph implementation changes later.
 
@@ -215,17 +217,17 @@ bound traversal by depth, fanout, object type, relation type, and lifecycle
 
 The graph is not optimized for unconstrained exploration. Character Memory retrieval should be bounded because user and assistant entities can become hubs. The schema supports expansion, but the retrieval layer controls fanout and limits.
 
-## Why Not Store Everything As Triples Only
+## Durable Hydration
 
-The embedded Oxigraph adapter also keeps canonical domain objects in memory for contract reads while materializing RDF triples. That is an implementation boundary, not a rejection of RDF.
+Canonical objects and links are hydrated from RDF/Oxigraph state. The persistent graph authority must not depend on a persisted sidecar object store or on Qdrant payloads to reconstruct domain memory after restart.
 
-It keeps the graph authority simple and deterministic:
+The hydration boundary keeps these rules explicit:
 
-- domain objects can round-trip without lossy RDF reconstruction
-- tests can validate graph behavior without committing to full SPARQL object hydration yet
-- RDF triples still exist for relationship mapping and future query expansion
+- RDF named graphs are the durable source for graph-authoritative object and link fields
+- Qdrant payloads can help find candidates, but cannot fill missing graph truth
+- multi-value RDF fields are normalized deterministically when hydrated
 
-Persistent graph storage can later move more responsibility into SPARQL-backed queries without changing the public object model. That persistent authority work remains scoped to v0.1.1-era follow-up, not the v0.1 in-memory boundary.
+This means a reopened graph store can answer object queries, link queries, provenance lookup, lifecycle filtering, supersession checks, and bounded expansion without process-local sidecar state.
 
 ## Cross-Store Contract
 
@@ -238,12 +240,22 @@ Oxigraph verifies existence, relationships, provenance, lifecycle, and context
 
 This is why the vector payload intentionally duplicates some graph-derived hints. Duplication is acceptable for speed as long as retrieval treats those hints as non-authoritative.
 
+Internal reconciliation diagnostics can report cross-store drift:
+
+- vector point exists but graph object is missing
+- graph object exists but vector point is missing
+- vector payload `graph_uri` does not match the canonical graph URI
+- vector lifecycle/currentness hints disagree with graph authority
+- vector payload schema version is unsupported
+- graph object is missing required provenance
+
+The initial boundary is report-only. Diagnostics do not change normal retrieval behavior and are not exposed through the public facade.
+
 ## Future Revisit Points
 
 Revisit this design when:
 
-- v0.1.1 persistent Oxigraph storage becomes configurable
-- SPARQL query helpers replace more in-memory object-side reads
+- public/admin reconciliation operations need a stable facade
 - belief/claim tracking adds richer factual rigor semantics
 - some relation types become important enough to deserve specialized objects
 - graph migrations need compatibility across stored schema versions
