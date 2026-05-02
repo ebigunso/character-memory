@@ -466,7 +466,7 @@
 
 - 2026-05-03 00:50 Live Oxigraph Docker service verified.
   - Summary: Started `docker-compose.oxigraph.yml`, verified the container is running, verified the HTTP `/query` endpoint responds, and ran the ignored live Oxigraph graph-authority smoke test.
-  - Validation evidence: `docker compose -f docker-compose.oxigraph.yml up -d` pulled `ghcr.io/oxigraph/oxigraph:0.5.7` and started `charactermemory-oxigraph-1`; `docker compose -f docker-compose.oxigraph.yml ps` reported `Up` with `0.0.0.0:7878->7878/tcp`; POST `ASK { ?s ?p ?o }` to `http://localhost:7878/query` returned a SPARQL JSON response; `OXIGRAPH_CONNECTION_STRING=http://localhost:7878 cargo test --lib oxigraph_http_service_live_smoke_upserts_queries_and_filters -- --ignored` passed with 1 passed.
+  - Validation evidence: Superseded by the later `0.5.8` Docker validation entry below. The original default-service smoke started `charactermemory-oxigraph-1`, verified `0.0.0.0:7878->7878/tcp`, verified the `/query` endpoint, and passed the then-current ignored live smoke before the smoke was moved to the dedicated test service.
   - Notes: The Oxigraph container remains running after verification.
 
 - 2026-05-03 01:05 Separate Oxigraph test service and per-test cleanup verified.

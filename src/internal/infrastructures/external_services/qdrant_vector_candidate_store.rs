@@ -502,14 +502,19 @@ fn retrieved_point_to_diagnostic_record(
         CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
     })?;
     let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
-    let surface = parse_vector_surface(payload_string(&point.payload, SURFACE_FIELD)?)?;
+    let surface = optional_payload_string(&point.payload, SURFACE_FIELD)
+        .map(parse_vector_surface)
+        .transpose()?
+        .unwrap_or(VectorSurface::Summary);
 
     Ok(VectorCandidateDiagnosticRecord {
         object_id,
         object_type,
-        graph_uri: payload_string(&point.payload, GRAPH_URI_FIELD)?,
+        graph_uri: optional_payload_string(&point.payload, GRAPH_URI_FIELD)
+            .unwrap_or_else(|| "<missing graph_uri>".to_owned()),
         surface,
-        schema_version: payload_string(&point.payload, SCHEMA_VERSION_FIELD)?,
+        schema_version: optional_payload_string(&point.payload, SCHEMA_VERSION_FIELD)
+            .unwrap_or_else(|| "<missing schema_version>".to_owned()),
         retention_state: optional_payload_string(&point.payload, RETENTION_STATE_FIELD)
             .map(parse_retention_state)
             .transpose()?,
@@ -790,6 +795,29 @@ mod tests {
         assert_eq!(matched.object_type, ObjectType::DerivedMemory);
         assert_eq!(matched.surface, VectorSurface::DerivedText);
         assert_eq!(matched.score, 0.75);
+    }
+
+    #[test]
+    fn diagnostic_mapping_reports_missing_legacy_payload_fields_without_aborting() {
+        let object_id = Uuid::new_v4();
+        let point = RetrievedPoint {
+            payload: HashMap::from([
+                (
+                    OBJECT_ID_FIELD.to_owned(),
+                    string_value(&object_id.to_string()),
+                ),
+                (OBJECT_TYPE_FIELD.to_owned(), string_value("derived_memory")),
+            ]),
+            ..Default::default()
+        };
+
+        let diagnostic = retrieved_point_to_diagnostic_record(point).expect("diagnostic maps");
+
+        assert_eq!(diagnostic.object_id, object_id);
+        assert_eq!(diagnostic.object_type, ObjectType::DerivedMemory);
+        assert_eq!(diagnostic.surface, VectorSurface::Summary);
+        assert_eq!(diagnostic.graph_uri, "<missing graph_uri>");
+        assert_eq!(diagnostic.schema_version, "<missing schema_version>");
     }
 
     #[test]

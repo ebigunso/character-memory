@@ -25,9 +25,7 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
 
     async fn list_candidate_diagnostics(
         &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
-        Ok(Vec::new())
-    }
+    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError>;
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError>;
 }

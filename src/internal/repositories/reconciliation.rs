@@ -79,16 +79,6 @@ fn reconcile_records(
 
     for record in &vector_records {
         let object_ref = GraphObjectRef::new(record.object_id, record.object_type);
-        let Some(graph_object) = graph_by_ref.get(&object_ref) else {
-            push_diagnostic(
-                &mut diagnostics,
-                object_ref,
-                ReconciliationDriftKind::VectorOnlyCandidate,
-                "vector candidate has no matching graph object",
-            );
-            continue;
-        };
-
         let expected_graph_uri = graph_uri(record.object_type, record.object_id);
         if record.graph_uri != expected_graph_uri {
             push_diagnostic(
@@ -113,6 +103,16 @@ fn reconcile_records(
                 ),
             );
         }
+
+        let Some(graph_object) = graph_by_ref.get(&object_ref) else {
+            push_diagnostic(
+                &mut diagnostics,
+                object_ref,
+                ReconciliationDriftKind::VectorOnlyCandidate,
+                "vector candidate has no matching graph object",
+            );
+            continue;
+        };
 
         push_lifecycle_diagnostics(
             &mut diagnostics,
@@ -401,7 +401,7 @@ mod tests {
                     id(999),
                     ObjectType::Entity,
                     graph_uri(ObjectType::Entity, id(999)),
-                    DEFAULT_SCHEMA_VERSION,
+                    "<missing schema_version>",
                     None,
                     None,
                     None,
@@ -442,6 +442,10 @@ mod tests {
         assert!(report.diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == ReconciliationDriftKind::MissingProvenance
                 && diagnostic.object_ref.object_id == missing_provenance.id
+        }));
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == ReconciliationDriftKind::UnsupportedVectorSchema
+                && diagnostic.object_ref.object_id == id(999)
         }));
     }
 
