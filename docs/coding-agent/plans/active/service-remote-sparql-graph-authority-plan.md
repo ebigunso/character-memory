@@ -49,6 +49,7 @@
   - Embedded Oxigraph uses `SparqlGraphSelectors` over an in-process `Store`.
   - HTTP service mode currently snapshots all named graphs into an in-memory `Store`, then reuses embedded selector/hydration logic.
   - The current bridge is correctness-preserving for small/local datasets but is not acceptable as the long-term service adapter for larger graph datasets.
+  - LongMemEval live benchmark logs showed retrieval latency rising as shard graph state grew, which is consistent with paying whole-dataset snapshot cost on ordinary service-mode reads.
   - Live Oxigraph validation uses `docker-compose.oxigraph.test.yml` and `OXIGRAPH_TEST_CONNECTION_STRING=http://localhost:7879`.
 - Repo reference docs consulted:
   - `docs/coding-agent/rules/index.md`
@@ -278,12 +279,23 @@ Interpretation:
 
 ## Progress Log (append-only)
 
+- 2026-05-04 00:00 Planning branch created: `feature-2026-05-04-service-remote-sparql-graph-authority`.
+  - Summary: Reused the existing active plan for the Oxigraph service read optimization scope and recorded the LongMemEval performance context.
+  - Validation evidence: Planning artifact only; implementation validation pending.
+  - Notes: This branch should remove snapshot-based service reads without changing retrieval breadth or eval semantics.
+
 - 2026-05-03 00:00 Plan drafted: [Task_1, Task_2, Task_3, Task_4, Task_5, Task_6]
   - Summary: Created future-work plan to replace the Oxigraph HTTP service full-graph snapshot bridge with targeted remote SPARQL reads.
   - Validation evidence: Plan-format checklist applied; implementation intentionally not started.
   - Notes: Current worktree already contains review-fix edits from the persistent graph authority PR; this plan is a separate future-work artifact.
 
 ## Decision Log (append-only; re-plans and major discoveries)
+
+- 2026-05-04 00:00 Decision:
+  - Trigger / new insight: LongMemEval retrieval timings showed service-mode graph reads are a core-library performance bottleneck, not an eval-only configuration concern.
+  - Plan delta (what changed): Confirmed this existing plan is the implementation scope for removing whole-dataset remote snapshots from ordinary graph reads.
+  - Tradeoffs considered: Optimize service graph reads while preserving graph-authoritative hybrid retrieval and avoiding vector-only fallbacks.
+  - User approval: yes; user requested branches and committed plans for ready work scopes.
 
 - 2026-05-03 00:00 Decision:
   - Trigger / new insight: Review accepted the service snapshot bridge as tracked debt, but requested a concrete future plan to remove it.
