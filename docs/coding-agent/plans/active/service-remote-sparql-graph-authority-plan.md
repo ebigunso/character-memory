@@ -297,6 +297,12 @@ Interpretation:
   - Tradeoffs considered: Optimize service graph reads while preserving graph-authoritative hybrid retrieval and avoiding vector-only fallbacks.
   - User approval: yes; user requested branches and committed plans for ready work scopes.
 
+- 2026-05-04 00:00 Decision:
+  - Trigger / new insight: Remaining service remote-SPARQL open questions were resolved before implementation.
+  - Plan delta (what changed): Keep remote query helpers beside `OxigraphHttpGraphAuthorityStore` initially; make diagnostics category-scoped and explicitly bounded or paginated where practical; prefer smaller targeted frontier queries for bounded expansion before optimizing query shape; use unit/request-body verification plus the no-snapshot grep gate as the hard no-snapshot evidence, with live smoke focused on service behavior.
+  - Tradeoffs considered: Avoid premature selector abstraction while still preventing hidden unbounded reads and preserving embedded/service parity.
+  - User approval: yes; user accepted these recommendations.
+
 - 2026-05-03 00:00 Decision:
   - Trigger / new insight: Review accepted the service snapshot bridge as tracked debt, but requested a concrete future plan to remove it.
   - Plan delta (what changed): Added a dedicated follow-up plan for targeted remote SPARQL service reads and validation.
