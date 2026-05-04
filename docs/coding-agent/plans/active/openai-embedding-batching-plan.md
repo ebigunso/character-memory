@@ -201,6 +201,12 @@ Interpretation:
   - Tradeoffs considered: Avoid adding OpenAI-specific token counting now, while still permitting splitting by documented input-array count limits if needed.
   - User approval: yes; user requested this decision be recorded where it is not easily missed.
 
+- 2026-05-04 00:00 Decision:
+  - Trigger / new insight: Remaining provider batching open questions were resolved before implementation.
+  - Plan delta (what changed): Use one request for the full bulk input when within documented input-array count constraints; split automatically only when the documented input-array count limit is exceeded; restore response order by embedding `index`; fail the whole batch on API, parse, token-limit, or rate-limit errors; defer adaptive retry/backoff.
+  - Tradeoffs considered: Preserve the existing all-or-nothing bulk trait behavior and avoid introducing retry/order complexity before the basic batch path is stable.
+  - User approval: yes; user accepted these recommendations.
+
 ## Notes
 - Risks:
   - OpenAI response parsing must preserve input-to-embedding correspondence.
