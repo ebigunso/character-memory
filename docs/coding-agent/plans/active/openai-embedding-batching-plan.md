@@ -58,6 +58,7 @@
 - A2: The first implementation should fail the whole batch on API or parse failure, matching the current all-or-nothing bulk trait behavior.
 - A3: Provider-specific batching should stay inside the OpenAI adapter so tests and alternative embedding providers remain unchanged.
 - A4: Live benchmark speedup should be measured after the core provider change lands, not inside this implementation plan.
+- A5: Token estimation and token-limit preflight guards are intentionally deferred. Supporting future embedding model configurations beyond the OpenAI adapter will affect the right abstraction, so this plan should not add OpenAI-specific token counting yet.
 
 ## Tasks
 
@@ -72,6 +73,7 @@
 - acceptance:
   - Plan decision log records the batch size and retry boundary.
   - Plan decision log records empty batch and empty text behavior.
+  - Plan decision log records that token estimation and token-limit preflight guards are intentionally deferred.
   - Plan decision log records response ordering expectations.
   - No public trait or model default changes are introduced by this decision.
 - validation:
@@ -91,6 +93,7 @@
   - `bulk_generate_embeddings` sends array inputs to the embeddings endpoint.
   - Empty batch returns an empty vector without an HTTP request.
   - Blank text entries return a clear embedding generation error before the HTTP request.
+  - The implementation may split only by documented input-array count limits; it must not add token estimation or token-limit preflight guards in this scope.
   - Response parsing validates embedding count and vector dimensions.
   - Returned embeddings preserve input order.
 - validation:
@@ -191,6 +194,12 @@ Interpretation:
   - Plan delta (what changed): Created a dedicated implementation scope for provider batching.
   - Tradeoffs considered: Keep batching provider-local rather than changing public traits or eval configs.
   - User approval: yes; user requested branches and committed plans for ready work scopes.
+
+- 2026-05-04 00:00 Decision:
+  - Trigger / new insight: OpenAI documents request-level token limits, but future-proof token handling across embedding provider/model configurations needs a broader abstraction than this provider-local batching fix.
+  - Plan delta (what changed): Token estimation and token-limit preflight guards are explicitly deferred; the implementation should rely on API errors for token-limit failures in this scope.
+  - Tradeoffs considered: Avoid adding OpenAI-specific token counting now, while still permitting splitting by documented input-array count limits if needed.
+  - User approval: yes; user requested this decision be recorded where it is not easily missed.
 
 ## Notes
 - Risks:
