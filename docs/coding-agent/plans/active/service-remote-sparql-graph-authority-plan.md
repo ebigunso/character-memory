@@ -1,6 +1,6 @@
 # Plan: Service Remote SPARQL Graph Authority
 
-- status: draft
+- status: implemented
 - generated: 2026-05-03
 - last_updated: 2026-05-03
 - work_type: code
@@ -47,7 +47,7 @@
   - Reconciliation diagnostics: `src/internal/repositories/reconciliation.rs`
 - Existing patterns or references:
   - Embedded Oxigraph uses `SparqlGraphSelectors` over an in-process `Store`.
-  - HTTP service mode currently snapshots all named graphs into an in-memory `Store`, then reuses embedded selector/hydration logic.
+  - HTTP service mode previously snapshotted all named graphs into an in-memory `Store`, then reused embedded selector/hydration logic.
   - The current bridge is correctness-preserving for small/local datasets but is not acceptable as the long-term service adapter for larger graph datasets.
   - LongMemEval live benchmark logs showed retrieval latency rising as shard graph state grew, which is consistent with paying whole-dataset snapshot cost on ordinary service-mode reads.
   - Live Oxigraph validation uses `docker-compose.oxigraph.test.yml` and `OXIGRAPH_TEST_CONNECTION_STRING=http://localhost:7879`.
@@ -62,9 +62,14 @@
 
 ## Open Questions (max 3)
 
-- Q1: Should service-mode remote query helpers live beside `OxigraphHttpGraphAuthorityStore`, or should selector abstractions be split into embedded and remote backends under `src/internal/infrastructures/graph/`?
-- Q2: Should service-mode diagnostics remain full-scan by category for this refactor, or should they be paginated/streamed to avoid large in-memory diagnostic result sets?
-- Q3: Should live Oxigraph smoke validation assert the absence of the whole-dataset snapshot query through test instrumentation, or is unit-level HTTP request-body verification sufficient?
+- None.
+
+## Resolved Decisions
+
+- Keep service-mode remote query helpers beside `OxigraphHttpGraphAuthorityStore` for this refactor instead of splitting a new selector abstraction.
+- Hydrate targeted named graphs selected by remote SPARQL for object refs, derived-memory IDs, link IDs, frontier refs, and diagnostic categories.
+- Keep diagnostics category-scoped for this scope; pagination/streaming can be revisited if diagnostic result sets become too large.
+- Use query-builder coverage and the no-snapshot grep gate as hard evidence that the unbounded whole-dataset query shape is gone; live smoke remains behavior/cleanup validation.
 
 ## Assumptions
 
@@ -278,6 +283,36 @@ Interpretation:
 - If targeted service reads cannot preserve bounded expansion/lifecycle parity cleanly, stop and replan around a shared query abstraction before changing public construction defaults.
 
 ## Progress Log (append-only)
+
+- 2026-05-04 00:00 Wave 1 completed: [Task_1]
+  - Summary: Resolved the service remote-query boundary: keep helpers beside `OxigraphHttpGraphAuthorityStore`, mirror embedded selector query semantics, hydrate targeted named graphs, and use query-builder/no-snapshot gates instead of adding a mock HTTP dependency.
+  - Validation evidence: Plan decisions updated and reviewed by Orchestrator before implementation.
+  - Notes: Diagnostics remain category-scoped in this scope.
+
+- 2026-05-04 00:00 Wave 2 completed: [Task_2]
+  - Summary: Replaced ordinary service-mode `snapshot_store()` reads with targeted remote SPARQL helpers for object refs, derived-memory provenance/thread IDs, link frontiers, named-graph hydration, bounded expansion, and diagnostics.
+  - Validation evidence: `cargo test --lib internal::infrastructures::graph::oxigraph_authority_store` passed; `cargo test --lib live_smoke_endpoint_guard_allows_only_local_test_service` passed; no-snapshot `rg` gate returned no matches.
+  - Notes: Embedded Oxigraph behavior was left unchanged.
+
+- 2026-05-04 00:00 Wave 3 completed: [Task_3]
+  - Summary: Preserved graph-authoritative retrieval, lifecycle/currentness/supersession filtering, bounded expansion, reconciliation diagnostics, and embedded graph coverage.
+  - Validation evidence: `cargo test --lib internal::infrastructures::graph` passed; `cargo test --lib internal::repositories::reconciliation` passed; `cargo test --lib internal::repositories::retrieve_pipeline` passed; `cargo test --lib` passed.
+  - Notes: HTTP selector query shapes intentionally mirror embedded selector semantics.
+
+- 2026-05-04 00:00 Wave 4 completed: [Task_4]
+  - Summary: Live Oxigraph test service validation passed against the dedicated test endpoint.
+  - Validation evidence: `docker compose -f docker-compose.oxigraph.test.yml up -d` confirmed `ghcr.io/oxigraph/oxigraph:0.5.8` on `http://localhost:7879`; `OXIGRAPH_TEST_CONNECTION_STRING=http://localhost:7879 cargo test --lib oxigraph_http_service_live_smoke_upserts_queries_and_filters -- --ignored` passed.
+  - Notes: The live smoke includes post-cleanup named-graph quad count verification.
+
+- 2026-05-04 00:00 Wave 5 completed: [Task_5]
+  - Summary: Updated graph schema/design and v0.1.1 roadmap docs to describe targeted service reads and close the snapshot-bridge debt note.
+  - Validation evidence: Documentation cross-check completed alongside implementation review.
+  - Notes: Future optimization should tune high-degree frontier query shape rather than reintroduce unbounded snapshots.
+
+- 2026-05-04 00:00 Wave 6 completed: [Task_6]
+  - Summary: Completed review loop. Reviewer reported no findings and approved the branch for PR.
+  - Validation evidence: `cargo fmt --check` passed; `cargo check` passed; `cargo test --no-run` passed; `cargo test --lib` passed; `cargo clippy --all-targets -- -D warnings` passed; no-snapshot `rg` gate returned no matches.
+  - Notes: Reviewer flagged high-degree bounded expansion and diagnostic list scale as future non-blocking optimization areas.
 
 - 2026-05-04 00:00 Planning branch created: `feature-2026-05-04-service-remote-sparql-graph-authority`.
   - Summary: Reused the existing active plan for the Oxigraph service read optimization scope and recorded the LongMemEval performance context.

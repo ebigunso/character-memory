@@ -23,6 +23,8 @@ Those questions are graph questions. The schema therefore prioritizes stable ide
 
 Oxigraph service mode is the default graph authority for application construction. It is configured with `OXIGRAPH_CONNECTION_STRING` as an HTTP endpoint, for example `http://localhost:7878`, and can be started with `docker compose -f docker-compose.oxigraph.yml up -d`.
 
+Service-mode reads use targeted remote SPARQL queries and hydrate only the named graphs needed for the current object query, provenance lookup, thread lookup, bounded expansion, or diagnostic category. They do not snapshot all named graphs into the application process for ordinary retrieval.
+
 Embedded filesystem persistence remains available by setting `GRAPH_STORE_MODE=persistent` and using `OXIGRAPH_CONNECTION_STRING` as a local path, for example `./data/oxigraph`. In-memory Oxigraph remains available for deterministic tests and explicit fixture runs by setting `GRAPH_STORE_MODE=in_memory`.
 
 The public domain model does not expose Oxigraph types. Domain objects are mapped into RDF at the infrastructure edge. This keeps the public API stable if the backing graph implementation changes later.

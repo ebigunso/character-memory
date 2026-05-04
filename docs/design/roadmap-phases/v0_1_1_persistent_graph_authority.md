@@ -153,6 +153,8 @@ Start the local service with:
 docker compose -f docker-compose.oxigraph.yml up -d
 ```
 
+Service-mode graph reads use targeted remote SPARQL and named-graph hydration rather than a whole-dataset application-side snapshot. Ordinary object queries, provenance/thread lookups, bounded expansion, and diagnostics should remain scoped to the refs, IDs, link frontiers, or categories being requested.
+
 `GRAPH_STORE_MODE=persistent` is the explicit embedded filesystem-backed mode, where `OXIGRAPH_CONNECTION_STRING` is a local path such as `./data/oxigraph`. `GRAPH_STORE_MODE=in_memory` is the explicit test/fixture override.
 
 ---
