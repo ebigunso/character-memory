@@ -1,6 +1,6 @@
 # Plan: OpenAI Embedding Batching
 
-- status: draft
+- status: in_progress
 - generated: 2026-05-04
 - last_updated: 2026-05-04
 - work_type: code
@@ -49,9 +49,15 @@
   - `docs/roadmap/development_roadmap.md`
 
 ## Open Questions (max 3)
-- Q1: Should batch size be a fixed internal constant for the first implementation, or become a configurable provider setting later?
-- Q2: Should HTTP response parsing preserve provider response order directly, or sort by response `index` before returning embeddings?
-- Q3: Should a failed item fail the whole batch, or should partial retry behavior be planned separately after the baseline batching fix?
+- None.
+
+## Resolved Decisions
+- Use one OpenAI embeddings request for the full bulk input when it is within documented input-array count constraints.
+- Split automatically only when the documented input-array count limit is exceeded.
+- Do not add token estimation or token-limit preflight guards in this scope.
+- Restore response order by returned embedding `index`.
+- Fail the whole batch on API, parse, token-limit, or rate-limit errors.
+- Defer adaptive retry/backoff.
 
 ## Assumptions
 - A1: The OpenAI embeddings endpoint accepts an array of input strings and returns one embedding per input.
@@ -181,6 +187,26 @@ Interpretation:
 - Keep the `EmbeddingProvider` trait unchanged so callers and test providers are insulated from rollback.
 
 ## Progress Log (append-only)
+
+- 2026-05-04 00:00 Wave 1 completed: [Task_1]
+  - Summary: Batch request semantics resolved and recorded in the decision log.
+  - Validation evidence: Orchestrator reviewed the plan decision log and resolved open questions.
+  - Notes: No public trait or model-default changes are in scope.
+
+- 2026-05-04 00:00 Wave 2 completed: [Task_2]
+  - Summary: Replaced the serial provider bulk loop with batched array requests, response parsing by index, documented input-count chunking, and provider-local validation.
+  - Validation evidence: `cargo test openai_embedding_provider --lib` passed; `cargo test internal::repositories::remember_pipeline --lib` passed.
+  - Notes: Token-limit preflight and adaptive retry/backoff remain deferred by decision.
+
+- 2026-05-04 00:00 Wave 3 completed: [Task_3]
+  - Summary: Added service-free provider tests for payload shape, blank input validation, index-ordered parsing, count mismatch, dimension mismatch, duplicate index, and nonnumeric values.
+  - Validation evidence: `cargo test openai_embedding_provider --lib` passed.
+  - Notes: Removed reliance on dummy-key live-network tests.
+
+- 2026-05-04 00:00 Review loop completed: [Task_4]
+  - Summary: First reviewer pass found missing request-count coverage for the actual bulk path; implementation added a private transport seam and bulk-method tests. Second reviewer pass reported no findings and approved the branch.
+  - Validation evidence: `cargo fmt --check` passed; `cargo check` passed; `cargo test --no-run` passed; `cargo test openai_embedding_provider --lib` passed; `cargo test internal::repositories::remember_pipeline --lib` passed; `cargo test internal::repositories::correction_forget_pipeline --lib` passed.
+  - Notes: Live OpenAI integration remains out of scope; token-limit preflight remains intentionally deferred.
 
 - 2026-05-04 00:00 Plan drafted on `feature-2026-05-04-openai-embedding-batching`.
   - Summary: Created execution plan for true OpenAI embedding batching.
