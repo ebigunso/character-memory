@@ -219,6 +219,8 @@ pub struct RetrievalRationale {
     pub stale_candidate_omission_reasons: Vec<StaleCandidateOmissionSummary>,
     pub lifecycle_omission_count: usize,
     pub lifecycle_omission_reasons: Vec<LifecycleOmissionSummary>,
+    #[serde(default)]
+    pub telemetry: RetrievalTelemetry,
 }
 
 impl RetrievalRationale {
@@ -231,6 +233,7 @@ impl RetrievalRationale {
             stale_candidate_omission_reasons: Vec::new(),
             lifecycle_omission_count: 0,
             lifecycle_omission_reasons: Vec::new(),
+            telemetry: RetrievalTelemetry::default(),
         }
     }
 }
@@ -239,6 +242,71 @@ impl Default for RetrievalRationale {
     fn default() -> Self {
         Self::new(String::new())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetrievalTelemetry {
+    pub configured_candidate_limits: RetrievalCandidateLimits,
+    pub configured_graph_limits: RetrievalGraphLimits,
+    pub configured_section_limits: ContinuitySectionLimits,
+    pub query_embedding_dimension: usize,
+    pub returned_vector_candidate_count: usize,
+    pub unique_graph_root_candidate_count: usize,
+    pub selected_graph_root_count: usize,
+    pub graph_root_omission_count: usize,
+    pub graph_expansion: GraphExpansionTelemetry,
+    pub section_pressure: Vec<SectionPressureSummary>,
+}
+
+impl Default for RetrievalTelemetry {
+    fn default() -> Self {
+        Self {
+            configured_candidate_limits: RetrievalCandidateLimits::default(),
+            configured_graph_limits: RetrievalGraphLimits::default(),
+            configured_section_limits: ContinuitySectionLimits::default(),
+            query_embedding_dimension: 0,
+            returned_vector_candidate_count: 0,
+            unique_graph_root_candidate_count: 0,
+            selected_graph_root_count: 0,
+            graph_root_omission_count: 0,
+            graph_expansion: GraphExpansionTelemetry::default(),
+            section_pressure: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphExpansionTelemetry {
+    pub attempted_root_count: usize,
+    pub expanded_root_count: usize,
+    pub missing_root_count: usize,
+    pub expanded_object_count: usize,
+    pub expanded_relation_count: usize,
+    pub filtered_node_count: usize,
+    pub bounded_failure_count: usize,
+    pub bounded_failure_reasons: Vec<GraphExpansionBoundedFailureSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphExpansionBoundedFailureSummary {
+    pub reason: GraphExpansionBoundedReason,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphExpansionBoundedReason {
+    NodeLimit,
+    Timeout,
+    HubLimit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SectionPressureSummary {
+    pub section: ContextPackSection,
+    pub limit: usize,
+    pub included_count: usize,
+    pub omitted_by_limit_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -257,6 +325,8 @@ pub struct LifecycleOmissionSummary {
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
     pub graph_relations: Vec<GraphRelationTrace>,
+    #[serde(default)]
+    pub graph_expansions: Vec<GraphExpansionTrace>,
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
     pub section_assignments: Vec<SectionAssignment>,
@@ -267,6 +337,7 @@ impl RetrievalTrace {
         Self {
             vector_candidates: Vec::new(),
             graph_relations: Vec::new(),
+            graph_expansions: Vec::new(),
             lifecycle_filter_decisions: Vec::new(),
             stale_candidate_omissions: Vec::new(),
             section_assignments: Vec::new(),
@@ -305,6 +376,30 @@ pub struct GraphRelationTrace {
     pub to: MemoryObjectRef,
     pub relation: RelationType,
     pub proximity: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphExpansionTrace {
+    pub root: MemoryObjectRef,
+    pub object_count: usize,
+    pub relation_count: usize,
+    pub filtered_node_count: usize,
+    pub bounded_failure: Option<GraphExpansionBoundedFailureTrace>,
+    pub outcome: GraphExpansionOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GraphExpansionBoundedFailureTrace {
+    pub reason: GraphExpansionBoundedReason,
+    pub at: Option<MemoryObjectRef>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphExpansionOutcome {
+    Expanded,
+    MissingRoot,
+    Bounded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -651,6 +746,17 @@ mod tests {
                 relation: RelationType::DerivedFrom,
                 proximity: 1,
             }],
+            graph_expansions: vec![GraphExpansionTrace {
+                root: candidate,
+                object_count: 2,
+                relation_count: 1,
+                filtered_node_count: 0,
+                bounded_failure: Some(GraphExpansionBoundedFailureTrace {
+                    reason: GraphExpansionBoundedReason::NodeLimit,
+                    at: Some(episode),
+                }),
+                outcome: GraphExpansionOutcome::Bounded,
+            }],
             lifecycle_filter_decisions: vec![LifecycleFilterDecision {
                 object: candidate,
                 retention_state: Some(RetentionState::Active),
@@ -681,6 +787,14 @@ mod tests {
             RelationType::DerivedFrom
         );
         assert_eq!(
+            decoded.graph_expansions[0]
+                .bounded_failure
+                .as_ref()
+                .unwrap()
+                .reason,
+            GraphExpansionBoundedReason::NodeLimit
+        );
+        assert_eq!(
             decoded.lifecycle_filter_decisions[0].reason,
             LifecycleFilterReason::Active
         );
@@ -691,6 +805,77 @@ mod tests {
         assert_eq!(
             decoded.section_assignments[0].section,
             ContextPackSection::Preferences
+        );
+    }
+
+    #[test]
+    fn retrieval_trace_deserializes_old_payload_without_graph_expansions() {
+        let encoded = r#"{
+            "vector_candidates": [],
+            "graph_relations": [],
+            "lifecycle_filter_decisions": [],
+            "stale_candidate_omissions": [],
+            "section_assignments": []
+        }"#;
+
+        let decoded: RetrievalTrace = serde_json::from_str(encoded).unwrap();
+
+        assert!(decoded.graph_expansions.is_empty());
+    }
+
+    #[test]
+    fn retrieval_telemetry_serializes_with_backend_agnostic_bounds() {
+        let telemetry = RetrievalTelemetry {
+            query_embedding_dimension: 3,
+            returned_vector_candidate_count: 4,
+            unique_graph_root_candidate_count: 3,
+            selected_graph_root_count: 2,
+            graph_root_omission_count: 1,
+            graph_expansion: GraphExpansionTelemetry {
+                attempted_root_count: 2,
+                bounded_failure_count: 1,
+                bounded_failure_reasons: vec![GraphExpansionBoundedFailureSummary {
+                    reason: GraphExpansionBoundedReason::HubLimit,
+                    count: 1,
+                }],
+                ..GraphExpansionTelemetry::default()
+            },
+            section_pressure: vec![SectionPressureSummary {
+                section: ContextPackSection::SalientObservations,
+                limit: 16,
+                included_count: 16,
+                omitted_by_limit_count: 2,
+            }],
+            ..RetrievalTelemetry::default()
+        };
+        let mut rationale = RetrievalRationale::new("telemetry example");
+        rationale.telemetry = telemetry.clone();
+
+        let encoded = serde_json::to_value(&rationale).unwrap();
+        let decoded: RetrievalRationale = serde_json::from_value(encoded.clone()).unwrap();
+
+        assert_eq!(decoded.telemetry, telemetry);
+        assert_eq!(
+            encoded["telemetry"]["graph_expansion"]["bounded_failure_reasons"][0]["reason"],
+            "hub_limit"
+        );
+    }
+
+    #[test]
+    fn retrieval_telemetry_default_preserves_retrieval_defaults() {
+        let telemetry = RetrievalTelemetry::default();
+
+        assert_eq!(
+            telemetry.configured_candidate_limits,
+            RetrievalCandidateLimits::default()
+        );
+        assert_eq!(
+            telemetry.configured_graph_limits,
+            RetrievalGraphLimits::default()
+        );
+        assert_eq!(
+            telemetry.configured_section_limits,
+            ContinuitySectionLimits::default()
         );
     }
 }

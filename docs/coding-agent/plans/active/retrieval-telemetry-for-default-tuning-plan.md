@@ -1,6 +1,6 @@
 # Plan: Retrieval Telemetry For Default Tuning
 
-- status: draft
+- status: implemented
 - generated: 2026-05-04
 - last_updated: 2026-05-04
 - work_type: code
@@ -51,9 +51,14 @@
   - `docs/roadmap/development_roadmap.md`
 
 ## Open Questions (max 3)
-- Q1: Should telemetry live directly on `RetrievalRationale`, or should `RetrievalRationale` contain an optional nested telemetry struct?
-- Q2: Should graph expansion telemetry report per-root details, aggregate summaries, or both when trace is enabled?
-- Q3: Should section-limit pressure distinguish final section overflow from lifecycle/currentness omissions that happened earlier?
+- None.
+
+## Resolved Decisions
+- Add a nested backend-agnostic telemetry struct under `RetrievalRationale`.
+- Expose aggregate telemetry without requiring `include_trace`.
+- Gate high-cardinality per-root expansion details behind `include_trace`.
+- Keep section-limit pressure distinct from lifecycle/currentness/provenance omissions.
+- Do not change retrieval defaults, eval configs, or vector-only behavior in this scope.
 
 ## Assumptions
 - A1: Telemetry is part of explainability/debuggability and should remain backend-agnostic.
@@ -209,6 +214,31 @@ Interpretation:
 - Keep existing retrieval defaults and behavior unchanged so rollback does not affect retrieval semantics.
 
 ## Progress Log (append-only)
+
+- 2026-05-04 00:00 Wave 1 completed: [Task_1]
+  - Summary: Telemetry DTO boundary resolved and open questions moved into resolved decisions.
+  - Validation evidence: Orchestrator reviewed the decision log and default-preservation boundary.
+  - Notes: Budget sweep execution remains deferred.
+
+- 2026-05-04 00:00 Wave 2 completed: [Task_2]
+  - Summary: Added backend-agnostic retrieval telemetry DTOs, graph expansion telemetry DTOs, section-pressure summaries, and trace-gated graph expansion trace DTOs.
+  - Validation evidence: `cargo test --lib api::types::retrieval` passed.
+  - Notes: New DTOs are additive and re-exported with existing public retrieval types.
+
+- 2026-05-04 00:00 Wave 3 completed: [Task_3]
+  - Summary: Populated telemetry in the retrieve pipeline for configured limits, vector candidates, graph root selection, graph expansion summaries, bounded failures, and section pressure.
+  - Validation evidence: `cargo test internal::repositories::retrieve_pipeline --lib` passed.
+  - Notes: Ranking, filtering, defaults, and eval configs were not changed.
+
+- 2026-05-04 00:00 Wave 4 completed: [Task_4]
+  - Summary: Added regression coverage for DTO serialization/defaults, graph root truncation, bounded failures, section-limit pressure, and trace-gated graph expansion detail.
+  - Validation evidence: `cargo test --lib api::types::retrieval` passed; `cargo test internal::repositories::retrieve_pipeline --lib` passed.
+  - Notes: Tests assert default candidate limits remain unchanged.
+
+- 2026-05-04 00:00 Wave 5 completed: [Task_5]
+  - Summary: Completed reviewer loop. First review found missing serde default compatibility for old trace payloads; fixed with `#[serde(default)]` and a regression test. Second review reported no findings.
+  - Validation evidence: `cargo test --lib api::types::retrieval` passed; `cargo test internal::repositories::retrieve_pipeline --lib` passed; `cargo fmt --check` passed; `cargo check` passed; `cargo test --no-run` passed.
+  - Notes: Reviewer noted a non-blocking future API policy question for public struct literal compatibility.
 
 - 2026-05-04 00:00 Plan drafted on `feature-2026-05-04-retrieval-telemetry-for-default-tuning`.
   - Summary: Created execution plan for retrieval telemetry needed before future default-budget tuning.

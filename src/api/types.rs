@@ -25,9 +25,13 @@ pub use lifecycle::{
 };
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,
-    ContinuitySectionLimits, GraphRelationTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
-    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
-    RetrievalRationale, RetrievalTrace, RetrieveOutcome, SectionAssignment, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    ContinuitySectionLimits, GraphExpansionBoundedFailureSummary,
+    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
+    GraphExpansionTelemetry, GraphExpansionTrace, GraphRelationTrace, IncludedDerivedMemory,
+    LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
+    LifecycleOmissionSummary, MemoryObjectRef, RetrievalCandidateLimits, RetrievalContext,
+    RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
+    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    VectorCandidateTrace,
 };
