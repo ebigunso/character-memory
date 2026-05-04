@@ -244,7 +244,7 @@ impl Default for RetrievalRationale {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalTelemetry {
     pub configured_candidate_limits: RetrievalCandidateLimits,
     pub configured_graph_limits: RetrievalGraphLimits,
@@ -256,23 +256,6 @@ pub struct RetrievalTelemetry {
     pub graph_root_omission_count: usize,
     pub graph_expansion: GraphExpansionTelemetry,
     pub section_pressure: Vec<SectionPressureSummary>,
-}
-
-impl Default for RetrievalTelemetry {
-    fn default() -> Self {
-        Self {
-            configured_candidate_limits: RetrievalCandidateLimits::default(),
-            configured_graph_limits: RetrievalGraphLimits::default(),
-            configured_section_limits: ContinuitySectionLimits::default(),
-            query_embedding_dimension: 0,
-            returned_vector_candidate_count: 0,
-            unique_graph_root_candidate_count: 0,
-            selected_graph_root_count: 0,
-            graph_root_omission_count: 0,
-            graph_expansion: GraphExpansionTelemetry::default(),
-            section_pressure: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
