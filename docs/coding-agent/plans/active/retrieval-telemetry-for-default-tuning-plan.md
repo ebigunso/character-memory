@@ -223,6 +223,12 @@ Interpretation:
   - Tradeoffs considered: Add measurement support without reducing eval context, changing defaults, or weakening graph-authoritative retrieval.
   - User approval: yes; user requested branches and committed plans for ready work scopes while waiting on the budget sweep.
 
+- 2026-05-04 00:00 Decision:
+  - Trigger / new insight: Remaining retrieval telemetry open questions were resolved before implementation.
+  - Plan delta (what changed): Add a nested backend-agnostic telemetry struct under `RetrievalRationale`; expose aggregate telemetry without requiring `include_trace`; gate high-cardinality per-root details behind `include_trace`; keep section-limit pressure distinct from lifecycle/currentness/provenance omissions.
+  - Tradeoffs considered: Keep ordinary rationale readable while preserving enough aggregate data for future default tuning and enough trace detail for debugging.
+  - User approval: yes; user accepted these recommendations.
+
 ## Notes
 - Risks:
   - Public telemetry can become noisy if per-root details are not bounded.
