@@ -66,7 +66,7 @@
   - `docs/coding-agent/rules/orchestrator.md`
   - `docs/coding-agent/lessons.md`
   - `docs/roadmap/development_roadmap.md`
-  - `docs/design/project_philosophy.md`
+  - `docs/project_philosophy.md`
   - `docs/design/roadmap-phases/v0_1_1_persistent_graph_authority.md`
   - `docs/design/database/graph_schema_design.md`
   - `docs/design/database/vector_payload_design.md`
