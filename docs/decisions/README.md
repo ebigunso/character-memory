@@ -1,6 +1,6 @@
 # Character Memory Decisions
 
-This directory contains decided Architecture Decision Records for Character Memory.
+This directory contains decision records (ADRs) for Character Memory.
 
 The decision records are split into two tracks so high-level philosophy/design decisions do not get mixed with lower-level implementation choices.
 

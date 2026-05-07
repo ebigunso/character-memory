@@ -1,6 +1,6 @@
 ---
 status: accepted
-adr_type: {design | implementation}
+adr_type: "design" # allowed values: design, implementation
 date: YYYY-MM-DD
 deciders: []
 consulted: []
