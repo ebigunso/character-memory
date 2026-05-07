@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: {design | implementation}
 date: YYYY-MM-DD
 deciders: []

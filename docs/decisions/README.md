@@ -1,13 +1,13 @@
-# Character Memory ADRs
+# Character Memory Decisions
 
-This directory contains Architecture Decision Records for Character Memory.
+This directory contains decided Architecture Decision Records for Character Memory.
 
-The ADRs are split into two tracks so high-level philosophy/design decisions do not get mixed with lower-level implementation choices.
+The decision records are split into two tracks so high-level philosophy/design decisions do not get mixed with lower-level implementation choices.
 
 ## Directory layout
 
 ```text
-docs/adrs/
+docs/decisions/
   template.md
   design/
     ADR-D-0001-...
@@ -33,18 +33,17 @@ An implementation ADR should be used when the decision is primarily about how th
 Recommended statuses:
 
 ```text
-proposed
 accepted
 rejected
 superseded
 deprecated
 ```
 
-Use `proposed` while the design is still being implemented. Move to `accepted` after the corresponding behavior exists and has tests.
+Records in this repository are expected to capture decisions, not undecided proposals. Use `accepted` when the decision is current, `rejected` when a considered decision is not adopted, `superseded` when a later decision replaces it, and `deprecated` when the decision remains historical but should no longer guide new work.
 
-## Current ADR set
+## Current Decision Set
 
-### Design ADRs
+### Design Decisions
 
 - [ADR-D-0001: Use an episode-backed object model](design/ADR-D-0001-episode-backed-object-model.md)
 - [ADR-D-0002: Require provenance for behavior-influencing derived memories](design/ADR-D-0002-derived-memory-provenance.md)
@@ -55,7 +54,7 @@ Use `proposed` while the design is still being implemented. Move to `accepted` a
 - [ADR-D-0007: Start chat-native and transcript-compatible, not multimodal-native](design/ADR-D-0007-chat-native-transcript-compatible-start.md)
 - [ADR-D-0008: Preserve source references because summaries are not source material](design/ADR-D-0008-preserve-source-references.md)
 
-### Implementation ADRs
+### Implementation Decisions
 
 - [ADR-I-0001: Use stable cross-store IDs and deterministic graph IRIs](implementation/ADR-I-0001-stable-cross-store-ids.md)
 - [ADR-I-0002: Embed natural-language semantic surfaces, not structured metadata templates](implementation/ADR-I-0002-natural-language-embedding-surfaces.md)

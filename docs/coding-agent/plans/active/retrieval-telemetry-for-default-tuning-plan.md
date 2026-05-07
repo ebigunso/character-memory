@@ -34,7 +34,7 @@
   - `src/internal/repositories/retrieve_pipeline.rs`
   - `src/internal/repositories/graph_authority_store.rs`
   - `docs/decisions/implementation/ADR-I-0006-bounded-graph-expansion.md`
-  - `docs/design/project_philosophy.md`
+  - `docs/project_philosophy.md`
   - `docs/roadmap/development_roadmap.md`
 - Existing patterns or references:
   - `RetrievalContext` already carries candidate, graph, section, lifecycle, trace, and object-type policy.
@@ -47,7 +47,7 @@
   - `docs/coding-agent/rules/orchestrator.md`
   - `docs/coding-agent/lessons.md`
   - `docs/decisions/implementation/ADR-I-0006-bounded-graph-expansion.md`
-  - `docs/design/project_philosophy.md`
+  - `docs/project_philosophy.md`
   - `docs/roadmap/development_roadmap.md`
 
 ## Open Questions (max 3)
