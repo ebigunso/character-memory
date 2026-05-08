@@ -21,11 +21,9 @@ Those questions are graph questions. The schema therefore prioritizes stable ide
 
 ## Backend Boundary
 
-Oxigraph service mode is the default graph authority for application construction. It is configured with `OXIGRAPH_CONNECTION_STRING` as an HTTP endpoint, for example `http://localhost:7878`, and can be started with `docker compose -f docker-compose.oxigraph.yml up -d`.
+Oxigraph is the graph authority regardless of backing adapter. This schema document describes authority and hydration boundaries only; operational setup belongs outside the schema reference.
 
-Service-mode reads use targeted remote SPARQL queries and hydrate only the named graphs needed for the current object query, provenance lookup, thread lookup, bounded expansion, or diagnostic category. They do not snapshot all named graphs into the application process for ordinary retrieval.
-
-Embedded filesystem persistence remains available by setting `GRAPH_STORE_MODE=persistent` and using `OXIGRAPH_CONNECTION_STRING` as a local path, for example `./data/oxigraph`. In-memory Oxigraph remains available for deterministic tests and explicit fixture runs by setting `GRAPH_STORE_MODE=in_memory`.
+Graph reads should hydrate only the named graphs needed for the current object query, provenance lookup, thread lookup, bounded expansion, or diagnostic category. They should not snapshot all named graphs into the application process for ordinary retrieval.
 
 The public domain model does not expose Oxigraph types. Domain objects are mapped into RDF at the infrastructure edge. This keeps the public API stable if the backing graph implementation changes later.
 
@@ -167,7 +165,7 @@ lastTouchedAt
 summary
 ```
 
-Entities and threads are continuity anchors. They help memories cluster around people, projects, topics, open loops, and recurring concerns.
+Entities and threads are continuity anchors. They help memories cluster around people, characters, projects, places, objects, topics, open loops, and recurring concerns.
 
 ### Derived Memory Properties
 
@@ -214,10 +212,43 @@ find derived memories by source episode or observation
 find derived memories by thread
 exclude suppressed, archived, deleted, non-current, or superseded objects
 trace why a relationship was included
-bound traversal by depth, fanout, object type, relation type, and lifecycle
+bound traversal by depth, fanout, object type, relation type, lifecycle, and selectivity policy
 ```
 
-The graph is not optimized for unconstrained exploration. Character Memory retrieval should be bounded because user and assistant entities can become hubs. The schema supports expansion, but the retrieval layer controls fanout and limits.
+The graph is not optimized for unconstrained exploration. Character Memory retrieval should be bounded because any recurring entity can become high-degree or low-selectivity over time. This could be a person, character, place, project, topic, object, organization, faction, scene, or application-specific concept.
+
+The schema supports expansion, but the retrieval layer controls fanout and limits. A derived retrieval stats store lets normal retrieval use persisted selectivity counters instead of scanning the whole graph to classify entity broadness.
+
+## Retrieval Stats Boundary
+
+Selectivity and fanout policy may use a derived retrieval stats store. These stats are maintained from graph writes and lifecycle/currentness changes, but they are not graph truth.
+
+Normal retrieval should not scan the whole graph to classify entity selectivity. It should read persisted counters for only the entities involved in the current retrieval context or candidate set, then perform bounded graph expansion through Oxigraph.
+
+The stats store may track:
+
+```text
+entity/relation/object counters
+global relation/object counters
+active/current counts
+selectivity inputs
+fanout diagnostics
+low-information co-occurrence rejections
+```
+
+The stats store must not decide:
+
+```text
+whether a graph relationship exists
+whether a memory is current
+whether a memory is suppressed
+whether provenance exists
+whether final context inclusion is allowed
+```
+
+Those remain Oxigraph authority decisions.
+
+Revisit if Oxigraph gains efficient aggregate/materialized-view support that makes a separate stats store unnecessary.
 
 ## Durable Hydration
 
@@ -227,16 +258,18 @@ The hydration boundary keeps these rules explicit:
 
 - RDF named graphs are the durable source for graph-authoritative object and link fields
 - Qdrant payloads can help find candidates, but cannot fill missing graph truth
+- Retrieval stats can guide expansion, but cannot fill missing graph truth
 - multi-value RDF fields are normalized deterministically when hydrated
 
 This means a reopened graph store can answer object queries, link queries, provenance lookup, lifecycle filtering, supersession checks, and bounded expansion without process-local sidecar state.
 
 ## Cross-Store Contract
 
-Qdrant and Oxigraph share stable IDs and graph URIs, but they do not share authority.
+Qdrant, Oxigraph, and the retrieval stats store share stable object IDs, but they do not share authority.
 
 ```text
 Qdrant   recalls candidates and applies coarse payload filters
+Stats    supplies derived selectivity/fanout inputs
 Oxigraph verifies existence, relationships, provenance, lifecycle, and context
 ```
 
@@ -250,14 +283,17 @@ Internal reconciliation diagnostics can report cross-store drift:
 - vector lifecycle/currentness hints disagree with graph authority
 - vector payload schema version is unsupported
 - graph object is missing required provenance
+- stats counter refers to graph edge/object state that no longer exists
+- stats health indicates conservative fallback should be used
 
-The initial boundary is report-only. Diagnostics do not change normal retrieval behavior and are not exposed through the public facade.
+The initial boundary is report-only. Diagnostics do not change normal retrieval behavior and are not exposed through the public facade by default.
 
 ## Future Revisit Points
 
 Revisit this design when:
 
 - public/admin reconciliation operations need a stable facade
+- stats diagnostics reveal that the selectivity model needs more dimensions
 - belief/claim tracking adds richer factual rigor semantics
 - some relation types become important enough to deserve specialized objects
 - graph migrations need compatibility across stored schema versions

@@ -9,9 +9,18 @@ This is the compact schema reference. The companion design notes explain why the
 
 | Store | Role | Authoritative For | Not Authoritative For |
 |---|---|---|---|
-| Qdrant | Vector candidate recall and coarse payload filtering | Vector points, embedding surfaces, payload hints | Memory existence, relationships, provenance, lifecycle, currentness |
-| Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking |
+| Qdrant | Vector candidate recall and coarse payload filtering | Vector points, embedding surfaces, payload hints | Memory existence, relationships, provenance, lifecycle, currentness, entity selectivity |
+| Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking, derived selectivity counters |
+| RetrievalStatsStore | Derived retrieval-policy statistics | Entity/relation counters, global counters, selectivity inputs, fanout diagnostics | Memory existence, relationships, provenance, lifecycle, currentness, semantic ranking |
 | Raw store / caller storage | Source material | Raw transcript or source content behind `raw_ref` | Canonical memory state |
+
+Rule of thumb:
+
+```text
+Qdrant suggests.
+Stats guide fanout.
+Oxigraph decides.
+```
 
 ## Cross-Store Join Keys
 
@@ -31,6 +40,8 @@ urn:cmem:thread:<uuid>
 urn:cmem:derived-memory:<uuid>
 urn:cmem:link:<uuid>
 ```
+
+Retrieval stats store keys refer to the same `object_id` / entity ID values, but stats are derived and rebuildable.
 
 ## Qdrant Payload Fields
 
@@ -71,6 +82,8 @@ Relationship fields in Qdrant are filter hints only. Oxigraph remains authoritat
 | `participant_entity_ids` | keyword array | Episode participant ids |
 | `speaker_entity_id` | keyword UUID string | Observation speaker id |
 | `supersedes` | keyword array | Supersession hint |
+
+Do not compute entity selectivity from Qdrant relationship hints. Qdrant may identify candidate entities from vector hits, but selectivity counts must come from graph-authoritative writes or graph-derived stats.
 
 ### Lifecycle, Ranking, And Time Hints
 
@@ -184,14 +197,48 @@ derived_memory
 | `urn:cmem:vocab:createdAt` | Link creation timestamp |
 | `urn:cmem:relation:<relation_name>` | Direct traversal predicate emitted for typed links |
 
+## Retrieval Stats Store
+
+The retrieval stats store is an internal derived index used for selectivity scoring and fanout policy. It is not a memory store of record. It can be rebuilt from graph authority and must not override Oxigraph lifecycle/currentness/provenance decisions.
+
+Core stats tables:
+
+```text
+entity_edge_index
+entity_relation_counts
+global_relation_counts
+stats_meta, optional
+```
+
+The stats store answers retrieval-policy questions such as:
+
+```text
+How selective is entity E under relation R for object type O?
+What fanout budget should this relation expansion receive?
+Which broad entity expansions were rejected as low-information?
+```
+
+It does not answer:
+
+```text
+Does this memory exist?
+Is this memory current?
+Is this relationship true?
+Is this memory suppressed?
+Should this memory enter final context?
+```
+
+Those remain graph-authoritative Oxigraph questions.
+
 ## Retrieval Rule Of Thumb
 
 ```text
 Qdrant narrows candidates.
+Stats guide bounded expansion.
 Oxigraph verifies graph truth.
 The final context pack follows Oxigraph state.
 ```
 
 ## Reconciliation Diagnostics
 
-Internal diagnostics can report vector-only records, graph-only records, graph URI mismatch, stale lifecycle/currentness hints, unsupported vector schema versions, and graph records with missing required provenance. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API.
+Internal diagnostics can report vector-only records, graph-only records, graph URI mismatch, stale lifecycle/currentness hints, unsupported vector schema versions, graph records with missing required provenance, stats records missing graph authority, stats health failures, and low-selectivity expansions rejected by policy. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API by default.
