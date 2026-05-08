@@ -3,10 +3,10 @@
 ## One-line thesis
 
 ```text
-Character Memory is an episode-backed continuity substrate for persistent AI assistants.
+Character Memory is an episode-backed continuity substrate for persistent AI characters, assistants, companions, simulations, and research systems.
 ```
 
-The roadmap should build the system in layers. The starter must be useful for chat-native memory without pretending to support every future modality or every epistemic feature.
+The roadmap should build the system in layers. The starter must be useful for chat-native memory without pretending to support every future modality or every epistemic feature. Later phases should add continuity, factual rigor, observability, association, and multimodal expansion without breaking the episode-backed core.
 
 ---
 
@@ -18,14 +18,16 @@ Therefore the system should optimize for:
 
 ```text
 temporal continuity
-relationship continuity
+entity continuity
+relationship and scope continuity
 project/thread continuity
 correction and revision
 retrieval rationale
 provenance from derived memory back to episodes
+bounded retrieval that remains useful over long timescales
 ```
 
-The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether the assistant can behave as the same continuing participant over time.
+The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether a persistent character can behave as the same continuing participant over time while remaining correctable, inspectable, and scoped to grounded memory.
 
 ---
 
@@ -72,7 +74,7 @@ Current views may include:
 
 ```text
 active threads
-current preferences
+current scoped preferences
 active commitments
 active open loops
 current character signals
@@ -97,13 +99,71 @@ The system should expose why a memory was retrieved:
 ```text
 semantic similarity
 same thread
-same entity
+same entity with high selectivity
+same entity with low selectivity but additional support
 recent event
 open commitment
 preference relevance
 correction relevance
 high salience
+explicit retrieval scope
 ```
+
+## 2.7 Entity-neutral retrieval policy
+
+The core library must not hard-code special retrieval behavior for user, assistant, player, protagonist, NPC, or any application-specific entity role.
+
+Entity-based retrieval policy should depend on:
+
+```text
+observed graph structure
+relation type
+object type
+lifecycle/currentness
+time
+salience
+retrieval scope
+supporting evidence
+```
+
+The core library may expose hooks for applications to provide scope, actor identity, or domain-specific policy, but the base schema and retrieval policy should remain use-case agnostic.
+
+## 2.8 Derived stats are not graph truth
+
+Retrieval statistics may guide fanout policy, but they are not authoritative for:
+
+```text
+memory existence
+relationships
+provenance
+lifecycle
+currentness
+final context inclusion
+```
+
+The authority split remains:
+
+```text
+Qdrant   suggests vector candidates.
+Stats    guide fanout policy.
+Oxigraph decides graph truth and final inclusion.
+```
+
+Stats must remain rebuildable from graph authority.
+
+## 2.9 Recurring entities are anchors, not traversal invitations
+
+Entities are central to continuity, but a recurring entity with many incident memories should not trigger unbounded expansion.
+
+The broader an entity's graph footprint becomes under a relation, the more retrieval should require additional narrowing evidence.
+
+High degree affects expansion policy. It does not mean the entity is unimportant.
+
+## 2.10 Low-information co-occurrence is not enough for durable links
+
+Durable pairwise memory links should not be created solely because two memories share a low-selectivity entity or broad relation.
+
+Durable association requires stronger evidence, rationale, or explicit application intent.
 
 ---
 
@@ -111,13 +171,17 @@ high salience
 
 | Version | Theme | Outcome |
 |---|---|---|
-| v0.1 | Starter episodic memory | Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
-| v0.1 backend | Storage contracts | Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, and tests. |
-| v0.1.1 | Persistent graph authority | Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation before adding richer continuity/reflection features. |
-| v0.2 | Continuity and reflection | Relationship state, character signals, open-loop/commitment lifecycle, scheduled reflection, current continuity views. |
-| v0.3 | Factual rigor | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, current-belief view. |
-| v0.4 | Advanced recall and governance | Associations, episode clusters, retention governance, retrieval traces, validation, context subgraph construction. |
+| v0.1 | Starter episodic memory | Finished. Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
+| v0.1 backend | Storage contracts | Finished. Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, bounded expansion support, and tests. |
+| v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
+| v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
+| v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
+| v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
+| v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, and retention assessment. |
+| v0.5 | Advanced associative recall and clustering | Associations, episode clusters, cluster summaries, and selectivity-aware association admission. |
 | v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
+
+Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
 
 ---
 
@@ -149,47 +213,49 @@ src/
   api/
     mod.rs
     embedding.rs
-    types/
-      domain.rs
-      draft.rs
-      lifecycle.rs
-      retrieval.rs
+  types/
+    domain.rs
+    draft.rs
+    lifecycle.rs
+    retrieval.rs
   internal/
     models/
-      vector/
-        mod.rs
-        candidate_record.rs
-        embedding_model.rs
-        embedding_surface.rs
-        record.rs
+    vector/
+      mod.rs
+      candidate_record.rs
+      embedding_model.rs
+      embedding_surface.rs
+      record.rs
     repositories/
       graph_authority_store.rs
-      remember_pipeline.rs
-      link_pipeline.rs
-      retrieve_pipeline.rs
-      correction_forget_pipeline.rs
       vector_candidate_store.rs
-      embedder.rs
-      raw_reference_resolver.rs
+      retrieval_stats_store.rs
+    remember_pipeline.rs
+    link_pipeline.rs
+    retrieve_pipeline.rs
+    correction_forget_pipeline.rs
+    embedder.rs
+    raw_reference_resolver.rs
+    mod.rs
+  infrastructures/
+    external_services/
       mod.rs
-    infrastructures/
-      external_services/
-        mod.rs
-        qdrant_payload.rs
-        qdrant_vector_candidate_store.rs
-        openai_embedding_provider.rs
-      graph/
-        mod.rs
-        rdf_mapping.rs
-        vocabulary.rs
-        oxigraph_authority_store.rs
+    qdrant_payload.rs
+    qdrant_vector_candidate_store.rs
+    openai_embedding_provider.rs
+    graph/
       mod.rs
-  repositories.rs
-  models.rs
+      rdf_mapping.rs
+      vocabulary.rs
+      oxigraph_authority_store.rs
+    stats/
+      mod.rs
+      sqlite_retrieval_stats_store.rs
+      in_memory_retrieval_stats_store.rs
   config/
     settings.rs
-    settings/
-      app_settings.rs
+  settings/
+    app_settings.rs
   errors.rs
 tests/
 ```
@@ -284,7 +350,7 @@ retrieval behavior is deterministic under fixed fixtures
 
 # 7. v0.1.1: persistent graph authority
 
-Detailed draft: [`v0_1_1_persistent_graph_authority`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
+Detailed draft: [`v0_1_1_persistent_graph_authority.md`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
 
 ## Intent
 
@@ -304,7 +370,9 @@ prevent vector-only candidates from becoming behavior-influencing memory
 document persistence configuration and operational expectations
 ```
 
-Oxigraph service mode is the application default. Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
+Oxigraph service mode is the application default.
+
+Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
 
 ## Non-goals
 
@@ -347,18 +415,124 @@ Existing v0.1 public APIs continue to work.
 
 ---
 
-# 8. v0.2: continuity and reflection
+# 8. v0.1.2: continuous entity selectivity and retrieval guardrails
 
-Detailed draft: [`v0_2_continuity_reflection.md`](../design/roadmap-phases/v0_2_continuity_reflection.md)
+Detailed draft: [`v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md`](../design/roadmap-phases/v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md)
+
+## Intent
+
+Harden retrieval against high-degree recurring entities without baking in assumptions about which entities matter in a particular application.
+
+Any entity may become broad over time:
+
+```text
+person
+character
+place
+project
+topic
+organization
+object
+faction
+scene
+conversation partner
+domain-specific concept
+```
+
+The retrieval layer should adapt to the graph's accumulated structure instead of relying on hard-coded entity roles.
+
+## Key design principle
+
+```text
+All entities start equal.
+Retrieval adapts to observed graph structure.
+High degree affects expansion policy, not entity importance.
+```
+
+A high-degree entity may still be central and highly relevant. It should not be globally penalized as unimportant. Instead, low selectivity should mean:
+
+```text
+Do not expand broadly from this entity unless additional retrieval evidence supports it.
+```
+
+Supporting evidence may include:
+
+```text
+semantic similarity
+thread membership
+temporal relevance
+salience
+currentness
+correction/supersession relevance
+explicit retrieval scope
+application-provided scope
+```
+
+## Goals
+
+```text
+treat all entities equally at schema level
+persist lightweight retrieval statistics across app restarts
+compute continuous relation-specific selectivity scores from counters
+use selectivity scores to control graph expansion fanout
+prevent durable pairwise links from weak low-information co-occurrence
+preserve Oxigraph graph authority for final inclusion
+keep Qdrant relationship/lifecycle fields as hints only
+add diagnostics showing selectivity inputs and fanout decisions
+add tests proving no entity identity is special-cased
+```
+
+## Non-goals
+
+```text
+hard-coded user/assistant/protagonist/player/NPC behavior
+persisted selectivity categories
+NoSQL service
+mandatory Postgres service
+graph centrality algorithms
+PageRank-like memory importance
+learned retrieval policy
+full retrieval trace object
+admin dashboard
+episode clustering
+advanced association graph
+automatic retention optimization
+migration/backfill for existing production data
+```
+
+## Acceptance criteria
+
+```text
+Stats survive app restart.
+Normal retrieval does not scan the whole graph to classify entity selectivity.
+Selectivity is computed continuously from counters.
+Selectivity labels are diagnostic only.
+Fanout budgets are smooth functions of selectivity, relation kind, object type, and supporting evidence.
+No retrieval rule depends on entity name, canonical key, or application role.
+High-degree entities require additional narrowing evidence for broad expansion.
+High-degree entities can still contribute when supported by semantic, temporal, thread, salience, currentness, correction, or explicit scope evidence.
+Durable pairwise links are not created solely from shared low-selectivity entity co-occurrence.
+Qdrant relationship hints remain non-authoritative.
+Oxigraph remains authoritative for graph truth, lifecycle, currentness, provenance, and expansion context.
+Missing or unhealthy stats produce conservative fanout.
+Synthetic high-degree fixtures cover people, places, projects, topics, objects, and arbitrary custom entities.
+```
+
+---
+
+# 9. v0.2: scoped continuity and reflection
+
+Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
 ## New concepts
 
 ```text
+ContinuityScope
+ReflectionJob
 RelationshipState
 CharacterSignal
 OpenLoop
 Commitment
-ReflectionJob
 CurrentContinuityView
 ```
 
@@ -366,16 +540,28 @@ CurrentContinuityView
 
 ```text
 make memory shape future behavior more explicitly
-track active commitments and unresolved threads
-derive relationship/project-specific character signals
+track active commitments and unresolved scoped matters
+derive relationship/project/entity-specific character signals
 separate current continuity context from raw historical memories
+avoid assuming continuity is centered on one user-assistant relationship
+```
+
+## Acceptance criteria additions
+
+```text
+Reflection jobs require explicit or inferred ContinuityScope.
+CurrentContinuityView is generated for a scope.
+RelationshipState can describe arbitrary entity relationships.
+CharacterSignal can attach to any continuing entity or scope.
+Reflection avoids all-history scans through broad entities.
+Open loops and commitments can be retrieved by scope without assuming who the main actor is.
 ```
 
 ---
 
-# 9. v0.3: factual rigor and belief tracking
+# 10. v0.3: factual rigor, temporal validity, and entity evolution
 
-Detailed draft: [`v0_3_factual_rigor_belief_tracking.md`](../design/roadmap-phases/v0_3_factual_rigor_belief_tracking.md)
+Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
 ## New concepts
 
@@ -386,6 +572,7 @@ EvidenceLink
 BeliefAssessment
 SourceAssessment
 TemporalValidity
+EntityStateHistory
 CurrentBeliefView
 ```
 
@@ -395,6 +582,7 @@ CurrentBeliefView
 distinguish source reports from truth
 support contradictions and updates
 track temporal validity and volatility
+represent entity drift over time
 show why factual beliefs are accepted or rejected
 ```
 
@@ -402,34 +590,60 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 10. v0.4: advanced recall and governance
+# 11. v0.4: retrieval observability and governance
 
-Detailed draft: [`v0_4_advanced_recall_governance.md`](../design/roadmap-phases/v0_4_advanced_recall_governance.md)
+Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
+
+## New concepts
+
+```text
+RetrievalTrace
+ContextSubgraph
+ValidationRules
+GraphHealthReport
+RetentionAssessment
+PolicyDiagnostics
+```
+
+## Goals
+
+```text
+make retrieval decisions inspectable
+show bounded expansion paths
+validate graph/retrieval invariants
+detect high-fanout relation patterns
+evaluate retention/downranking candidates
+report policy behavior over time
+```
+
+---
+
+# 12. v0.5: advanced associative recall and clustering
+
+Detailed draft: [`v0_5_advanced_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_advanced_associative_recall_clustering.md)
 
 ## New concepts
 
 ```text
 Association
 EpisodeCluster
-RetentionAssessment
-RetrievalTrace
-ContextSubgraph
-ValidationRules
+ClusterSummary
+AssociationAdmissionPolicy
 ```
 
 ## Goals
 
 ```text
 improve associative recall
-support retention/downranking/deletion policies
-explain retrieval decisions
-bound graph expansion
-validate invariants
+compress repeated patterns across many episodes
+support cluster-level retrieval
+avoid pairwise clique growth
+preserve provenance from summaries/clusters to source memories
 ```
 
 ---
 
-# 11. v1.0+: multimodal and embodied expansion
+# 13. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -457,13 +671,12 @@ This is a future path, not starter scope.
 
 ---
 
-# 12. Public API evolution
+# 14. Public API evolution
 
 ## v0.1 API
 
 ```rust
 let memory = CharacterMemory::new(settings, collection_name).await?;
-
 let stored = memory.remember(remember_draft).await?;
 let context = memory.retrieve(retrieval_context).await?;
 let correction = memory.correct(correct_memory_draft).await?;
@@ -471,22 +684,50 @@ let forget = memory.forget(forget_memory_draft).await?;
 let link = memory.link(memory_link_draft).await?;
 ```
 
+## v0.1.2 configuration / internal additions
+
+v0.1.2 should not require a new public memory facade. It adds retrieval hardening through configuration and internal stores.
+
+Conceptual configuration:
+
+```toml
+[retrieval.stats]
+store = "sqlite"
+path = "./data/character-memory/retrieval_stats.sqlite"
+health_fail_mode = "conservative"
+
+[retrieval.selectivity]
+smoothing_alpha = 1.0
+gamma = 1.0
+
+[retrieval.fanout.about_entity.derived_memory]
+min = 0
+max = 20
+
+[retrieval.fanout.participant_entity.episode]
+min = 0
+max = 5
+
+[retrieval.fanout.part_of_thread.derived_memory]
+min = 0
+max = 15
+```
+
 ## v0.2 API additions
 
 ```rust
-let reflection_scope: Option<ReflectionScope> = None;
+let reflection_scope: Option<ContinuityScope> = None;
 memory.reflect(reflection_scope).await?;
 
-let signal: Option<CharacterSignal> = None;
+let signal: Option<ReinforcementSignal> = None;
 memory.reinforce(target_id, signal).await?;
 
 let continuity_scope: Option<ContinuityScope> = None;
 let open_loops = memory.get_open_loops(continuity_scope).await?;
+let commitments = memory.get_commitments(continuity_scope).await?;
 
-let evidence: Option<EvidenceLink> = None;
-memory
-  .resolve_commitment(commitment_id, evidence)
-  .await?;
+let evidence: Option<EvidenceInput> = None;
+memory.resolve_commitment(commitment_id, evidence).await?;
 ```
 
 ## v0.3 API additions
@@ -494,10 +735,8 @@ memory
 ```rust
 let assessment = memory.assess_claim(claim_id).await?;
 
-let belief_scope: Option<BeliefScope> = None;
-let beliefs = memory
-  .get_current_beliefs(belief_scope)
-  .await?;
+let belief_scope: Option<ContinuityScope> = None;
+let beliefs = memory.get_current_beliefs(belief_scope).await?;
 
 let reviewed = memory.review_stale_beliefs().await?;
 ```
@@ -506,21 +745,33 @@ let reviewed = memory.review_stale_beliefs().await?;
 
 ```rust
 let explanation = memory.explain_retrieval(trace_id).await?;
-memory.associate(from_id, to_id, association_type).await?;
+let report = memory.graph_health_report(scope).await?;
+let validation = memory.validate(scope).await?;
+let context_subgraph = memory.get_context_subgraph(context).await?;
 
-let retention_scope: Option<RetentionScope> = None;
-let retention_result = memory
-  .apply_retention_policy(retention_scope)
-  .await?;
+let retention_scope: Option<ContinuityScope> = None;
+let retention_result = memory.apply_retention_policy(retention_scope).await?;
+```
+
+## v0.5 API additions
+
+```rust
+memory.associate(from_id, to_id, association_type).await?;
+let cluster_result = memory.cluster_episodes(scope).await?;
+let cluster_context = memory.retrieve_cluster_context(cluster_id).await?;
 ```
 
 ---
 
-# 13. YAGNI rules
+# 15. YAGNI rules
 
-Do not implement in v0.1:
+Do not implement in v0.1 / v0.1.2:
 
 ```text
+hard-coded entity role treatment
+persisted selectivity categories
+learned retrieval policy
+graph centrality algorithms
 true hypergraphs
 full OWL reasoning
 continuous multimodal segmentation
@@ -528,11 +779,13 @@ robotic situation frames
 full evidence-backed belief subsystem
 normalized belief ontology
 source reliability scoring
-learned admission control
 complex spreading activation
 reflection scheduler
 raw transcript storage in graph/vector stores
 physical redaction/delete as the default lifecycle path
+admin dashboard
+analytics-heavy stats system
+migration/backfill for nonexistent production data
 ```
 
 Do design for:
@@ -546,6 +799,9 @@ schema versions
 provenance links
 modality fields
 backend adapters
+retrieval stats rebuildable from graph authority
+entity-neutral retrieval policy
+scope-aware future continuity
 ```
 
 This keeps the starter small while avoiding structural dead ends.
