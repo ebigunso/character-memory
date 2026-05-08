@@ -3,8 +3,28 @@ name: Check Formatting
 on:
   push:
     branches: [ main ]
+    paths:
+      - ".github/workflows/check_formatting.yaml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "build.rs"
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - "examples/**"
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - ".github/workflows/check_formatting.yaml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "build.rs"
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - "examples/**"
 
 jobs:
   check_formatting:
