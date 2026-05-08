@@ -14,7 +14,7 @@ That leads to three rules:
 2. Store only enough metadata to prefilter and join candidates.
 3. Treat relationship and lifecycle payload fields as hints until Oxigraph verifies them.
 
-This split is deliberate. A vector database is excellent at finding nearby text and applying coarse filters. It is not the right place to decide graph truth, supersession, provenance, or lifecycle policy.
+This split is deliberate. A vector database is excellent at finding nearby text and applying coarse filters. It is not the right place to decide graph truth, supersession, provenance, lifecycle policy, entity selectivity, or fanout policy.
 
 ## Record Shape
 
@@ -115,6 +115,8 @@ These are denormalized hints. They exist because filters like "memories about th
 
 They are intentionally called hints because relationships are graph facts. If a payload says a memory is connected to an entity but the graph no longer agrees, retrieval must follow the graph.
 
+Qdrant payload relationship fields should not be used as the source of entity selectivity truth. They may identify candidate entities from vector hits, but selectivity counts must come from graph-authoritative writes or graph-derived stats.
+
 ### Lifecycle And Ranking Hints
 
 ```text
@@ -189,17 +191,17 @@ stability
 raw_ref
 ```
 
-The intent is not to index every interesting fact. The intent is to index facts that are useful before graph expansion. Rich relationship traversal belongs in the graph store.
+The intent is not to index every interesting fact. The intent is to index facts that are useful before graph expansion. Rich relationship traversal belongs in the graph store. Selectivity and fanout policy belong in the derived retrieval stats store.
 
 ## Consistency Model
 
-Writes that affect indexed memory normally update both stores:
+Writes that affect indexed memory normally update stores in this direction:
 
 ```text
-remember     graph upsert, then vector upsert
-correct      graph supersession, then vector delete/upsert maintenance
-forget       graph lifecycle mutation, then vector delete maintenance
-retrieve     vector candidates, then graph verification
+remember     graph upsert, then vector upsert, then stats delta
+correct      graph supersession, then vector delete/upsert maintenance, then stats delta
+forget       graph lifecycle mutation, then vector delete maintenance, then stats delta
+retrieve     vector candidates, then stats-guided fanout, then graph verification
 ```
 
 This is not a distributed transaction. The design assumes partial vector maintenance failure can happen. The correctness rule is therefore:
@@ -210,11 +212,13 @@ Graph state wins over Qdrant payload state.
 
 If Qdrant is stale, retrieval may do extra work, but it should not return stale or suppressed memories as current context after graph verification.
 
+If stats are missing or unhealthy, retrieval should degrade conservatively rather than expand broadly.
+
 ## Future Revisit Points
 
 Revisit this design when:
 
-- v0.1.1 persistent Oxigraph configuration lands and cross-process graph/vector reconciliation needs stronger operational guarantees
 - multiple vector surfaces per object become common enough to require public surface policy
 - spatial/location retrieval becomes a real product requirement
 - a belief/claim subsystem introduces new indexable object types
+- Qdrant becomes transactionally synchronized with graph authority, which is not the current design

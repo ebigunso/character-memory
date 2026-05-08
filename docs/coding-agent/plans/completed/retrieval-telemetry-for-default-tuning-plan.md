@@ -1,6 +1,6 @@
 # Plan: Retrieval Telemetry For Default Tuning
 
-- status: implemented
+- status: done
 - generated: 2026-05-04
 - last_updated: 2026-05-04
 - work_type: code

@@ -1,6 +1,6 @@
 # Plan: OpenAI Embedding Batching
 
-- status: in_progress
+- status: done
 - generated: 2026-05-04
 - last_updated: 2026-05-04
 - work_type: code

@@ -1,6 +1,6 @@
 # Plan: Service Remote SPARQL Graph Authority
 
-- status: implemented
+- status: done
 - generated: 2026-05-03
 - last_updated: 2026-05-03
 - work_type: code

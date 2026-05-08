@@ -43,6 +43,32 @@ Prevention:
 Evidence:
 - PR #46 path filters now include future Rust build/lint/format configuration inputs.
 
+## 2026-05-09 - Keep ADR Context Focused On The Decision  [tags: documentation, adr, assumptions, output-contract]
+
+Context:
+- Plan: v0.1.3 remember intake and assisted remember roadmap docs
+- Task/Wave: ADR wording correction after documentation integration
+- Roles involved: Orchestrator
+
+Symptom:
+- ADR-I-0012 opened with the exact rejected commit-mode names, making alternatives feel like the central context rather than supporting considered options.
+- New ADRs also referred to roadmap phases primarily by version numbers, which made them less self-contained.
+
+Root cause:
+- Copied too much hand-off comparison language directly into ADR context and leaned on roadmap version labels instead of the phase names that explain the concepts.
+
+Fix applied:
+- Rewrote ADR-I-0012 context to focus on why prepare / validate / commit was chosen.
+- Moved rejected workflow shapes into the considered-options discussion.
+- Replaced version-number shorthand in the new ADRs with roadmap phase names.
+
+Prevention:
+- When adding ADRs from a hand-off, keep context centered on the decision pressure and put rejected alternatives under considered options.
+- Prefer roadmap phase names over bare version numbers in ADR prose, especially in context, consequences, and revisit sections.
+
+Evidence:
+- New ADRs no longer contain `v0.1.3`, `v0.6`, or exact rejected commit-mode names.
+
 ## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
 
 Context:

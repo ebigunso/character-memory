@@ -3,10 +3,10 @@
 ## One-line thesis
 
 ```text
-Character Memory is an episode-backed continuity substrate for persistent AI assistants.
+Character Memory is an episode-backed continuity substrate for persistent AI characters, assistants, companions, simulations, and research systems.
 ```
 
-The roadmap should build the system in layers. The starter must be useful for chat-native memory without pretending to support every future modality or every epistemic feature.
+The roadmap should build the system in layers. The starter must be useful for chat-native memory without pretending to support every future modality or every epistemic feature. Later phases should add continuity, factual rigor, observability, association, and multimodal expansion without breaking the episode-backed core.
 
 ---
 
@@ -18,14 +18,16 @@ Therefore the system should optimize for:
 
 ```text
 temporal continuity
-relationship continuity
+entity continuity
+relationship and scope continuity
 project/thread continuity
 correction and revision
 retrieval rationale
 provenance from derived memory back to episodes
+bounded retrieval that remains useful over long timescales
 ```
 
-The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether the assistant can behave as the same continuing participant over time.
+The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether a persistent character can behave as the same continuing participant over time while remaining correctable, inspectable, and scoped to grounded memory.
 
 ---
 
@@ -72,7 +74,7 @@ Current views may include:
 
 ```text
 active threads
-current preferences
+current scoped preferences
 active commitments
 active open loops
 current character signals
@@ -97,13 +99,93 @@ The system should expose why a memory was retrieved:
 ```text
 semantic similarity
 same thread
-same entity
+same entity with high selectivity
+same entity with low selectivity but additional support
 recent event
 open commitment
 preference relevance
 correction relevance
 high salience
+explicit retrieval scope
 ```
+
+## 2.7 Entity-neutral retrieval policy
+
+The core library must not hard-code special retrieval behavior for user, assistant, player, protagonist, NPC, or any application-specific entity role.
+
+Entity-based retrieval policy should depend on:
+
+```text
+observed graph structure
+relation type
+object type
+lifecycle/currentness
+time
+salience
+retrieval scope
+supporting evidence
+```
+
+The core library may expose hooks for applications to provide scope, actor identity, or domain-specific policy, but the base schema and retrieval policy should remain use-case agnostic.
+
+## 2.8 Derived stats are not graph truth
+
+Retrieval statistics may guide fanout policy, but they are not authoritative for:
+
+```text
+memory existence
+relationships
+provenance
+lifecycle
+currentness
+final context inclusion
+```
+
+The authority split remains:
+
+```text
+Qdrant   suggests vector candidates.
+Stats    guide fanout policy.
+Oxigraph decides graph truth and final inclusion.
+```
+
+Stats must remain rebuildable from graph authority.
+
+## 2.9 Recurring entities are anchors, not traversal invitations
+
+Entities are central to continuity, but a recurring entity with many incident memories should not trigger unbounded expansion.
+
+The broader an entity's graph footprint becomes under a relation, the more retrieval should require additional narrowing evidence.
+
+High degree affects expansion policy. It does not mean the entity is unimportant.
+
+## 2.10 Low-information co-occurrence is not enough for durable links
+
+Durable pairwise memory links should not be created solely because two memories share a low-selectivity entity or broad relation.
+
+Durable association requires stronger evidence, rationale, or explicit application intent.
+
+## 2.11 Generated and manual writes should share one safe path
+
+Manual caller-provided writes and future generated memory candidates should pass through the same validation and commit machinery.
+
+The library should not grow a separate unsafe path where generated memory candidates can bypass provenance, lifecycle, retention, currentness, graph-authority validation, or idempotency checks.
+
+```text
+manual input
+  -> MemoryCandidate / RememberWritePlan
+  -> validation
+  -> commit
+
+future generated input
+  -> MemoryCandidate / RememberWritePlan
+  -> validation
+  -> commit
+```
+
+Future assisted generation should improve usability without weakening Character Memory invariants.
+
+Revisit during v0.6 assisted remember workflow. Generated processors should plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
 
 ---
 
@@ -111,13 +193,19 @@ high salience
 
 | Version | Theme | Outcome |
 |---|---|---|
-| v0.1 | Starter episodic memory | Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
-| v0.1 backend | Storage contracts | Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, and tests. |
-| v0.1.1 | Persistent graph authority | Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation before adding richer continuity/reflection features. |
-| v0.2 | Continuity and reflection | Relationship state, character signals, open-loop/commitment lifecycle, scheduled reflection, current continuity views. |
-| v0.3 | Factual rigor | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, current-belief view. |
-| v0.4 | Advanced recall and governance | Associations, episode clusters, retention governance, retrieval traces, validation, context subgraph construction. |
+| v0.1 | Starter episodic memory | Finished. Public graph-authoritative memory substrate with episodes, observations, entities, soft threads, derived memories, lifecycle facades, and continuity retrieval. |
+| v0.1 backend | Storage contracts | Finished. Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, bounded expansion support, and tests. |
+| v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
+| v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
+| v0.1.3 | Remember intake interfaces and deterministic write planning | Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, draft/validate/commit flow, and shared manual/future-generated commit machinery. |
+| v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
+| v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
+| v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, and retention assessment. |
+| v0.5 | Advanced associative recall and clustering | Associations, episode clusters, cluster summaries, and selectivity-aware association admission. |
+| v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from raw conversation or transcript-like input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. |
 | v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
+
+Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
 
 ---
 
@@ -141,56 +229,69 @@ Test fixtures
 Migration hooks
 ```
 
-## Suggested modules
+## Implemented module layout
 
 ```text
 src/
   lib.rs
+  api.rs
   api/
-    mod.rs
     embedding.rs
+    types.rs
     types/
       domain.rs
       draft.rs
       lifecycle.rs
       retrieval.rs
-  internal/
-    models/
-      vector/
-        mod.rs
-        candidate_record.rs
-        embedding_model.rs
-        embedding_surface.rs
-        record.rs
-    repositories/
-      graph_authority_store.rs
-      remember_pipeline.rs
-      link_pipeline.rs
-      retrieve_pipeline.rs
-      correction_forget_pipeline.rs
-      vector_candidate_store.rs
-      embedder.rs
-      raw_reference_resolver.rs
-      mod.rs
-    infrastructures/
-      external_services/
-        mod.rs
-        qdrant_payload.rs
-        qdrant_vector_candidate_store.rs
-        openai_embedding_provider.rs
-      graph/
-        mod.rs
-        rdf_mapping.rs
-        vocabulary.rs
-        oxigraph_authority_store.rs
-      mod.rs
-  repositories.rs
-  models.rs
+  config.rs
   config/
     settings.rs
     settings/
       app_settings.rs
   errors.rs
+  errors/
+    custom.rs
+  internal.rs
+  internal/
+    config.rs
+    config/
+      settings.rs
+      settings/
+        embedding_provider_settings.rs
+    infrastructures.rs
+    infrastructures/
+      external_services.rs
+      external_services/
+        openai_embedding_provider.rs
+        qdrant_payload.rs
+        qdrant_vector_candidate_store.rs
+      graph.rs
+      graph/
+        oxigraph_authority_store.rs
+        rdf_mapping.rs
+        sparql_selectors.rs
+        vocabulary.rs
+    models.rs
+    models/
+      vector.rs
+      vector/
+        candidate_record.rs
+        embedding_model.rs
+        embedding_surface.rs
+        record.rs
+    repositories.rs
+    repositories/
+      correction_forget_pipeline.rs
+      embedder.rs
+      graph_authority_store.rs
+      link_pipeline.rs
+      raw_reference_resolver.rs
+      reconciliation.rs
+      remember_pipeline.rs
+      retrieve_pipeline.rs
+      test_support.rs
+      vector_candidate_store.rs
+    schema.rs
 tests/
 ```
 
@@ -284,7 +385,7 @@ retrieval behavior is deterministic under fixed fixtures
 
 # 7. v0.1.1: persistent graph authority
 
-Detailed draft: [`v0_1_1_persistent_graph_authority`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
+Detailed draft: [`v0_1_1_persistent_graph_authority.md`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
 
 ## Intent
 
@@ -304,7 +405,9 @@ prevent vector-only candidates from becoming behavior-influencing memory
 document persistence configuration and operational expectations
 ```
 
-Oxigraph service mode is the application default. Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
+Oxigraph service mode is the application default.
+
+Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
 
 ## Non-goals
 
@@ -347,18 +450,474 @@ Existing v0.1 public APIs continue to work.
 
 ---
 
-# 8. v0.2: continuity and reflection
+# 8. v0.1.2: continuous entity selectivity and retrieval guardrails
 
-Detailed draft: [`v0_2_continuity_reflection.md`](../design/roadmap-phases/v0_2_continuity_reflection.md)
+Detailed draft: [`v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md`](../design/roadmap-phases/v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md)
+
+## Intent
+
+Harden retrieval against high-degree recurring entities without baking in assumptions about which entities matter in a particular application.
+
+Any entity may become broad over time:
+
+```text
+person
+character
+place
+project
+topic
+organization
+object
+faction
+scene
+conversation partner
+domain-specific concept
+```
+
+The retrieval layer should adapt to the graph's accumulated structure instead of relying on hard-coded entity roles.
+
+## Key design principle
+
+```text
+All entities start equal.
+Retrieval adapts to observed graph structure.
+High degree affects expansion policy, not entity importance.
+```
+
+A high-degree entity may still be central and highly relevant. It should not be globally penalized as unimportant. Instead, low selectivity should mean:
+
+```text
+Do not expand broadly from this entity unless additional retrieval evidence supports it.
+```
+
+Supporting evidence may include:
+
+```text
+semantic similarity
+thread membership
+temporal relevance
+salience
+currentness
+correction/supersession relevance
+explicit retrieval scope
+application-provided scope
+```
+
+## Goals
+
+```text
+treat all entities equally at schema level
+persist lightweight retrieval statistics across app restarts
+compute continuous relation-specific selectivity scores from counters
+use selectivity scores to control graph expansion fanout
+prevent durable pairwise links from weak low-information co-occurrence
+preserve Oxigraph graph authority for final inclusion
+keep Qdrant relationship/lifecycle fields as hints only
+add diagnostics showing selectivity inputs and fanout decisions
+add tests proving no entity identity is special-cased
+```
+
+## Non-goals
+
+```text
+hard-coded user/assistant/protagonist/player/NPC behavior
+persisted selectivity categories
+NoSQL service
+mandatory Postgres service
+graph centrality algorithms
+PageRank-like memory importance
+learned retrieval policy
+full retrieval trace object
+admin dashboard
+episode clustering
+advanced association graph
+automatic retention optimization
+migration/backfill for existing production data
+```
+
+## Acceptance criteria
+
+```text
+Stats survive app restart.
+Normal retrieval does not scan the whole graph to classify entity selectivity.
+Selectivity is computed continuously from counters.
+Selectivity labels are diagnostic only.
+Fanout budgets are smooth functions of selectivity, relation kind, object type, and supporting evidence.
+No retrieval rule depends on entity name, canonical key, or application role.
+High-degree entities require additional narrowing evidence for broad expansion.
+High-degree entities can still contribute when supported by semantic, temporal, thread, salience, currentness, correction, or explicit scope evidence.
+Durable pairwise links are not created solely from shared low-selectivity entity co-occurrence.
+Qdrant relationship hints remain non-authoritative.
+Oxigraph remains authoritative for graph truth, lifecycle, currentness, provenance, and expansion context.
+Missing or unhealthy stats produce conservative fanout.
+Synthetic high-degree fixtures cover people, places, projects, topics, objects, and arbitrary custom entities.
+```
+
+---
+
+# 9. v0.1.3: remember intake interfaces and deterministic write planning
+
+Detailed draft: [`v0_1_3_remember_intake_interfaces_deterministic_write_planning.md`](../design/roadmap-phases/v0_1_3_remember_intake_interfaces_deterministic_write_planning.md)
+
+## Intent
+
+Prepare the memory write path for future assisted generation without implementing model-assisted extraction yet.
+
+The library should support a common flow:
+
+```text
+candidate objects
+  -> validation
+  -> write plan
+  -> commit
+```
+
+This flow should be usable by manual caller-provided writes today and by future generated memory candidates later.
+
+The phase should make the write path generation-ready, but it should not infer high-level memory meaning from raw natural language.
+
+## Why this comes after v0.1.2
+
+v0.1.2 adds selectivity and retrieval guardrails for high-degree or low-selectivity entities. That should come before easier intake APIs because better intake can increase memory volume.
+
+The safer sequence is:
+
+```text
+first: retrieval guardrails
+then: easier intake/write planning
+then: scoped continuity/reflection
+```
+
+v0.1.3 should therefore introduce a safer write-planning surface only after the retrieval layer has basic protection against fanout, weak co-occurrence, and context pollution.
+
+## Why this comes before v0.2
+
+v0.2 introduces stronger continuity concepts such as scoped reflection, relationship state, character signals, commitments, open loops, and current continuity views.
+
+Those features should eventually be generated or updated through a safe write path. v0.1.3 establishes that path before the library starts creating richer continuity structures.
+
+## Core distinction
+
+This phase is not the full assisted generation workflow.
+
+```text
+v0.1.3:
+  package, validate, and commit caller-provided or deterministic memory candidates
+
+v0.6:
+  generate memory candidates from raw conversation/transcript-like input
+```
+
+v0.1.3 should not infer:
+
+```text
+this is a user preference
+this is a commitment
+this is a correction
+this is a character signal
+this text mentions entity X
+this episode belongs to thread Y
+```
+
+unless the caller supplied that information.
 
 ## New concepts
 
 ```text
+RememberInput
+RememberWritePlan
+MemoryCandidate
+CandidateValidation
+CandidateProvenance
+RememberOutcome
+RememberDiagnostics
+```
+
+These concepts support future generation without requiring generation now.
+
+## Goals
+
+```text
+introduce RememberWritePlan
+introduce MemoryCandidate types for planned writes
+support prepare / validate / commit workflow
+keep remember() as a convenience wrapper
+add deterministic helpers for stable IDs, graph IRIs, source references, source spans, lifecycle defaults, and provenance links
+allow callers to provide structured hints such as entity IDs, thread IDs, scope IDs, participants, timestamps, raw references, and source spans
+validate behavior-influencing DerivedMemory provenance before commit
+validate MemoryLink targets before commit
+make manual writes and future generated writes share the same validation and commit path
+preserve Oxigraph as graph authority
+preserve Qdrant as vector candidate recall only
+preserve RetrievalStatsStore as derived selectivity/fanout metadata only
+```
+
+## Non-goals
+
+Do not implement in v0.1.3:
+
+```text
+LLM-based summarization
+automatic observation extraction
+automatic entity extraction from raw text
+automatic entity resolution from natural language
+automatic thread inference
+automatic scope inference
+automatic preference extraction
+automatic commitment or open-loop detection
+automatic correction detection
+automatic character-signal generation
+model-assisted salience scoring
+model-assisted admission control
+privacy classification using a model
+raw audio/video processing
+full assisted remember workflow
+application review callback framework
+learned write policy
+```
+
+This phase should remain deterministic and schema-oriented.
+
+## Write workflow
+
+The core workflow should be:
+
+```text
+prepare
+  -> validate
+    -> commit
+```
+
+`remember()` should remain available as a convenience wrapper around those steps.
+
+```text
+remember(input)
+  = prepare(input)
+  + validate_plan(plan)
+  + commit(plan)
+```
+
+## API direction
+
+Suggested public or semi-public API shape:
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+let validation = memory.validate_plan(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+Convenience path:
+
+```rust
+let outcome = memory.remember(input, remember_options).await?;
+```
+
+`commit()` should always revalidate, because graph state may have changed after `prepare()`.
+
+## Commit and review model
+
+Do not introduce many commit modes.
+
+Avoid first-class modes such as:
+
+```text
+DraftOnly
+ValidateOnly
+RequireApproval
+ApplicationReviewCallback
+AutoCommitSafeCandidates
+```
+
+Instead, use explicit workflow operations:
+
+```text
+DraftOnly      = prepare()
+ValidateOnly   = validate(plan)
+Commit         = commit(plan)
+RequireApproval = prepare() + app-owned approval + commit(approved_plan)
+ApplicationReviewCallback = optional future adapter, not v0.1.3 core
+AutoCommitSafeCandidates = future admission policy for generated candidates, not v0.1.3 core
+```
+
+The only true commit operation is `commit(plan)`.
+
+Review is application workflow, not a primitive commit mode.
+
+## Deterministic helpers
+
+v0.1.3 may implement deterministic helpers for:
+
+```text
+stable object ID generation
+idempotency key generation
+deterministic graph IRI generation
+source reference construction
+source span construction
+one-input-one-episode episode candidate construction
+caller-provided observation wrapping
+caller-provided entity hint linking
+caller-provided thread/scope hint linking
+retention defaults
+currentness defaults
+schema version assignment
+provenance link construction
+embedding text fallback from caller-provided content text
+write-plan validation
+diagnostic reporting
+```
+
+These helpers should not infer high-level semantic meaning.
+
+## RememberWritePlan contents
+
+A `RememberWritePlan` should be explicit and inspectable.
+
+It should be able to contain:
+
+```text
+operation ID
+idempotency key
+source input reference
+episode candidates
+observation candidates
+entity candidates or entity references
+memory thread references or candidates
+derived memory candidates
+memory link candidates
+vector index candidates
+retrieval stats update candidates
+validation results
+diagnostics
+```
+
+The plan should make it possible for an application or test to inspect what would be written before anything is persisted.
+
+## Candidate provenance
+
+Every candidate that could later influence behavior should carry provenance.
+
+For v0.1.3, provenance may come from caller-provided source references or spans.
+
+Examples:
+
+```text
+source conversation ID
+message ID
+turn range
+character offset range
+transcript segment ID
+timestamp range
+raw_ref pointer
+episode ID
+observation ID
+```
+
+Behavior-influencing `DerivedMemory` candidates must have provenance to an `Episode` or `Observation`.
+
+## Validation rules
+
+Validation should check at least:
+
+```text
+stable IDs are present or can be assigned
+object types are valid
+schema version is present
+MemoryLink targets exist or are part of the same write plan
+behavior-influencing DerivedMemory has Episode or Observation provenance
+suppressed memories are not current
+superseded memories are not current unless explicitly historical
+Qdrant vector candidates point to graph objects in the same write plan or existing graph authority
+RetrievalStatsStore updates only reference accepted graph-authoritative relationships
+source spans are structurally valid when provided
+idempotency keys prevent duplicate retry writes
+```
+
+Invalid plans should not commit.
+
+## Persistence failure policy
+
+v0.1.3 should continue the existing authority split:
+
+```text
+Qdrant suggests.
+Stats guide fanout.
+Oxigraph decides.
+```
+
+Critical writes:
+
+```text
+Oxigraph object existence
+provenance links
+lifecycle/currentness state
+supersession/suppression state
+```
+
+Repairable writes:
+
+```text
+Qdrant vector index
+RetrievalStatsStore counters
+diagnostics
+optional secondary links
+```
+
+`commit()` should distinguish critical failure from repairable degraded state. It should not allow behavior-influencing ungrounded memory.
+
+## Acceptance criteria
+
+```text
+A caller can prepare a RememberWritePlan without committing it.
+A caller can validate a RememberWritePlan without committing it.
+A caller can commit a validated RememberWritePlan.
+remember() remains available as a convenience wrapper.
+commit() revalidates before writing.
+Invalid behavior-influencing DerivedMemory without provenance is rejected.
+Missing MemoryLink targets are rejected or deferred according to explicit policy.
+Idempotency keys prevent duplicate writes from retry.
+Deterministic source references and source spans are preserved.
+Manual writes and future generated writes can share the same commit path.
+The write-plan flow works with in-memory and persistent graph modes.
+Qdrant remains candidate recall only.
+Oxigraph remains authoritative for object existence, links, provenance, lifecycle, currentness, and final inclusion.
+RetrievalStatsStore remains derived policy metadata only.
+No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
+```
+
+## Revisit when
+
+Revisit during v0.6 assisted remember workflow.
+
+At that point, model-assisted processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+
+The v0.6 work may add admission states such as:
+
+```text
+Accepted
+Deferred
+NeedsReview
+Rejected
+Invalid
+```
+
+But v0.1.3 should keep candidate state simpler unless implementation clearly requires more.
+
+---
+
+# 10. v0.2: scoped continuity and reflection
+
+Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
+
+## New concepts
+
+```text
+ContinuityScope
+ReflectionJob
 RelationshipState
 CharacterSignal
 OpenLoop
 Commitment
-ReflectionJob
 CurrentContinuityView
 ```
 
@@ -366,16 +925,28 @@ CurrentContinuityView
 
 ```text
 make memory shape future behavior more explicitly
-track active commitments and unresolved threads
-derive relationship/project-specific character signals
+track active commitments and unresolved scoped matters
+derive relationship/project/entity-specific character signals
 separate current continuity context from raw historical memories
+avoid assuming continuity is centered on one user-assistant relationship
+```
+
+## Acceptance criteria additions
+
+```text
+Reflection jobs require explicit or inferred ContinuityScope.
+CurrentContinuityView is generated for a scope.
+RelationshipState can describe arbitrary entity relationships.
+CharacterSignal can attach to any continuing entity or scope.
+Reflection avoids all-history scans through broad entities.
+Open loops and commitments can be retrieved by scope without assuming who the main actor is.
 ```
 
 ---
 
-# 9. v0.3: factual rigor and belief tracking
+# 11. v0.3: factual rigor, temporal validity, and entity evolution
 
-Detailed draft: [`v0_3_factual_rigor_belief_tracking.md`](../design/roadmap-phases/v0_3_factual_rigor_belief_tracking.md)
+Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
 ## New concepts
 
@@ -386,6 +957,7 @@ EvidenceLink
 BeliefAssessment
 SourceAssessment
 TemporalValidity
+EntityStateHistory
 CurrentBeliefView
 ```
 
@@ -395,6 +967,7 @@ CurrentBeliefView
 distinguish source reports from truth
 support contradictions and updates
 track temporal validity and volatility
+represent entity drift over time
 show why factual beliefs are accepted or rejected
 ```
 
@@ -402,34 +975,151 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 10. v0.4: advanced recall and governance
+# 12. v0.4: retrieval observability and governance
 
-Detailed draft: [`v0_4_advanced_recall_governance.md`](../design/roadmap-phases/v0_4_advanced_recall_governance.md)
+Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
+
+## New concepts
+
+```text
+RetrievalTrace
+ContextSubgraph
+ValidationRules
+GraphHealthReport
+RetentionAssessment
+PolicyDiagnostics
+```
+
+## Goals
+
+```text
+make retrieval decisions inspectable
+show bounded expansion paths
+validate graph/retrieval invariants
+detect high-fanout relation patterns
+evaluate retention/downranking candidates
+report policy behavior over time
+```
+
+---
+
+# 13. v0.5: advanced associative recall and clustering
+
+Detailed draft: [`v0_5_advanced_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_advanced_associative_recall_clustering.md)
 
 ## New concepts
 
 ```text
 Association
 EpisodeCluster
-RetentionAssessment
-RetrievalTrace
-ContextSubgraph
-ValidationRules
+ClusterSummary
+AssociationAdmissionPolicy
 ```
 
 ## Goals
 
 ```text
 improve associative recall
-support retention/downranking/deletion policies
-explain retrieval decisions
-bound graph expansion
-validate invariants
+compress repeated patterns across many episodes
+support cluster-level retrieval
+avoid pairwise clique growth
+preserve provenance from summaries/clusters to source memories
 ```
 
 ---
 
-# 11. v1.0+: multimodal and embodied expansion
+# 14. v0.6: assisted remember workflow and memory candidate generation
+
+Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](../design/roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
+
+## Intent
+
+Let callers provide raw conversation, transcript-like input, or structured interaction logs to `remember()`, while the library generates validated memory candidates and write plans.
+
+The caller still decides:
+
+```text
+when to call remember()
+what raw data to offer
+what processing policy to use
+whether generated candidates are committed, reviewed, or discarded
+```
+
+The library helps decide:
+
+```text
+how offered experience becomes memory candidates
+how candidates are validated
+how candidates preserve provenance
+how accepted candidates are committed
+```
+
+## Why this comes later
+
+Assisted generation should wait until the memory substrate has stronger retrieval quality, scope handling, factual rigor, observability, governance, and association/clustering behavior.
+
+The generation workflow will be shaped by what the library can store and how retrieval behaves. Implementing it too early risks generating plausible-looking memory objects that degrade continuity.
+
+## Dependency on v0.1.3
+
+v0.6 should use the v0.1.3 write-plan path.
+
+Generated processors should produce:
+
+```text
+MemoryCandidate
+RememberWritePlan
+CandidateProvenance
+RememberDiagnostics
+```
+
+They should not bypass validation or commit directly to stores.
+
+## Possible generated candidates
+
+```text
+Episode candidates
+Observation candidates
+Entity candidates
+Thread/scope link candidates
+DerivedMemory candidates
+salience/admission candidates
+natural embedding surfaces
+memory link candidates
+```
+
+## Non-goals
+
+Do not make v0.6 an autonomous memory agent that scans logs without caller intent.
+
+The caller should still control:
+
+```text
+when raw input is offered
+which raw input is offered
+which processors are enabled
+what privacy policy applies
+whether candidates require review
+```
+
+## Acceptance criteria
+
+```text
+Caller can pass raw chat/transcript-like input and receive a RememberWritePlan.
+Generated DerivedMemory candidates include provenance.
+Explicit corrections generate correction candidates.
+Explicit commitments generate commitment/open-loop candidates.
+Entity candidates are resolved through graph authority rather than direct model-minted IDs.
+Thread/scope links are optional and confidence-scored.
+Embedding text is natural language, not metadata dumps.
+Generation diagnostics expose accepted, rejected, and deferred candidates.
+Privacy exclusions are applied before external processor calls.
+Generated candidates use the same validation and commit path as manual candidates.
+```
+
+---
+
+# 15. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -457,13 +1147,12 @@ This is a future path, not starter scope.
 
 ---
 
-# 12. Public API evolution
+# 16. Public API evolution
 
 ## v0.1 API
 
 ```rust
 let memory = CharacterMemory::new(settings, collection_name).await?;
-
 let stored = memory.remember(remember_draft).await?;
 let context = memory.retrieve(retrieval_context).await?;
 let correction = memory.correct(correct_memory_draft).await?;
@@ -471,22 +1160,90 @@ let forget = memory.forget(forget_memory_draft).await?;
 let link = memory.link(memory_link_draft).await?;
 ```
 
+## v0.1.2 configuration / internal additions
+
+v0.1.2 should not require a new public memory facade. It adds retrieval hardening through configuration and internal stores.
+
+Conceptual configuration:
+
+```toml
+[retrieval.stats]
+store = "sqlite"
+path = "./data/character-memory/retrieval_stats.sqlite"
+health_fail_mode = "conservative"
+
+[retrieval.selectivity]
+smoothing_alpha = 1.0
+gamma = 1.0
+
+[retrieval.fanout.about_entity.derived_memory]
+min = 0
+max = 20
+
+[retrieval.fanout.participant_entity.episode]
+min = 0
+max = 5
+
+[retrieval.fanout.part_of_thread.derived_memory]
+min = 0
+max = 15
+```
+
+## v0.1.3 API additions
+
+v0.1.3 introduces an explicit write-planning workflow.
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+let validation = memory.validate_plan(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+The existing `remember()` API remains the convenience path:
+
+```rust
+let outcome = memory.remember(input, remember_options).await?;
+```
+
+Conceptually:
+
+```text
+remember(input)
+  = prepare(input)
+  + validate_plan(plan)
+  + commit(plan)
+```
+
+The purpose is to let manual writes and future generated writes share the same validation and commit path.
+
+Application-owned approval flows should compose these primitives:
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+
+// Application reviews, edits, or filters the plan.
+let approved_plan = app_review(plan).await?;
+
+let outcome = memory.commit(approved_plan, commit_options).await?;
+```
+
+`RequireApproval` and `ApplicationReviewCallback` are not core v0.1.3 commit modes. They are application workflows or future adapters.
+
 ## v0.2 API additions
 
 ```rust
-let reflection_scope: Option<ReflectionScope> = None;
+let reflection_scope: Option<ContinuityScope> = None;
 memory.reflect(reflection_scope).await?;
 
-let signal: Option<CharacterSignal> = None;
+let signal: Option<ReinforcementSignal> = None;
 memory.reinforce(target_id, signal).await?;
 
 let continuity_scope: Option<ContinuityScope> = None;
 let open_loops = memory.get_open_loops(continuity_scope).await?;
+let commitments = memory.get_commitments(continuity_scope).await?;
 
-let evidence: Option<EvidenceLink> = None;
-memory
-  .resolve_commitment(commitment_id, evidence)
-  .await?;
+let evidence: Option<EvidenceInput> = None;
+memory.resolve_commitment(commitment_id, evidence).await?;
 ```
 
 ## v0.3 API additions
@@ -494,10 +1251,8 @@ memory
 ```rust
 let assessment = memory.assess_claim(claim_id).await?;
 
-let belief_scope: Option<BeliefScope> = None;
-let beliefs = memory
-  .get_current_beliefs(belief_scope)
-  .await?;
+let belief_scope: Option<ContinuityScope> = None;
+let beliefs = memory.get_current_beliefs(belief_scope).await?;
 
 let reviewed = memory.review_stale_beliefs().await?;
 ```
@@ -506,21 +1261,43 @@ let reviewed = memory.review_stale_beliefs().await?;
 
 ```rust
 let explanation = memory.explain_retrieval(trace_id).await?;
-memory.associate(from_id, to_id, association_type).await?;
+let report = memory.graph_health_report(scope).await?;
+let validation = memory.validate_graph(scope).await?;
+let context_subgraph = memory.get_context_subgraph(context).await?;
 
-let retention_scope: Option<RetentionScope> = None;
-let retention_result = memory
-  .apply_retention_policy(retention_scope)
-  .await?;
+let retention_scope: Option<ContinuityScope> = None;
+let retention_result = memory.apply_retention_policy(retention_scope).await?;
 ```
+
+## v0.5 API additions
+
+```rust
+memory.associate(from_id, to_id, association_type).await?;
+let cluster_result = memory.cluster_episodes(scope).await?;
+let cluster_context = memory.retrieve_cluster_context(cluster_id).await?;
+```
+
+## v0.6 API additions
+
+```rust
+let plan = memory.prepare(raw_interaction_input, generation_options).await?;
+let validation = memory.validate_plan(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+Generated processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing validation or committing directly to stores.
 
 ---
 
-# 13. YAGNI rules
+# 17. YAGNI rules
 
-Do not implement in v0.1:
+Do not implement in v0.1 / v0.1.2:
 
 ```text
+hard-coded entity role treatment
+persisted selectivity categories
+learned retrieval policy
+graph centrality algorithms
 true hypergraphs
 full OWL reasoning
 continuous multimodal segmentation
@@ -528,11 +1305,56 @@ robotic situation frames
 full evidence-backed belief subsystem
 normalized belief ontology
 source reliability scoring
-learned admission control
 complex spreading activation
 reflection scheduler
 raw transcript storage in graph/vector stores
 physical redaction/delete as the default lifecycle path
+admin dashboard
+analytics-heavy stats system
+migration/backfill for nonexistent production data
+```
+
+## v0.1.3 YAGNI rules
+
+Do not implement in v0.1.3:
+
+```text
+LLM-based summarization
+automatic observation extraction
+automatic entity extraction
+automatic entity resolution from natural language
+automatic thread or scope inference
+automatic preference extraction
+automatic commitment/open-loop detection
+automatic correction detection
+automatic character-signal generation
+model-assisted salience scoring
+learned admission policy
+application review callback framework
+full assisted remember workflow
+raw audio/video processing
+```
+
+Do design for:
+
+```text
+RememberWritePlan
+MemoryCandidate
+CandidateProvenance
+CandidateValidation
+RememberDiagnostics
+prepare / validate / commit workflow
+manual and future-generated writes sharing the same commit path
+deterministic source spans and source references
+idempotent retry-safe writes
+validation before behavior-influencing persistence
+```
+
+The principle is:
+
+```text
+Build the path that generated memories will travel later.
+Do not build the generator yet.
 ```
 
 Do design for:
@@ -546,6 +1368,9 @@ schema versions
 provenance links
 modality fields
 backend adapters
+retrieval stats rebuildable from graph authority
+entity-neutral retrieval policy
+scope-aware future continuity
 ```
 
 This keeps the starter small while avoiding structural dead ends.
