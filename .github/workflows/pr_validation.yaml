@@ -3,6 +3,21 @@ name: PR Validation
 on:
   pull_request:
     branches: [ "main", "develop" ]
+    paths:
+      - ".github/workflows/pr_validation.yaml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "build.rs"
+      - "rustfmt.toml"
+      - ".rustfmt.toml"
+      - "clippy.toml"
+      - ".clippy.toml"
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - "examples/**"
 
 jobs:
   compile_check:
