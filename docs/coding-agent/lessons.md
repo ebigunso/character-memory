@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-05-09 - Triage Copilot Review Comments Against Current Diff  [tags: review, ci, assumptions]
+
+Context:
+- Plan: PR #46 Rust CI path filters
+- Task/Wave: Copilot review comment remediation
+- Roles involved: Orchestrator
+
+Symptom:
+- Treated sequential Copilot comments as potentially contradictory because a later comment asked to include `build.rs` after an earlier comment asked to remove it.
+
+Root cause:
+- Assumed Copilot review passes consider prior review context, instead of recognizing each pass reviews the current diff independently.
+
+Fix applied:
+- Chose the long-term CI-correct filter: include Rust build/config inputs such as `build.rs`, `.cargo/**`, `rustfmt.toml`, and `clippy.toml`, even if some do not exist yet.
+
+Prevention:
+- When Copilot comments appear to contradict earlier Copilot feedback, triage each comment against the current diff and the durable repo outcome, not against previous Copilot review history.
+
+Evidence:
+- PR #46 path filters now include future Rust build/lint/format configuration inputs.
+
 ## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
 
 Context:
