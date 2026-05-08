@@ -56,6 +56,7 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-D-0009: Keep core retrieval policy entity-neutral](design/ADR-D-0009-entity-neutral-retrieval-policy.md)
 - [ADR-D-0010: Treat recurring entities as continuity anchors, not traversal invitations](design/ADR-D-0010-recurring-entities-are-anchors-not-traversal-invitations.md)
 - [ADR-D-0011: Scope continuity around arbitrary entities and contexts](design/ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts.md)
+- [ADR-D-0012: Separate memory candidates from committed memory](design/ADR-D-0012-separate-memory-candidates-from-committed-memory.md)
 
 ### Implementation Decisions
 
@@ -70,3 +71,5 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0009: Use SQLite as the default retrieval stats store](implementation/ADR-I-0009-use-sqlite-as-default-retrieval-stats-store.md)
 - [ADR-I-0010: Use continuous selectivity and smooth fanout](implementation/ADR-I-0010-use-continuous-selectivity-and-smooth-fanout.md)
 - [ADR-I-0011: Guard against durable links from low-information co-occurrence](implementation/ADR-I-0011-guard-against-low-information-co-occurrence-links.md)
+- [ADR-I-0012: Use prepare / validate / commit for the write workflow](implementation/ADR-I-0012-use-prepare-validate-commit-write-workflow.md)
+- [ADR-I-0013: Deterministic write-planning helpers do not infer high-level meaning](implementation/ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md)

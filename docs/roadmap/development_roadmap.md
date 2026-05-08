@@ -165,6 +165,28 @@ Durable pairwise memory links should not be created solely because two memories 
 
 Durable association requires stronger evidence, rationale, or explicit application intent.
 
+## 2.11 Generated and manual writes should share one safe path
+
+Manual caller-provided writes and future generated memory candidates should pass through the same validation and commit machinery.
+
+The library should not grow a separate unsafe path where generated memory candidates can bypass provenance, lifecycle, retention, currentness, graph-authority validation, or idempotency checks.
+
+```text
+manual input
+  -> MemoryCandidate / RememberWritePlan
+  -> validation
+  -> commit
+
+future generated input
+  -> MemoryCandidate / RememberWritePlan
+  -> validation
+  -> commit
+```
+
+Future assisted generation should improve usability without weakening Character Memory invariants.
+
+Revisit during v0.6 assisted remember workflow. Generated processors should plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+
 ---
 
 # 3. Version overview
@@ -175,10 +197,12 @@ Durable association requires stronger evidence, rationale, or explicit applicati
 | v0.1 backend | Storage contracts | Finished. Qdrant candidate recall, Oxigraph graph authority, stable IDs, vector metadata hints, graph triples, schema versions, bounded expansion support, and tests. |
 | v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
 | v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
+| v0.1.3 | Remember intake interfaces and deterministic write planning | Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, draft/validate/commit flow, and shared manual/future-generated commit machinery. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, and retention assessment. |
 | v0.5 | Advanced associative recall and clustering | Associations, episode clusters, cluster summaries, and selectivity-aware association admission. |
+| v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from raw conversation or transcript-like input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. |
 | v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
 
 Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
@@ -520,7 +544,357 @@ Synthetic high-degree fixtures cover people, places, projects, topics, objects, 
 
 ---
 
-# 9. v0.2: scoped continuity and reflection
+# 9. v0.1.3: remember intake interfaces and deterministic write planning
+
+Detailed draft: [`v0_1_3_remember_intake_interfaces_deterministic_write_planning.md`](../design/roadmap-phases/v0_1_3_remember_intake_interfaces_deterministic_write_planning.md)
+
+## Intent
+
+Prepare the memory write path for future assisted generation without implementing model-assisted extraction yet.
+
+The library should support a common flow:
+
+```text
+candidate objects
+  -> validation
+  -> write plan
+  -> commit
+```
+
+This flow should be usable by manual caller-provided writes today and by future generated memory candidates later.
+
+The phase should make the write path generation-ready, but it should not infer high-level memory meaning from raw natural language.
+
+## Why this comes after v0.1.2
+
+v0.1.2 adds selectivity and retrieval guardrails for high-degree or low-selectivity entities. That should come before easier intake APIs because better intake can increase memory volume.
+
+The safer sequence is:
+
+```text
+first: retrieval guardrails
+then: easier intake/write planning
+then: scoped continuity/reflection
+```
+
+v0.1.3 should therefore introduce a safer write-planning surface only after the retrieval layer has basic protection against fanout, weak co-occurrence, and context pollution.
+
+## Why this comes before v0.2
+
+v0.2 introduces stronger continuity concepts such as scoped reflection, relationship state, character signals, commitments, open loops, and current continuity views.
+
+Those features should eventually be generated or updated through a safe write path. v0.1.3 establishes that path before the library starts creating richer continuity structures.
+
+## Core distinction
+
+This phase is not the full assisted generation workflow.
+
+```text
+v0.1.3:
+  package, validate, and commit caller-provided or deterministic memory candidates
+
+v0.6:
+  generate memory candidates from raw conversation/transcript-like input
+```
+
+v0.1.3 should not infer:
+
+```text
+this is a user preference
+this is a commitment
+this is a correction
+this is a character signal
+this text mentions entity X
+this episode belongs to thread Y
+```
+
+unless the caller supplied that information.
+
+## New concepts
+
+```text
+RememberInput
+RememberWritePlan
+MemoryCandidate
+CandidateValidation
+CandidateProvenance
+RememberOutcome
+RememberDiagnostics
+```
+
+These concepts support future generation without requiring generation now.
+
+## Goals
+
+```text
+introduce RememberWritePlan
+introduce MemoryCandidate types for planned writes
+support prepare / validate / commit workflow
+keep remember() as a convenience wrapper
+add deterministic helpers for stable IDs, graph IRIs, source references, source spans, lifecycle defaults, and provenance links
+allow callers to provide structured hints such as entity IDs, thread IDs, scope IDs, participants, timestamps, raw references, and source spans
+validate behavior-influencing DerivedMemory provenance before commit
+validate MemoryLink targets before commit
+make manual writes and future generated writes share the same validation and commit path
+preserve Oxigraph as graph authority
+preserve Qdrant as vector candidate recall only
+preserve RetrievalStatsStore as derived selectivity/fanout metadata only
+```
+
+## Non-goals
+
+Do not implement in v0.1.3:
+
+```text
+LLM-based summarization
+automatic observation extraction
+automatic entity extraction from raw text
+automatic entity resolution from natural language
+automatic thread inference
+automatic scope inference
+automatic preference extraction
+automatic commitment or open-loop detection
+automatic correction detection
+automatic character-signal generation
+model-assisted salience scoring
+model-assisted admission control
+privacy classification using a model
+raw audio/video processing
+full assisted remember workflow
+application review callback framework
+learned write policy
+```
+
+This phase should remain deterministic and schema-oriented.
+
+## Write workflow
+
+The core workflow should be:
+
+```text
+prepare
+  -> validate
+    -> commit
+```
+
+`remember()` should remain available as a convenience wrapper around those steps.
+
+```text
+remember(input)
+  = prepare(input)
+  + validate(plan)
+  + commit(plan)
+```
+
+## API direction
+
+Suggested public or semi-public API shape:
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+let validation = memory.validate(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+Convenience path:
+
+```rust
+let outcome = memory.remember(input, remember_options).await?;
+```
+
+`commit()` should always revalidate, because graph state may have changed after `prepare()`.
+
+## Commit and review model
+
+Do not introduce many commit modes.
+
+Avoid first-class modes such as:
+
+```text
+DraftOnly
+ValidateOnly
+RequireApproval
+ApplicationReviewCallback
+AutoCommitSafeCandidates
+```
+
+Instead, use explicit workflow operations:
+
+```text
+DraftOnly      = prepare()
+ValidateOnly   = validate(plan)
+Commit         = commit(plan)
+RequireApproval = prepare() + app-owned approval + commit(approved_plan)
+ApplicationReviewCallback = optional future adapter, not v0.1.3 core
+AutoCommitSafeCandidates = future admission policy for generated candidates, not v0.1.3 core
+```
+
+The only true commit operation is `commit(plan)`.
+
+Review is application workflow, not a primitive commit mode.
+
+## Deterministic helpers
+
+v0.1.3 may implement deterministic helpers for:
+
+```text
+stable object ID generation
+idempotency key generation
+deterministic graph IRI generation
+source reference construction
+source span construction
+one-input-one-episode episode candidate construction
+caller-provided observation wrapping
+caller-provided entity hint linking
+caller-provided thread/scope hint linking
+retention defaults
+currentness defaults
+schema version assignment
+provenance link construction
+embedding text fallback from caller-provided content text
+write-plan validation
+diagnostic reporting
+```
+
+These helpers should not infer high-level semantic meaning.
+
+## RememberWritePlan contents
+
+A `RememberWritePlan` should be explicit and inspectable.
+
+It should be able to contain:
+
+```text
+operation ID
+idempotency key
+source input reference
+episode candidates
+observation candidates
+entity candidates or entity references
+memory thread references or candidates
+derived memory candidates
+memory link candidates
+vector index candidates
+retrieval stats update candidates
+validation results
+diagnostics
+```
+
+The plan should make it possible for an application or test to inspect what would be written before anything is persisted.
+
+## Candidate provenance
+
+Every candidate that could later influence behavior should carry provenance.
+
+For v0.1.3, provenance may come from caller-provided source references or spans.
+
+Examples:
+
+```text
+source conversation ID
+message ID
+turn range
+character offset range
+transcript segment ID
+timestamp range
+raw_ref pointer
+episode ID
+observation ID
+```
+
+Behavior-influencing `DerivedMemory` candidates must have provenance to an `Episode` or `Observation`.
+
+## Validation rules
+
+Validation should check at least:
+
+```text
+stable IDs are present or can be assigned
+object types are valid
+schema version is present
+MemoryLink targets exist or are part of the same write plan
+behavior-influencing DerivedMemory has Episode or Observation provenance
+suppressed memories are not current
+superseded memories are not current unless explicitly historical
+Qdrant vector candidates point to graph objects in the same write plan or existing graph authority
+RetrievalStatsStore updates only reference accepted graph-authoritative relationships
+source spans are structurally valid when provided
+idempotency keys prevent duplicate retry writes
+```
+
+Invalid plans should not commit.
+
+## Persistence failure policy
+
+v0.1.3 should continue the existing authority split:
+
+```text
+Qdrant suggests.
+Stats guide fanout.
+Oxigraph decides.
+```
+
+Critical writes:
+
+```text
+Oxigraph object existence
+provenance links
+lifecycle/currentness state
+supersession/suppression state
+```
+
+Repairable writes:
+
+```text
+Qdrant vector index
+RetrievalStatsStore counters
+diagnostics
+optional secondary links
+```
+
+`commit()` should distinguish critical failure from repairable degraded state. It should not allow behavior-influencing ungrounded memory.
+
+## Acceptance criteria
+
+```text
+A caller can prepare a RememberWritePlan without committing it.
+A caller can validate a RememberWritePlan without committing it.
+A caller can commit a validated RememberWritePlan.
+remember() remains available as a convenience wrapper.
+commit() revalidates before writing.
+Invalid behavior-influencing DerivedMemory without provenance is rejected.
+Missing MemoryLink targets are rejected or deferred according to explicit policy.
+Idempotency keys prevent duplicate writes from retry.
+Deterministic source references and source spans are preserved.
+Manual writes and future generated writes can share the same commit path.
+The write-plan flow works with in-memory and persistent graph modes.
+Qdrant remains candidate recall only.
+Oxigraph remains authoritative for object existence, links, provenance, lifecycle, currentness, and final inclusion.
+RetrievalStatsStore remains derived policy metadata only.
+No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
+```
+
+## Revisit when
+
+Revisit during v0.6 assisted remember workflow.
+
+At that point, model-assisted processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+
+The v0.6 work may add admission states such as:
+
+```text
+Accepted
+Deferred
+NeedsReview
+Rejected
+Invalid
+```
+
+But v0.1.3 should keep candidate state simpler unless implementation clearly requires more.
+
+---
+
+# 10. v0.2: scoped continuity and reflection
 
 Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
@@ -559,7 +933,7 @@ Open loops and commitments can be retrieved by scope without assuming who the ma
 
 ---
 
-# 10. v0.3: factual rigor, temporal validity, and entity evolution
+# 11. v0.3: factual rigor, temporal validity, and entity evolution
 
 Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
@@ -590,7 +964,7 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 11. v0.4: retrieval observability and governance
+# 12. v0.4: retrieval observability and governance
 
 Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
 
@@ -618,7 +992,7 @@ report policy behavior over time
 
 ---
 
-# 12. v0.5: advanced associative recall and clustering
+# 13. v0.5: advanced associative recall and clustering
 
 Detailed draft: [`v0_5_advanced_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_advanced_associative_recall_clustering.md)
 
@@ -643,7 +1017,98 @@ preserve provenance from summaries/clusters to source memories
 
 ---
 
-# 13. v1.0+: multimodal and embodied expansion
+# 14. v0.6: assisted remember workflow and memory candidate generation
+
+Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](../design/roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
+
+## Intent
+
+Let callers provide raw conversation, transcript-like input, or structured interaction logs to `remember()`, while the library generates validated memory candidates and write plans.
+
+The caller still decides:
+
+```text
+when to call remember()
+what raw data to offer
+what processing policy to use
+whether generated candidates are committed, reviewed, or discarded
+```
+
+The library helps decide:
+
+```text
+how offered experience becomes memory candidates
+how candidates are validated
+how candidates preserve provenance
+how accepted candidates are committed
+```
+
+## Why this comes later
+
+Assisted generation should wait until the memory substrate has stronger retrieval quality, scope handling, factual rigor, observability, governance, and association/clustering behavior.
+
+The generation workflow will be shaped by what the library can store and how retrieval behaves. Implementing it too early risks generating plausible-looking memory objects that degrade continuity.
+
+## Dependency on v0.1.3
+
+v0.6 should use the v0.1.3 write-plan path.
+
+Generated processors should produce:
+
+```text
+MemoryCandidate
+RememberWritePlan
+CandidateProvenance
+RememberDiagnostics
+```
+
+They should not bypass validation or commit directly to stores.
+
+## Possible generated candidates
+
+```text
+Episode candidates
+Observation candidates
+Entity candidates
+Thread/scope link candidates
+DerivedMemory candidates
+salience/admission candidates
+natural embedding surfaces
+memory link candidates
+```
+
+## Non-goals
+
+Do not make v0.6 an autonomous memory agent that scans logs without caller intent.
+
+The caller should still control:
+
+```text
+when raw input is offered
+which raw input is offered
+which processors are enabled
+what privacy policy applies
+whether candidates require review
+```
+
+## Acceptance criteria
+
+```text
+Caller can pass raw chat/transcript-like input and receive a RememberWritePlan.
+Generated DerivedMemory candidates include provenance.
+Explicit corrections generate correction candidates.
+Explicit commitments generate commitment/open-loop candidates.
+Entity candidates are resolved through graph authority rather than direct model-minted IDs.
+Thread/scope links are optional and confidence-scored.
+Embedding text is natural language, not metadata dumps.
+Generation diagnostics expose accepted, rejected, and deferred candidates.
+Privacy exclusions are applied before external processor calls.
+Generated candidates use the same validation and commit path as manual candidates.
+```
+
+---
+
+# 15. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -671,7 +1136,7 @@ This is a future path, not starter scope.
 
 ---
 
-# 14. Public API evolution
+# 16. Public API evolution
 
 ## v0.1 API
 
@@ -712,6 +1177,46 @@ max = 5
 min = 0
 max = 15
 ```
+
+## v0.1.3 API additions
+
+v0.1.3 introduces an explicit write-planning workflow.
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+let validation = memory.validate(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+The existing `remember()` API remains the convenience path:
+
+```rust
+let outcome = memory.remember(input, remember_options).await?;
+```
+
+Conceptually:
+
+```text
+remember(input)
+  = prepare(input)
+  + validate(plan)
+  + commit(plan)
+```
+
+The purpose is to let manual writes and future generated writes share the same validation and commit path.
+
+Application-owned approval flows should compose these primitives:
+
+```rust
+let plan = memory.prepare(input, prepare_options).await?;
+
+// Application reviews, edits, or filters the plan.
+let approved_plan = app_review(plan).await?;
+
+let outcome = memory.commit(approved_plan, commit_options).await?;
+```
+
+`RequireApproval` and `ApplicationReviewCallback` are not core v0.1.3 commit modes. They are application workflows or future adapters.
 
 ## v0.2 API additions
 
@@ -761,9 +1266,19 @@ let cluster_result = memory.cluster_episodes(scope).await?;
 let cluster_context = memory.retrieve_cluster_context(cluster_id).await?;
 ```
 
+## v0.6 API additions
+
+```rust
+let plan = memory.prepare(raw_interaction_input, generation_options).await?;
+let validation = memory.validate(&plan).await?;
+let outcome = memory.commit(plan, commit_options).await?;
+```
+
+Generated processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing validation or committing directly to stores.
+
 ---
 
-# 15. YAGNI rules
+# 17. YAGNI rules
 
 Do not implement in v0.1 / v0.1.2:
 
@@ -786,6 +1301,49 @@ physical redaction/delete as the default lifecycle path
 admin dashboard
 analytics-heavy stats system
 migration/backfill for nonexistent production data
+```
+
+## v0.1.3 YAGNI rules
+
+Do not implement in v0.1.3:
+
+```text
+LLM-based summarization
+automatic observation extraction
+automatic entity extraction
+automatic entity resolution from natural language
+automatic thread or scope inference
+automatic preference extraction
+automatic commitment/open-loop detection
+automatic correction detection
+automatic character-signal generation
+model-assisted salience scoring
+learned admission policy
+application review callback framework
+full assisted remember workflow
+raw audio/video processing
+```
+
+Do design for:
+
+```text
+RememberWritePlan
+MemoryCandidate
+CandidateProvenance
+CandidateValidation
+RememberDiagnostics
+prepare / validate / commit workflow
+manual and future-generated writes sharing the same commit path
+deterministic source spans and source references
+idempotent retry-safe writes
+validation before behavior-influencing persistence
+```
+
+The principle is:
+
+```text
+Build the path that generated memories will travel later.
+Do not build the generator yet.
 ```
 
 Do design for:

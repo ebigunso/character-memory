@@ -2,7 +2,7 @@
 
 ## Version intent
 
-v0.1 stores episodes and simple derived memories. v0.1.2 hardens retrieval so broad entities do not flood context. v0.2 then makes those memories actively support continuity through explicit scopes, reflections, relationship states, character signals, open loops, and commitments.
+v0.1 stores episodes and simple derived memories. v0.1.2 hardens retrieval so broad entities do not flood context. v0.1.3 prepares the shared write-plan path those richer continuity structures can use. v0.2 then makes memories actively support continuity through explicit scopes, reflections, relationship states, character signals, open loops, and commitments.
 
 The key refinement in this version is scope:
 
