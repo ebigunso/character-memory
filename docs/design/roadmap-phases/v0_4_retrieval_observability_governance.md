@@ -253,7 +253,7 @@ fn get_context_subgraph(
     context: RetrievalContext,
 ) -> Result<ContextSubgraph, MemoryError>;
 
-fn validate(
+fn validate_graph(
     &self,
     scope: Option<&ContinuityScope>,
 ) -> Result<ValidationReport, MemoryError>;

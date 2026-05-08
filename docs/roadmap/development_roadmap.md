@@ -229,58 +229,69 @@ Test fixtures
 Migration hooks
 ```
 
-## Suggested modules
+## Implemented module layout
 
 ```text
 src/
   lib.rs
+  api.rs
   api/
-    mod.rs
     embedding.rs
-  types/
-    domain.rs
-    draft.rs
-    lifecycle.rs
-    retrieval.rs
-  internal/
-    models/
-    vector/
-      mod.rs
-      candidate_record.rs
-      embedding_model.rs
-      embedding_surface.rs
-      record.rs
-    repositories/
-      graph_authority_store.rs
-      vector_candidate_store.rs
-      retrieval_stats_store.rs
-    remember_pipeline.rs
-    link_pipeline.rs
-    retrieve_pipeline.rs
-    correction_forget_pipeline.rs
-    embedder.rs
-    raw_reference_resolver.rs
-    mod.rs
-  infrastructures/
-    external_services/
-      mod.rs
-    qdrant_payload.rs
-    qdrant_vector_candidate_store.rs
-    openai_embedding_provider.rs
-    graph/
-      mod.rs
-      rdf_mapping.rs
-      vocabulary.rs
-      oxigraph_authority_store.rs
-    stats/
-      mod.rs
-      sqlite_retrieval_stats_store.rs
-      in_memory_retrieval_stats_store.rs
+    types.rs
+    types/
+      domain.rs
+      draft.rs
+      lifecycle.rs
+      retrieval.rs
+  config.rs
   config/
     settings.rs
-  settings/
-    app_settings.rs
+    settings/
+      app_settings.rs
   errors.rs
+  errors/
+    custom.rs
+  internal.rs
+  internal/
+    config.rs
+    config/
+      settings.rs
+      settings/
+        embedding_provider_settings.rs
+    infrastructures.rs
+    infrastructures/
+      external_services.rs
+      external_services/
+        openai_embedding_provider.rs
+        qdrant_payload.rs
+        qdrant_vector_candidate_store.rs
+      graph.rs
+      graph/
+        oxigraph_authority_store.rs
+        rdf_mapping.rs
+        sparql_selectors.rs
+        vocabulary.rs
+    models.rs
+    models/
+      vector.rs
+      vector/
+        candidate_record.rs
+        embedding_model.rs
+        embedding_surface.rs
+        record.rs
+    repositories.rs
+    repositories/
+      correction_forget_pipeline.rs
+      embedder.rs
+      graph_authority_store.rs
+      link_pipeline.rs
+      raw_reference_resolver.rs
+      reconciliation.rs
+      remember_pipeline.rs
+      retrieve_pipeline.rs
+      test_support.rs
+      vector_candidate_store.rs
+    schema.rs
 tests/
 ```
 
@@ -682,7 +693,7 @@ prepare
 ```text
 remember(input)
   = prepare(input)
-  + validate(plan)
+  + validate_plan(plan)
   + commit(plan)
 ```
 
@@ -692,7 +703,7 @@ Suggested public or semi-public API shape:
 
 ```rust
 let plan = memory.prepare(input, prepare_options).await?;
-let validation = memory.validate(&plan).await?;
+let validation = memory.validate_plan(&plan).await?;
 let outcome = memory.commit(plan, commit_options).await?;
 ```
 
@@ -1184,7 +1195,7 @@ v0.1.3 introduces an explicit write-planning workflow.
 
 ```rust
 let plan = memory.prepare(input, prepare_options).await?;
-let validation = memory.validate(&plan).await?;
+let validation = memory.validate_plan(&plan).await?;
 let outcome = memory.commit(plan, commit_options).await?;
 ```
 
@@ -1199,7 +1210,7 @@ Conceptually:
 ```text
 remember(input)
   = prepare(input)
-  + validate(plan)
+  + validate_plan(plan)
   + commit(plan)
 ```
 
@@ -1251,7 +1262,7 @@ let reviewed = memory.review_stale_beliefs().await?;
 ```rust
 let explanation = memory.explain_retrieval(trace_id).await?;
 let report = memory.graph_health_report(scope).await?;
-let validation = memory.validate(scope).await?;
+let validation = memory.validate_graph(scope).await?;
 let context_subgraph = memory.get_context_subgraph(context).await?;
 
 let retention_scope: Option<ContinuityScope> = None;
@@ -1270,7 +1281,7 @@ let cluster_context = memory.retrieve_cluster_context(cluster_id).await?;
 
 ```rust
 let plan = memory.prepare(raw_interaction_input, generation_options).await?;
-let validation = memory.validate(&plan).await?;
+let validation = memory.validate_plan(&plan).await?;
 let outcome = memory.commit(plan, commit_options).await?;
 ```
 

@@ -225,12 +225,12 @@ It should not persist anything.
 let plan = memory.prepare(input, prepare_options).await?;
 ```
 
-### validate
+### validate_plan
 
-`validate()` checks a plan without committing it.
+`validate_plan()` checks a plan without committing it.
 
 ```rust
-let validation = memory.validate(&plan).await?;
+let validation = memory.validate_plan(&plan).await?;
 ```
 
 ### commit
@@ -256,7 +256,7 @@ Conceptually:
 ```text
 remember(input)
   = prepare(input)
-  + validate(plan)
+  + validate_plan(plan)
   + commit(plan)
 ```
 
