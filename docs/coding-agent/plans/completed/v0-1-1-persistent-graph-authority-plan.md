@@ -1,6 +1,6 @@
 # Plan: v0.1.1 Persistent Graph Authority
 
-- status: in_progress
+- status: done
 - generated: 2026-05-01
 - last_updated: 2026-05-01
 - work_type: mixed
