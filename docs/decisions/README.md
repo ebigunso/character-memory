@@ -24,9 +24,9 @@ ADR-D-0001, ADR-D-0002, ...  High-level design and product-philosophy decisions.
 ADR-I-0001, ADR-I-0002, ...  Implementation, storage, API, and operational decisions.
 ```
 
-A design ADR should be used when overlooking the decision would risk violating the core Character Memory philosophy: episode-backed continuity, provenance, correction, or reflection.
+A design ADR should be used when overlooking the decision would risk violating the core Character Memory philosophy: episode-backed continuity, provenance, correction, reflection, scoped continuity, or entity-neutral recall.
 
-An implementation ADR should be used when the decision is primarily about how the library is built: storage contracts, indexing, IDs, schema versions, retrieval bounds, and integration behavior.
+An implementation ADR should be used when the decision is primarily about how the library is built: storage contracts, indexing, IDs, schema versions, retrieval bounds, fanout policy, derived stats, and integration behavior.
 
 ## Status values
 
@@ -53,6 +53,10 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-D-0006: Use supersession and suppression as default correction/forgetting mechanisms](design/ADR-D-0006-supersession-and-suppression.md)
 - [ADR-D-0007: Start chat-native and transcript-compatible, not multimodal-native](design/ADR-D-0007-chat-native-transcript-compatible-start.md)
 - [ADR-D-0008: Preserve source references because summaries are not source material](design/ADR-D-0008-preserve-source-references.md)
+- [ADR-D-0009: Keep core retrieval policy entity-neutral](design/ADR-D-0009-entity-neutral-retrieval-policy.md)
+- [ADR-D-0010: Treat recurring entities as continuity anchors, not traversal invitations](design/ADR-D-0010-recurring-entities-are-anchors-not-traversal-invitations.md)
+- [ADR-D-0011: Scope continuity around arbitrary entities and contexts](design/ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts.md)
+- [ADR-D-0012: Separate memory candidates from committed memory](design/ADR-D-0012-separate-memory-candidates-from-committed-memory.md)
 
 ### Implementation Decisions
 
@@ -63,3 +67,9 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0005: Keep Qdrant metadata filterable while graph relationships remain authoritative](implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md)
 - [ADR-I-0006: Bound graph expansion and expose retrieval rationale](implementation/ADR-I-0006-bounded-graph-expansion.md)
 - [ADR-I-0007: Version persisted schemas from the first implementation](implementation/ADR-I-0007-schema-versioning.md)
+- [ADR-I-0008: Treat retrieval stats as derived policy metadata, not graph truth](implementation/ADR-I-0008-retrieval-stats-are-derived-policy-metadata.md)
+- [ADR-I-0009: Use SQLite as the default retrieval stats store](implementation/ADR-I-0009-use-sqlite-as-default-retrieval-stats-store.md)
+- [ADR-I-0010: Use continuous selectivity and smooth fanout](implementation/ADR-I-0010-use-continuous-selectivity-and-smooth-fanout.md)
+- [ADR-I-0011: Guard against durable links from low-information co-occurrence](implementation/ADR-I-0011-guard-against-low-information-co-occurrence-links.md)
+- [ADR-I-0012: Use prepare / validate / commit for the write workflow](implementation/ADR-I-0012-use-prepare-validate-commit-write-workflow.md)
+- [ADR-I-0013: Deterministic write-planning helpers do not infer high-level meaning](implementation/ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md)
