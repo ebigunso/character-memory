@@ -50,7 +50,7 @@ AssociationSupport
 
 ## Why cluster-level status is not enough
 
-An active associative cluster may receive new possible members over time.
+An active `AssociativeUnit` may receive new possible members over time.
 
 A new memory that appears related to an active cluster should not automatically be treated as equally established with existing core members.
 
@@ -332,7 +332,7 @@ Active membership role -> Peripheral
 Active -> Retired
   if rarely retrieved, low salience, and no longer useful even as a peripheral member
 
-Any membership -> InvalidForRetrieval
+Any membership remains in its status but becomes ineligible for retrieval
   if source memory is suppressed or deleted
 ```
 

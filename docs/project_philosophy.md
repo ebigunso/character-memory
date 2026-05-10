@@ -149,8 +149,8 @@ The system should distinguish:
 ```text
 entity incidence
 query-time associative activation
-candidate association
-active associative cluster
+association candidate evidence
+active AssociativeUnit
 strong durable relation
 ```
 
