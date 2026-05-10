@@ -109,9 +109,15 @@ impl Settings {
     /// - `Ok`: A new `Settings` instance with the provided configuration
     /// - `Err`: A `CustomError` if any required settings are missing or invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
-        config.try_deserialize().map_err(|e| {
+        let settings: Self = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
-        })
+        })?;
+        validate_positive_f64(
+            "selectivity_smoothing_alpha",
+            settings.selectivity_smoothing_alpha,
+        )?;
+        validate_positive_f64("selectivity_gamma", settings.selectivity_gamma)?;
+        Ok(settings)
     }
 
     /// Loads settings from environment variables and configuration files using default loaders.
@@ -295,12 +301,17 @@ fn parse_positive_f64(name: &str, value: &str) -> Result<f64, CustomError> {
     let parsed = value.parse::<f64>().map_err(|error| {
         CustomError::ConfigParseError(format!("{name} must be a finite positive number: {error}"))
     })?;
-    if !parsed.is_finite() || parsed <= 0.0 {
+    validate_positive_f64(name, parsed)?;
+    Ok(parsed)
+}
+
+fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+    if !value.is_finite() || value <= 0.0 {
         return Err(CustomError::ConfigParseError(format!(
             "{name} must be a finite positive number, got {value}"
         )));
     }
-    Ok(parsed)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -427,6 +438,31 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
         assert_eq!(settings.get_selectivity_gamma(), 0.5);
+    }
+
+    #[test]
+    fn test_settings_new_rejects_invalid_selectivity_numbers() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("selectivity_smoothing_alpha", 0.0)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let result = Settings::new(external_config);
+
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("selectivity_smoothing_alpha")
+        ));
     }
 
     #[test]

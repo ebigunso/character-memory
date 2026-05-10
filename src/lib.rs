@@ -216,10 +216,10 @@ impl CharacterMemory {
             }
         };
         let stats_store = retrieval_stats_store(&settings)?;
-        let selectivity_policy = RetrievalSelectivityPolicy::new(
+        let selectivity_policy = RetrievalSelectivityPolicy::try_new(
             settings.get_selectivity_smoothing_alpha(),
             settings.get_selectivity_gamma(),
-        );
+        )?;
 
         Ok(Self::from_parts_with_stats(
             graph_store,

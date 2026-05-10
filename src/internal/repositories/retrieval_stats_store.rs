@@ -174,6 +174,8 @@ impl InMemoryRetrievalStatsStore {
 #[derive(Debug, Default)]
 struct InMemoryState {
     edges: HashMap<String, RetrievalStatsEdge>,
+    counters: HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter>,
+    global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     health: RetrievalStatsHealth,
 }
 
@@ -184,6 +186,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         for edge in edges {
             state.edges.insert(edge.edge_key.clone(), edge.clone());
         }
+        state.refresh_counters();
         state.health = RetrievalStatsHealth::default();
         Ok(())
     }
@@ -204,6 +207,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                 }
             }
         }
+        state.refresh_counters();
         state.health = RetrievalStatsHealth::default();
         Ok(())
     }
@@ -212,9 +216,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         &self,
         key: &RetrievalStatsCounterKey,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(recomputed_counters(&lock(&self.state)?.edges)
-            .get(key)
-            .copied())
+        Ok(lock(&self.state)?.counters.get(key).copied())
     }
 
     async fn global_counter(
@@ -222,7 +224,8 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         relation_kind: RelationType,
         object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(recomputed_global_counters(&lock(&self.state)?.edges)
+        Ok(lock(&self.state)?
+            .global_counters
             .get(&(relation_kind, object_type))
             .copied())
     }
@@ -238,6 +241,13 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             last_error_message: Some(message),
         };
         Ok(())
+    }
+}
+
+impl InMemoryState {
+    fn refresh_counters(&mut self) {
+        self.counters = recomputed_counters(&self.edges);
+        self.global_counters = recomputed_global_counters(&self.edges);
     }
 }
 
