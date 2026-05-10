@@ -90,6 +90,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     stats_store: &dyn RetrievalStatsStore,
     policy: RetrievalSelectivityPolicy,
     stats_context: &SelectivityStatsContext,
+    include_trace: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
         return Ok(SelectivityPlan::default());
@@ -142,19 +143,21 @@ pub(crate) async fn selectivity_plan_for_candidate(
             object_type: spec.object_type,
             max_fanout: chosen_fanout,
         });
-        plan.traces.push(SelectivityTrace {
-            root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            relation: spec.relation,
-            object_type: spec.object_type,
-            score,
-            entity_count,
-            global_count,
-            support_factor,
-            chosen_fanout,
-            max_fanout,
-            decision,
-            fallback,
-        });
+        if include_trace {
+            plan.traces.push(SelectivityTrace {
+                root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                relation: spec.relation,
+                object_type: spec.object_type,
+                score,
+                entity_count,
+                global_count,
+                support_factor,
+                chosen_fanout,
+                max_fanout,
+                decision,
+                fallback,
+            });
+        }
     }
 
     Ok(plan)
@@ -265,6 +268,8 @@ fn fanout_specs() -> &'static [FanoutSpec] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::models::vector::VectorSurface;
+    use crate::internal::repositories::InMemoryRetrievalStatsStore;
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -306,5 +311,42 @@ mod tests {
             invalid_gamma,
             Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
         ));
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_builds_traces_only_when_requested() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462001").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.75,
+        );
+
+        let without_trace = selectivity_plan_for_candidate(
+            &candidate,
+            10,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            false,
+        )
+        .await
+        .unwrap();
+        let with_trace = selectivity_plan_for_candidate(
+            &candidate,
+            10,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(without_trace.telemetry.decision_count, fanout_specs().len());
+        assert!(without_trace.traces.is_empty());
+        assert_eq!(with_trace.traces.len(), fanout_specs().len());
     }
 }
