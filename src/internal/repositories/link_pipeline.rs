@@ -1,5 +1,4 @@
-// Typed-link pipeline used by the public facade and internal tests. Some
-// helpers remain available for focused test and validation paths.
+// Typed-link pipeline used by the public facade and internal tests.
 use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
@@ -7,16 +6,9 @@ use crate::internal::repositories::{
     RetrievalStatsStore,
 };
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
     ExplicitCallerIntent,
-    SameThread,
-    Correction,
-    Temporal,
-    SemanticSupport,
-    HighSalience,
-    SelectiveEntity,
     LowSelectivityCoOccurrenceOnly,
 }
 
@@ -68,22 +60,6 @@ where
     ) -> Result<MemoryLink, CustomError> {
         self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
             .await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn link_inferred_association_candidate(
-        &self,
-        draft: MemoryLinkDraft,
-        defaults: &mut DraftDefaults,
-        evidence: LinkAdmissionEvidence,
-    ) -> Result<MemoryLink, CustomError> {
-        if evidence == LinkAdmissionEvidence::ExplicitCallerIntent {
-            return Err(CustomError::MemoryValidation(
-                "inferred association candidates require non-explicit admission evidence"
-                    .to_owned(),
-            ));
-        }
-        self.link_with_evidence(draft, defaults, evidence).await
     }
 
     async fn link_with_evidence(
@@ -372,7 +348,7 @@ mod tests {
         let mut defaults = DraftDefaults::at(timestamp());
 
         let error = pipeline
-            .link_inferred_association_candidate(
+            .link_with_evidence(
                 associated_with_link_draft(),
                 &mut defaults,
                 LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
@@ -406,32 +382,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inferred_association_entrypoint_requires_non_explicit_evidence() {
-        let graph = FakeGraphAuthorityStore::new();
-        let stats = InMemoryRetrievalStatsStore::new();
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let mut defaults = DraftDefaults::at(timestamp());
-
-        let error = pipeline
-            .link_inferred_association_candidate(
-                associated_with_link_draft(),
-                &mut defaults,
-                LinkAdmissionEvidence::ExplicitCallerIntent,
-            )
-            .await
-            .unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("inferred association candidates require non-explicit admission evidence"));
-    }
-
-    #[tokio::test]
     async fn entity_neutral_low_information_guard_does_not_check_roles() {
         for evidence in [
             LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
-            LinkAdmissionEvidence::SelectiveEntity,
-            LinkAdmissionEvidence::SameThread,
+            LinkAdmissionEvidence::ExplicitCallerIntent,
         ] {
             let decision = admit_link(&associated_with_link(), evidence);
             assert_eq!(
