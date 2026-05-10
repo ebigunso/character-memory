@@ -172,7 +172,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
         let mut state = lock(&self.state)?;
         for edge in edges {
-            state.edges.insert(edge.edge_key.clone(), edge.clone());
+            insert_edge(&mut state.edges, edge.clone());
         }
         state.mark_healthy_after_success();
         Ok(())
@@ -585,6 +585,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_store_merges_duplicate_edge_timestamps() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460041");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655460042");
+        let later_edge = edge(
+            entity_id,
+            RelationType::Involves,
+            episode_id,
+            ObjectType::Episode,
+            RetentionState::Active,
+            true,
+            timestamp_at("2026-04-28T13:00:00Z"),
+        );
+        let earlier_edge = edge(
+            entity_id,
+            RelationType::Involves,
+            episode_id,
+            ObjectType::Episode,
+            RetentionState::Active,
+            true,
+            timestamp_at("2026-04-28T11:00:00Z"),
+        );
+
+        store.record_edges(&[later_edge]).await.unwrap();
+        store.record_edges(&[earlier_edge]).await.unwrap();
+
+        let state = lock(&store.state).unwrap();
+        let stored = state
+            .edges
+            .get(&format!("{}:involves:episode:{}", entity_id, episode_id))
+            .unwrap();
+        assert_eq!(stored.first_seen_at, timestamp_at("2026-04-28T11:00:00Z"));
+        assert_eq!(stored.last_seen_at, timestamp_at("2026-04-28T13:00:00Z"));
+    }
+
+    #[tokio::test]
     async fn in_memory_store_updates_lifecycle_counts() {
         let store = InMemoryRetrievalStatsStore::new();
         let entity_id = id("550e8400-e29b-41d4-a716-446655460011");
@@ -827,7 +863,11 @@ mod tests {
     }
 
     fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
+        timestamp_at("2026-04-28T12:00:00Z")
+    }
+
+    fn timestamp_at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
     }
