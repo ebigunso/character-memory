@@ -134,14 +134,16 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     }
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
-        let connection = lock(&self.connection)?;
+        let mut connection = lock(&self.connection)?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
         set_health(
-            &connection,
+            &transaction,
             RetrievalStatsHealth {
                 state: RetrievalStatsHealthState::Unhealthy,
                 last_error_message: Some(message),
             },
-        )
+        )?;
+        transaction.commit().map_err(sqlite_error)
     }
 
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
@@ -248,19 +250,28 @@ fn upsert_edge(connection: &Connection, edge: &RetrievalStatsEdge) -> Result<(),
     match existing {
         Some((old_retention, old_is_current)) => {
             let old_active = old_retention == "active";
-            let new_active = edge.is_active();
+            let merged_retention =
+                more_restrictive_retention_key(&old_retention, edge.retention_state);
+            let merged_is_current = old_is_current && edge.is_current;
+            let new_active = merged_retention == RetentionState::Active;
             let active_delta = bool_delta(old_active, new_active);
-            let current_delta =
-                bool_delta(old_active && old_is_current, new_active && edge.is_current);
+            let current_delta = bool_delta(
+                old_active && old_is_current,
+                new_active && merged_is_current,
+            );
             connection
                 .execute(
                     "UPDATE entity_edge_index
-                     SET retention_state = ?2, is_current = ?3, last_seen_at = ?4
+                     SET retention_state = ?2,
+                         is_current = ?3,
+                         first_seen_at = MIN(first_seen_at, ?4),
+                         last_seen_at = MAX(last_seen_at, ?5)
                      WHERE edge_key = ?1",
                     params![
                         edge.edge_key,
-                        retention_state_key(edge.retention_state),
-                        bool_int(edge.is_current),
+                        retention_state_key(merged_retention),
+                        bool_int(merged_is_current),
+                        edge.first_seen_at.to_rfc3339(),
                         edge.last_seen_at.to_rfc3339()
                     ],
                 )
@@ -340,7 +351,9 @@ fn update_object_state(
         connection
             .execute(
                 "UPDATE entity_edge_index
-                 SET retention_state = ?2, is_current = ?3, last_seen_at = ?4
+                 SET retention_state = ?2,
+                     is_current = ?3,
+                     last_seen_at = MAX(last_seen_at, ?4)
                  WHERE edge_key = ?1",
                 params![
                     edge_key,
@@ -495,6 +508,36 @@ fn bool_delta(old: bool, new: bool) -> i64 {
     }
 }
 
+fn more_restrictive_retention_key(existing: &str, incoming: RetentionState) -> RetentionState {
+    if retention_rank(incoming) > retention_key_rank(existing) {
+        incoming
+    } else {
+        retention_from_key(existing)
+    }
+}
+
+fn retention_from_key(value: &str) -> RetentionState {
+    match value {
+        "suppressed" => RetentionState::Suppressed,
+        "archived" => RetentionState::Archived,
+        "deleted" => RetentionState::Deleted,
+        _ => RetentionState::Active,
+    }
+}
+
+fn retention_key_rank(value: &str) -> u8 {
+    retention_rank(retention_from_key(value))
+}
+
+fn retention_rank(retention_state: RetentionState) -> u8 {
+    match retention_state {
+        RetentionState::Active => 0,
+        RetentionState::Archived => 1,
+        RetentionState::Suppressed => 2,
+        RetentionState::Deleted => 3,
+    }
+}
+
 fn bool_int(value: bool) -> i64 {
     i64::from(value)
 }
@@ -564,6 +607,75 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(global.total_count, 1);
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_merges_duplicate_edge_timestamps_monotonically() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461031");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461032");
+        let mut later_edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+        later_edge.first_seen_at = timestamp_at("2026-04-28T12:00:00Z");
+        later_edge.last_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        let mut earlier_edge = later_edge.clone();
+        earlier_edge.first_seen_at = timestamp_at("2026-04-28T11:00:00Z");
+        earlier_edge.last_seen_at = timestamp_at("2026-04-28T12:30:00Z");
+
+        store.record_edges(&[later_edge]).await.unwrap();
+        store.record_edges(&[earlier_edge]).await.unwrap();
+
+        let connection = lock(&store.connection).unwrap();
+        let (first_seen_at, last_seen_at): (String, String) = connection
+            .query_row(
+                "SELECT first_seen_at, last_seen_at
+                 FROM entity_edge_index
+                 WHERE edge_key = ?1",
+                params![format!("{}:involves:episode:{}", entity_id, episode_id)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(first_seen_at, "2026-04-28T11:00:00+00:00");
+        assert_eq!(last_seen_at, "2026-04-28T13:00:00+00:00");
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_keeps_restrictive_lifecycle_on_incomplete_edge_update() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461041");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461042");
+        let suppressed_edge = test_edge(entity_id, episode_id, RetentionState::Suppressed, false);
+        let active_edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+
+        store.record_edges(&[suppressed_edge]).await.unwrap();
+        store.record_edges(&[active_edge]).await.unwrap();
+
+        let counter = store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::Involves,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
+
+        let connection = lock(&store.connection).unwrap();
+        let (retention_state, is_current): (String, i64) = connection
+            .query_row(
+                "SELECT retention_state, is_current
+                 FROM entity_edge_index
+                 WHERE edge_key = ?1",
+                params![format!("{}:involves:episode:{}", entity_id, episode_id)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retention_state, "suppressed");
+        assert_eq!(is_current, 0);
     }
 
     #[tokio::test]
@@ -679,6 +791,41 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn sqlite_object_state_updates_do_not_regress_last_seen_at() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461041");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461042");
+        let mut edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+        edge.first_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        edge.last_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        store.record_edges(&[edge]).await.unwrap();
+
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: episode_id,
+                object_type: ObjectType::Episode,
+                retention_state: RetentionState::Suppressed,
+                is_current: false,
+                observed_at: timestamp_at("2026-04-28T11:00:00Z"),
+            }])
+            .await
+            .unwrap();
+
+        let connection = lock(&store.connection).unwrap();
+        let last_seen_at: String = connection
+            .query_row(
+                "SELECT last_seen_at
+                 FROM entity_edge_index
+                 WHERE edge_key = ?1",
+                params![format!("{}:involves:episode:{}", entity_id, episode_id)],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(last_seen_at, "2026-04-28T13:00:00+00:00");
+    }
+
     fn test_edge(
         entity_id: MemoryId,
         object_id: MemoryId,
@@ -703,7 +850,11 @@ mod tests {
     }
 
     fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
+        timestamp_at("2026-04-28T12:00:00Z")
+    }
+
+    fn timestamp_at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
     }

@@ -18,7 +18,10 @@ pub(crate) enum LinkAdmissionEvidence {
     LowSelectivityCoOccurrenceOnly,
 }
 
-const STRONGER_LINK_ADMISSION_EVIDENCE: [LinkAdmissionEvidence; 6] = [
+const LOW_INFORMATION_LINK_ADMISSION_EVIDENCE: LinkAdmissionEvidence =
+    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly;
+const LINK_ADMISSION_EVIDENCE_SUPPORTING_ASSOCIATION: [LinkAdmissionEvidence; 7] = [
+    LinkAdmissionEvidence::ExplicitCallerIntent,
     LinkAdmissionEvidence::SameActiveThread,
     LinkAdmissionEvidence::CorrectionOrSupersession,
     LinkAdmissionEvidence::TemporalRelation,
@@ -26,8 +29,6 @@ const STRONGER_LINK_ADMISSION_EVIDENCE: [LinkAdmissionEvidence; 6] = [
     LinkAdmissionEvidence::HighSalience,
     LinkAdmissionEvidence::SelectiveSharedEntity,
 ];
-const LOW_INFORMATION_LINK_ADMISSION_EVIDENCE: LinkAdmissionEvidence =
-    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionDecision {
@@ -125,7 +126,9 @@ where
                     .await;
             }
             Err(error) => {
-                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
+                let error_message = error.to_string();
+                record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
+                let _ = self.stats_store.mark_unhealthy(error_message).await;
             }
         }
     }
@@ -150,16 +153,22 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
 }
 
 fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissionDecision {
-    let has_stronger_evidence = evidence == LinkAdmissionEvidence::ExplicitCallerIntent
-        || STRONGER_LINK_ADMISSION_EVIDENCE.contains(&evidence);
-    if link.relation == crate::api::types::RelationType::AssociatedWith
-        && evidence == LOW_INFORMATION_LINK_ADMISSION_EVIDENCE
-        && !has_stronger_evidence
-    {
-        LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-    } else {
-        LinkAdmissionDecision::Accepted
+    match (link.relation, evidence) {
+        (
+            crate::api::types::RelationType::AssociatedWith,
+            LOW_INFORMATION_LINK_ADMISSION_EVIDENCE,
+        ) => LinkAdmissionDecision::RejectedLowInformationCoOccurrence,
+        (crate::api::types::RelationType::AssociatedWith, evidence)
+            if link_admission_evidence_supports_association(evidence) =>
+        {
+            LinkAdmissionDecision::Accepted
+        }
+        _ => LinkAdmissionDecision::Accepted,
     }
+}
+
+fn link_admission_evidence_supports_association(evidence: LinkAdmissionEvidence) -> bool {
+    LINK_ADMISSION_EVIDENCE_SUPPORTING_ASSOCIATION.contains(&evidence)
 }
 
 fn validation_error(error: impl ToString) -> CustomError {
@@ -169,18 +178,21 @@ fn validation_error(error: impl ToString) -> CustomError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use crate::api::types::{
-        MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, DEFAULT_SCHEMA_VERSION,
+        DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
     };
     use crate::internal::repositories::{
-        GraphAuthorityStore, GraphExpansionQuery, InMemoryRetrievalStatsStore,
-        RetrievalStatsCounterKey, RetrievalStatsStore,
+        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+        GraphExpansion, GraphExpansionQuery, InMemoryRetrievalStatsStore, RetrievalStatsCounterKey,
+        RetrievalStatsStore,
     };
 
     #[tokio::test]
@@ -464,6 +476,97 @@ mod tests {
             stats.rejected_low_information_link_count().await.unwrap(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_fallback_stats_when_endpoint_lookup_fails() {
+        let graph = QueryObjectsFailingGraph::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = valid_link_draft();
+        let entity_id = draft.to_id;
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+        assert_eq!(
+            stats.health().await.unwrap().state,
+            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+        );
+    }
+
+    #[derive(Default)]
+    struct QueryObjectsFailingGraph {
+        links: std::sync::Mutex<Vec<MemoryLink>>,
+    }
+
+    #[async_trait]
+    impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+            self.links.lock().unwrap().extend_from_slice(links);
+            Ok(())
+        }
+
+        async fn upsert_objects_and_links(
+            &self,
+            _objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            self.upsert_links(links).await
+        }
+
+        async fn query_objects(
+            &self,
+            _query: &GraphObjectQuery,
+        ) -> Result<Vec<MemoryObject>, CustomError> {
+            Err(CustomError::DatabaseError(
+                "endpoint lifecycle lookup failed".to_owned(),
+            ))
+        }
+
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            _query: &GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn expand_bounded(
+            &self,
+            _query: &GraphExpansionQuery,
+        ) -> Result<GraphExpansion, CustomError> {
+            Ok(GraphExpansion::new(Vec::new(), Vec::new()))
+        }
+
+        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(self.links.lock().unwrap().clone())
+        }
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {

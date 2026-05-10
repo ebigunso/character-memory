@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::types::{
-    MemoryObjectRef, ObjectType, RelationType, SelectivityDecision, SelectivityTelemetry,
-    SelectivityTrace,
+    MemoryObjectRef, ObjectType, RelationType, RetrievalLifecyclePolicy, SelectivityCountScope,
+    SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::VectorCandidateMatch;
@@ -90,6 +90,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     stats_store: &dyn RetrievalStatsStore,
     policy: RetrievalSelectivityPolicy,
     stats_context: &SelectivityStatsContext,
+    lifecycle_policy: RetrievalLifecyclePolicy,
     include_trace: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
@@ -97,6 +98,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     }
 
     let mut plan = SelectivityPlan::default();
+    let count_scope = SelectivityCountScope::from(lifecycle_policy);
     for spec in fanout_specs() {
         let support_factor = semantic_support_factor(candidate.score);
         let (score, entity_count, global_count, fallback) =
@@ -109,16 +111,24 @@ pub(crate) async fn selectivity_plan_for_candidate(
                 let entity = stats_store.counter(&key).await?;
                 let global = stats_context.global_counter(spec.relation, spec.object_type);
                 match (entity, global) {
-                    (Some(entity), Some(global)) if global.current_count > 0 => (
-                        Some(selectivity_score(
-                            entity.current_count,
-                            global.current_count,
-                            policy.smoothing_alpha,
-                        )),
-                        Some(entity.current_count),
-                        Some(global.current_count),
-                        false,
-                    ),
+                    (Some(entity), Some(global)) => {
+                        let entity_count = count_scope.count(entity);
+                        let global_count = count_scope.count(global);
+                        if global_count > 0 {
+                            (
+                                Some(selectivity_score(
+                                    entity_count,
+                                    global_count,
+                                    policy.smoothing_alpha,
+                                )),
+                                Some(entity_count),
+                                Some(global_count),
+                                false,
+                            )
+                        } else {
+                            (None, None, None, true)
+                        }
+                    }
                     _ => (None, None, None, true),
                 }
             } else {
@@ -148,6 +158,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
                 root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                 relation: spec.relation,
                 object_type: spec.object_type,
+                count_scope,
                 score,
                 entity_count,
                 global_count,
@@ -214,6 +225,9 @@ fn selectivity_decision(
     if fallback {
         return SelectivityDecision::ConservativeFallback;
     }
+    if chosen_fanout == 0 {
+        return SelectivityDecision::LowSelectivityRejected;
+    }
     let score = score.unwrap_or_default();
     if score >= 0.5 {
         SelectivityDecision::HighSelectivity
@@ -221,6 +235,28 @@ fn selectivity_decision(
         SelectivityDecision::LowSelectivitySupported
     } else {
         SelectivityDecision::LowSelectivityRejected
+    }
+}
+
+impl From<RetrievalLifecyclePolicy> for SelectivityCountScope {
+    fn from(policy: RetrievalLifecyclePolicy) -> Self {
+        if policy.include_archived || policy.include_suppressed || policy.include_deleted {
+            Self::Total
+        } else if policy.include_non_current || policy.include_superseded {
+            Self::Active
+        } else {
+            Self::Current
+        }
+    }
+}
+
+impl SelectivityCountScope {
+    fn count(self, counter: RetrievalStatsCounter) -> u64 {
+        match self {
+            Self::Current => counter.current_count,
+            Self::Active => counter.active_count,
+            Self::Total => counter.total_count,
+        }
     }
 }
 
@@ -273,7 +309,7 @@ fn fanout_specs() -> &'static [FanoutSpec] {
 mod tests {
     use super::*;
     use crate::internal::models::vector::VectorSurface;
-    use crate::internal::repositories::InMemoryRetrievalStatsStore;
+    use crate::internal::repositories::{InMemoryRetrievalStatsStore, RetrievalStatsEdge};
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -334,6 +370,7 @@ mod tests {
             &stats,
             RetrievalSelectivityPolicy::default(),
             &stats_context,
+            RetrievalLifecyclePolicy::default(),
             false,
         )
         .await
@@ -344,6 +381,7 @@ mod tests {
             &stats,
             RetrievalSelectivityPolicy::default(),
             &stats_context,
+            RetrievalLifecyclePolicy::default(),
             true,
         )
         .await
@@ -371,6 +409,7 @@ mod tests {
             &stats,
             RetrievalSelectivityPolicy::default(),
             &stats_context,
+            RetrievalLifecyclePolicy::default(),
             true,
         )
         .await
@@ -383,8 +422,119 @@ mod tests {
             .all(|override_| override_.max_fanout == 1));
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
+                && trace.count_scope == SelectivityCountScope::Current
                 && trace.chosen_fanout == 1
                 && trace.decision == SelectivityDecision::ConservativeFallback
         }));
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_uses_lifecycle_scoped_counts() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462003").unwrap();
+        stats
+            .record_edges(&[
+                RetrievalStatsEdge {
+                    edge_key: format!("{entity_id}:about:derived_memory:current"),
+                    entity_id,
+                    relation_kind: RelationType::About,
+                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462004")
+                        .unwrap(),
+                    object_type: ObjectType::DerivedMemory,
+                    retention_state: crate::api::types::RetentionState::Active,
+                    is_current: true,
+                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                },
+                RetrievalStatsEdge {
+                    edge_key: format!("{entity_id}:about:derived_memory:non_current"),
+                    entity_id,
+                    relation_kind: RelationType::About,
+                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462005")
+                        .unwrap(),
+                    object_type: ObjectType::DerivedMemory,
+                    retention_state: crate::api::types::RetentionState::Active,
+                    is_current: false,
+                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                },
+                RetrievalStatsEdge {
+                    edge_key: format!("{entity_id}:about:derived_memory:suppressed"),
+                    entity_id,
+                    relation_kind: RelationType::About,
+                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462006")
+                        .unwrap(),
+                    object_type: ObjectType::DerivedMemory,
+                    retention_state: crate::api::types::RetentionState::Suppressed,
+                    is_current: false,
+                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                },
+            ])
+            .await
+            .unwrap();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate =
+            VectorCandidateMatch::new(entity_id, ObjectType::Entity, VectorSurface::Name, 0.75);
+
+        let active_plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy {
+                include_non_current: true,
+                ..RetrievalLifecyclePolicy::default()
+            },
+            true,
+        )
+        .await
+        .unwrap();
+        let total_plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy {
+                include_suppressed: true,
+                ..RetrievalLifecyclePolicy::default()
+            },
+            true,
+        )
+        .await
+        .unwrap();
+
+        let active_about = active_plan
+            .traces
+            .iter()
+            .find(|trace| {
+                trace.relation == RelationType::About
+                    && trace.object_type == ObjectType::DerivedMemory
+            })
+            .unwrap();
+        assert_eq!(active_about.count_scope, SelectivityCountScope::Active);
+        assert_eq!(active_about.entity_count, Some(2));
+        assert_eq!(active_about.global_count, Some(2));
+
+        let total_about = total_plan
+            .traces
+            .iter()
+            .find(|trace| {
+                trace.relation == RelationType::About
+                    && trace.object_type == ObjectType::DerivedMemory
+            })
+            .unwrap();
+        assert_eq!(total_about.count_scope, SelectivityCountScope::Total);
+        assert_eq!(total_about.entity_count, Some(3));
+        assert_eq!(total_about.global_count, Some(3));
+    }
+
+    #[test]
+    fn zero_fanout_is_not_reported_as_high_selectivity() {
+        let decision = selectivity_decision(Some(1.0), 2.0, 0, false);
+
+        assert_eq!(decision, SelectivityDecision::LowSelectivityRejected);
     }
 }

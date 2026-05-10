@@ -112,6 +112,7 @@ where
                     self.stats_store,
                     self.selectivity_policy,
                     stats_context,
+                    context.lifecycle_policy,
                     include_trace,
                 )
                 .await?
