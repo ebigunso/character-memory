@@ -27,6 +27,8 @@
   - Stats store persistence foundation; depends on the stats foundation plan.
   - Durable link co-occurrence admission policy.
   - Full v0.4 retrieval trace or admin dashboard.
+  - Future v0.4/v0.5 observability surfaces such as `ActivationTrace`, `RejectedExpansionTrace`, `ClusterExpansionTrace`, `MembershipDecisionTrace`, `AssociationCandidateDiagnostic`, or `CoactivationDiagnostic`.
+  - AssociativeUnit, AssociativeMembership, AssociationSupport, query-time activation, cluster expansion, or associative membership lifecycle.
   - Graph centrality, PageRank, learned retrieval policy, or persisted selectivity categories.
   - Entity identity or application-role special-casing.
 
@@ -46,6 +48,7 @@
   - `RetrievalRationale`, `RetrievalTelemetry`, and `RetrievalTrace` already use serde defaults for backwards-compatible additions.
   - Graph expansion queries must remain backend-neutral.
   - Qdrant candidates whose graph objects are missing are omitted from normal retrieval.
+  - Latest main keeps v0.1.2 diagnostics lightweight and reserves activation, rejected-expansion, cluster-expansion, membership-decision, association-candidate, and coactivation diagnostics for v0.4/v0.5.
 - Repo reference docs consulted:
   - `docs/coding-agent/rules/common.md`
   - `docs/coding-agent/rules/orchestrator.md`
@@ -56,6 +59,7 @@
 
 ## Resolved Decisions
 - Expose v0.1.2 retrieval diagnostics through existing `RetrievalRationale`, `RetrievalTelemetry`, and `RetrievalTrace` using serde-defaulted additions; do not add a new public diagnostic API in this phase.
+- Do not introduce `ActivationTrace`, `RejectedExpansionTrace`, `ClusterExpansionTrace`, `MembershipDecisionTrace`, `AssociationCandidateDiagnostic`, or `CoactivationDiagnostic` in this phase; v0.1.2 may only add small serde-defaulted fields to existing retrieval rationale/telemetry/trace surfaces.
 - Use conservative initial fanout defaults from the roadmap examples: `aboutEntity` to `derived_memory` has `min = 0`, `max = 20`; `participantEntity` to `episode` has `min = 0`, `max = 5`; `partOfThread` to `derived_memory` has `min = 0`, `max = 15`. Additional relation/object pairs default to conservative bounded settings and must preserve existing static graph caps as hard upper bounds.
 - Do not introduce the full v0.2 `ContinuityScope` model in this phase. Use a narrow internal policy hook or optional retrieval-context support only if current types provide a clean fit; leave full scope modeling to v0.2.
 
@@ -137,6 +141,7 @@
   - Conservative fallback is visible when it occurs.
   - Public serde additions preserve backwards compatibility for older trace/rationale payloads.
   - Diagnostics stay within existing rationale/telemetry/trace surfaces, are report-only, and do not repair or override stores.
+  - No future v0.4/v0.5 trace, activation, cluster, membership, association-candidate, or coactivation diagnostic type is introduced.
 - validation:
   - kind: command
     required: true
@@ -230,6 +235,10 @@
   - Summary: User requested each plan be committed on its own implementation branch and readied for execution.
   - Validation evidence: Plan status updated to approved; implementation remains pending.
   - Notes: No Worker tasks dispatched yet.
+- 2026-05-10 Main roadmap refresh reviewed:
+  - Summary: Updated plan boundary after latest main added controlled associative recall and expanded future observability docs.
+  - Validation evidence: Plan-only update; branch rebased onto `origin/main`.
+  - Notes: v0.1.2 remains limited to lightweight additions on existing retrieval rationale/telemetry/trace surfaces.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -242,6 +251,11 @@
   - Trigger / new insight: User approved the recommended answers to all selectivity fanout/rationale open questions.
   - Plan delta (what changed): Resolved diagnostics to existing rationale/telemetry/trace surfaces, recorded initial conservative fanout budgets, and deferred full `ContinuityScope` modeling to v0.2.
   - Tradeoffs considered: Existing DTO surfaces avoid premature public diagnostic API growth; roadmap budget examples give a conservative starting point; narrow scope hooks avoid pulling v0.2 concepts into v0.1.2.
+  - User approval: yes
+- 2026-05-10 Decision:
+  - Trigger / new insight: Latest main adds future observability concepts for rejected expansion, activation, cluster expansion, membership decisions, association candidates, and coactivation.
+  - Plan delta (what changed): Added explicit non-goals and acceptance coverage to keep those future trace/diagnostic types out of the v0.1.2 selectivity/fanout implementation.
+  - Tradeoffs considered: Keeping v0.1.2 lightweight preserves the retrieval guardrail scope while leaving full observability and associative activation diagnostics to v0.4/v0.5.
   - User approval: yes
 
 ## Notes
