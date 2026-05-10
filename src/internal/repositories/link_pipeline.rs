@@ -1,9 +1,10 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft};
+use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft, ObjectType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    record_stats_after_write, GraphAuthorityStore, RetrievalStatsStore,
+    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
+    RetrievalStatsStore,
 };
 
 pub(crate) struct LinkPipeline<'a, G>
@@ -52,9 +53,49 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
-        record_stats_after_write(self.stats_store, &[], std::slice::from_ref(&link)).await;
+        self.record_link_stats_after_write(&link).await;
         Ok(link)
     }
+
+    async fn record_link_stats_after_write(&self, link: &MemoryLink) {
+        let endpoint_refs = link_stats_endpoint_refs(link);
+        if endpoint_refs.is_empty() {
+            record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
+            return;
+        }
+
+        match self
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
+            .await
+        {
+            Ok(objects) => {
+                record_stats_after_write(self.stats_store, &objects, std::slice::from_ref(link))
+                    .await;
+            }
+            Err(error) => {
+                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
+            }
+        }
+    }
+}
+
+fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
+    let mut refs = Vec::new();
+    if object_type_has_stats_state(link.from_type) {
+        refs.push(GraphObjectRef::new(link.from_id, link.from_type));
+    }
+    if object_type_has_stats_state(link.to_type) {
+        refs.push(GraphObjectRef::new(link.to_id, link.to_type));
+    }
+    refs
+}
+
+fn object_type_has_stats_state(object_type: ObjectType) -> bool {
+    matches!(
+        object_type,
+        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
+    )
 }
 
 fn validation_error(error: impl ToString) -> CustomError {
@@ -68,7 +109,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::api::types::{
-        MemoryId, MemoryObject, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
+        MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
@@ -214,6 +255,45 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_endpoint_lifecycle_state_in_stats() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let mut suppressed_episode = fixtures.episode.clone();
+        suppressed_episode.retention_state = RetentionState::Suppressed;
+        graph
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::Episode(suppressed_episode.clone()),
+            ])
+            .await
+            .unwrap();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = MemoryLinkDraft::new(
+            ObjectType::Entity,
+            fixtures.hub_entity.id,
+            RelationType::Involves,
+            ObjectType::Episode,
+            suppressed_episode.id,
+        );
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: fixtures.hub_entity.id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {
