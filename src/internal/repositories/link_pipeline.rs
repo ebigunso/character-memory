@@ -74,7 +74,9 @@ where
                     .await;
             }
             Err(error) => {
-                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
+                let error_message = error.to_string();
+                record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
+                let _ = self.stats_store.mark_unhealthy(error_message).await;
             }
         }
     }
@@ -105,18 +107,21 @@ fn validation_error(error: impl ToString) -> CustomError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use crate::api::types::{
-        MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, DEFAULT_SCHEMA_VERSION,
+        DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
     };
     use crate::internal::repositories::{
-        GraphAuthorityStore, GraphExpansionQuery, InMemoryRetrievalStatsStore,
-        RetrievalStatsCounterKey, RetrievalStatsStore,
+        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+        GraphExpansion, GraphExpansionQuery, InMemoryRetrievalStatsStore, RetrievalStatsCounterKey,
+        RetrievalStatsStore,
     };
 
     #[tokio::test]
@@ -294,6 +299,97 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_fallback_stats_when_endpoint_lookup_fails() {
+        let graph = QueryObjectsFailingGraph::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = valid_link_draft();
+        let entity_id = draft.to_id;
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+        assert_eq!(
+            stats.health().await.unwrap().state,
+            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+        );
+    }
+
+    #[derive(Default)]
+    struct QueryObjectsFailingGraph {
+        links: std::sync::Mutex<Vec<MemoryLink>>,
+    }
+
+    #[async_trait]
+    impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+            self.links.lock().unwrap().extend_from_slice(links);
+            Ok(())
+        }
+
+        async fn upsert_objects_and_links(
+            &self,
+            _objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            self.upsert_links(links).await
+        }
+
+        async fn query_objects(
+            &self,
+            _query: &GraphObjectQuery,
+        ) -> Result<Vec<MemoryObject>, CustomError> {
+            Err(CustomError::DatabaseError(
+                "endpoint lifecycle lookup failed".to_owned(),
+            ))
+        }
+
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            _query: &GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn expand_bounded(
+            &self,
+            _query: &GraphExpansionQuery,
+        ) -> Result<GraphExpansion, CustomError> {
+            Ok(GraphExpansion::new(Vec::new(), Vec::new()))
+        }
+
+        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(self.links.lock().unwrap().clone())
+        }
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {
