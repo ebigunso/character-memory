@@ -5,6 +5,7 @@ mod link_pipeline;
 mod raw_reference_resolver;
 mod reconciliation;
 mod remember_pipeline;
+mod retrieval_selectivity;
 mod retrieval_stats_store;
 mod retrieve_pipeline;
 #[cfg(test)]
@@ -27,9 +28,9 @@ pub(crate) use graph_authority_store::{
     bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
     derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
     GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredNode,
-    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
-    GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
+    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFanoutOverride,
+    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
 #[allow(unused_imports)]
@@ -64,6 +65,11 @@ pub(crate) use retrieval_stats_store::{
     NoopRetrievalStatsStore, RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge,
     RetrievalStatsHealth, RetrievalStatsHealthState, RetrievalStatsObjectState,
     RetrievalStatsStore,
+};
+
+#[allow(unused_imports)]
+pub(crate) use retrieval_selectivity::{
+    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
 };
 
 // Continuity retrieval pipeline surface.

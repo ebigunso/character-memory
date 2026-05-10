@@ -26,6 +26,12 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
         key: &RetrievalStatsCounterKey,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
 
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
@@ -119,6 +125,14 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
         Ok(None)
     }
 
+    async fn global_counter(
+        &self,
+        _relation_kind: RelationType,
+        _object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(None)
+    }
+
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
         Ok(RetrievalStatsHealth::default())
     }
@@ -188,6 +202,16 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
         Ok(recomputed_counters(&lock(&self.state)?.edges)
             .get(key)
+            .copied())
+    }
+
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(recomputed_global_counters(&lock(&self.state)?.edges)
+            .get(&(relation_kind, object_type))
             .copied())
     }
 
@@ -434,6 +458,25 @@ fn recomputed_counters(
     counters
 }
 
+fn recomputed_global_counters(
+    edges: &HashMap<String, RetrievalStatsEdge>,
+) -> HashMap<(RelationType, ObjectType), RetrievalStatsCounter> {
+    let mut counters = HashMap::new();
+    for edge in edges.values() {
+        let counter = counters
+            .entry((edge.relation_kind, edge.object_type))
+            .or_insert_with(RetrievalStatsCounter::default);
+        counter.total_count += 1;
+        if edge.is_active() {
+            counter.active_count += 1;
+        }
+        if edge.is_active() && edge.is_current {
+            counter.current_count += 1;
+        }
+    }
+    counters
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
     mutex
         .lock()
@@ -483,6 +526,12 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+        let global = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(global.total_count, 1);
     }
 
     #[tokio::test]

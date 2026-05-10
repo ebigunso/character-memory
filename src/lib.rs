@@ -21,7 +21,8 @@ use crate::internal::infrastructures::retrieval_stats::SqliteRetrievalStatsStore
 use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
     CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
-    RememberPipelineDraft, RetrievalStatsStore, RetrievePipeline, VectorCandidateStore,
+    RememberPipelineDraft, RetrievalSelectivityPolicy, RetrievalStatsStore, RetrievePipeline,
+    VectorCandidateStore,
 };
 
 // Re-export types for public use
@@ -43,11 +44,11 @@ pub use crate::api::types::{
     RelationType, RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
     RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionPressureSummary, SourceObjectCorrectionTarget, SourceProvenanceReference, Stability,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    SupersededByEvidence, SuppressionPolicy, ThreadStatus, VectorCandidateTrace,
-    VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    SectionPressureSummary, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
+    SourceObjectCorrectionTarget, SourceProvenanceReference, Stability, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, SupersededByEvidence, SuppressionPolicy,
+    ThreadStatus, VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure,
+    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
@@ -95,6 +96,7 @@ struct MemoryComposition {
     vector_store: Box<dyn VectorCandidateStore>,
     embedder: Box<dyn MemoryEmbedder>,
     stats_store: Box<dyn RetrievalStatsStore>,
+    selectivity_policy: RetrievalSelectivityPolicy,
 }
 
 struct EmbeddingProviderMemoryEmbedder {
@@ -135,6 +137,7 @@ impl CharacterMemory {
                 stats_store: Box::new(
                     crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
                 ),
+                selectivity_policy: RetrievalSelectivityPolicy::default(),
             },
         }
     }
@@ -144,6 +147,7 @@ impl CharacterMemory {
         vector_store: Box<dyn VectorCandidateStore>,
         embedder: Box<dyn MemoryEmbedder>,
         stats_store: Box<dyn RetrievalStatsStore>,
+        selectivity_policy: RetrievalSelectivityPolicy,
     ) -> Self {
         Self {
             memory_composition: MemoryComposition {
@@ -151,6 +155,7 @@ impl CharacterMemory {
                 vector_store,
                 embedder,
                 stats_store,
+                selectivity_policy,
             },
         }
     }
@@ -211,12 +216,17 @@ impl CharacterMemory {
             }
         };
         let stats_store = retrieval_stats_store(&settings)?;
+        let selectivity_policy = RetrievalSelectivityPolicy::new(
+            settings.get_selectivity_smoothing_alpha(),
+            settings.get_selectivity_gamma(),
+        );
 
         Ok(Self::from_parts_with_stats(
             graph_store,
             Box::new(vector_store),
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
             stats_store,
+            selectivity_policy,
         ))
     }
 
@@ -276,10 +286,12 @@ impl CharacterMemory {
         context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
         let parts = self.memory_composition();
-        RetrievePipeline::new(
+        RetrievePipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
+            parts.selectivity_policy,
         )
         .retrieve(context)
         .await

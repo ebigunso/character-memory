@@ -91,6 +91,33 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
             .map_err(sqlite_error)
     }
 
+    async fn global_counter(
+        &self,
+        relation_kind: crate::api::types::RelationType,
+        object_type: crate::api::types::ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        let connection = lock(&self.connection)?;
+        connection
+            .query_row(
+                "SELECT total_count, active_count, current_count
+                 FROM global_relation_counts
+                 WHERE relation_kind = ?1 AND object_type = ?2",
+                params![
+                    relation_type_key(relation_kind),
+                    object_type_key(object_type)
+                ],
+                |row| {
+                    Ok(RetrievalStatsCounter {
+                        total_count: row.get::<_, i64>(0)? as u64,
+                        active_count: row.get::<_, i64>(1)? as u64,
+                        current_count: row.get::<_, i64>(2)? as u64,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
         let connection = lock(&self.connection)?;
         let state =
@@ -473,6 +500,12 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+        let global = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(global.total_count, 1);
     }
 
     #[tokio::test]
