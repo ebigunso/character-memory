@@ -134,7 +134,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
                 max_fanout,
                 policy.gamma,
             ),
-            None => max_fanout,
+            None => conservative_fallback_fanout(max_fanout),
         };
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
         increment_telemetry(&mut plan.telemetry, decision);
@@ -199,6 +199,10 @@ fn smooth_fanout_budget(
 
 fn semantic_support_factor(score: f32) -> f64 {
     1.0 + score.clamp(0.0, 1.0) as f64
+}
+
+fn conservative_fallback_fanout(max_fanout: usize) -> usize {
+    max_fanout.min(1)
 }
 
 fn selectivity_decision(
@@ -348,5 +352,39 @@ mod tests {
         assert_eq!(without_trace.telemetry.decision_count, fanout_specs().len());
         assert!(without_trace.traces.is_empty());
         assert_eq!(with_trace.traces.len(), fanout_specs().len());
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_uses_conservative_fanout_when_stats_are_missing() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462002").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert!(plan
+            .fanout_overrides
+            .iter()
+            .all(|override_| override_.max_fanout == 1));
+        assert!(plan.traces.iter().all(|trace| {
+            trace.fallback
+                && trace.chosen_fanout == 1
+                && trace.decision == SelectivityDecision::ConservativeFallback
+        }));
     }
 }
