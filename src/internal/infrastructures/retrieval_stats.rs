@@ -193,12 +193,16 @@ fn upsert_edge(connection: &Connection, edge: &RetrievalStatsEdge) -> Result<(),
             connection
                 .execute(
                     "UPDATE entity_edge_index
-                     SET retention_state = ?2, is_current = ?3, last_seen_at = ?4
+                     SET retention_state = ?2,
+                         is_current = ?3,
+                         first_seen_at = MIN(first_seen_at, ?4),
+                         last_seen_at = MAX(last_seen_at, ?5)
                      WHERE edge_key = ?1",
                     params![
                         edge.edge_key,
                         retention_state_key(edge.retention_state),
                         bool_int(edge.is_current),
+                        edge.first_seen_at.to_rfc3339(),
                         edge.last_seen_at.to_rfc3339()
                     ],
                 )
@@ -499,6 +503,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sqlite_store_merges_duplicate_edge_timestamps_monotonically() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461031");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461032");
+        let mut later_edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+        later_edge.first_seen_at = timestamp_at("2026-04-28T12:00:00Z");
+        later_edge.last_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        let mut earlier_edge = later_edge.clone();
+        earlier_edge.first_seen_at = timestamp_at("2026-04-28T11:00:00Z");
+        earlier_edge.last_seen_at = timestamp_at("2026-04-28T12:30:00Z");
+
+        store.record_edges(&[later_edge]).await.unwrap();
+        store.record_edges(&[earlier_edge]).await.unwrap();
+
+        let connection = lock(&store.connection).unwrap();
+        let (first_seen_at, last_seen_at): (String, String) = connection
+            .query_row(
+                "SELECT first_seen_at, last_seen_at
+                 FROM entity_edge_index
+                 WHERE edge_key = ?1",
+                params![format!("{}:involves:episode:{}", entity_id, episode_id)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(first_seen_at, "2026-04-28T11:00:00+00:00");
+        assert_eq!(last_seen_at, "2026-04-28T13:00:00+00:00");
+    }
+
+    #[tokio::test]
     async fn sqlite_store_persists_counters_across_reopen() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("stats.sqlite3");
@@ -613,7 +647,11 @@ mod tests {
     }
 
     fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
+        timestamp_at("2026-04-28T12:00:00Z")
+    }
+
+    fn timestamp_at(value: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
     }
