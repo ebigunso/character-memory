@@ -157,6 +157,18 @@ impl InMemoryRetrievalStatsStore {
     pub(crate) fn new() -> Self {
         Self::default()
     }
+
+    pub(crate) fn unhealthy(message: String) -> Self {
+        Self {
+            state: Mutex::new(InMemoryState {
+                health: RetrievalStatsHealth {
+                    state: RetrievalStatsHealthState::Unhealthy,
+                    last_error_message: Some(message),
+                },
+                ..InMemoryState::default()
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -235,13 +247,17 @@ pub(crate) async fn record_stats_after_write(
     links: &[MemoryLink],
 ) {
     let states = retrieval_stats_object_states(objects);
-    if let Err(error) = stats_store.record_object_states(&states).await {
+    let edges = retrieval_stats_edges(objects, links);
+    if let Err(error) = stats_store.record_edges(&edges).await {
         let _ = stats_store.mark_unhealthy(error.to_string()).await;
         return;
     }
 
-    let edges = retrieval_stats_edges(objects, links);
-    if let Err(error) = stats_store.record_edges(&edges).await {
+    if states.is_empty() {
+        return;
+    }
+
+    if let Err(error) = stats_store.record_object_states(&states).await {
         let _ = stats_store.mark_unhealthy(error.to_string()).await;
     }
 }
@@ -250,15 +266,21 @@ pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],
     links: &[MemoryLink],
 ) -> Vec<RetrievalStatsEdge> {
-    let mut edges = Vec::new();
+    let object_states = retrieval_stats_object_states(objects);
+    let mut object_state_lookup = HashMap::new();
+    for state in &object_states {
+        object_state_lookup.insert((state.object_id, state.object_type), state.clone());
+    }
+
+    let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
         append_intrinsic_edges(&mut edges, object);
     }
     for link in links {
-        append_link_edges(&mut edges, link);
+        append_link_edges(&mut edges, link, &object_state_lookup);
     }
+    let mut edges = edges.into_values().collect::<Vec<_>>();
     edges.sort_by(|left, right| left.edge_key.cmp(&right.edge_key));
-    edges.dedup_by(|left, right| left.edge_key == right.edge_key);
     edges
 }
 
@@ -307,73 +329,138 @@ pub(crate) fn retention_state_key(retention_state: RetentionState) -> &'static s
     }
 }
 
-fn append_intrinsic_edges(edges: &mut Vec<RetrievalStatsEdge>, object: &MemoryObject) {
+fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, object: &MemoryObject) {
     match object {
         MemoryObject::Episode(episode) => {
             for entity_id in &episode.participant_entity_ids {
-                edges.push(edge(
-                    *entity_id,
-                    RelationType::Involves,
-                    episode.id,
-                    ObjectType::Episode,
-                    episode.retention_state,
-                    true,
-                    episode.created_at,
-                ));
+                insert_edge(
+                    edges,
+                    edge(
+                        *entity_id,
+                        RelationType::Involves,
+                        episode.id,
+                        ObjectType::Episode,
+                        episode.retention_state,
+                        true,
+                        episode.created_at,
+                    ),
+                );
             }
         }
         MemoryObject::Observation(observation) => {
             if let Some(entity_id) = observation.speaker_entity_id {
-                edges.push(edge(
-                    entity_id,
-                    RelationType::Mentions,
-                    observation.id,
-                    ObjectType::Observation,
-                    observation.retention_state,
-                    true,
-                    observation.created_at,
-                ));
+                insert_edge(
+                    edges,
+                    edge(
+                        entity_id,
+                        RelationType::Mentions,
+                        observation.id,
+                        ObjectType::Observation,
+                        observation.retention_state,
+                        true,
+                        observation.created_at,
+                    ),
+                );
             }
         }
         MemoryObject::DerivedMemory(memory) => {
             for entity_id in &memory.entity_ids {
-                edges.push(edge(
-                    *entity_id,
-                    RelationType::About,
-                    memory.id,
-                    ObjectType::DerivedMemory,
-                    memory.retention_state,
-                    memory.is_current,
-                    memory.created_at,
-                ));
+                insert_edge(
+                    edges,
+                    edge(
+                        *entity_id,
+                        RelationType::About,
+                        memory.id,
+                        ObjectType::DerivedMemory,
+                        memory.retention_state,
+                        memory.is_current,
+                        memory.created_at,
+                    ),
+                );
             }
         }
         MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {}
     }
 }
 
-fn append_link_edges(edges: &mut Vec<RetrievalStatsEdge>, link: &MemoryLink) {
+fn append_link_edges(
+    edges: &mut HashMap<String, RetrievalStatsEdge>,
+    link: &MemoryLink,
+    object_states: &HashMap<(MemoryId, ObjectType), RetrievalStatsObjectState>,
+) {
     if link.from_type == ObjectType::Entity && link.to_type != ObjectType::MemoryLink {
-        edges.push(edge(
-            link.from_id,
-            link.relation,
-            link.to_id,
-            link.to_type,
-            RetentionState::Active,
-            true,
-            link.created_at,
-        ));
+        let (retention_state, is_current) = edge_lifecycle(link.to_id, link.to_type, object_states);
+        insert_edge(
+            edges,
+            edge(
+                link.from_id,
+                link.relation,
+                link.to_id,
+                link.to_type,
+                retention_state,
+                is_current,
+                link.created_at,
+            ),
+        );
     }
     if link.to_type == ObjectType::Entity && link.from_type != ObjectType::MemoryLink {
-        edges.push(edge(
-            link.to_id,
-            link.relation,
-            link.from_id,
-            link.from_type,
-            RetentionState::Active,
-            true,
-            link.created_at,
-        ));
+        let (retention_state, is_current) =
+            edge_lifecycle(link.from_id, link.from_type, object_states);
+        insert_edge(
+            edges,
+            edge(
+                link.to_id,
+                link.relation,
+                link.from_id,
+                link.from_type,
+                retention_state,
+                is_current,
+                link.created_at,
+            ),
+        );
+    }
+}
+
+fn edge_lifecycle(
+    object_id: MemoryId,
+    object_type: ObjectType,
+    object_states: &HashMap<(MemoryId, ObjectType), RetrievalStatsObjectState>,
+) -> (RetentionState, bool) {
+    object_states
+        .get(&(object_id, object_type))
+        .map(|state| (state.retention_state, state.is_current))
+        .unwrap_or((RetentionState::Active, true))
+}
+
+fn insert_edge(edges: &mut HashMap<String, RetrievalStatsEdge>, edge: RetrievalStatsEdge) {
+    edges
+        .entry(edge.edge_key.clone())
+        .and_modify(|existing| merge_edge(existing, &edge))
+        .or_insert(edge);
+}
+
+fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) {
+    existing.first_seen_at = existing.first_seen_at.min(incoming.first_seen_at);
+    existing.last_seen_at = existing.last_seen_at.max(incoming.last_seen_at);
+    existing.retention_state =
+        more_restrictive_retention(existing.retention_state, incoming.retention_state);
+    existing.is_current = existing.is_current && incoming.is_current;
+}
+
+fn more_restrictive_retention(left: RetentionState, right: RetentionState) -> RetentionState {
+    if retention_rank(right) > retention_rank(left) {
+        right
+    } else {
+        left
+    }
+}
+
+fn retention_rank(retention_state: RetentionState) -> u8 {
+    match retention_state {
+        RetentionState::Active => 0,
+        RetentionState::Archived => 1,
+        RetentionState::Suppressed => 2,
+        RetentionState::Deleted => 3,
     }
 }
 
@@ -631,6 +718,99 @@ mod tests {
                 && edge.relation_kind == RelationType::About
                 && edge.object_id == memory_id
         }));
+    }
+
+    #[test]
+    fn link_edges_use_available_object_lifecycle() {
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460031");
+        let memory_id = id("550e8400-e29b-41d4-a716-446655460032");
+        let link_id = id("550e8400-e29b-41d4-a716-446655460033");
+        let objects = vec![MemoryObject::DerivedMemory(DerivedMemory {
+            id: memory_id,
+            object_type: ObjectType::DerivedMemory,
+            derived_type: DerivedType::Reflection,
+            text: "memory".to_owned(),
+            derived_from_episode_ids: Vec::new(),
+            derived_from_observation_ids: Vec::new(),
+            thread_ids: Vec::new(),
+            entity_ids: Vec::new(),
+            confidence: 0.7,
+            salience_score: 0.7,
+            stability: Stability::Medium,
+            is_current: false,
+            supersedes: Vec::new(),
+            retention_state: RetentionState::Suppressed,
+            created_at: timestamp(),
+            updated_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        })];
+        let link = MemoryLink {
+            id: link_id,
+            object_type: ObjectType::MemoryLink,
+            from_id: entity_id,
+            from_type: ObjectType::Entity,
+            to_id: memory_id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::About,
+            confidence: 1.0,
+            rationale: None,
+            created_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        };
+
+        let edges = retrieval_stats_edges(&objects, &[link]);
+
+        let edge = edges
+            .iter()
+            .find(|edge| edge.entity_id == entity_id && edge.object_id == memory_id)
+            .unwrap();
+        assert_eq!(edge.retention_state, RetentionState::Suppressed);
+        assert!(!edge.is_current);
+    }
+
+    #[test]
+    fn duplicate_edge_derivations_merge_lifecycle_deterministically() {
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460041");
+        let memory_id = id("550e8400-e29b-41d4-a716-446655460042");
+        let link_id = id("550e8400-e29b-41d4-a716-446655460043");
+        let memory = MemoryObject::DerivedMemory(DerivedMemory {
+            id: memory_id,
+            object_type: ObjectType::DerivedMemory,
+            derived_type: DerivedType::Reflection,
+            text: "memory".to_owned(),
+            derived_from_episode_ids: Vec::new(),
+            derived_from_observation_ids: Vec::new(),
+            thread_ids: Vec::new(),
+            entity_ids: vec![entity_id],
+            confidence: 0.7,
+            salience_score: 0.7,
+            stability: Stability::Medium,
+            is_current: false,
+            supersedes: Vec::new(),
+            retention_state: RetentionState::Suppressed,
+            created_at: timestamp(),
+            updated_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        });
+        let link = MemoryLink {
+            id: link_id,
+            object_type: ObjectType::MemoryLink,
+            from_id: entity_id,
+            from_type: ObjectType::Entity,
+            to_id: memory_id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::About,
+            confidence: 1.0,
+            rationale: None,
+            created_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        };
+
+        let edges = retrieval_stats_edges(&[memory], &[link]);
+
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].retention_state, RetentionState::Suppressed);
+        assert!(!edges[0].is_current);
     }
 
     #[tokio::test]

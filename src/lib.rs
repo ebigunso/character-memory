@@ -20,9 +20,9 @@ use crate::internal::infrastructures::graph::{
 use crate::internal::infrastructures::retrieval_stats::SqliteRetrievalStatsStore;
 use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
-    CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
-    RememberPipelineDraft, RetrievalSelectivityPolicy, RetrievalStatsStore, RetrievePipeline,
-    VectorCandidateStore,
+    CorrectionForgetPipeline, GraphAuthorityStore, InMemoryRetrievalStatsStore, LinkPipeline,
+    MemoryEmbedder, RememberPipeline, RememberPipelineDraft, RetrievalSelectivityPolicy,
+    RetrievalStatsStore, RetrievePipeline, VectorCandidateStore,
 };
 
 // Re-export types for public use
@@ -336,12 +336,15 @@ impl CharacterMemory {
 
 fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsStore>, CustomError> {
     match settings.get_retrieval_stats_store_mode() {
-        ConfigRetrievalStatsStoreMode::Sqlite => Ok(Box::new(SqliteRetrievalStatsStore::open(
-            settings.get_retrieval_stats_path(),
-        )?)),
-        ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(
-            crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
-        )),
+        ConfigRetrievalStatsStoreMode::Sqlite => {
+            match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
+                Ok(store) => Ok(Box::new(store)),
+                Err(error) => Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
+                    "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
+                )))),
+            }
+        }
+        ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
     }
 }
 
