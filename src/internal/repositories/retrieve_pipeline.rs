@@ -23,7 +23,7 @@ use crate::internal::repositories::{
     GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
     GraphObjectRef, MemoryEmbedder, RetrievalSelectivityPolicy, RetrievalStatsStore,
-    VectorCandidateStore,
+    SelectivityStatsContext, VectorCandidateStore,
 };
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
@@ -95,6 +95,7 @@ where
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = include_trace.then(Vec::new);
         let mut selectivity_traces = include_trace.then(Vec::new);
+        let selectivity_stats_context = SelectivityStatsContext::load(self.stats_store).await?;
 
         for candidate in &candidate_roots {
             let selectivity_plan = selectivity_plan_for_candidate(
@@ -102,11 +103,12 @@ where
                 context.graph_limits.max_fanout_per_node,
                 self.stats_store,
                 self.selectivity_policy,
+                &selectivity_stats_context,
             )
             .await?;
             absorb_selectivity_telemetry(&mut selectivity_telemetry, &selectivity_plan.telemetry);
             if let Some(traces) = &mut selectivity_traces {
-                traces.extend(selectivity_plan.traces.clone());
+                traces.extend(selectivity_plan.traces);
             }
             let query =
                 graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides);

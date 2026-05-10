@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::api::types::{
     MemoryObjectRef, ObjectType, RelationType, SelectivityDecision, SelectivityTelemetry,
     SelectivityTrace,
@@ -5,8 +7,8 @@ use crate::api::types::{
 use crate::errors::CustomError;
 use crate::internal::models::vector::VectorCandidateMatch;
 use crate::internal::repositories::{
-    GraphExpansionFanoutOverride, RetrievalStatsCounterKey, RetrievalStatsHealthState,
-    RetrievalStatsStore,
+    GraphExpansionFanoutOverride, RetrievalStatsCounter, RetrievalStatsCounterKey,
+    RetrievalStatsHealth, RetrievalStatsHealthState, RetrievalStatsStore,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -17,10 +19,17 @@ pub(crate) struct RetrievalSelectivityPolicy {
 
 impl RetrievalSelectivityPolicy {
     pub(crate) fn new(smoothing_alpha: f64, gamma: f64) -> Self {
-        Self {
+        Self::try_new(smoothing_alpha, gamma)
+            .expect("selectivity smoothing_alpha and gamma must be finite positive numbers")
+    }
+
+    pub(crate) fn try_new(smoothing_alpha: f64, gamma: f64) -> Result<Self, CustomError> {
+        validate_positive_f64("selectivity_smoothing_alpha", smoothing_alpha)?;
+        validate_positive_f64("selectivity_gamma", gamma)?;
+        Ok(Self {
             smoothing_alpha,
             gamma,
-        }
+        })
     }
 }
 
@@ -37,31 +46,67 @@ pub(crate) struct SelectivityPlan {
     pub(crate) telemetry: SelectivityTelemetry,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct SelectivityStatsContext {
+    health: RetrievalStatsHealth,
+    global_counters: HashMap<(RelationType, ObjectType), Option<RetrievalStatsCounter>>,
+}
+
+impl SelectivityStatsContext {
+    pub(crate) async fn load(stats_store: &dyn RetrievalStatsStore) -> Result<Self, CustomError> {
+        let health = stats_store.health().await?;
+        let mut global_counters = HashMap::new();
+        if health.state == RetrievalStatsHealthState::Healthy {
+            for spec in fanout_specs() {
+                global_counters.insert(
+                    (spec.relation, spec.object_type),
+                    stats_store
+                        .global_counter(spec.relation, spec.object_type)
+                        .await?,
+                );
+            }
+        }
+        Ok(Self {
+            health,
+            global_counters,
+        })
+    }
+
+    fn global_counter(
+        &self,
+        relation: RelationType,
+        object_type: ObjectType,
+    ) -> Option<RetrievalStatsCounter> {
+        self.global_counters
+            .get(&(relation, object_type))
+            .copied()
+            .flatten()
+    }
+}
+
 pub(crate) async fn selectivity_plan_for_candidate(
     candidate: &VectorCandidateMatch,
     static_max_fanout: usize,
     stats_store: &dyn RetrievalStatsStore,
     policy: RetrievalSelectivityPolicy,
+    stats_context: &SelectivityStatsContext,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
         return Ok(SelectivityPlan::default());
     }
 
-    let health = stats_store.health().await?;
     let mut plan = SelectivityPlan::default();
     for spec in fanout_specs() {
         let support_factor = semantic_support_factor(candidate.score);
         let (score, entity_count, global_count, fallback) =
-            if health.state == RetrievalStatsHealthState::Healthy {
+            if stats_context.health.state == RetrievalStatsHealthState::Healthy {
                 let key = RetrievalStatsCounterKey {
                     entity_id: candidate.object_id,
                     relation_kind: spec.relation,
                     object_type: spec.object_type,
                 };
                 let entity = stats_store.counter(&key).await?;
-                let global = stats_store
-                    .global_counter(spec.relation, spec.object_type)
-                    .await?;
+                let global = stats_context.global_counter(spec.relation, spec.object_type);
                 match (entity, global) {
                     (Some(entity), Some(global)) if global.current_count > 0 => (
                         Some(selectivity_score(
@@ -113,6 +158,15 @@ pub(crate) async fn selectivity_plan_for_candidate(
     }
 
     Ok(plan)
+}
+
+fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(CustomError::ConfigParseError(format!(
+            "{name} must be a finite positive number, got {value}"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn selectivity_score(entity_count: u64, global_count: u64, alpha: f64) -> f64 {
@@ -236,5 +290,21 @@ mod tests {
         let budget = smooth_fanout_budget(0.0, 2.0, 0, 20, 1.0);
 
         assert_eq!(budget, 0);
+    }
+
+    #[test]
+    fn selectivity_policy_rejects_invalid_numbers() {
+        let invalid_alpha = RetrievalSelectivityPolicy::try_new(0.0, 1.0);
+        let invalid_gamma = RetrievalSelectivityPolicy::try_new(1.0, f64::NAN);
+
+        assert!(matches!(
+            invalid_alpha,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("selectivity_smoothing_alpha")
+        ));
+        assert!(matches!(
+            invalid_gamma,
+            Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
+        ));
     }
 }

@@ -70,6 +70,7 @@ pub(crate) use retrieval_stats_store::{
 #[allow(unused_imports)]
 pub(crate) use retrieval_selectivity::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
+    SelectivityStatsContext,
 };
 
 // Continuity retrieval pipeline surface.

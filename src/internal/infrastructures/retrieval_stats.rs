@@ -81,9 +81,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
                 ],
                 |row| {
                     Ok(RetrievalStatsCounter {
-                        total_count: row.get::<_, i64>(0)? as u64,
-                        active_count: row.get::<_, i64>(1)? as u64,
-                        current_count: row.get::<_, i64>(2)? as u64,
+                        total_count: non_negative_count(row.get(0)?)?,
+                        active_count: non_negative_count(row.get(1)?)?,
+                        current_count: non_negative_count(row.get(2)?)?,
                     })
                 },
             )
@@ -188,6 +188,9 @@ fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL
             );
+
+            CREATE INDEX IF NOT EXISTS entity_edge_index_object
+            ON entity_edge_index(object_id, object_type);
 
             CREATE TABLE IF NOT EXISTS entity_relation_counts (
                 entity_id TEXT NOT NULL,
@@ -468,9 +471,10 @@ fn meta_value(connection: &Connection, key: &str) -> Result<Option<String>, Cust
         .query_row(
             "SELECT value FROM stats_meta WHERE key = ?1",
             params![key],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
         .optional()
+        .map(|value| value.flatten())
         .map_err(sqlite_error)
 }
 
@@ -488,6 +492,18 @@ fn bool_int(value: bool) -> i64 {
 
 fn sqlite_error(error: rusqlite::Error) -> CustomError {
     CustomError::DatabaseError(format!("retrieval stats sqlite error: {error}"))
+}
+
+fn non_negative_count(value: i64) -> rusqlite::Result<u64> {
+    u64::try_from(value).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Integer,
+            Box::new(CustomError::DatabaseError(format!(
+                "retrieval stats counter was negative: {value}"
+            ))),
+        )
+    })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
@@ -539,6 +555,41 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(global.total_count, 1);
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_persists_counters_across_reopen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("stats.sqlite3");
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461021");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461022");
+        let edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+
+        {
+            let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+            store
+                .record_edges(std::slice::from_ref(&edge))
+                .await
+                .unwrap();
+        }
+
+        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
+        let counter = reopened
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::Involves,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+        assert_eq!(
+            reopened.health().await.unwrap(),
+            RetrievalStatsHealth::default()
+        );
     }
 
     #[tokio::test]
