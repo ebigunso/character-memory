@@ -390,6 +390,8 @@ pub struct SelectivityTrace {
     pub root: MemoryObjectRef,
     pub relation: RelationType,
     pub object_type: ObjectType,
+    #[serde(default)]
+    pub count_scope: SelectivityCountScope,
     pub score: Option<f64>,
     pub entity_count: Option<u64>,
     pub global_count: Option<u64>,
@@ -398,6 +400,15 @@ pub struct SelectivityTrace {
     pub max_fanout: usize,
     pub decision: SelectivityDecision,
     pub fallback: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectivityCountScope {
+    #[default]
+    Current,
+    Active,
+    Total,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
