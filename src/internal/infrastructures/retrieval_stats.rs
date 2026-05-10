@@ -145,8 +145,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     }
 
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        let connection = lock(&self.connection)?;
-        connection
+        let mut connection = lock(&self.connection)?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
             .execute(
                 "INSERT INTO link_guard_diagnostics (reason, count)
                  VALUES ('low_information_co_occurrence', 1)
@@ -154,7 +155,8 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
                 [],
             )
             .map_err(sqlite_error)?;
-        Ok(())
+        set_health(&transaction, RetrievalStatsHealth::default())?;
+        transaction.commit().map_err(sqlite_error)
     }
 
     async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
@@ -169,7 +171,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
             .optional()
             .map_err(sqlite_error)?
             .unwrap_or_default();
-        Ok(count as u64)
+        non_negative_count(count).map_err(sqlite_error)
     }
 }
 
@@ -630,6 +632,10 @@ mod tests {
     async fn sqlite_store_counts_rejected_low_information_links() {
         let dir = tempdir().unwrap();
         let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        store
+            .mark_unhealthy("transient stats failure".to_owned())
+            .await
+            .unwrap();
 
         store.record_rejected_low_information_link().await.unwrap();
         store.record_rejected_low_information_link().await.unwrap();
@@ -637,6 +643,10 @@ mod tests {
         assert_eq!(
             store.rejected_low_information_link_count().await.unwrap(),
             2
+        );
+        assert_eq!(
+            store.health().await.unwrap(),
+            RetrievalStatsHealth::default()
         );
     }
 

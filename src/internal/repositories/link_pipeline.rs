@@ -80,10 +80,13 @@ where
             .map_err(validation_error)?;
         if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         {
-            let _ = self
+            if let Err(error) = self
                 .stats_store
                 .record_rejected_low_information_link()
-                .await;
+                .await
+            {
+                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
+            }
             return Err(CustomError::MemoryValidation(
                 "low-information co-occurrence link rejected".to_owned(),
             ));

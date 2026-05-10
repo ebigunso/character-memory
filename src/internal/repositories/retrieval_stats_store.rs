@@ -259,6 +259,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
         let mut state = lock(&self.state)?;
         state.rejected_low_information_link_count += 1;
+        state.health = RetrievalStatsHealth::default();
         Ok(())
     }
 
@@ -865,6 +866,10 @@ mod tests {
     #[tokio::test]
     async fn diagnostics_count_rejected_low_information_links() {
         let store = InMemoryRetrievalStatsStore::new();
+        store
+            .mark_unhealthy("transient stats failure".to_owned())
+            .await
+            .unwrap();
 
         store.record_rejected_low_information_link().await.unwrap();
         store.record_rejected_low_information_link().await.unwrap();
@@ -872,6 +877,10 @@ mod tests {
         assert_eq!(
             store.rejected_low_information_link_count().await.unwrap(),
             2
+        );
+        assert_eq!(
+            store.health().await.unwrap(),
+            RetrievalStatsHealth::default()
         );
     }
 
