@@ -25,7 +25,7 @@ use crate::internal::repositories::{
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
-use super::sparql_selectors::SparqlGraphSelectors;
+use super::sparql_selectors::{SparqlGraphSelectors, SparqlLinkRef};
 use super::vocabulary as vocab;
 
 pub(crate) struct OxigraphGraphAuthorityStore {
@@ -555,14 +555,17 @@ impl OxigraphHttpGraphAuthorityStore {
         let mut graph_link_ids = HashSet::new();
         let mut frontier = vec![root_ref];
 
-        for _ in 0..query.max_depth {
+        for depth in 0..query.max_depth {
             let link_refs = self.query_link_refs_touching(&frontier).await?;
             let mut next_frontier = Vec::new();
-            for link_ref in link_refs {
-                graph_link_ids.insert(link_ref.link_id);
-                for endpoint in [link_ref.from, link_ref.to] {
-                    if graph_refs.insert(endpoint) {
-                        next_frontier.push(endpoint);
+            for object_ref in &frontier {
+                for link_ref in
+                    bounded_incident_link_refs(query, root_ref, *object_ref, depth, &link_refs)
+                {
+                    graph_link_ids.insert(link_ref.link_id());
+                    let neighbor = link_ref.other_endpoint(*object_ref);
+                    if graph_refs.insert(neighbor) {
+                        next_frontier.push(neighbor);
                     }
                 }
             }
@@ -592,6 +595,157 @@ impl OxigraphHttpGraphAuthorityStore {
             lifecycle_link_ids,
         })
     }
+}
+
+trait BoundedExpansionLinkRef: Copy {
+    fn link_id(self) -> MemoryId;
+    fn from(self) -> GraphObjectRef;
+    fn to(self) -> GraphObjectRef;
+    fn relation(self) -> RelationType;
+
+    fn touches(self, object_ref: GraphObjectRef) -> bool {
+        self.from() == object_ref || self.to() == object_ref
+    }
+
+    fn other_endpoint(self, object_ref: GraphObjectRef) -> GraphObjectRef {
+        if self.from() == object_ref {
+            self.to()
+        } else {
+            self.from()
+        }
+    }
+}
+
+impl BoundedExpansionLinkRef for SparqlLinkRef {
+    fn link_id(self) -> MemoryId {
+        self.link_id
+    }
+
+    fn from(self) -> GraphObjectRef {
+        self.from
+    }
+
+    fn to(self) -> GraphObjectRef {
+        self.to
+    }
+
+    fn relation(self) -> RelationType {
+        self.relation
+    }
+}
+
+impl BoundedExpansionLinkRef for SparqlHttpLinkRef {
+    fn link_id(self) -> MemoryId {
+        self.link_id
+    }
+
+    fn from(self) -> GraphObjectRef {
+        self.from
+    }
+
+    fn to(self) -> GraphObjectRef {
+        self.to
+    }
+
+    fn relation(self) -> RelationType {
+        self.relation
+    }
+}
+
+fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
+    query: &GraphExpansionQuery,
+    root_ref: GraphObjectRef,
+    object_ref: GraphObjectRef,
+    depth: u8,
+    link_refs: &[T],
+) -> Vec<T> {
+    let mut incident_links = link_refs
+        .iter()
+        .copied()
+        .filter(|link_ref| relation_allowed(query, link_ref.relation()))
+        .filter(|link_ref| link_ref.touches(object_ref))
+        .filter(|link_ref| {
+            object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
+        })
+        .collect::<Vec<_>>();
+    incident_links.sort_by_key(|link_ref| stable_link_ref_key(*link_ref));
+
+    if incident_links.len() > query.max_hub_edges {
+        incident_links.truncate(query.max_hub_edges);
+    }
+    let apply_selectivity_overrides = depth == 0 && object_ref == root_ref;
+    apply_link_ref_fanout_limits(
+        query,
+        object_ref,
+        incident_links,
+        apply_selectivity_overrides,
+    )
+}
+
+fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
+    query: &GraphExpansionQuery,
+    object_ref: GraphObjectRef,
+    mut incident_links: Vec<T>,
+    apply_selectivity_overrides: bool,
+) -> Vec<T> {
+    if query.fanout_overrides.is_empty() || !apply_selectivity_overrides {
+        incident_links.truncate(query.max_fanout_per_node);
+        return incident_links;
+    }
+
+    let mut retained = Vec::new();
+    let mut per_pair_counts = HashMap::<(RelationType, ObjectType), usize>::new();
+    for link_ref in incident_links {
+        if retained.len() >= query.max_fanout_per_node {
+            break;
+        }
+        let neighbor = link_ref.other_endpoint(object_ref);
+        let max_for_pair = fanout_limit_for_pair(query, link_ref.relation(), neighbor.object_type);
+        let count = per_pair_counts
+            .entry((link_ref.relation(), neighbor.object_type))
+            .or_default();
+        if *count >= max_for_pair {
+            continue;
+        }
+        *count += 1;
+        retained.push(link_ref);
+    }
+    retained
+}
+
+fn fanout_limit_for_pair(
+    query: &GraphExpansionQuery,
+    relation: RelationType,
+    object_type: ObjectType,
+) -> usize {
+    query
+        .fanout_overrides
+        .iter()
+        .find(|override_| override_.relation == relation && override_.object_type == object_type)
+        .map(|override_| override_.max_fanout)
+        .unwrap_or(query.max_fanout_per_node)
+        .min(query.max_fanout_per_node)
+}
+
+fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool {
+    query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
+}
+
+fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> bool {
+    query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
+}
+
+fn stable_link_ref_key<T: BoundedExpansionLinkRef>(
+    link_ref: T,
+) -> (MemoryId, MemoryId, MemoryId, u8, u8, u8) {
+    (
+        link_ref.to().object_id,
+        link_ref.from().object_id,
+        link_ref.link_id(),
+        object_type_rank(link_ref.to().object_type),
+        object_type_rank(link_ref.from().object_type),
+        relation_type_rank(link_ref.relation()),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1778,14 +1932,17 @@ fn bounded_graph_visible_refs(
     let mut graph_link_ids = HashSet::new();
     let mut frontier = vec![root_ref];
 
-    for _ in 0..query.max_depth {
+    for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
         let mut next_frontier = Vec::new();
-        for link_ref in link_refs {
-            graph_link_ids.insert(link_ref.link_id);
-            for endpoint in [link_ref.from, link_ref.to] {
-                if graph_refs.insert(endpoint) {
-                    next_frontier.push(endpoint);
+        for object_ref in &frontier {
+            for link_ref in
+                bounded_incident_link_refs(query, root_ref, *object_ref, depth, &link_refs)
+            {
+                graph_link_ids.insert(link_ref.link_id());
+                let neighbor = link_ref.other_endpoint(*object_ref);
+                if graph_refs.insert(neighbor) {
+                    next_frontier.push(neighbor);
                 }
             }
         }
@@ -1925,8 +2082,8 @@ mod tests {
     };
     use crate::internal::repositories::{
         GraphDerivedMemoryProvenanceQuery, GraphExpansionBoundedFailureReason,
-        GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-        GraphObjectRef,
+        GraphExpansionFailurePolicy, GraphExpansionFanoutOverride, GraphExpansionFilteredReason,
+        GraphExpansionLifecyclePolicy, GraphObjectRef,
     };
     use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
     use std::path::{Path, PathBuf};
@@ -2398,6 +2555,42 @@ mod tests {
                 .map(|relation| relation.link_id)
                 .collect::<Vec<_>>(),
             vec![traversed_link.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_visibility_applies_selectivity_fanout_before_hydration() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(20)
+            .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                max_fanout: 1,
+            }]);
+        let selectors = SparqlGraphSelectors::new(&store.store);
+
+        let visibility = bounded_graph_visible_refs(
+            &selectors,
+            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            &query,
+        )
+        .unwrap();
+
+        assert_eq!(visibility.traversal_link_ids.len(), 1);
+        assert_eq!(
+            visibility
+                .object_refs
+                .iter()
+                .filter(|object_ref| object_ref.object_type == ObjectType::DerivedMemory)
+                .count(),
+            1
         );
     }
 

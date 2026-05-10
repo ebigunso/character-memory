@@ -112,6 +112,7 @@ where
                     self.stats_store,
                     self.selectivity_policy,
                     stats_context,
+                    include_trace,
                 )
                 .await?
             } else {

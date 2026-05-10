@@ -90,6 +90,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     stats_store: &dyn RetrievalStatsStore,
     policy: RetrievalSelectivityPolicy,
     stats_context: &SelectivityStatsContext,
+    include_trace: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
         return Ok(SelectivityPlan::default());
@@ -133,7 +134,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
                 max_fanout,
                 policy.gamma,
             ),
-            None => max_fanout,
+            None => conservative_fallback_fanout(max_fanout),
         };
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
         increment_telemetry(&mut plan.telemetry, decision);
@@ -142,19 +143,21 @@ pub(crate) async fn selectivity_plan_for_candidate(
             object_type: spec.object_type,
             max_fanout: chosen_fanout,
         });
-        plan.traces.push(SelectivityTrace {
-            root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            relation: spec.relation,
-            object_type: spec.object_type,
-            score,
-            entity_count,
-            global_count,
-            support_factor,
-            chosen_fanout,
-            max_fanout,
-            decision,
-            fallback,
-        });
+        if include_trace {
+            plan.traces.push(SelectivityTrace {
+                root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                relation: spec.relation,
+                object_type: spec.object_type,
+                score,
+                entity_count,
+                global_count,
+                support_factor,
+                chosen_fanout,
+                max_fanout,
+                decision,
+                fallback,
+            });
+        }
     }
 
     Ok(plan)
@@ -198,6 +201,10 @@ fn semantic_support_factor(score: f32) -> f64 {
     1.0 + score.clamp(0.0, 1.0) as f64
 }
 
+fn conservative_fallback_fanout(max_fanout: usize) -> usize {
+    max_fanout.min(1)
+}
+
 fn selectivity_decision(
     score: Option<f64>,
     support_factor: f64,
@@ -239,8 +246,8 @@ struct FanoutSpec {
     max_fanout: usize,
 }
 
-fn fanout_specs() -> Vec<FanoutSpec> {
-    vec![
+fn fanout_specs() -> &'static [FanoutSpec] {
+    &[
         FanoutSpec {
             relation: RelationType::About,
             object_type: ObjectType::DerivedMemory,
@@ -265,6 +272,8 @@ fn fanout_specs() -> Vec<FanoutSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::models::vector::VectorSurface;
+    use crate::internal::repositories::InMemoryRetrievalStatsStore;
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -306,5 +315,76 @@ mod tests {
             invalid_gamma,
             Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
         ));
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_builds_traces_only_when_requested() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462001").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.75,
+        );
+
+        let without_trace = selectivity_plan_for_candidate(
+            &candidate,
+            10,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            false,
+        )
+        .await
+        .unwrap();
+        let with_trace = selectivity_plan_for_candidate(
+            &candidate,
+            10,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(without_trace.telemetry.decision_count, fanout_specs().len());
+        assert!(without_trace.traces.is_empty());
+        assert_eq!(with_trace.traces.len(), fanout_specs().len());
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_uses_conservative_fanout_when_stats_are_missing() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462002").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert!(plan
+            .fanout_overrides
+            .iter()
+            .all(|override_| override_.max_fanout == 1));
+        assert!(plan.traces.iter().all(|trace| {
+            trace.fallback
+                && trace.chosen_fanout == 1
+                && trace.decision == SelectivityDecision::ConservativeFallback
+        }));
     }
 }

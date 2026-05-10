@@ -713,7 +713,10 @@ fn bounded_expansion_plan<'a>(
             bounded_failure.get_or_insert(failure);
             incident_links.truncate(query.max_hub_edges);
         }
-        incident_links = apply_fanout_limits(query, incident_links);
+        let apply_selectivity_overrides = depth == 0
+            && object_ref.object_id == query.root_id
+            && object_ref.object_type == query.root_type;
+        incident_links = apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
 
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -776,8 +779,14 @@ fn bounded_expansion_plan<'a>(
 
 fn apply_fanout_limits<'a>(
     query: &GraphExpansionQuery,
-    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    mut incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    apply_selectivity_overrides: bool,
 ) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+    if query.fanout_overrides.is_empty() || !apply_selectivity_overrides {
+        incident_links.truncate(query.max_fanout_per_node);
+        return incident_links;
+    }
+
     let mut retained = Vec::new();
     let mut per_pair_counts = std::collections::HashMap::<(RelationType, ObjectType), usize>::new();
     for (link, neighbor) in incident_links {
@@ -1288,6 +1297,72 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn bounded_expansion_applies_selectivity_fanout_overrides_only_at_root() {
+        let fixture = representative_fixtures();
+        let root_expanded = &fixture.derived_reflection;
+        let root_pruned = &fixture.user_preference;
+        let downstream_a = &fixture.open_loop;
+        let downstream_b = &fixture.commitment;
+        let links = vec![
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0300),
+                fixture.hub_entity.id,
+                ObjectType::Entity,
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0301),
+                fixture.hub_entity.id,
+                ObjectType::Entity,
+                root_pruned.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0302),
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                downstream_a.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0303),
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                downstream_b.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+        ];
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 10)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(10)
+            .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                max_fanout: 1,
+            }]);
+
+        let expansion = bounded_expansion(&query, fixture.objects(), links).unwrap();
+
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == root_expanded.id)
+        }));
+        assert!(!expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == root_pruned.id)
+        }));
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == downstream_a.id)
+        }));
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == downstream_b.id)
+        }));
+    }
+
     fn test_link(
         from_id: MemoryId,
         from_type: ObjectType,
@@ -1295,8 +1370,26 @@ mod tests {
         to_type: ObjectType,
         relation: RelationType,
     ) -> MemoryLink {
+        test_link_with_id(
+            MemoryId::new_v4(),
+            from_id,
+            from_type,
+            to_id,
+            to_type,
+            relation,
+        )
+    }
+
+    fn test_link_with_id(
+        id: MemoryId,
+        from_id: MemoryId,
+        from_type: ObjectType,
+        to_id: MemoryId,
+        to_type: ObjectType,
+        relation: RelationType,
+    ) -> MemoryLink {
         MemoryLink {
-            id: MemoryId::new_v4(),
+            id,
             object_type: ObjectType::MemoryLink,
             from_id,
             from_type,
