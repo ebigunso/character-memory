@@ -225,7 +225,14 @@ fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
             ",
         )
         .map_err(sqlite_error)?;
-    set_health(connection, RetrievalStatsHealth::default())
+    initialize_health_metadata(connection)
+}
+
+fn initialize_health_metadata(connection: &Connection) -> Result<(), CustomError> {
+    if meta_value(connection, "health_state")?.is_none() {
+        set_health(connection, RetrievalStatsHealth::default())?;
+    }
+    Ok(())
 }
 
 fn upsert_edge(connection: &Connection, edge: &RetrievalStatsEdge) -> Result<(), CustomError> {
@@ -591,6 +598,28 @@ mod tests {
         assert_eq!(
             reopened.health().await.unwrap(),
             RetrievalStatsHealth::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_preserves_unhealthy_marker_across_reopen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("stats.sqlite3");
+
+        {
+            let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+            store
+                .mark_unhealthy("transient stats failure".to_owned())
+                .await
+                .unwrap();
+        }
+
+        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
+        let health = reopened.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert_eq!(
+            health.last_error_message.as_deref(),
+            Some("transient stats failure")
         );
     }
 

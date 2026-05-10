@@ -106,9 +106,11 @@ impl Default for RetrievalStatsHealth {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct NoopRetrievalStatsStore;
 
+#[cfg(test)]
 #[async_trait]
 impl RetrievalStatsStore for NoopRetrievalStatsStore {
     async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
@@ -177,6 +179,7 @@ impl InMemoryRetrievalStatsStore {
                     state: RetrievalStatsHealthState::Unhealthy,
                     last_error_message: Some(message),
                 },
+                preserve_unhealthy_on_success: true,
                 ..InMemoryState::default()
             }),
         }
@@ -190,6 +193,7 @@ struct InMemoryState {
     global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     health: RetrievalStatsHealth,
     rejected_low_information_link_count: u64,
+    preserve_unhealthy_on_success: bool,
 }
 
 #[async_trait]
@@ -200,7 +204,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             state.edges.insert(edge.edge_key.clone(), edge.clone());
         }
         state.refresh_counters();
-        state.health = RetrievalStatsHealth::default();
+        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -221,7 +225,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             }
         }
         state.refresh_counters();
-        state.health = RetrievalStatsHealth::default();
+        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -259,7 +263,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
         let mut state = lock(&self.state)?;
         state.rejected_low_information_link_count += 1;
-        state.health = RetrievalStatsHealth::default();
+        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -272,6 +276,12 @@ impl InMemoryState {
     fn refresh_counters(&mut self) {
         self.counters = recomputed_counters(&self.edges);
         self.global_counters = recomputed_global_counters(&self.edges);
+    }
+
+    fn mark_healthy_after_success(&mut self) {
+        if !self.preserve_unhealthy_on_success {
+            self.health = RetrievalStatsHealth::default();
+        }
     }
 }
 
@@ -882,6 +892,36 @@ mod tests {
             store.health().await.unwrap(),
             RetrievalStatsHealth::default()
         );
+    }
+
+    #[tokio::test]
+    async fn fallback_health_marker_survives_successful_writes() {
+        let store = InMemoryRetrievalStatsStore::unhealthy(
+            "sqlite retrieval stats unavailable; using in-memory fallback".to_owned(),
+        );
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460051");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655460052");
+
+        store
+            .record_edges(&[edge(
+                entity_id,
+                RelationType::Involves,
+                episode_id,
+                ObjectType::Episode,
+                RetentionState::Active,
+                true,
+                timestamp(),
+            )])
+            .await
+            .unwrap();
+
+        let health = store.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert!(health
+            .last_error_message
+            .as_deref()
+            .unwrap()
+            .contains("in-memory fallback"));
     }
 
     fn id(value: &str) -> MemoryId {
