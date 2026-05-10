@@ -7,7 +7,10 @@ use crate::errors::CustomError;
 use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
-use crate::internal::repositories::{GraphAuthorityStore, MemoryEmbedder, VectorCandidateStore};
+use crate::internal::repositories::{
+    record_stats_after_write, GraphAuthorityStore, MemoryEmbedder, RetrievalStatsStore,
+    VectorCandidateStore,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RememberPipelineDraft {
@@ -69,6 +72,7 @@ where
     graph_store: &'a G,
     vector_store: &'a V,
     embedder: &'a E,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G, V, E> RememberPipeline<'a, G, V, E>
@@ -77,11 +81,27 @@ where
     V: VectorCandidateStore + ?Sized,
     E: MemoryEmbedder + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
         Self {
             graph_store,
             vector_store,
             embedder,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            vector_store,
+            embedder,
+            stats_store,
         }
     }
 
@@ -97,6 +117,7 @@ where
 
         let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
         if vector_records.is_empty() {
+            record_stats_after_write(self.stats_store, &objects, &links).await;
             return Ok(outcome);
         }
 
@@ -114,6 +135,8 @@ where
                 });
             }
         }
+
+        record_stats_after_write(self.stats_store, &objects, &links).await;
 
         Ok(outcome)
     }
@@ -223,6 +246,9 @@ mod tests {
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
     };
     use crate::internal::repositories::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
+    use crate::internal::repositories::{
+        InMemoryRetrievalStatsStore, RetrievalStatsCounterKey, RetrievalStatsStore,
+    };
 
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
@@ -460,6 +486,44 @@ mod tests {
             "embedder returned 4 embeddings for 5 vector records"
         );
         assert!(vector.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remember_pipeline_records_stats_after_vector_attempt() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::default();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        pipeline
+            .remember(RememberPipelineDraft::new(
+                [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
+                [typed_link_draft(
+                    ids.extra_link,
+                    ObjectType::Entity,
+                    ids.entity,
+                    RelationType::Mentions,
+                    ObjectType::Episode,
+                    ids.episode,
+                )],
+            ))
+            .await
+            .expect("stats should not change remember outcome");
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: ids.entity,
+                relation_kind: RelationType::Mentions,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
     }
 
     #[derive(Debug, Clone, Copy)]
