@@ -239,8 +239,8 @@ struct FanoutSpec {
     max_fanout: usize,
 }
 
-fn fanout_specs() -> Vec<FanoutSpec> {
-    vec![
+fn fanout_specs() -> &'static [FanoutSpec] {
+    &[
         FanoutSpec {
             relation: RelationType::About,
             object_type: ObjectType::DerivedMemory,
