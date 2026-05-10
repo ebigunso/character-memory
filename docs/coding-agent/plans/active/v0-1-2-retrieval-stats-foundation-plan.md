@@ -27,6 +27,7 @@
   - Stats-guided retrieval fanout implementation.
   - Retrieval rationale/trace public DTO expansion.
   - Durable link co-occurrence admission policy.
+  - Weak associative hint storage, associative units, associative memberships, or association support records.
   - Stats rebuild/backfill tooling.
   - Public admin API or dashboard.
   - Postgres, Redb, or network stats backends.
@@ -51,6 +52,7 @@
   - Repository contracts live under `src/internal/repositories/`.
   - Tests prefer deterministic fakes and unit tests near production modules.
   - Stats must remain derived policy metadata; Oxigraph remains graph truth.
+  - Controlled associative recall docs keep weak association evidence graph-internal in future `AssociativeUnit`/`AssociativeMembership`/`AssociationSupport` structures, not in the retrieval stats store.
 - Repo reference docs consulted:
   - `docs/coding-agent/rules/index.md`
   - `docs/coding-agent/rules/common.md`
@@ -91,6 +93,7 @@
   - Dependency selection is recorded as `rusqlite` with bundled SQLite unless implementation discovers a blocking validation issue that requires replanning.
   - Conservative fallback defaults are represented for downstream fanout policy: minimum fanout for weak/low-selectivity paths, existing static graph caps as hard upper bounds, and stronger-support requirement for broad expansion.
   - No persisted selectivity category type is introduced.
+  - Contract does not model weak associative hints, associative units, associative memberships, or association support records.
 - validation:
   - kind: command
     required: true
@@ -214,6 +217,10 @@
   - Summary: User requested each plan be committed on its own implementation branch and readied for execution.
   - Validation evidence: Plan status updated to approved; implementation remains pending.
   - Notes: No Worker tasks dispatched yet.
+- 2026-05-10 Main roadmap refresh reviewed:
+  - Summary: Updated plan boundary after latest main added controlled associative recall docs.
+  - Validation evidence: Plan-only update; branch rebased onto `origin/main`.
+  - Notes: Retrieval stats remain derived counters only and must not become weak associative hint storage.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -226,6 +233,11 @@
   - Trigger / new insight: User approved the recommended answers to all stats foundation open questions.
   - Plan delta (what changed): Added resolved decisions for `rusqlite` with bundled SQLite, internal-only stats update failure surfacing, and conservative missing/unhealthy stats fallback defaults.
   - Tradeoffs considered: `rusqlite` keeps the embedded counter workload simple; public outcome changes are deferred until a concrete caller workflow requires them; conservative fallback protects retrieval from treating stale derived stats as authority.
+  - User approval: yes
+- 2026-05-10 Decision:
+  - Trigger / new insight: Latest main adds controlled associative recall docs and ADRs that reserve weak associative evidence for future graph-internal associative structures.
+  - Plan delta (what changed): Added an explicit non-goal and acceptance boundary preventing `RetrievalStatsStore` from becoming a weak associative hint store or associative membership/support store.
+  - Tradeoffs considered: Keeping stats as counters preserves ADR-I-0008's derived-policy boundary and leaves future associative recall under graph authority.
   - User approval: yes
 
 ## Notes
