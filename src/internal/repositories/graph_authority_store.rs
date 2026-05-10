@@ -776,8 +776,13 @@ fn bounded_expansion_plan<'a>(
 
 fn apply_fanout_limits<'a>(
     query: &GraphExpansionQuery,
-    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    mut incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
 ) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+    if query.fanout_overrides.is_empty() {
+        incident_links.truncate(query.max_fanout_per_node);
+        return incident_links;
+    }
+
     let mut retained = Vec::new();
     let mut per_pair_counts = std::collections::HashMap::<(RelationType, ObjectType), usize>::new();
     for (link, neighbor) in incident_links {
