@@ -160,8 +160,16 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) max_hub_edges: usize,
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
+    pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GraphExpansionFanoutOverride {
+    pub(crate) relation: RelationType,
+    pub(crate) object_type: ObjectType,
+    pub(crate) max_fanout: usize,
 }
 
 impl GraphExpansionQuery {
@@ -180,6 +188,7 @@ impl GraphExpansionQuery {
             max_hub_edges: usize::MAX,
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
+            fanout_overrides: Vec::new(),
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -192,6 +201,14 @@ impl GraphExpansionQuery {
 
     pub(crate) fn with_allowed_relation_types(mut self, relation_types: Vec<RelationType>) -> Self {
         self.allowed_relation_types = relation_types;
+        self
+    }
+
+    pub(crate) fn with_fanout_overrides(
+        mut self,
+        fanout_overrides: Vec<GraphExpansionFanoutOverride>,
+    ) -> Self {
+        self.fanout_overrides = fanout_overrides;
         self
     }
 
@@ -494,6 +511,7 @@ pub(crate) fn bounded_expansion_node_set(
     if query.max_fanout_per_node != usize::MAX
         || query.max_hub_edges != usize::MAX
         || !query.allowed_relation_types.is_empty()
+        || !query.fanout_overrides.is_empty()
         || query.lifecycle_policy != GraphExpansionLifecyclePolicy::default()
         || query.failure_policy != GraphExpansionFailurePolicy::default()
     {
@@ -693,10 +711,9 @@ fn bounded_expansion_plan<'a>(
                 return Err(graph_expansion_bounded_error(failure));
             }
             bounded_failure.get_or_insert(failure);
-            incident_links.truncate(query.max_fanout_per_node.min(query.max_hub_edges));
-        } else {
-            incident_links.truncate(query.max_fanout_per_node);
+            incident_links.truncate(query.max_hub_edges);
         }
+        incident_links = apply_fanout_limits(query, incident_links);
 
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -755,6 +772,43 @@ fn bounded_expansion_plan<'a>(
         filtered_nodes,
         bounded_failure,
     })
+}
+
+fn apply_fanout_limits<'a>(
+    query: &GraphExpansionQuery,
+    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+    let mut retained = Vec::new();
+    let mut per_pair_counts = std::collections::HashMap::<(RelationType, ObjectType), usize>::new();
+    for (link, neighbor) in incident_links {
+        if retained.len() >= query.max_fanout_per_node {
+            break;
+        }
+        let max_for_pair = fanout_limit_for_pair(query, link.relation, neighbor.object_type);
+        let count = per_pair_counts
+            .entry((link.relation, neighbor.object_type))
+            .or_default();
+        if *count >= max_for_pair {
+            continue;
+        }
+        *count += 1;
+        retained.push((link, neighbor));
+    }
+    retained
+}
+
+fn fanout_limit_for_pair(
+    query: &GraphExpansionQuery,
+    relation: RelationType,
+    object_type: ObjectType,
+) -> usize {
+    query
+        .fanout_overrides
+        .iter()
+        .find(|override_| override_.relation == relation && override_.object_type == object_type)
+        .map(|override_| override_.max_fanout)
+        .unwrap_or(query.max_fanout_per_node)
+        .min(query.max_fanout_per_node)
 }
 
 fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {

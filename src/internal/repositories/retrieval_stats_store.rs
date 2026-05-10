@@ -1,0 +1,661 @@
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard};
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+
+use crate::api::types::{
+    MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
+};
+use crate::errors::CustomError;
+
+#[allow(dead_code)]
+#[async_trait]
+pub(crate) trait RetrievalStatsStore: Send + Sync {
+    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError>;
+
+    async fn record_object_states(
+        &self,
+        states: &[RetrievalStatsObjectState],
+    ) -> Result<(), CustomError>;
+
+    async fn counter(
+        &self,
+        key: &RetrievalStatsCounterKey,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+
+    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
+
+    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RetrievalStatsEdge {
+    pub(crate) edge_key: String,
+    pub(crate) entity_id: MemoryId,
+    pub(crate) relation_kind: RelationType,
+    pub(crate) object_id: MemoryId,
+    pub(crate) object_type: ObjectType,
+    pub(crate) retention_state: RetentionState,
+    pub(crate) is_current: bool,
+    pub(crate) first_seen_at: DateTime<Utc>,
+    pub(crate) last_seen_at: DateTime<Utc>,
+}
+
+impl RetrievalStatsEdge {
+    pub(crate) fn is_active(&self) -> bool {
+        self.retention_state == RetentionState::Active
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RetrievalStatsObjectState {
+    pub(crate) object_id: MemoryId,
+    pub(crate) object_type: ObjectType,
+    pub(crate) retention_state: RetentionState,
+    pub(crate) is_current: bool,
+    pub(crate) observed_at: DateTime<Utc>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RetrievalStatsCounterKey {
+    pub(crate) entity_id: MemoryId,
+    pub(crate) relation_kind: RelationType,
+    pub(crate) object_type: ObjectType,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RetrievalStatsCounter {
+    pub(crate) total_count: u64,
+    pub(crate) active_count: u64,
+    pub(crate) current_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RetrievalStatsHealth {
+    pub(crate) state: RetrievalStatsHealthState,
+    pub(crate) last_error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetrievalStatsHealthState {
+    Healthy,
+    Unhealthy,
+}
+
+impl Default for RetrievalStatsHealth {
+    fn default() -> Self {
+        Self {
+            state: RetrievalStatsHealthState::Healthy,
+            last_error_message: None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct NoopRetrievalStatsStore;
+
+#[async_trait]
+impl RetrievalStatsStore for NoopRetrievalStatsStore {
+    async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        Ok(())
+    }
+
+    async fn record_object_states(
+        &self,
+        _states: &[RetrievalStatsObjectState],
+    ) -> Result<(), CustomError> {
+        Ok(())
+    }
+
+    async fn counter(
+        &self,
+        _key: &RetrievalStatsCounterKey,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(None)
+    }
+
+    async fn global_counter(
+        &self,
+        _relation_kind: RelationType,
+        _object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(None)
+    }
+
+    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        Ok(RetrievalStatsHealth::default())
+    }
+
+    async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn noop_retrieval_stats_store() -> &'static dyn RetrievalStatsStore {
+    static STORE: OnceLock<NoopRetrievalStatsStore> = OnceLock::new();
+    STORE.get_or_init(NoopRetrievalStatsStore::default)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct InMemoryRetrievalStatsStore {
+    state: Mutex<InMemoryState>,
+}
+
+impl InMemoryRetrievalStatsStore {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Default)]
+struct InMemoryState {
+    edges: HashMap<String, RetrievalStatsEdge>,
+    health: RetrievalStatsHealth,
+}
+
+#[async_trait]
+impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
+    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        let mut state = lock(&self.state)?;
+        for edge in edges {
+            state.edges.insert(edge.edge_key.clone(), edge.clone());
+        }
+        state.health = RetrievalStatsHealth::default();
+        Ok(())
+    }
+
+    async fn record_object_states(
+        &self,
+        states: &[RetrievalStatsObjectState],
+    ) -> Result<(), CustomError> {
+        let mut state = lock(&self.state)?;
+        for object_state in states {
+            for edge in state.edges.values_mut() {
+                if edge.object_id == object_state.object_id
+                    && edge.object_type == object_state.object_type
+                {
+                    edge.retention_state = object_state.retention_state;
+                    edge.is_current = object_state.is_current;
+                    edge.last_seen_at = object_state.observed_at;
+                }
+            }
+        }
+        state.health = RetrievalStatsHealth::default();
+        Ok(())
+    }
+
+    async fn counter(
+        &self,
+        key: &RetrievalStatsCounterKey,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(recomputed_counters(&lock(&self.state)?.edges)
+            .get(key)
+            .copied())
+    }
+
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(recomputed_global_counters(&lock(&self.state)?.edges)
+            .get(&(relation_kind, object_type))
+            .copied())
+    }
+
+    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        Ok(lock(&self.state)?.health.clone())
+    }
+
+    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
+        let mut state = lock(&self.state)?;
+        state.health = RetrievalStatsHealth {
+            state: RetrievalStatsHealthState::Unhealthy,
+            last_error_message: Some(message),
+        };
+        Ok(())
+    }
+}
+
+pub(crate) async fn record_stats_after_write(
+    stats_store: &dyn RetrievalStatsStore,
+    objects: &[MemoryObject],
+    links: &[MemoryLink],
+) {
+    let states = retrieval_stats_object_states(objects);
+    if let Err(error) = stats_store.record_object_states(&states).await {
+        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+        return;
+    }
+
+    let edges = retrieval_stats_edges(objects, links);
+    if let Err(error) = stats_store.record_edges(&edges).await {
+        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+    }
+}
+
+pub(crate) fn retrieval_stats_edges(
+    objects: &[MemoryObject],
+    links: &[MemoryLink],
+) -> Vec<RetrievalStatsEdge> {
+    let mut edges = Vec::new();
+    for object in objects {
+        append_intrinsic_edges(&mut edges, object);
+    }
+    for link in links {
+        append_link_edges(&mut edges, link);
+    }
+    edges.sort_by(|left, right| left.edge_key.cmp(&right.edge_key));
+    edges.dedup_by(|left, right| left.edge_key == right.edge_key);
+    edges
+}
+
+pub(crate) fn retrieval_stats_object_states(
+    objects: &[MemoryObject],
+) -> Vec<RetrievalStatsObjectState> {
+    objects.iter().filter_map(object_state).collect()
+}
+
+pub(crate) fn relation_type_key(relation: RelationType) -> &'static str {
+    match relation {
+        RelationType::HasObservation => "has_observation",
+        RelationType::ObservedIn => "observed_in",
+        RelationType::Mentions => "mentions",
+        RelationType::Involves => "involves",
+        RelationType::About => "about",
+        RelationType::DerivedFrom => "derived_from",
+        RelationType::PartOfThread => "part_of_thread",
+        RelationType::Supports => "supports",
+        RelationType::Contradicts => "contradicts",
+        RelationType::Supersedes => "supersedes",
+        RelationType::Resolves => "resolves",
+        RelationType::CreatesOpenLoop => "creates_open_loop",
+        RelationType::FulfillsCommitment => "fulfills_commitment",
+        RelationType::AssociatedWith => "associated_with",
+    }
+}
+
+pub(crate) fn object_type_key(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::Episode => "episode",
+        ObjectType::Observation => "observation",
+        ObjectType::Entity => "entity",
+        ObjectType::MemoryThread => "memory_thread",
+        ObjectType::DerivedMemory => "derived_memory",
+        ObjectType::MemoryLink => "memory_link",
+    }
+}
+
+pub(crate) fn retention_state_key(retention_state: RetentionState) -> &'static str {
+    match retention_state {
+        RetentionState::Active => "active",
+        RetentionState::Suppressed => "suppressed",
+        RetentionState::Archived => "archived",
+        RetentionState::Deleted => "deleted",
+    }
+}
+
+fn append_intrinsic_edges(edges: &mut Vec<RetrievalStatsEdge>, object: &MemoryObject) {
+    match object {
+        MemoryObject::Episode(episode) => {
+            for entity_id in &episode.participant_entity_ids {
+                edges.push(edge(
+                    *entity_id,
+                    RelationType::Involves,
+                    episode.id,
+                    ObjectType::Episode,
+                    episode.retention_state,
+                    true,
+                    episode.created_at,
+                ));
+            }
+        }
+        MemoryObject::Observation(observation) => {
+            if let Some(entity_id) = observation.speaker_entity_id {
+                edges.push(edge(
+                    entity_id,
+                    RelationType::Mentions,
+                    observation.id,
+                    ObjectType::Observation,
+                    observation.retention_state,
+                    true,
+                    observation.created_at,
+                ));
+            }
+        }
+        MemoryObject::DerivedMemory(memory) => {
+            for entity_id in &memory.entity_ids {
+                edges.push(edge(
+                    *entity_id,
+                    RelationType::About,
+                    memory.id,
+                    ObjectType::DerivedMemory,
+                    memory.retention_state,
+                    memory.is_current,
+                    memory.created_at,
+                ));
+            }
+        }
+        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {}
+    }
+}
+
+fn append_link_edges(edges: &mut Vec<RetrievalStatsEdge>, link: &MemoryLink) {
+    if link.from_type == ObjectType::Entity && link.to_type != ObjectType::MemoryLink {
+        edges.push(edge(
+            link.from_id,
+            link.relation,
+            link.to_id,
+            link.to_type,
+            RetentionState::Active,
+            true,
+            link.created_at,
+        ));
+    }
+    if link.to_type == ObjectType::Entity && link.from_type != ObjectType::MemoryLink {
+        edges.push(edge(
+            link.to_id,
+            link.relation,
+            link.from_id,
+            link.from_type,
+            RetentionState::Active,
+            true,
+            link.created_at,
+        ));
+    }
+}
+
+fn edge(
+    entity_id: MemoryId,
+    relation_kind: RelationType,
+    object_id: MemoryId,
+    object_type: ObjectType,
+    retention_state: RetentionState,
+    is_current: bool,
+    observed_at: DateTime<Utc>,
+) -> RetrievalStatsEdge {
+    RetrievalStatsEdge {
+        edge_key: format!(
+            "{}:{}:{}:{}",
+            entity_id,
+            relation_type_key(relation_kind),
+            object_type_key(object_type),
+            object_id
+        ),
+        entity_id,
+        relation_kind,
+        object_id,
+        object_type,
+        retention_state,
+        is_current,
+        first_seen_at: observed_at,
+        last_seen_at: observed_at,
+    }
+}
+
+fn object_state(object: &MemoryObject) -> Option<RetrievalStatsObjectState> {
+    match object {
+        MemoryObject::Episode(object) => Some(RetrievalStatsObjectState {
+            object_id: object.id,
+            object_type: ObjectType::Episode,
+            retention_state: object.retention_state,
+            is_current: true,
+            observed_at: object.created_at,
+        }),
+        MemoryObject::Observation(object) => Some(RetrievalStatsObjectState {
+            object_id: object.id,
+            object_type: ObjectType::Observation,
+            retention_state: object.retention_state,
+            is_current: true,
+            observed_at: object.created_at,
+        }),
+        MemoryObject::DerivedMemory(object) => Some(RetrievalStatsObjectState {
+            object_id: object.id,
+            object_type: ObjectType::DerivedMemory,
+            retention_state: object.retention_state,
+            is_current: object.is_current,
+            observed_at: object.updated_at,
+        }),
+        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
+            None
+        }
+    }
+}
+
+fn recomputed_counters(
+    edges: &HashMap<String, RetrievalStatsEdge>,
+) -> HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter> {
+    let mut counters = HashMap::new();
+    for edge in edges.values() {
+        let key = RetrievalStatsCounterKey {
+            entity_id: edge.entity_id,
+            relation_kind: edge.relation_kind,
+            object_type: edge.object_type,
+        };
+        let counter = counters
+            .entry(key)
+            .or_insert_with(RetrievalStatsCounter::default);
+        counter.total_count += 1;
+        if edge.is_active() {
+            counter.active_count += 1;
+        }
+        if edge.is_active() && edge.is_current {
+            counter.current_count += 1;
+        }
+    }
+    counters
+}
+
+fn recomputed_global_counters(
+    edges: &HashMap<String, RetrievalStatsEdge>,
+) -> HashMap<(RelationType, ObjectType), RetrievalStatsCounter> {
+    let mut counters = HashMap::new();
+    for edge in edges.values() {
+        let counter = counters
+            .entry((edge.relation_kind, edge.object_type))
+            .or_insert_with(RetrievalStatsCounter::default);
+        counter.total_count += 1;
+        if edge.is_active() {
+            counter.active_count += 1;
+        }
+        if edge.is_active() && edge.is_current {
+            counter.current_count += 1;
+        }
+    }
+    counters
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
+    mutex
+        .lock()
+        .map_err(|_| CustomError::DatabaseError("retrieval stats mutex was poisoned".to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::types::{
+        DerivedMemory, DerivedType, Episode, Modality, Stability, DEFAULT_SCHEMA_VERSION,
+    };
+
+    #[tokio::test]
+    async fn in_memory_store_counts_edges_idempotently() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460001");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655460002");
+        let edge = edge(
+            entity_id,
+            RelationType::Involves,
+            episode_id,
+            ObjectType::Episode,
+            RetentionState::Active,
+            true,
+            timestamp(),
+        );
+
+        store
+            .record_edges(std::slice::from_ref(&edge))
+            .await
+            .unwrap();
+        store
+            .record_edges(std::slice::from_ref(&edge))
+            .await
+            .unwrap();
+
+        let counter = store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::Involves,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+        let global = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(global.total_count, 1);
+    }
+
+    #[tokio::test]
+    async fn in_memory_store_updates_lifecycle_counts() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460011");
+        let memory_id = id("550e8400-e29b-41d4-a716-446655460012");
+        store
+            .record_edges(&[edge(
+                entity_id,
+                RelationType::About,
+                memory_id,
+                ObjectType::DerivedMemory,
+                RetentionState::Active,
+                true,
+                timestamp(),
+            )])
+            .await
+            .unwrap();
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: memory_id,
+                object_type: ObjectType::DerivedMemory,
+                retention_state: RetentionState::Suppressed,
+                is_current: false,
+                observed_at: timestamp(),
+            }])
+            .await
+            .unwrap();
+
+        let counter = store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
+    }
+
+    #[test]
+    fn derives_entity_edges_from_objects_and_links() {
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460021");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655460022");
+        let memory_id = id("550e8400-e29b-41d4-a716-446655460023");
+        let objects = vec![
+            MemoryObject::Episode(Episode {
+                id: episode_id,
+                object_type: ObjectType::Episode,
+                modality: Modality::Chat,
+                source_conversation_id: None,
+                started_at: None,
+                ended_at: None,
+                participant_entity_ids: vec![entity_id],
+                summary: "episode".to_owned(),
+                raw_ref: None,
+                salience_score: 0.5,
+                retention_state: RetentionState::Active,
+                created_at: timestamp(),
+                schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+            }),
+            MemoryObject::DerivedMemory(DerivedMemory {
+                id: memory_id,
+                object_type: ObjectType::DerivedMemory,
+                derived_type: DerivedType::Reflection,
+                text: "memory".to_owned(),
+                derived_from_episode_ids: vec![episode_id],
+                derived_from_observation_ids: Vec::new(),
+                thread_ids: Vec::new(),
+                entity_ids: vec![entity_id],
+                confidence: 0.7,
+                salience_score: 0.7,
+                stability: Stability::Medium,
+                is_current: true,
+                supersedes: Vec::new(),
+                retention_state: RetentionState::Active,
+                created_at: timestamp(),
+                updated_at: timestamp(),
+                schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+            }),
+        ];
+
+        let edges = retrieval_stats_edges(&objects, &[]);
+
+        assert_eq!(edges.len(), 2);
+        assert!(edges.iter().any(|edge| {
+            edge.entity_id == entity_id
+                && edge.relation_kind == RelationType::Involves
+                && edge.object_id == episode_id
+        }));
+        assert!(edges.iter().any(|edge| {
+            edge.entity_id == entity_id
+                && edge.relation_kind == RelationType::About
+                && edge.object_id == memory_id
+        }));
+    }
+
+    #[tokio::test]
+    async fn health_tracks_internal_failure_markers() {
+        let store = InMemoryRetrievalStatsStore::new();
+        store
+            .mark_unhealthy("stats write failed".to_owned())
+            .await
+            .unwrap();
+
+        let health = store.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert_eq!(
+            health.last_error_message.as_deref(),
+            Some("stats write failed")
+        );
+    }
+
+    fn id(value: &str) -> MemoryId {
+        uuid::Uuid::parse_str(value).unwrap()
+    }
+
+    fn timestamp() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+}

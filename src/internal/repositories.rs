@@ -5,6 +5,8 @@ mod link_pipeline;
 mod raw_reference_resolver;
 mod reconciliation;
 mod remember_pipeline;
+mod retrieval_selectivity;
+mod retrieval_stats_store;
 mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -26,9 +28,9 @@ pub(crate) use graph_authority_store::{
     bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
     derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
     GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredNode,
-    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
-    GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
+    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFanoutOverride,
+    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
 #[allow(unused_imports)]
@@ -52,6 +54,22 @@ pub(crate) use reconciliation::{
 pub(crate) use remember_pipeline::{
     RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome,
     VectorIndexingFailure as InternalVectorIndexingFailure,
+};
+
+#[cfg(test)]
+pub(crate) use retrieval_stats_store::noop_retrieval_stats_store;
+#[allow(unused_imports)]
+pub(crate) use retrieval_stats_store::{
+    object_type_key, record_stats_after_write, relation_type_key, retention_state_key,
+    retrieval_stats_edges, retrieval_stats_object_states, InMemoryRetrievalStatsStore,
+    NoopRetrievalStatsStore, RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge,
+    RetrievalStatsHealth, RetrievalStatsHealthState, RetrievalStatsObjectState,
+    RetrievalStatsStore,
+};
+
+#[allow(unused_imports)]
+pub(crate) use retrieval_selectivity::{
+    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
 };
 
 // Continuity retrieval pipeline surface.

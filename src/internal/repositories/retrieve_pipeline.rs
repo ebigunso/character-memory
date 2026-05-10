@@ -10,8 +10,8 @@ use crate::api::types::{
     MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState,
     RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
     RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason, ThreadStatus,
-    VectorCandidateTrace,
+    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
@@ -19,9 +19,10 @@ use crate::internal::models::vector::{
     VectorSurface,
 };
 use crate::internal::repositories::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphObjectRef, MemoryEmbedder,
+    selectivity_plan_for_candidate, GraphAuthorityStore, GraphExpansion,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
+    GraphObjectRef, MemoryEmbedder, RetrievalSelectivityPolicy, RetrievalStatsStore,
     VectorCandidateStore,
 };
 
@@ -34,6 +35,8 @@ where
     graph_store: &'a G,
     vector_store: &'a V,
     embedder: &'a E,
+    stats_store: &'a dyn RetrievalStatsStore,
+    selectivity_policy: RetrievalSelectivityPolicy,
 }
 
 impl<'a, G, V, E> RetrievePipeline<'a, G, V, E>
@@ -42,11 +45,30 @@ where
     V: VectorCandidateStore + ?Sized,
     E: MemoryEmbedder + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
         Self {
             graph_store,
             vector_store,
             embedder,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+            selectivity_policy: RetrievalSelectivityPolicy::default(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        stats_store: &'a dyn RetrievalStatsStore,
+        selectivity_policy: RetrievalSelectivityPolicy,
+    ) -> Self {
+        Self {
+            graph_store,
+            vector_store,
+            embedder,
+            stats_store,
+            selectivity_policy,
         }
     }
 
@@ -70,10 +92,24 @@ where
         let candidate_roots = root_selection.roots;
         let mut assembly = RetrieveAssembly::new(include_trace);
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
+        let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = include_trace.then(Vec::new);
+        let mut selectivity_traces = include_trace.then(Vec::new);
 
         for candidate in &candidate_roots {
-            let query = graph_query_for_candidate(candidate, &context);
+            let selectivity_plan = selectivity_plan_for_candidate(
+                candidate,
+                context.graph_limits.max_fanout_per_node,
+                self.stats_store,
+                self.selectivity_policy,
+            )
+            .await?;
+            absorb_selectivity_telemetry(&mut selectivity_telemetry, &selectivity_plan.telemetry);
+            if let Some(traces) = &mut selectivity_traces {
+                traces.extend(selectivity_plan.traces.clone());
+            }
+            let query =
+                graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides);
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
@@ -149,6 +185,7 @@ where
             selected_graph_root_count: candidate_roots.len(),
             graph_root_omission_count: root_selection.omitted_count,
             graph_expansion: graph_expansion_telemetry,
+            selectivity: selectivity_telemetry,
             section_pressure,
         };
         let trace = include_trace.then(|| RetrievalTrace {
@@ -163,6 +200,7 @@ where
                 .collect(),
             graph_relations: assembly.graph_relations.unwrap_or_default(),
             graph_expansions: graph_expansion_traces.unwrap_or_default(),
+            selectivity_decisions: selectivity_traces.unwrap_or_default(),
             lifecycle_filter_decisions: details.lifecycle_filter_decisions,
             stale_candidate_omissions: details.stale_candidate_omissions,
             section_assignments: details.section_assignments,
@@ -780,6 +818,7 @@ fn select_candidate_roots(
 fn graph_query_for_candidate(
     candidate: &VectorCandidateMatch,
     context: &RetrievalContext,
+    fanout_overrides: Vec<crate::internal::repositories::GraphExpansionFanoutOverride>,
 ) -> GraphExpansionQuery {
     GraphExpansionQuery::new(
         candidate.object_id,
@@ -789,6 +828,7 @@ fn graph_query_for_candidate(
     )
     .with_allowed_object_types(context.object_type_defaults.clone())
     .with_allowed_relation_types(context.graph_limits.allowed_relation_types.clone())
+    .with_fanout_overrides(fanout_overrides)
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
     .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
@@ -802,6 +842,14 @@ fn graph_query_for_candidate(
         timeout_ms: context.graph_limits.timeout_ms,
         allow_partial_results: context.graph_limits.allow_degraded_results,
     })
+}
+
+fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &SelectivityTelemetry) {
+    total.decision_count += next.decision_count;
+    total.high_selectivity_count += next.high_selectivity_count;
+    total.low_selectivity_supported_count += next.low_selectivity_supported_count;
+    total.low_selectivity_rejected_count += next.low_selectivity_rejected_count;
+    total.fallback_count += next.fallback_count;
 }
 
 fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
@@ -1272,12 +1320,19 @@ mod tests {
     use async_trait::async_trait;
     use uuid::Uuid;
 
+    use chrono::{DateTime, Utc};
+
     use crate::api::types::{ContinuitySectionLimits, RetrievalCandidateLimits};
     use crate::internal::models::vector::{
         VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
     };
     use crate::internal::repositories::test_support::{
-        representative_fixtures, FakeGraphAuthorityStore, FakeVectorCandidateStore,
+        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
+        FakeVectorCandidateStore,
+    };
+    use crate::internal::repositories::{
+        InMemoryRetrievalStatsStore, RetrievalSelectivityPolicy, RetrievalStatsEdge,
+        RetrievalStatsStore,
     };
 
     #[tokio::test]
@@ -1352,6 +1407,98 @@ mod tests {
             .all(|assignment| assignment.reason.is_some()));
         assert_eq!(trace.vector_candidates.len(), 4);
         assert_eq!(trace.graph_expansions.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn entity_neutral_selectivity_rejects_low_selectivity_concept_entity_about_expansion() {
+        let fixture = high_fanout_graph_fixture();
+        let graph = graph_with(&fixture.objects(), &fixture.links).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixture.hub_entity.id,
+            ObjectType::Entity,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let stats = InMemoryRetrievalStatsStore::new();
+        record_about_edges(
+            &stats,
+            fixture.hub_entity.id,
+            &fixture
+                .derived_memories
+                .iter()
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        let pipeline = RetrievePipeline::new_with_stats(
+            &graph,
+            &vector,
+            &embedder,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+        );
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("broad hub").with_trace())
+            .await
+            .unwrap();
+
+        assert!(outcome.pack.derived_memories.is_empty());
+        assert!(outcome
+            .trace
+            .as_ref()
+            .unwrap()
+            .selectivity_decisions
+            .iter()
+            .any(|decision| {
+                decision.relation == RelationType::About
+                    && decision.object_type == ObjectType::DerivedMemory
+                    && decision.chosen_fanout == 0
+                    && decision.decision
+                        == crate::api::types::SelectivityDecision::LowSelectivityRejected
+            }));
+    }
+
+    #[tokio::test]
+    async fn selectivity_allows_high_selectivity_entity_about_expansion() {
+        let fixture = high_fanout_graph_fixture();
+        let graph = graph_with(&fixture.objects(), &fixture.links).await;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixture.hub_entity.id,
+            ObjectType::Entity,
+            0.99,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let stats = InMemoryRetrievalStatsStore::new();
+        record_about_edges(
+            &stats,
+            fixture.hub_entity.id,
+            &[fixture.derived_memories[0].id],
+        )
+        .await;
+        record_other_about_edges(&stats, 80).await;
+        let pipeline = RetrievePipeline::new_with_stats(
+            &graph,
+            &vector,
+            &embedder,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+        );
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("specific hub").with_trace())
+            .await
+            .unwrap();
+
+        assert!(!outcome.pack.derived_memories.is_empty());
+        assert!(
+            outcome
+                .rationale
+                .telemetry
+                .selectivity
+                .high_selectivity_count
+                > 0
+        );
     }
 
     #[tokio::test]
@@ -1580,12 +1727,12 @@ mod tests {
         let mut context = RetrievalContext::new("fail closed query");
         context.graph_limits.allow_degraded_results = false;
 
-        let query = graph_query_for_candidate(&candidate, &context);
+        let query = graph_query_for_candidate(&candidate, &context, Vec::new());
 
         assert!(!query.failure_policy.allow_partial_results);
 
         context.graph_limits.allow_degraded_results = true;
-        let query = graph_query_for_candidate(&candidate, &context);
+        let query = graph_query_for_candidate(&candidate, &context, Vec::new());
 
         assert!(query.failure_policy.allow_partial_results);
     }
@@ -1947,6 +2094,51 @@ mod tests {
         graph.upsert_objects(objects).await.unwrap();
         graph.upsert_links(links).await.unwrap();
         graph
+    }
+
+    async fn record_about_edges(
+        stats: &InMemoryRetrievalStatsStore,
+        entity_id: MemoryId,
+        derived_memory_ids: &[MemoryId],
+    ) {
+        let edges = derived_memory_ids
+            .iter()
+            .map(|object_id| stats_edge(entity_id, *object_id))
+            .collect::<Vec<_>>();
+        stats.record_edges(&edges).await.unwrap();
+    }
+
+    async fn record_other_about_edges(stats: &InMemoryRetrievalStatsStore, count: u128) {
+        let edges = (0..count)
+            .map(|offset| {
+                stats_edge(
+                    Uuid::from_u128(0x650e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
+                    Uuid::from_u128(0x750e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
+                )
+            })
+            .collect::<Vec<_>>();
+        stats.record_edges(&edges).await.unwrap();
+    }
+
+    fn stats_edge(entity_id: MemoryId, object_id: MemoryId) -> RetrievalStatsEdge {
+        let observed_at = timestamp();
+        RetrievalStatsEdge {
+            edge_key: format!("{}:about:derived_memory:{}", entity_id, object_id),
+            entity_id,
+            relation_kind: RelationType::About,
+            object_id,
+            object_type: ObjectType::DerivedMemory,
+            retention_state: RetentionState::Active,
+            is_current: true,
+            first_seen_at: observed_at,
+            last_seen_at: observed_at,
+        }
+    }
+
+    fn timestamp() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
     }
 
     fn candidate(object_id: MemoryId, object_type: ObjectType, score: f32) -> VectorCandidateMatch {

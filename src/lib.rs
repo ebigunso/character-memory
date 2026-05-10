@@ -7,17 +7,22 @@ mod internal;
 
 use async_trait::async_trait;
 
-use crate::config::settings::{EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode};
+use crate::config::settings::{
+    EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
+    RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
+};
 use crate::internal::infrastructures::external_services::{
     OpenAIEmbeddingProvider, QdrantVectorCandidateStore,
 };
 use crate::internal::infrastructures::graph::{
     OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore,
 };
+use crate::internal::infrastructures::retrieval_stats::SqliteRetrievalStatsStore;
 use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
     CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
-    RememberPipelineDraft, RetrievePipeline, VectorCandidateStore,
+    RememberPipelineDraft, RetrievalSelectivityPolicy, RetrievalStatsStore, RetrievePipeline,
+    VectorCandidateStore,
 };
 
 // Re-export types for public use
@@ -39,13 +44,15 @@ pub use crate::api::types::{
     RelationType, RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
     RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionPressureSummary, SourceObjectCorrectionTarget, SourceProvenanceReference, Stability,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    SupersededByEvidence, SuppressionPolicy, ThreadStatus, VectorCandidateTrace,
-    VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    SectionPressureSummary, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
+    SourceObjectCorrectionTarget, SourceProvenanceReference, Stability, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, SupersededByEvidence, SuppressionPolicy,
+    ThreadStatus, VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure,
+    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
-pub use crate::config::settings::{GraphStoreMode, Settings};
+pub use crate::config::settings::{
+    GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
+};
 pub use crate::errors::CustomError;
 
 // Re-export for integration tests
@@ -88,6 +95,8 @@ struct MemoryComposition {
     graph_store: Box<dyn GraphAuthorityStore>,
     vector_store: Box<dyn VectorCandidateStore>,
     embedder: Box<dyn MemoryEmbedder>,
+    stats_store: Box<dyn RetrievalStatsStore>,
+    selectivity_policy: RetrievalSelectivityPolicy,
 }
 
 struct EmbeddingProviderMemoryEmbedder {
@@ -114,6 +123,7 @@ impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
 
 impl CharacterMemory {
     /// Builds CharacterMemory from provider-neutral graph, vector, and embedder parts.
+    #[cfg(test)]
     pub(crate) fn from_parts(
         graph_store: Box<dyn GraphAuthorityStore>,
         vector_store: Box<dyn VectorCandidateStore>,
@@ -124,6 +134,28 @@ impl CharacterMemory {
                 graph_store,
                 vector_store,
                 embedder,
+                stats_store: Box::new(
+                    crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
+                ),
+                selectivity_policy: RetrievalSelectivityPolicy::default(),
+            },
+        }
+    }
+
+    fn from_parts_with_stats(
+        graph_store: Box<dyn GraphAuthorityStore>,
+        vector_store: Box<dyn VectorCandidateStore>,
+        embedder: Box<dyn MemoryEmbedder>,
+        stats_store: Box<dyn RetrievalStatsStore>,
+        selectivity_policy: RetrievalSelectivityPolicy,
+    ) -> Self {
+        Self {
+            memory_composition: MemoryComposition {
+                graph_store,
+                vector_store,
+                embedder,
+                stats_store,
+                selectivity_policy,
             },
         }
     }
@@ -183,11 +215,18 @@ impl CharacterMemory {
                 Box::new(OxigraphGraphAuthorityStore::new_in_memory()?)
             }
         };
+        let stats_store = retrieval_stats_store(&settings)?;
+        let selectivity_policy = RetrievalSelectivityPolicy::new(
+            settings.get_selectivity_smoothing_alpha(),
+            settings.get_selectivity_gamma(),
+        );
 
-        Ok(Self::from_parts(
+        Ok(Self::from_parts_with_stats(
             graph_store,
             Box::new(vector_store),
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
+            stats_store,
+            selectivity_policy,
         ))
     }
 
@@ -218,10 +257,11 @@ impl CharacterMemory {
     /// Persists a remember draft through the graph-authoritative write pipeline.
     pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
         let parts = self.memory_composition();
-        let pipeline = RememberPipeline::new(
+        let pipeline = RememberPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         );
         let outcome = pipeline
             .remember(RememberPipelineDraft::new(
@@ -235,7 +275,7 @@ impl CharacterMemory {
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
         let parts = self.memory_composition();
-        LinkPipeline::new(parts.graph_store.as_ref())
+        LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
             .link(draft)
             .await
     }
@@ -246,10 +286,12 @@ impl CharacterMemory {
         context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
         let parts = self.memory_composition();
-        RetrievePipeline::new(
+        RetrievePipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
+            parts.selectivity_policy,
         )
         .retrieve(context)
         .await
@@ -261,10 +303,11 @@ impl CharacterMemory {
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         let parts = self.memory_composition();
-        CorrectionForgetPipeline::new(
+        CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         )
         .correct(draft)
         .await
@@ -276,10 +319,11 @@ impl CharacterMemory {
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         let parts = self.memory_composition();
-        CorrectionForgetPipeline::new(
+        CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         )
         .forget(draft)
         .await
@@ -287,6 +331,17 @@ impl CharacterMemory {
 
     fn memory_composition(&self) -> &MemoryComposition {
         &self.memory_composition
+    }
+}
+
+fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsStore>, CustomError> {
+    match settings.get_retrieval_stats_store_mode() {
+        ConfigRetrievalStatsStoreMode::Sqlite => Ok(Box::new(SqliteRetrievalStatsStore::open(
+            settings.get_retrieval_stats_path(),
+        )?)),
+        ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(
+            crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
+        )),
     }
 }
 

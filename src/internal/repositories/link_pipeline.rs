@@ -2,21 +2,38 @@
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft};
 use crate::errors::CustomError;
-use crate::internal::repositories::GraphAuthorityStore;
+use crate::internal::repositories::{
+    record_stats_after_write, GraphAuthorityStore, RetrievalStatsStore,
+};
 
 pub(crate) struct LinkPipeline<'a, G>
 where
     G: GraphAuthorityStore + ?Sized,
 {
     graph_store: &'a G,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G> LinkPipeline<'a, G>
 where
     G: GraphAuthorityStore + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G) -> Self {
-        Self { graph_store }
+        Self {
+            graph_store,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            stats_store,
+        }
     }
 
     pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
@@ -35,6 +52,7 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
+        record_stats_after_write(self.stats_store, &[], std::slice::from_ref(&link)).await;
         Ok(link)
     }
 }
@@ -55,7 +73,10 @@ mod tests {
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
     };
-    use crate::internal::repositories::{GraphAuthorityStore, GraphExpansionQuery};
+    use crate::internal::repositories::{
+        GraphAuthorityStore, GraphExpansionQuery, InMemoryRetrievalStatsStore,
+        RetrievalStatsCounterKey, RetrievalStatsStore,
+    };
 
     #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
@@ -169,6 +190,30 @@ mod tests {
         let persisted = pipeline.link(valid_link_draft()).await.unwrap();
 
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_entity_relation_stats_after_graph_success() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = valid_link_draft();
+        let entity_id = draft.to_id;
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {

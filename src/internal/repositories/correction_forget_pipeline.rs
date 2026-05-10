@@ -16,9 +16,9 @@ use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
 use crate::internal::repositories::{
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef, MemoryEmbedder,
-    VectorCandidateStore,
+    record_stats_after_write, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
+    GraphDerivedMemoryThreadQuery, GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
+    MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
 };
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
@@ -30,6 +30,7 @@ where
     graph_store: &'a G,
     vector_store: &'a V,
     embedder: &'a E,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G, V, E> CorrectionForgetPipeline<'a, G, V, E>
@@ -38,11 +39,27 @@ where
     V: VectorCandidateStore + ?Sized,
     E: MemoryEmbedder + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
         Self {
             graph_store,
             vector_store,
             embedder,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            vector_store,
+            embedder,
+            stats_store,
         }
     }
 
@@ -62,6 +79,7 @@ where
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await;
         apply_vector_result(&mut outcome, vector_result);
+        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
     }
 
@@ -77,6 +95,7 @@ where
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await;
         apply_vector_result(&mut outcome, vector_result);
+        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
     }
 
