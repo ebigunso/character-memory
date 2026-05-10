@@ -190,7 +190,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                 {
                     edge.retention_state = object_state.retention_state;
                     edge.is_current = object_state.is_current;
-                    edge.last_seen_at = object_state.observed_at;
+                    edge.last_seen_at = edge.last_seen_at.max(object_state.observed_at);
                 }
             }
         }
@@ -660,6 +660,43 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
+    }
+
+    #[tokio::test]
+    async fn in_memory_object_state_updates_do_not_regress_last_seen_at() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460051");
+        let memory_id = id("550e8400-e29b-41d4-a716-446655460052");
+        store
+            .record_edges(&[edge(
+                entity_id,
+                RelationType::About,
+                memory_id,
+                ObjectType::DerivedMemory,
+                RetentionState::Active,
+                true,
+                timestamp_at("2026-04-28T13:00:00Z"),
+            )])
+            .await
+            .unwrap();
+
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: memory_id,
+                object_type: ObjectType::DerivedMemory,
+                retention_state: RetentionState::Suppressed,
+                is_current: false,
+                observed_at: timestamp_at("2026-04-28T11:00:00Z"),
+            }])
+            .await
+            .unwrap();
+
+        let state = lock(&store.state).unwrap();
+        let stored = state
+            .edges
+            .get(&format!("{}:about:derived_memory:{}", entity_id, memory_id))
+            .unwrap();
+        assert_eq!(stored.last_seen_at, timestamp_at("2026-04-28T13:00:00Z"));
     }
 
     #[test]

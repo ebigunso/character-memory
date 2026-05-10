@@ -107,14 +107,16 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     }
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
-        let connection = lock(&self.connection)?;
+        let mut connection = lock(&self.connection)?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
         set_health(
-            &connection,
+            &transaction,
             RetrievalStatsHealth {
                 state: RetrievalStatsHealthState::Unhealthy,
                 last_error_message: Some(message),
             },
-        )
+        )?;
+        transaction.commit().map_err(sqlite_error)
     }
 }
 
@@ -282,7 +284,9 @@ fn update_object_state(
         connection
             .execute(
                 "UPDATE entity_edge_index
-                 SET retention_state = ?2, is_current = ?3, last_seen_at = ?4
+                 SET retention_state = ?2,
+                     is_current = ?3,
+                     last_seen_at = MAX(last_seen_at, ?4)
                  WHERE edge_key = ?1",
                 params![
                     edge_key,
@@ -621,6 +625,41 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
+    }
+
+    #[tokio::test]
+    async fn sqlite_object_state_updates_do_not_regress_last_seen_at() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655461041");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655461042");
+        let mut edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
+        edge.first_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        edge.last_seen_at = timestamp_at("2026-04-28T13:00:00Z");
+        store.record_edges(&[edge]).await.unwrap();
+
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: episode_id,
+                object_type: ObjectType::Episode,
+                retention_state: RetentionState::Suppressed,
+                is_current: false,
+                observed_at: timestamp_at("2026-04-28T11:00:00Z"),
+            }])
+            .await
+            .unwrap();
+
+        let connection = lock(&store.connection).unwrap();
+        let last_seen_at: String = connection
+            .query_row(
+                "SELECT last_seen_at
+                 FROM entity_edge_index
+                 WHERE edge_key = ?1",
+                params![format!("{}:involves:episode:{}", entity_id, episode_id)],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(last_seen_at, "2026-04-28T13:00:00+00:00");
     }
 
     fn test_edge(
