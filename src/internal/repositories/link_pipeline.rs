@@ -9,8 +9,25 @@ use crate::internal::repositories::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
     ExplicitCallerIntent,
+    SameActiveThread,
+    CorrectionOrSupersession,
+    TemporalRelation,
+    SemanticSupport,
+    HighSalience,
+    SelectiveSharedEntity,
     LowSelectivityCoOccurrenceOnly,
 }
+
+const STRONGER_LINK_ADMISSION_EVIDENCE: [LinkAdmissionEvidence; 6] = [
+    LinkAdmissionEvidence::SameActiveThread,
+    LinkAdmissionEvidence::CorrectionOrSupersession,
+    LinkAdmissionEvidence::TemporalRelation,
+    LinkAdmissionEvidence::SemanticSupport,
+    LinkAdmissionEvidence::HighSalience,
+    LinkAdmissionEvidence::SelectiveSharedEntity,
+];
+const LOW_INFORMATION_LINK_ADMISSION_EVIDENCE: LinkAdmissionEvidence =
+    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionDecision {
@@ -133,8 +150,11 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
 }
 
 fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissionDecision {
+    let has_stronger_evidence = evidence == LinkAdmissionEvidence::ExplicitCallerIntent
+        || STRONGER_LINK_ADMISSION_EVIDENCE.contains(&evidence);
     if link.relation == crate::api::types::RelationType::AssociatedWith
-        && evidence == LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly
+        && evidence == LOW_INFORMATION_LINK_ADMISSION_EVIDENCE
+        && !has_stronger_evidence
     {
         LinkAdmissionDecision::RejectedLowInformationCoOccurrence
     } else {
@@ -383,20 +403,67 @@ mod tests {
 
     #[tokio::test]
     async fn entity_neutral_low_information_guard_does_not_check_roles() {
-        for evidence in [
-            LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
-            LinkAdmissionEvidence::ExplicitCallerIntent,
-        ] {
-            let decision = admit_link(&associated_with_link(), evidence);
-            assert_eq!(
-                decision,
-                if evidence == LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly {
-                    LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-                } else {
-                    LinkAdmissionDecision::Accepted
-                }
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+
+        for scenario in heterogeneous_association_scenarios() {
+            let mut defaults = DraftDefaults::at(timestamp());
+            let error = pipeline
+                .link_with_evidence(
+                    scenario.draft,
+                    &mut defaults,
+                    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
+                )
+                .await
+                .unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("low-information co-occurrence link rejected"),
+                "scenario {} should reject weak co-occurrence only",
+                scenario.label
             );
         }
+    }
+
+    #[tokio::test]
+    async fn stronger_evidence_allows_associated_with_candidates_without_role_checks() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let evidence_cases = [
+            LinkAdmissionEvidence::ExplicitCallerIntent,
+            LinkAdmissionEvidence::SameActiveThread,
+            LinkAdmissionEvidence::CorrectionOrSupersession,
+            LinkAdmissionEvidence::TemporalRelation,
+            LinkAdmissionEvidence::SemanticSupport,
+            LinkAdmissionEvidence::HighSalience,
+            LinkAdmissionEvidence::SelectiveSharedEntity,
+        ];
+
+        for (index, scenario) in heterogeneous_association_scenarios()
+            .into_iter()
+            .enumerate()
+        {
+            let mut defaults = DraftDefaults::at(timestamp());
+            let persisted = pipeline
+                .link_with_evidence(scenario.draft, &mut defaults, evidence_cases[index])
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "scenario {} with {:?} should be accepted: {error}",
+                        scenario.label, evidence_cases[index]
+                    )
+                });
+
+            assert_eq!(persisted.relation, RelationType::AssociatedWith);
+        }
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            0
+        );
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {
@@ -423,11 +490,72 @@ mod tests {
         draft
     }
 
-    fn associated_with_link() -> MemoryLink {
-        let mut defaults = DraftDefaults::at(timestamp());
-        associated_with_link_draft()
-            .into_domain_with_defaults(&mut defaults)
-            .unwrap()
+    #[derive(Debug)]
+    struct AssociationScenario {
+        label: &'static str,
+        draft: MemoryLinkDraft,
+    }
+
+    fn heterogeneous_association_scenarios() -> Vec<AssociationScenario> {
+        [
+            (
+                "broad_person",
+                0x450_u128,
+                ObjectType::Episode,
+                ObjectType::Episode,
+            ),
+            (
+                "broad_place",
+                0x460_u128,
+                ObjectType::Observation,
+                ObjectType::Episode,
+            ),
+            (
+                "broad_project",
+                0x470_u128,
+                ObjectType::DerivedMemory,
+                ObjectType::Observation,
+            ),
+            (
+                "broad_topic",
+                0x480_u128,
+                ObjectType::DerivedMemory,
+                ObjectType::DerivedMemory,
+            ),
+            (
+                "broad_object",
+                0x490_u128,
+                ObjectType::Episode,
+                ObjectType::DerivedMemory,
+            ),
+            (
+                "custom_domain_entity",
+                0x4a0_u128,
+                ObjectType::Observation,
+                ObjectType::Observation,
+            ),
+            (
+                "assistant_domain_entity",
+                0x4b0_u128,
+                ObjectType::Episode,
+                ObjectType::Observation,
+            ),
+        ]
+        .into_iter()
+        .map(|(label, offset, from_type, to_type)| {
+            let mut draft = MemoryLinkDraft::new(
+                from_type,
+                MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
+                RelationType::AssociatedWith,
+                to_type,
+                MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0001 + offset),
+            );
+            draft.id = Some(MemoryId::from_u128(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0002 + offset,
+            ));
+            AssociationScenario { label, draft }
+        })
+        .collect()
     }
 
     fn id(value: &str) -> MemoryId {
