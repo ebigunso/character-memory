@@ -23,7 +23,9 @@
   - Link/retrieval acceptance tests using heterogeneous high-degree fixtures.
   - Final cross-plan validation for v0.1.2.
 - Non-goals:
-  - Implementing v0.5 advanced association/clustering.
+  - Implementing v0.5 controlled associative recall and clustering.
+  - Implementing `AssociativeUnit`, `AssociativeMembership`, `AssociationSupport`, query-time activation, promotion/decay policy, cluster summaries, or bounded cluster expansion.
+  - Creating a separate weak associative hint store.
   - Disabling all co-occurrence links.
   - Learned association policy.
   - Public admin dashboard.
@@ -35,7 +37,12 @@
   - `docs/design/roadmap-phases/v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md`
   - `docs/decisions/design/ADR-D-0009-entity-neutral-retrieval-policy.md`
   - `docs/decisions/design/ADR-D-0010-recurring-entities-are-anchors-not-traversal-invitations.md`
+  - `docs/decisions/design/ADR-D-0013-controlled-serendipitous-recall-without-weak-pairwise-links.md`
+  - `docs/decisions/design/ADR-D-0014-represent-associative-membership-lifecycle-separately.md`
   - `docs/decisions/implementation/ADR-I-0011-guard-against-low-information-co-occurrence-links.md`
+  - `docs/decisions/implementation/ADR-I-0014-use-graph-internal-associative-units.md`
+  - `docs/design/database/graph_schema_design.md`
+  - `docs/design/database/schema_cheat_sheet.md`
   - `src/internal/repositories/link_pipeline.rs`
   - `src/internal/repositories/retrieve_pipeline.rs`
   - `src/internal/repositories/test_support.rs`
@@ -43,7 +50,8 @@
 - Existing patterns or references:
   - Durable relationships are written through graph-authoritative repository paths.
   - Current public `link()` calls may represent explicit caller intent and should not be silently treated as weak automatic co-occurrence without a decision.
-  - v0.5 owns advanced association/clustering; v0.1.2 should only add guardrails.
+  - v0.5 owns controlled associative recall and clustering; v0.1.2 should only add guardrails.
+  - Latest main distinguishes weak association evidence from ordinary durable relationship truth and reserves future serendipitous recall for graph-internal `AssociativeUnit`/`AssociativeMembership`/`AssociationSupport` structures.
 - Repo reference docs consulted:
   - `docs/coding-agent/rules/common.md`
   - `docs/coding-agent/rules/orchestrator.md`
@@ -56,6 +64,7 @@
 - Apply the low-information guard to automatic or inferred association candidates, and to weak `AssociatedWith`-style links when the only evidence is low-selectivity co-occurrence. Do not block explicit caller-authored public `link()` calls by default.
 - Represent link admission evidence with an internal evidence model such as `ExplicitCallerIntent`, `SameThread`, `Correction`, `Temporal`, `SemanticSupport`, `SelectiveEntity`, and `LowSelectivityCoOccurrenceOnly`. Explicit caller intent may bypass low-information rejection but still must pass graph/lifecycle validation.
 - Count/store rejected low-information link diagnostics internally in stats diagnostics first. Surface aggregate counts in retrieval telemetry only when they explain a retrieval result; do not add a broad public diagnostics API in this phase.
+- Do not persist reusable weak associative hints, associative units, associative memberships, association support records, query-time activation state, or cluster membership lifecycle in v0.1.2. Weak co-occurrence can be counted or diagnosed as rejected evidence, but it must not become ordinary pairwise relationship truth or a separate memory truth surface.
 
 ## Assumptions
 - A1: Stats foundation and selectivity fanout plans are complete before this plan starts.
@@ -63,6 +72,7 @@
 - A3: The initial guard should be conservative and narrow so it does not preempt v0.5 association design.
 - A4: Diagnostics are report-only and do not repair graph/vector/stats stores.
 - A5: Public explicit link calls still pass existing graph/lifecycle validation; explicit intent only bypasses low-information co-occurrence rejection.
+- A6: Future graph-internal associative structures remain under Oxigraph authority and are outside this v0.1.2 plan.
 
 ## Tasks
 
@@ -77,7 +87,8 @@
   - Plan records that automatic/inferred association candidates and weak `AssociatedWith`-style links are guarded when the only evidence is low-selectivity co-occurrence.
   - Plan records that explicit caller-authored public `link()` calls are not blocked by default, but still pass graph/lifecycle validation.
   - Plan records the internal admission evidence model and diagnostics location.
-  - Decision preserves v0.5 association/clustering as future work.
+  - Decision preserves v0.5 controlled associative recall and clustering as future work.
+  - Decision records that rejected weak co-occurrence diagnostics do not create reusable weak hint storage or graph-internal associative structures in this phase.
 - validation:
   - kind: review
     required: true
@@ -104,6 +115,7 @@
   - Internal admission evidence distinguishes explicit caller intent, same thread, correction/supersession, temporal relation, semantic support, high salience where represented, selective shared entity, and low-selectivity co-occurrence only.
   - Stronger evidence paths remain allowed where represented.
   - Rejections are counted or reported without mutating graph authority.
+  - Rejections do not persist weak associative hints, associative units, associative memberships, association support records, activation state, or cluster lifecycle state.
   - Guard behavior is relation/object-specific and does not check entity identity or app role.
 - validation:
   - kind: command
@@ -130,7 +142,7 @@
   - Fixtures cover broad person, place, project, topic/concept, object/tool/document, and arbitrary custom entities.
   - Tests prove the guard treats broad non-user/non-assistant entities the same as broad assistant-domain entities.
   - Tests prove explicit or stronger-evidence links are accepted without identity-specific exceptions.
-  - Diagnostics remain report-only and do not repair or override stores or introduce a broad public diagnostics API.
+  - Diagnostics remain report-only and do not repair or override stores, introduce a broad public diagnostics API, or become reusable weak associative hint storage.
 - validation:
   - kind: command
     required: true
@@ -153,6 +165,7 @@
   - Durable link guard prevents weak broad-entity pairwise growth without blocking explicit/stronger-evidence links.
   - Entity-neutral acceptance tests cover retrieval and link behavior.
   - No persisted selectivity categories, graph centrality, learned policy, admin dashboard, or identity-specific special cases are introduced.
+  - No v0.5 controlled associative recall structures or separate weak hint store are introduced.
   - Reviewer status is APPROVED.
 - validation:
   - kind: command
@@ -190,6 +203,7 @@
 ## Rollback / Safety
 - The guard should be implemented as a narrow admission check so it can be tuned or disabled by relation policy if validation shows it blocks explicit application intent.
 - Rejected-link diagnostics are report-only and must not mutate graph/vector/stats stores.
+- Weak co-occurrence diagnostics must remain counters/evidence for review, not durable relationship truth, reusable weak hint storage, or associative unit/membership/support state.
 
 ## Progress Log (append-only)
 
@@ -205,6 +219,10 @@
   - Summary: User requested each plan be committed on its own implementation branch and readied for execution.
   - Validation evidence: Plan status updated to approved; implementation remains pending.
   - Notes: No Worker tasks dispatched yet.
+- 2026-05-10 Main roadmap refresh reviewed:
+  - Summary: Updated plan after latest main clarified controlled associative recall, graph-internal associative units, member lifecycle, and no weak pairwise durable links.
+  - Validation evidence: Plan-only update; branch rebased onto `origin/main`.
+  - Notes: v0.1.2 remains a guardrail phase and does not implement future associative recall structures.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -218,11 +236,17 @@
   - Plan delta (what changed): Resolved guard scope to automatic/inferred associations and weak `AssociatedWith`-style low-selectivity-only links, preserved explicit caller-authored public links by default, added an internal admission evidence model, and kept rejected-link diagnostics internal-first.
   - Tradeoffs considered: This protects against broad-entity pairwise growth without surprising explicit public callers or prematurely implementing v0.5 association policy.
   - User approval: yes
+- 2026-05-10 Decision:
+  - Trigger / new insight: Latest main adds ADR-D-0013, ADR-D-0014, ADR-I-0014, and schema docs for controlled associative recall without weak pairwise durable links.
+  - Plan delta (what changed): Updated v0.5 terminology, added ADR/schema references, and clarified that rejected weak co-occurrence diagnostics must not persist weak hints or future associative unit/membership/support structures in v0.1.2.
+  - Tradeoffs considered: The guard should preserve graph quality now while leaving serendipitous recall to future graph-authoritative associative structures.
+  - User approval: yes
 
 ## Notes
 - Risks:
   - Guard scope is ambiguous until explicit caller intent is resolved.
   - Diagnostics could creep toward v0.4/v0.5 observability if not kept report-only.
+  - Rejected weak co-occurrence counts could accidentally become a separate weak hint store if implementation stores reusable candidate associations instead of report-only diagnostics.
   - Tests must avoid proving only personal-assistant examples.
 - Edge cases:
   - Two memories share a broad project but are also in the same active thread.
