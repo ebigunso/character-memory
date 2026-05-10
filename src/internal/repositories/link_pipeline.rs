@@ -6,6 +6,25 @@ use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, RetrievalStatsStore,
 };
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkAdmissionEvidence {
+    ExplicitCallerIntent,
+    SameThread,
+    Correction,
+    Temporal,
+    SemanticSupport,
+    HighSalience,
+    SelectiveEntity,
+    LowSelectivityCoOccurrenceOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkAdmissionDecision {
+    Accepted,
+    RejectedLowInformationCoOccurrence,
+}
+
 pub(crate) struct LinkPipeline<'a, G>
 where
     G: GraphAuthorityStore + ?Sized,
@@ -46,14 +65,44 @@ where
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
     ) -> Result<MemoryLink, CustomError> {
+        self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
+            .await
+    }
+
+    pub(crate) async fn link_with_evidence(
+        &self,
+        draft: MemoryLinkDraft,
+        defaults: &mut DraftDefaults,
+        evidence: LinkAdmissionEvidence,
+    ) -> Result<MemoryLink, CustomError> {
         let link = draft
             .into_domain_with_defaults(defaults)
             .map_err(validation_error)?;
+        if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+        {
+            let _ = self
+                .stats_store
+                .record_rejected_low_information_link()
+                .await;
+            return Err(CustomError::MemoryValidation(
+                "low-information co-occurrence link rejected".to_owned(),
+            ));
+        }
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
         record_stats_after_write(self.stats_store, &[], std::slice::from_ref(&link)).await;
         Ok(link)
+    }
+}
+
+fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissionDecision {
+    if link.relation == crate::api::types::RelationType::AssociatedWith
+        && evidence == LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly
+    {
+        LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+    } else {
+        LinkAdmissionDecision::Accepted
     }
 }
 
@@ -216,6 +265,66 @@ mod tests {
         assert_eq!(counter.current_count, 1);
     }
 
+    #[tokio::test]
+    async fn low_information_guard_rejects_weak_associated_with_candidate_without_graph_write() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let mut defaults = DraftDefaults::at(timestamp());
+
+        let error = pipeline
+            .link_with_evidence(
+                associated_with_link_draft(),
+                &mut defaults,
+                LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("low-information co-occurrence link rejected"));
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            1
+        );
+        assert!(graph.list_diagnostic_links().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_intent_allows_associated_with_links_by_default() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+
+        let persisted = pipeline.link(associated_with_link_draft()).await.unwrap();
+
+        assert_eq!(persisted.relation, RelationType::AssociatedWith);
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn entity_neutral_low_information_guard_does_not_check_roles() {
+        for evidence in [
+            LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
+            LinkAdmissionEvidence::SelectiveEntity,
+            LinkAdmissionEvidence::SameThread,
+        ] {
+            let decision = admit_link(&associated_with_link(), evidence);
+            assert_eq!(
+                decision,
+                if evidence == LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly {
+                    LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+                } else {
+                    LinkAdmissionDecision::Accepted
+                }
+            );
+        }
+    }
+
     fn valid_link_draft() -> MemoryLinkDraft {
         let mut draft = MemoryLinkDraft::new(
             ObjectType::Episode,
@@ -226,6 +335,25 @@ mod tests {
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655444032"));
         draft
+    }
+
+    fn associated_with_link_draft() -> MemoryLinkDraft {
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::Observation,
+            id("550e8400-e29b-41d4-a716-446655444040"),
+            RelationType::AssociatedWith,
+            ObjectType::Observation,
+            id("550e8400-e29b-41d4-a716-446655444041"),
+        );
+        draft.id = Some(id("550e8400-e29b-41d4-a716-446655444042"));
+        draft
+    }
+
+    fn associated_with_link() -> MemoryLink {
+        let mut defaults = DraftDefaults::at(timestamp());
+        associated_with_link_draft()
+            .into_domain_with_defaults(&mut defaults)
+            .unwrap()
     }
 
     fn id(value: &str) -> MemoryId {

@@ -35,6 +35,10 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
+
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError>;
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +144,14 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
     async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
         Ok(())
     }
+
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
+        Ok(())
+    }
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
+        Ok(0)
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +175,7 @@ impl InMemoryRetrievalStatsStore {
 struct InMemoryState {
     edges: HashMap<String, RetrievalStatsEdge>,
     health: RetrievalStatsHealth,
+    rejected_low_information_link_count: u64,
 }
 
 #[async_trait]
@@ -226,6 +239,16 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             last_error_message: Some(message),
         };
         Ok(())
+    }
+
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
+        let mut state = lock(&self.state)?;
+        state.rejected_low_information_link_count += 1;
+        Ok(())
+    }
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
+        Ok(lock(&self.state)?.rejected_low_information_link_count)
     }
 }
 
@@ -646,6 +669,19 @@ mod tests {
         assert_eq!(
             health.last_error_message.as_deref(),
             Some("stats write failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostics_count_rejected_low_information_links() {
+        let store = InMemoryRetrievalStatsStore::new();
+
+        store.record_rejected_low_information_link().await.unwrap();
+        store.record_rejected_low_information_link().await.unwrap();
+
+        assert_eq!(
+            store.rejected_low_information_link_count().await.unwrap(),
+            2
         );
     }
 
