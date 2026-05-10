@@ -2,8 +2,8 @@
 status: accepted
 adr_type: implementation
 date: 2026-05-10
-deciders: []
-consulted: []
+deciders: ["ebigunso"]
+consulted: ["GPT-5.5 Pro"]
 informed: []
 supersedes: []
 superseded_by: null
