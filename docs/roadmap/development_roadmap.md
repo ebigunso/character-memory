@@ -165,7 +165,29 @@ Durable pairwise memory links should not be created solely because two memories 
 
 Durable association requires stronger evidence, rationale, or explicit application intent.
 
-## 2.11 Generated and manual writes should share one safe path
+## 2.11 Weak associations are recall evidence before durable relation truth
+
+The system should support serendipitous recall, but weak co-occurrence should not be promoted directly into ordinary durable pairwise memory links.
+
+The library should distinguish:
+
+```text
+entity incidence
+query-time activation
+association candidate evidence
+active associative unit
+strong durable relation
+```
+
+Intent:
+
+Preserve human-like "this reminds me of that" recall without letting recurring entities create noisy graph cliques or false continuity.
+
+Revisit when:
+
+Revisit during v0.5 controlled associative recall and clustering. If member-level lifecycle proves too heavy, simplify fields before removing the distinction between unit lifecycle and member lifecycle.
+
+## 2.12 Generated and manual writes should share one safe path
 
 Manual caller-provided writes and future generated memory candidates should pass through the same validation and commit machinery.
 
@@ -200,8 +222,8 @@ Revisit during v0.6 assisted remember workflow. Generated processors should plug
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, draft/validate/commit flow, and shared manual/future-generated commit machinery. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
-| v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, and retention assessment. |
-| v0.5 | Advanced associative recall and clustering | Associations, episode clusters, cluster summaries, and selectivity-aware association admission. |
+| v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
+| v0.5 | Controlled associative recall and clustering | Query-time associative activation, graph-internal AssociativeUnit structures, member-level AssociativeMembership lifecycle, AssociationSupport evidence, cluster summaries, promotion/decay policy, and bounded cluster expansion for serendipitous recall without broad pairwise edge pollution. |
 | v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from raw conversation or transcript-like input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. |
 | v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
 
@@ -515,6 +537,76 @@ preserve Oxigraph graph authority for final inclusion
 keep Qdrant relationship/lifecycle fields as hints only
 add diagnostics showing selectivity inputs and fanout decisions
 add tests proving no entity identity is special-cased
+```
+
+## Serendipitous recall tradeoff
+
+v0.1.2 blocks durable pairwise links created only from weak low-selectivity co-occurrence. This protects the graph from hub-driven pairwise growth, false continuity, and context pollution.
+
+This is an accepted temporary tradeoff, not a dismissal of human-like associative recall.
+
+The system should preserve:
+
+```text
+entity incidence
+semantic retrieval
+temporal retrieval
+thread retrieval
+salience retrieval
+explicit links
+correction/supersession/provenance links
+```
+
+while preventing:
+
+```text
+Episode A --associated_with--> Episode B
+```
+
+when the only evidence is:
+
+```text
+both episodes share a broad low-selectivity entity or relation.
+```
+
+Later associative recall should reintroduce controlled serendipity through query-time activation, graph-internal associative units, member-level lifecycle, association support evidence, and cluster summaries.
+
+The intended tradeoff is:
+
+```text
+Prefer missing weak serendipity temporarily
+over creating durable false continuity permanently.
+```
+
+## Weak co-occurrence is not durable association
+
+Weak co-occurrence may be recorded or diagnosed as retrieval evidence, but it should not be represented as an ordinary durable pairwise memory association.
+
+The following must not create a durable pairwise association by itself:
+
+```text
+same broad entity
+same common place
+same high-degree project
+same recurring participant
+same broad topic
+same low-selectivity relation
+```
+
+Durable association requires stronger evidence, such as:
+
+```text
+same active thread
+explicit application-created link
+semantic similarity
+temporal pattern
+causal relation
+correction/supersession relation
+commitment lifecycle relation
+shared high-selectivity cue
+repeated coactivation
+reflection-derived rationale
+high salience with topical support
 ```
 
 ## Non-goals
@@ -983,6 +1075,12 @@ Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap
 
 ```text
 RetrievalTrace
+ActivationTrace
+RejectedExpansionTrace
+ClusterExpansionTrace
+MembershipDecisionTrace
+AssociationCandidateDiagnostic
+CoactivationDiagnostic
 ContextSubgraph
 ValidationRules
 GraphHealthReport
@@ -999,31 +1097,61 @@ validate graph/retrieval invariants
 detect high-fanout relation patterns
 evaluate retention/downranking candidates
 report policy behavior over time
+make rejected low-information expansions inspectable
+show why broad-entity-only expansion was blocked
+show activation paths used during retrieval
+show when weak coactivation was considered but not persisted
+show cluster membership inclusion/exclusion rationale
+diagnose candidate membership promotion, demotion, decay, or rejection
+detect over-broad clusters and high-fanout cluster expansions
 ```
+
+## Additional acceptance criteria
+
+```text
+RetrievalTrace can explain why broad entity expansion was limited.
+RetrievalTrace can distinguish strong association, candidate association, and ordinary entity incidence.
+ActivationTrace can show which cues activated which entities, concepts, scopes, threads, or associative units.
+RejectedExpansionTrace records when a low-selectivity entity match was insufficient for expansion.
+ClusterExpansionTrace records which AssociativeUnit was used and which memberships were included, excluded, or considered.
+MembershipDecisionTrace records member status, role, strength, and rationale used during retrieval.
+GraphHealthReport can identify clusters with excessive candidate members, stale memberships, or high expansion fanout.
+Diagnostics remain report-only and do not override Oxigraph lifecycle/currentness/provenance authority.
+```
+
+## Additional non-goal
+
+v0.4 should not implement the associative cluster machinery itself. It should make retrieval decisions and blocked expansions observable so v0.5 can safely add controlled associative recall.
 
 ---
 
-# 13. v0.5: advanced associative recall and clustering
+# 13. v0.5: controlled associative recall and clustering
 
-Detailed draft: [`v0_5_advanced_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_advanced_associative_recall_clustering.md)
+Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
 
 ## New concepts
 
 ```text
-Association
-EpisodeCluster
+AssociativeUnit
+AssociativeMembership
+AssociationSupport
+QueryTimeActivation
+AssociationPromotionPolicy
+AssociationDecayPolicy
 ClusterSummary
-AssociationAdmissionPolicy
 ```
 
 ## Goals
 
 ```text
-improve associative recall
-compress repeated patterns across many episodes
-support cluster-level retrieval
-avoid pairwise clique growth
-preserve provenance from summaries/clusters to source memories
+support human-like serendipitous recall
+avoid broad-entity clique growth
+represent associative structures inside graph authority
+track member-level status, role, strength, and rationale
+support query-time activation before durable association
+promote associations only with repeated or multi-signal support
+use summaries and exemplars for retrieval quality
+keep cluster expansion bounded and explainable
 ```
 
 ---
@@ -1272,9 +1400,9 @@ let retention_result = memory.apply_retention_policy(retention_scope).await?;
 ## v0.5 API additions
 
 ```rust
-memory.associate(from_id, to_id, association_type).await?;
-let cluster_result = memory.cluster_episodes(scope).await?;
-let cluster_context = memory.retrieve_cluster_context(cluster_id).await?;
+let activation = memory.activate_associative_recall(query, activation_options).await?;
+let unit = memory.get_associative_unit(unit_id).await?;
+let cluster_context = memory.retrieve_associative_context(unit_id, retrieval_mode).await?;
 ```
 
 ## v0.6 API additions
@@ -1312,6 +1440,29 @@ physical redaction/delete as the default lifecycle path
 admin dashboard
 analytics-heavy stats system
 migration/backfill for nonexistent production data
+```
+
+Do not implement before v0.5:
+
+```text
+ordinary low-value pairwise association edges
+cluster-level status as a substitute for membership-level lifecycle
+unbounded spreading activation
+global graph centrality as memory importance
+summary-only associative clusters by default
+automatic clique creation around recurring entities
+```
+
+Do design for:
+
+```text
+controlled serendipitous recall
+query-time activation
+graph-internal associative units
+member-level association lifecycle
+association support evidence
+bounded cluster expansion
+promotion/decay of candidate memberships
 ```
 
 ## v0.1.3 YAGNI rules

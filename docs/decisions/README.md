@@ -57,6 +57,8 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-D-0010: Treat recurring entities as continuity anchors, not traversal invitations](design/ADR-D-0010-recurring-entities-are-anchors-not-traversal-invitations.md)
 - [ADR-D-0011: Scope continuity around arbitrary entities and contexts](design/ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts.md)
 - [ADR-D-0012: Separate memory candidates from committed memory](design/ADR-D-0012-separate-memory-candidates-from-committed-memory.md)
+- [ADR-D-0013: Support controlled serendipitous recall without weak pairwise durable links](design/ADR-D-0013-controlled-serendipitous-recall-without-weak-pairwise-links.md)
+- [ADR-D-0014: Represent associative membership lifecycle separately from associative unit lifecycle](design/ADR-D-0014-represent-associative-membership-lifecycle-separately.md)
 
 ### Implementation Decisions
 
@@ -73,3 +75,4 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0011: Guard against durable links from low-information co-occurrence](implementation/ADR-I-0011-guard-against-low-information-co-occurrence-links.md)
 - [ADR-I-0012: Use prepare / validate / commit for the write workflow](implementation/ADR-I-0012-use-prepare-validate-commit-write-workflow.md)
 - [ADR-I-0013: Deterministic write-planning helpers do not infer high-level meaning](implementation/ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md)
+- [ADR-I-0014: Use graph-internal associative units instead of a separate weak hint store](implementation/ADR-I-0014-use-graph-internal-associative-units.md)

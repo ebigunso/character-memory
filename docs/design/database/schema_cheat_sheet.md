@@ -197,6 +197,29 @@ derived_memory
 | `urn:cmem:vocab:createdAt` | Link creation timestamp |
 | `urn:cmem:relation:<relation_name>` | Direct traversal predicate emitted for typed links |
 
+## Future Associative Recall Concepts
+
+| Concept | Purpose | Important distinction |
+|---|---|---|
+| AssociativeUnit | Represents a pair, cue bundle, cluster, or scope pattern used for associative recall. | Unit lifecycle says whether the associative structure is candidate, active, retired, or rejected. |
+| AssociativeMembership | Represents a specific memory's membership in an associative unit. | Membership status says whether that memory is candidate, active, retired, or rejected; member role says whether it is core, exemplar, peripheral, bridge, or outlier. |
+| AssociationSupport | Records why a unit or membership exists. | Support explains association evidence; it is not ordinary relationship truth. |
+| QueryTimeActivation | Activates memories through semantic/entity/thread/scope/time/salience cues during retrieval. | Supports serendipitous recall before durable association is promoted. |
+
+Design rule:
+
+```text
+Weak association evidence belongs in the graph,
+but not as ordinary durable pairwise association.
+```
+
+Retrieval quality rule:
+
+```text
+An active cluster may contain tentative members.
+Candidate-status members are considered, not trusted.
+```
+
 ## Retrieval Stats Store
 
 The retrieval stats store is an internal derived index used for selectivity scoring and fanout policy. It is not a memory store of record. It can be rebuilt from graph authority and must not override Oxigraph lifecycle/currentness/provenance decisions.

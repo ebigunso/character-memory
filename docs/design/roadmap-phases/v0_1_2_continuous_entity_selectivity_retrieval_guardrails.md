@@ -568,7 +568,77 @@ reflection-derived rationale
 
 This avoids O(N²) edge growth around broad recurring entities.
 
-Revisit when v0.5 advanced association/clustering work begins. At that point, association admission should use selectivity scores and evidence strength, not raw co-occurrence.
+Revisit when v0.5 controlled associative recall and clustering work begins. At that point, association admission should use query-time activation, graph-internal associative units, member-level lifecycle, association support evidence, selectivity scores, and evidence strength, not raw co-occurrence.
+
+## 9.1 Serendipitous recall tradeoff
+
+v0.1.2 blocks durable pairwise links created only from weak low-selectivity co-occurrence. This protects the graph from hub-driven pairwise growth, false continuity, and context pollution.
+
+This is an accepted temporary tradeoff, not a dismissal of human-like associative recall.
+
+The system should preserve:
+
+```text
+entity incidence
+semantic retrieval
+temporal retrieval
+thread retrieval
+salience retrieval
+explicit links
+correction/supersession/provenance links
+```
+
+while preventing:
+
+```text
+Episode A --associated_with--> Episode B
+```
+
+when the only evidence is:
+
+```text
+both episodes share a broad low-selectivity entity or relation.
+```
+
+Later associative recall should reintroduce controlled serendipity through query-time activation, graph-internal associative units, member-level lifecycle, association support evidence, and cluster summaries.
+
+The intended tradeoff is:
+
+```text
+Prefer missing weak serendipity temporarily
+over creating durable false continuity permanently.
+```
+
+## 9.2 Weak co-occurrence is not durable association
+
+Weak co-occurrence may be recorded or diagnosed as retrieval evidence, but it should not be represented as an ordinary durable pairwise memory association.
+
+The following must not create a durable pairwise association by itself:
+
+```text
+same broad entity
+same common place
+same high-degree project
+same recurring participant
+same broad topic
+same low-selectivity relation
+```
+
+Durable association requires stronger evidence, such as:
+
+```text
+same active thread
+explicit application-created link
+semantic similarity
+temporal pattern
+causal relation
+correction/supersession relation
+commitment lifecycle relation
+shared high-selectivity cue
+repeated coactivation
+reflection-derived rationale
+high salience with topical support
+```
 
 ---
 

@@ -250,6 +250,108 @@ Those remain Oxigraph authority decisions.
 
 Revisit if Oxigraph gains efficient aggregate/materialized-view support that makes a separate stats store unnecessary.
 
+## Associative Recall Boundary
+
+The graph should distinguish ordinary relationship truth from associative recall evidence.
+
+Do not use ordinary durable pairwise `associated_with` links for weak low-selectivity co-occurrence.
+
+Instead, later associative recall should use graph-internal associative structures:
+
+```text
+AssociativeUnit
+AssociativeMembership
+AssociationSupport
+```
+
+This allows the graph to represent weak or emerging recall patterns without pretending that every weak co-occurrence is a stable relationship.
+
+### AssociativeUnit
+
+An `AssociativeUnit` represents an associative recall structure such as:
+
+```text
+Pair
+CueBundle
+Cluster
+ScopePattern
+```
+
+The unit has its own lifecycle status:
+
+```text
+Candidate
+Active
+Retired
+Rejected
+```
+
+### AssociativeMembership
+
+Membership is first-class because unit-level status is not enough.
+
+An active unit may contain memberships with different statuses:
+
+```text
+Active members
+Candidate members
+Retired memberships
+Rejected memberships
+```
+
+and different roles:
+
+```text
+Core members
+Exemplar members
+Peripheral members
+Bridge members
+Outlier members
+```
+
+A new memory can be a candidate member of an active unit without being treated as equally established.
+
+### AssociationSupport
+
+`AssociationSupport` records why a unit or membership exists.
+
+Support may come from:
+
+```text
+semantic coactivation
+shared selective entity
+shared concept
+same scope
+same thread
+temporal proximity
+repeated retrieval together
+explicit application link
+reflection rationale
+correction chain
+commitment lifecycle
+```
+
+### Retrieval rule
+
+Associative structures must not override graph authority.
+
+Suppressed, deleted, non-current, or superseded memories must be excluded from normal retrieval even if they remain members of an associative unit.
+
+Associative retrieval should be bounded by:
+
+```text
+selectivity
+scope
+thread support
+semantic support
+temporal support
+salience
+membership status
+membership role
+lifecycle/currentness
+retrieval mode
+```
+
 ## Durable Hydration
 
 Canonical objects and links are hydrated from RDF/Oxigraph state. The persistent graph authority must not depend on a persisted sidecar object store or on Qdrant payloads to reconstruct domain memory after restart.

@@ -136,6 +136,26 @@ A broad entity may still be important. However, retrieval should adapt to entity
 
 This protects continuity without turning recurring entities into context pollution.
 
+### 7.2 Serendipitous recall should be supported without false continuity
+
+Human-like recall includes weak associative moments: one memory can remind the assistant of another through partial cues, repeated coactivation, or a shared context that is not strong enough to be a formal relationship.
+
+Character Memory should eventually support this kind of serendipitous recall.
+
+However, weak broad co-occurrence should not be treated as durable relationship truth. A recurring entity is a continuity anchor, but not every memory involving that entity should become directly associated with every other memory involving it.
+
+The system should distinguish:
+
+```text
+entity incidence
+query-time associative activation
+association candidate evidence
+active AssociativeUnit
+strong durable relation
+```
+
+This preserves human-like recall while reducing false continuity and graph pollution over long time horizons.
+
 ---
 
 ## 8. Design Principles for Implementation
