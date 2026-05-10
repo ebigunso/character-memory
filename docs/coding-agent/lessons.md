@@ -21,6 +21,29 @@ Purpose:
 
 ## Entries
 
+## 2026-05-10 - Dispatch Research Before Broad Discovery On Non-Trivial Work  [tags: workflow, planning, delegation]
+
+Context:
+- Plan: controlled associative recall docs integration
+- Task/Wave: pre-plan repository discovery
+- Roles involved: Orchestrator | Researcher
+
+Symptom:
+- Ran a broad `rg --files docs` discovery command before dispatching the required Researcher for a non-trivial documentation integration.
+
+Root cause:
+- Treated docs discovery as harmless setup after loading the harness, instead of applying the non-trivial Research Dispatch Gate immediately.
+
+Fix applied:
+- Dispatched a Researcher before further product-doc exploration and limited subsequent work to plan drafting pending user approval.
+
+Prevention:
+- For non-trivial requests, classify the request and dispatch at least one Researcher before any repo-wide discovery outside `docs/coding-agent/**`.
+- Turn-closing guardrail: before ending a planning turn, confirm the Research Dispatch Gate was satisfied or explicitly waived as trivial.
+
+Evidence:
+- Researcher produced the local roadmap, phase-doc, database-doc, philosophy, and ADR-numbering map used by the active plan.
+
 ## 2026-05-09 - Triage Copilot Review Comments Against Current Diff  [tags: review, ci, assumptions]
 
 Context:

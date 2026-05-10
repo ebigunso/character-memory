@@ -12,6 +12,8 @@ context subgraphs
 validation rules
 graph health reports
 policy diagnostics
+rejected expansion traces
+cluster and activation diagnostics
 retention assessment
 ```
 
@@ -46,6 +48,9 @@ Was expansion bounded correctly?
 Did a broad entity cause too much fanout?
 Are low-information links being admitted?
 Are retention and currentness policies working?
+Why was broad-entity-only expansion blocked?
+Which activation paths were considered?
+Why was a possible cluster member included, excluded, or rejected?
 ```
 
 ---
@@ -169,6 +174,19 @@ low-information co-occurrence guard rejected N candidate links
 retention policy archived N low-salience stale memories
 ```
 
+## 2.7 Additional v0.4 concepts
+
+```text
+ActivationTrace
+RejectedExpansionTrace
+ClusterExpansionTrace
+MembershipDecisionTrace
+AssociationCandidateDiagnostic
+CoactivationDiagnostic
+```
+
+These concepts are diagnostic and report-only in v0.4. They prepare the retrieval layer to explain controlled associative recall in v0.5 without implementing the associative cluster machinery in this phase.
+
 ---
 
 # 3. Retrieval observability
@@ -201,6 +219,18 @@ provenance expansion
 ```
 
 Association expansion is intentionally deferred to v0.5.
+
+## 3.1 Additional goals
+
+```text
+make rejected low-information expansions inspectable
+show why broad-entity-only expansion was blocked
+show activation paths used during retrieval
+show when weak coactivation was considered but not persisted
+show cluster membership inclusion/exclusion rationale
+diagnose candidate membership promotion, demotion, decay, or rejection
+detect over-broad clusters and high-fanout cluster expansions
+```
 
 ---
 
@@ -290,8 +320,27 @@ Suppressed/deleted memories do not appear in default retrieval.
 Current views exclude superseded memories.
 ```
 
+## 6.1 Additional acceptance criteria
+
+```text
+RetrievalTrace can explain why broad entity expansion was limited.
+RetrievalTrace can distinguish strong association, candidate association, and ordinary entity incidence.
+ActivationTrace can show which cues activated which entities, concepts, scopes, threads, or associative units.
+RejectedExpansionTrace records when a low-selectivity entity match was insufficient for expansion.
+ClusterExpansionTrace records which AssociativeUnit was used and which memberships were included, excluded, or considered.
+MembershipDecisionTrace records member status, role, strength, and rationale used during retrieval.
+GraphHealthReport can identify clusters with excessive candidate members, stale memberships, or high expansion fanout.
+Diagnostics remain report-only and do not override Oxigraph lifecycle/currentness/provenance authority.
+```
+
 ---
 
-# 7. Revisit guidance
+# 7. Additional non-goal
+
+v0.4 should not implement the associative cluster machinery itself. It should make retrieval decisions and blocked expansions observable so v0.5 can safely add controlled associative recall.
+
+---
+
+# 8. Revisit guidance
 
 Revisit if advanced association work cannot proceed safely without some v0.4 observability features. In that case, pull only the necessary trace/validation subset earlier, not the whole governance layer.
