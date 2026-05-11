@@ -151,9 +151,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let transaction = connection.transaction().map_err(sqlite_error)?;
         transaction
             .execute(
-                "INSERT INTO link_guard_diagnostics (reason, count)
+                "INSERT INTO link_guard_diagnostics (reason, rejected_count)
                  VALUES ('low_information_co_occurrence', 1)
-                 ON CONFLICT(reason) DO UPDATE SET count = count + 1",
+                 ON CONFLICT(reason) DO UPDATE SET rejected_count = rejected_count + 1",
                 [],
             )
             .map_err(sqlite_error)?;
@@ -165,7 +165,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let connection = lock(&self.connection)?;
         let count = connection
             .query_row(
-                "SELECT count FROM link_guard_diagnostics
+                "SELECT rejected_count FROM link_guard_diagnostics
                  WHERE reason = 'low_information_co_occurrence'",
                 [],
                 |row| row.get::<_, i64>(0),
@@ -222,7 +222,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
 
             CREATE TABLE IF NOT EXISTS link_guard_diagnostics (
                 reason TEXT PRIMARY KEY,
-                count INTEGER NOT NULL DEFAULT 0
+                rejected_count INTEGER NOT NULL DEFAULT 0
             );
             ",
         )

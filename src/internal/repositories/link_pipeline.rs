@@ -1,5 +1,5 @@
 // Typed-link pipeline used by the public facade and internal tests.
-use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft, ObjectType};
+use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
@@ -9,26 +9,23 @@ use crate::internal::repositories::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
     ExplicitCallerIntent,
+    #[cfg(test)]
     SameActiveThread,
+    #[cfg(test)]
     CorrectionOrSupersession,
+    #[cfg(test)]
     TemporalRelation,
+    #[cfg(test)]
     SemanticSupport,
+    #[cfg(test)]
     HighSalience,
+    #[cfg(test)]
     SelectiveSharedEntity,
     LowSelectivityCoOccurrenceOnly,
 }
 
 const LOW_INFORMATION_LINK_ADMISSION_EVIDENCE: LinkAdmissionEvidence =
     LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly;
-const LINK_ADMISSION_EVIDENCE_SUPPORTING_ASSOCIATION: [LinkAdmissionEvidence; 7] = [
-    LinkAdmissionEvidence::ExplicitCallerIntent,
-    LinkAdmissionEvidence::SameActiveThread,
-    LinkAdmissionEvidence::CorrectionOrSupersession,
-    LinkAdmissionEvidence::TemporalRelation,
-    LinkAdmissionEvidence::SemanticSupport,
-    LinkAdmissionEvidence::HighSalience,
-    LinkAdmissionEvidence::SelectiveSharedEntity,
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionDecision {
@@ -153,22 +150,28 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
 }
 
 fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissionDecision {
-    match (link.relation, evidence) {
-        (
-            crate::api::types::RelationType::AssociatedWith,
-            LOW_INFORMATION_LINK_ADMISSION_EVIDENCE,
-        ) => LinkAdmissionDecision::RejectedLowInformationCoOccurrence,
-        (crate::api::types::RelationType::AssociatedWith, evidence)
-            if link_admission_evidence_supports_association(evidence) =>
-        {
-            LinkAdmissionDecision::Accepted
-        }
-        _ => LinkAdmissionDecision::Accepted,
+    if link.relation != RelationType::AssociatedWith {
+        return LinkAdmissionDecision::Accepted;
     }
-}
 
-fn link_admission_evidence_supports_association(evidence: LinkAdmissionEvidence) -> bool {
-    LINK_ADMISSION_EVIDENCE_SUPPORTING_ASSOCIATION.contains(&evidence)
+    match evidence {
+        LOW_INFORMATION_LINK_ADMISSION_EVIDENCE => {
+            LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+        }
+        LinkAdmissionEvidence::ExplicitCallerIntent => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::SameActiveThread => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::CorrectionOrSupersession => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::TemporalRelation => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::SemanticSupport => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::HighSalience => LinkAdmissionDecision::Accepted,
+        #[cfg(test)]
+        LinkAdmissionEvidence::SelectiveSharedEntity => LinkAdmissionDecision::Accepted,
+    }
 }
 
 fn validation_error(error: impl ToString) -> CustomError {

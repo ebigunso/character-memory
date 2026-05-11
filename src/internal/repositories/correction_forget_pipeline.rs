@@ -2568,6 +2568,14 @@ mod tests {
             lock(&self.calls).push(StoreCall::StatsUnhealthy);
             Ok(())
         }
+
+        async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
+            Ok(0)
+        }
     }
 
     #[derive(Debug)]
