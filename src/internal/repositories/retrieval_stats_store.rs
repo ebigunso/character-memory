@@ -179,7 +179,6 @@ impl InMemoryRetrievalStatsStore {
                     state: RetrievalStatsHealthState::Unhealthy,
                     last_error_message: Some(message),
                 },
-                preserve_unhealthy_on_success: true,
                 ..InMemoryState::default()
             }),
         }
@@ -193,7 +192,6 @@ struct InMemoryState {
     global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     health: RetrievalStatsHealth,
     rejected_low_information_link_count: u64,
-    preserve_unhealthy_on_success: bool,
 }
 
 #[async_trait]
@@ -204,7 +202,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             insert_edge(&mut state.edges, edge.clone());
         }
         state.refresh_counters();
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -225,7 +222,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             }
         }
         state.refresh_counters();
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -263,7 +259,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
         let mut state = lock(&self.state)?;
         state.rejected_low_information_link_count += 1;
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -276,12 +271,6 @@ impl InMemoryState {
     fn refresh_counters(&mut self) {
         self.counters = recomputed_counters(&self.edges);
         self.global_counters = recomputed_global_counters(&self.edges);
-    }
-
-    fn mark_healthy_after_success(&mut self) {
-        if !self.preserve_unhealthy_on_success {
-            self.health = RetrievalStatsHealth::default();
-        }
     }
 }
 
@@ -961,6 +950,18 @@ mod tests {
             .mark_unhealthy("stats write failed".to_owned())
             .await
             .unwrap();
+        store
+            .record_edges(&[edge(
+                id("550e8400-e29b-41d4-a716-446655460071"),
+                RelationType::Involves,
+                id("550e8400-e29b-41d4-a716-446655460072"),
+                ObjectType::Episode,
+                RetentionState::Active,
+                true,
+                timestamp(),
+            )])
+            .await
+            .unwrap();
 
         let health = store.health().await.unwrap();
         assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
@@ -985,9 +986,11 @@ mod tests {
             store.rejected_low_information_link_count().await.unwrap(),
             2
         );
+        let health = store.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
         assert_eq!(
-            store.health().await.unwrap(),
-            RetrievalStatsHealth::default()
+            health.last_error_message.as_deref(),
+            Some("transient stats failure")
         );
     }
 
