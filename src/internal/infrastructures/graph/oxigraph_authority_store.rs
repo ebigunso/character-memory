@@ -19,10 +19,10 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    apply_fanout_limits_by_pair, bounded_expansion, derived_memories_by_provenance,
+    derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
+    GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
+    GraphExpansionBoundedFailureReason, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -559,14 +559,19 @@ impl OxigraphHttpGraphAuthorityStore {
 
         for depth in 0..query.max_depth {
             let link_refs = self.query_link_refs_touching(&frontier).await?;
+            let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
             let mut next_frontier = Vec::new();
             for object_ref in &frontier {
+                let incident_link_refs = link_refs_by_endpoint
+                    .get(object_ref)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
                 for link_ref in bounded_incident_link_refs(
                     query,
                     root_ref,
                     *object_ref,
                     depth,
-                    &link_refs,
+                    incident_link_refs,
                     &mut bounded_failure,
                 )? {
                     graph_link_ids.insert(link_ref.link_id());
@@ -610,10 +615,6 @@ trait BoundedExpansionLinkRef: Copy {
     fn from(self) -> GraphObjectRef;
     fn to(self) -> GraphObjectRef;
     fn relation(self) -> RelationType;
-
-    fn touches(self, object_ref: GraphObjectRef) -> bool {
-        self.from() == object_ref || self.to() == object_ref
-    }
 
     fn other_endpoint(self, object_ref: GraphObjectRef) -> GraphObjectRef {
         if self.from() == object_ref {
@@ -672,12 +673,10 @@ fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         .iter()
         .copied()
         .filter(|link_ref| relation_allowed(query, link_ref.relation()))
-        .filter(|link_ref| link_ref.touches(object_ref))
         .filter(|link_ref| {
             object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
         })
         .collect::<Vec<_>>();
-    incident_links.sort_by_key(|link_ref| stable_link_ref_key(*link_ref));
 
     if incident_links.len() > query.max_hub_edges {
         let failure = GraphExpansionBoundedFailure {
@@ -702,46 +701,18 @@ fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
 fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
     query: &GraphExpansionQuery,
     object_ref: GraphObjectRef,
-    mut incident_links: Vec<T>,
+    incident_links: Vec<T>,
     apply_selectivity_overrides: bool,
 ) -> Vec<T> {
-    if query.fanout_overrides.is_empty() || !apply_selectivity_overrides {
-        incident_links.truncate(query.max_fanout_per_node);
-        return incident_links;
-    }
-
-    let mut retained = Vec::new();
-    let mut per_pair_counts = HashMap::<(RelationType, ObjectType), usize>::new();
-    for link_ref in incident_links {
-        if retained.len() >= query.max_fanout_per_node {
-            break;
-        }
-        let neighbor = link_ref.other_endpoint(object_ref);
-        let max_for_pair = fanout_limit_for_pair(query, link_ref.relation(), neighbor.object_type);
-        let count = per_pair_counts
-            .entry((link_ref.relation(), neighbor.object_type))
-            .or_default();
-        if *count >= max_for_pair {
-            continue;
-        }
-        *count += 1;
-        retained.push(link_ref);
-    }
-    retained
-}
-
-fn fanout_limit_for_pair(
-    query: &GraphExpansionQuery,
-    relation: RelationType,
-    object_type: ObjectType,
-) -> usize {
-    query
-        .fanout_overrides
-        .iter()
-        .find(|override_| override_.relation == relation && override_.object_type == object_type)
-        .map(|override_| override_.max_fanout)
-        .unwrap_or(query.max_fanout_per_node)
-        .min(query.max_fanout_per_node)
+    apply_fanout_limits_by_pair(
+        query,
+        incident_links,
+        apply_selectivity_overrides,
+        |link_ref| {
+            let neighbor = link_ref.other_endpoint(object_ref);
+            (link_ref.relation(), neighbor.object_type)
+        },
+    )
 }
 
 fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool {
@@ -752,17 +723,23 @@ fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> 
     query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
 }
 
-fn stable_link_ref_key<T: BoundedExpansionLinkRef>(
-    link_ref: T,
-) -> (MemoryId, MemoryId, MemoryId, u8, u8, u8) {
-    (
-        link_ref.to().object_id,
-        link_ref.from().object_id,
-        link_ref.link_id(),
-        object_type_rank(link_ref.to().object_type),
-        object_type_rank(link_ref.from().object_type),
-        relation_type_rank(link_ref.relation()),
-    )
+fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
+    link_refs: &[T],
+) -> HashMap<GraphObjectRef, Vec<T>> {
+    let mut refs_by_endpoint = HashMap::<GraphObjectRef, Vec<T>>::new();
+    for link_ref in link_refs.iter().copied() {
+        refs_by_endpoint
+            .entry(link_ref.from())
+            .or_default()
+            .push(link_ref);
+        if link_ref.to() != link_ref.from() {
+            refs_by_endpoint
+                .entry(link_ref.to())
+                .or_default()
+                .push(link_ref);
+        }
+    }
+    refs_by_endpoint
 }
 
 fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
@@ -1998,14 +1975,19 @@ fn bounded_graph_visible_refs(
 
     for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
+        let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
         for object_ref in &frontier {
+            let incident_link_refs = link_refs_by_endpoint
+                .get(object_ref)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             for link_ref in bounded_incident_link_refs(
                 query,
                 root_ref,
                 *object_ref,
                 depth,
-                &link_refs,
+                incident_link_refs,
                 &mut bounded_failure,
             )? {
                 graph_link_ids.insert(link_ref.link_id());

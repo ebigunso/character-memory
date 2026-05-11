@@ -291,7 +291,7 @@ pub(crate) async fn record_stats_after_write(
     links: &[MemoryLink],
 ) {
     let states = retrieval_stats_object_states(objects);
-    let edges = retrieval_stats_edges(objects, links);
+    let edges = retrieval_stats_edges_with_states(objects, links, &states);
     if let Err(error) = stats_store.record_edges(&edges).await {
         let _ = stats_store.mark_unhealthy(error.to_string()).await;
         return;
@@ -306,16 +306,21 @@ pub(crate) async fn record_stats_after_write(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],
     links: &[MemoryLink],
 ) -> Vec<RetrievalStatsEdge> {
-    let object_states = retrieval_stats_object_states(objects);
-    let mut object_state_lookup = HashMap::new();
-    for state in &object_states {
-        object_state_lookup.insert((state.object_id, state.object_type), state.clone());
-    }
+    let states = retrieval_stats_object_states(objects);
+    retrieval_stats_edges_with_states(objects, links, &states)
+}
 
+fn retrieval_stats_edges_with_states(
+    objects: &[MemoryObject],
+    links: &[MemoryLink],
+    object_states: &[RetrievalStatsObjectState],
+) -> Vec<RetrievalStatsEdge> {
+    let object_state_lookup = object_state_lookup(object_states);
     let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
         append_intrinsic_edges(&mut edges, object);
@@ -326,6 +331,16 @@ pub(crate) fn retrieval_stats_edges(
     let mut edges = edges.into_values().collect::<Vec<_>>();
     edges.sort_by(|left, right| left.edge_key.cmp(&right.edge_key));
     edges
+}
+
+fn object_state_lookup(
+    object_states: &[RetrievalStatsObjectState],
+) -> HashMap<(MemoryId, ObjectType), RetrievalStatsObjectState> {
+    let mut object_state_lookup = HashMap::new();
+    for state in object_states {
+        object_state_lookup.insert((state.object_id, state.object_type), state.clone());
+    }
+    object_state_lookup
 }
 
 pub(crate) fn retrieval_stats_object_states(
@@ -391,22 +406,7 @@ fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, objec
                 );
             }
         }
-        MemoryObject::Observation(observation) => {
-            if let Some(entity_id) = observation.speaker_entity_id {
-                insert_edge(
-                    edges,
-                    edge(
-                        entity_id,
-                        RelationType::Mentions,
-                        observation.id,
-                        ObjectType::Observation,
-                        observation.retention_state,
-                        true,
-                        observation.created_at,
-                    ),
-                );
-            }
-        }
+        MemoryObject::Observation(_) => {}
         MemoryObject::DerivedMemory(memory) => {
             for entity_id in &memory.entity_ids {
                 insert_edge(
@@ -883,6 +883,30 @@ mod tests {
             .unwrap();
         assert_eq!(edge.retention_state, RetentionState::Suppressed);
         assert!(!edge.is_current);
+    }
+
+    #[test]
+    fn speaker_entity_id_does_not_count_as_mentions() {
+        let entity_id = id("550e8400-e29b-41d4-a716-446655460061");
+        let observation_id = id("550e8400-e29b-41d4-a716-446655460062");
+        let objects = vec![MemoryObject::Observation(crate::api::types::Observation {
+            id: observation_id,
+            object_type: ObjectType::Observation,
+            episode_id: id("550e8400-e29b-41d4-a716-446655460063"),
+            speaker_entity_id: Some(entity_id),
+            observed_at: None,
+            modality: Modality::Chat,
+            text: "speaker relationship is not a mentions edge".to_owned(),
+            raw_ref: None,
+            salience_score: 0.5,
+            retention_state: RetentionState::Active,
+            created_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        })];
+
+        let edges = retrieval_stats_edges(&objects, &[]);
+
+        assert!(edges.is_empty());
     }
 
     #[test]

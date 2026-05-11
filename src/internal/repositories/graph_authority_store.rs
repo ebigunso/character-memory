@@ -779,29 +779,42 @@ fn bounded_expansion_plan<'a>(
 
 fn apply_fanout_limits<'a>(
     query: &GraphExpansionQuery,
-    mut incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
     apply_selectivity_overrides: bool,
 ) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+    apply_fanout_limits_by_pair(
+        query,
+        incident_links,
+        apply_selectivity_overrides,
+        |(link, neighbor)| (link.relation, neighbor.object_type),
+    )
+}
+
+pub(crate) fn apply_fanout_limits_by_pair<T>(
+    query: &GraphExpansionQuery,
+    mut incident_items: Vec<T>,
+    apply_selectivity_overrides: bool,
+    pair_for_item: impl Fn(&T) -> (RelationType, ObjectType),
+) -> Vec<T> {
     if query.fanout_overrides.is_empty() || !apply_selectivity_overrides {
-        incident_links.truncate(query.max_fanout_per_node);
-        return incident_links;
+        incident_items.truncate(query.max_fanout_per_node);
+        return incident_items;
     }
 
     let mut retained = Vec::new();
     let mut per_pair_counts = std::collections::HashMap::<(RelationType, ObjectType), usize>::new();
-    for (link, neighbor) in incident_links {
+    for item in incident_items {
         if retained.len() >= query.max_fanout_per_node {
             break;
         }
-        let max_for_pair = fanout_limit_for_pair(query, link.relation, neighbor.object_type);
-        let count = per_pair_counts
-            .entry((link.relation, neighbor.object_type))
-            .or_default();
+        let (relation, object_type) = pair_for_item(&item);
+        let max_for_pair = fanout_limit_for_pair(query, relation, object_type);
+        let count = per_pair_counts.entry((relation, object_type)).or_default();
         if *count >= max_for_pair {
             continue;
         }
         *count += 1;
-        retained.push((link, neighbor));
+        retained.push(item);
     }
     retained
 }
