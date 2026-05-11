@@ -143,8 +143,8 @@ pub(crate) async fn selectivity_plan_for_candidate(
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
+    let support_factor = semantic_support_factor(candidate.score);
     for spec in &stats_context.specs {
-        let support_factor = semantic_support_factor(candidate.score);
         let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
             let key = RetrievalStatsCounterKey {
                 entity_id: candidate.object_id,

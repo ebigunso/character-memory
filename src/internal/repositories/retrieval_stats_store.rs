@@ -190,6 +190,7 @@ struct InMemoryState {
     edges: HashMap<String, RetrievalStatsEdge>,
     counters: HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter>,
     global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
+    counters_dirty: bool,
     health: RetrievalStatsHealth,
     rejected_low_information_link_count: u64,
 }
@@ -201,7 +202,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         for edge in edges {
             insert_edge(&mut state.edges, edge.clone());
         }
-        state.refresh_counters();
+        state.counters_dirty = true;
         Ok(())
     }
 
@@ -221,7 +222,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                 }
             }
         }
-        state.refresh_counters();
+        state.counters_dirty = true;
         Ok(())
     }
 
@@ -229,7 +230,9 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         &self,
         key: &RetrievalStatsCounterKey,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(lock(&self.state)?.counters.get(key).copied())
+        let mut state = lock(&self.state)?;
+        state.refresh_counters_if_dirty();
+        Ok(state.counters.get(key).copied())
     }
 
     async fn global_counter(
@@ -237,7 +240,9 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         relation_kind: RelationType,
         object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(lock(&self.state)?
+        let mut state = lock(&self.state)?;
+        state.refresh_counters_if_dirty();
+        Ok(state
             .global_counters
             .get(&(relation_kind, object_type))
             .copied())
@@ -268,9 +273,14 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
 }
 
 impl InMemoryState {
-    fn refresh_counters(&mut self) {
+    fn refresh_counters_if_dirty(&mut self) {
+        if !self.counters_dirty {
+            return;
+        }
+
         self.counters = recomputed_counters(&self.edges);
         self.global_counters = recomputed_global_counters(&self.edges);
+        self.counters_dirty = false;
     }
 }
 
