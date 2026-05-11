@@ -655,6 +655,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_store_counts_global_relation_object_pairs() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let first_entity_id = id("550e8400-e29b-41d4-a716-446655460031");
+        let second_entity_id = id("550e8400-e29b-41d4-a716-446655460032");
+        let first_episode_id = id("550e8400-e29b-41d4-a716-446655460033");
+        let second_episode_id = id("550e8400-e29b-41d4-a716-446655460034");
+
+        store
+            .record_edges(&[
+                edge(
+                    first_entity_id,
+                    RelationType::Involves,
+                    first_episode_id,
+                    ObjectType::Episode,
+                    RetentionState::Active,
+                    true,
+                    timestamp(),
+                ),
+                edge(
+                    second_entity_id,
+                    RelationType::Involves,
+                    second_episode_id,
+                    ObjectType::Episode,
+                    RetentionState::Suppressed,
+                    false,
+                    timestamp(),
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let counter = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 2);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
     async fn in_memory_store_merges_duplicate_edge_timestamps() {
         let store = InMemoryRetrievalStatsStore::new();
         let entity_id = id("550e8400-e29b-41d4-a716-446655460041");

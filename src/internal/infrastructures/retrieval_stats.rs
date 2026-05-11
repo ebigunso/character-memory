@@ -607,6 +607,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sqlite_store_counts_global_relation_object_pairs() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        let first_entity_id = id("550e8400-e29b-41d4-a716-446655461031");
+        let second_entity_id = id("550e8400-e29b-41d4-a716-446655461032");
+        let first_episode_id = id("550e8400-e29b-41d4-a716-446655461033");
+        let second_episode_id = id("550e8400-e29b-41d4-a716-446655461034");
+
+        store
+            .record_edges(&[
+                test_edge(
+                    first_entity_id,
+                    first_episode_id,
+                    RetentionState::Active,
+                    true,
+                ),
+                test_edge(
+                    second_entity_id,
+                    second_episode_id,
+                    RetentionState::Suppressed,
+                    false,
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let counter = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 2);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
     async fn sqlite_store_merges_duplicate_edge_timestamps_monotonically() {
         let dir = tempdir().unwrap();
         let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
