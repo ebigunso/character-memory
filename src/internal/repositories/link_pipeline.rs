@@ -9,18 +9,6 @@ use crate::internal::repositories::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
     ExplicitCallerIntent,
-    #[cfg(test)]
-    SameActiveThread,
-    #[cfg(test)]
-    CorrectionOrSupersession,
-    #[cfg(test)]
-    TemporalRelation,
-    #[cfg(test)]
-    SemanticSupport,
-    #[cfg(test)]
-    HighSalience,
-    #[cfg(test)]
-    SelectiveSharedEntity,
     LowSelectivityCoOccurrenceOnly,
 }
 
@@ -149,7 +137,10 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
     )
 }
 
-fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissionDecision {
+pub(crate) fn admit_link(
+    link: &MemoryLink,
+    evidence: LinkAdmissionEvidence,
+) -> LinkAdmissionDecision {
     if link.relation != RelationType::AssociatedWith {
         return LinkAdmissionDecision::Accepted;
     }
@@ -159,18 +150,6 @@ fn admit_link(link: &MemoryLink, evidence: LinkAdmissionEvidence) -> LinkAdmissi
             LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         }
         LinkAdmissionEvidence::ExplicitCallerIntent => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::SameActiveThread => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::CorrectionOrSupersession => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::TemporalRelation => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::SemanticSupport => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::HighSalience => LinkAdmissionDecision::Accepted,
-        #[cfg(test)]
-        LinkAdmissionEvidence::SelectiveSharedEntity => LinkAdmissionDecision::Accepted,
     }
 }
 
@@ -441,48 +420,6 @@ mod tests {
                 scenario.label
             );
         }
-    }
-
-    #[tokio::test]
-    async fn stronger_evidence_allows_associated_with_candidates_without_role_checks() {
-        let graph = FakeGraphAuthorityStore::new();
-        let stats = InMemoryRetrievalStatsStore::new();
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let evidence_cases = [
-            LinkAdmissionEvidence::ExplicitCallerIntent,
-            LinkAdmissionEvidence::SameActiveThread,
-            LinkAdmissionEvidence::CorrectionOrSupersession,
-            LinkAdmissionEvidence::TemporalRelation,
-            LinkAdmissionEvidence::SemanticSupport,
-            LinkAdmissionEvidence::HighSalience,
-            LinkAdmissionEvidence::SelectiveSharedEntity,
-        ];
-
-        let scenarios = heterogeneous_association_scenarios();
-        assert_eq!(
-            scenarios.len(),
-            evidence_cases.len(),
-            "each heterogeneous association scenario should have matching admissible evidence"
-        );
-
-        for (scenario, evidence) in scenarios.into_iter().zip(evidence_cases) {
-            let mut defaults = DraftDefaults::at(timestamp());
-            let persisted = pipeline
-                .link_with_evidence(scenario.draft, &mut defaults, evidence)
-                .await
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "scenario {} with {:?} should be accepted: {error}",
-                        scenario.label, evidence
-                    )
-                });
-
-            assert_eq!(persisted.relation, RelationType::AssociatedWith);
-        }
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            0
-        );
     }
 
     #[tokio::test]
