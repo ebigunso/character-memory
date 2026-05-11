@@ -153,7 +153,6 @@ impl InMemoryRetrievalStatsStore {
                     state: RetrievalStatsHealthState::Unhealthy,
                     last_error_message: Some(message),
                 },
-                preserve_unhealthy_on_success: true,
                 ..InMemoryState::default()
             }),
         }
@@ -164,7 +163,6 @@ impl InMemoryRetrievalStatsStore {
 struct InMemoryState {
     edges: HashMap<String, RetrievalStatsEdge>,
     health: RetrievalStatsHealth,
-    preserve_unhealthy_on_success: bool,
 }
 
 #[async_trait]
@@ -174,7 +172,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         for edge in edges {
             insert_edge(&mut state.edges, edge.clone());
         }
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -194,7 +191,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                 }
             }
         }
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -218,14 +214,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             last_error_message: Some(message),
         };
         Ok(())
-    }
-}
-
-impl InMemoryState {
-    fn mark_healthy_after_success(&mut self) {
-        if !self.preserve_unhealthy_on_success {
-            self.health = RetrievalStatsHealth::default();
-        }
     }
 }
 
@@ -878,6 +866,18 @@ mod tests {
         let store = InMemoryRetrievalStatsStore::new();
         store
             .mark_unhealthy("stats write failed".to_owned())
+            .await
+            .unwrap();
+        store
+            .record_edges(&[edge(
+                id("550e8400-e29b-41d4-a716-446655460071"),
+                RelationType::Involves,
+                id("550e8400-e29b-41d4-a716-446655460072"),
+                ObjectType::Episode,
+                RetentionState::Active,
+                true,
+                timestamp(),
+            )])
             .await
             .unwrap();
 

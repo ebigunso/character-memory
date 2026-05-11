@@ -47,7 +47,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         for edge in edges {
             upsert_edge(&transaction, edge)?;
         }
-        set_health(&transaction, RetrievalStatsHealth::default())?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -60,7 +59,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         for state in states {
             update_object_state(&transaction, state)?;
         }
-        set_health(&transaction, RetrievalStatsHealth::default())?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -654,6 +652,15 @@ mod tests {
             let store = SqliteRetrievalStatsStore::open(&path).unwrap();
             store
                 .mark_unhealthy("transient stats failure".to_owned())
+                .await
+                .unwrap();
+            store
+                .record_edges(&[test_edge(
+                    id("550e8400-e29b-41d4-a716-446655461051"),
+                    id("550e8400-e29b-41d4-a716-446655461052"),
+                    RetentionState::Active,
+                    true,
+                )])
                 .await
                 .unwrap();
         }
