@@ -455,18 +455,22 @@ mod tests {
             LinkAdmissionEvidence::SelectiveSharedEntity,
         ];
 
-        for (index, scenario) in heterogeneous_association_scenarios()
-            .into_iter()
-            .enumerate()
-        {
+        let scenarios = heterogeneous_association_scenarios();
+        assert_eq!(
+            scenarios.len(),
+            evidence_cases.len(),
+            "each heterogeneous association scenario should have matching admissible evidence"
+        );
+
+        for (scenario, evidence) in scenarios.into_iter().zip(evidence_cases) {
             let mut defaults = DraftDefaults::at(timestamp());
             let persisted = pipeline
-                .link_with_evidence(scenario.draft, &mut defaults, evidence_cases[index])
+                .link_with_evidence(scenario.draft, &mut defaults, evidence)
                 .await
                 .unwrap_or_else(|error| {
                     panic!(
                         "scenario {} with {:?} should be accepted: {error}",
-                        scenario.label, evidence_cases[index]
+                        scenario.label, evidence
                     )
                 });
 
