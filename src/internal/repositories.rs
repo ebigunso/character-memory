@@ -25,12 +25,13 @@ pub(crate) use correction_forget_pipeline::CorrectionForgetPipeline;
 // different subsets of the query/expansion helpers.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
-    bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
-    derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
-    GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFanoutOverride,
-    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-    GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
+    apply_fanout_limits_by_pair, bounded_expansion, bounded_expansion_node_set,
+    derived_memories_by_provenance, derived_memories_by_thread, GraphAuthorityStore,
+    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+    GraphExpansionFanoutOverride, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery,
+    GraphObjectRef,
 };
 
 #[allow(unused_imports)]
