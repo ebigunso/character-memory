@@ -99,7 +99,14 @@ where
             .iter()
             .any(|candidate| candidate.object_type == ObjectType::Entity)
         {
-            Some(SelectivityStatsContext::load(self.stats_store).await?)
+            Some(
+                SelectivityStatsContext::load_with_scope(
+                    self.stats_store,
+                    &context.object_type_defaults,
+                    &context.graph_limits.allowed_relation_types,
+                )
+                .await?,
+            )
         } else {
             None
         };
