@@ -2552,6 +2552,14 @@ mod tests {
             Ok(None)
         }
 
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Ok(None)
+        }
+
         async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
             Ok(RetrievalStatsHealth::default())
         }

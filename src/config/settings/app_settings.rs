@@ -109,9 +109,11 @@ impl Settings {
     /// - `Ok`: A new `Settings` instance with the provided configuration
     /// - `Err`: A `CustomError` if any required settings are missing or invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
-        config.try_deserialize().map_err(|e| {
+        let settings: Self = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
-        })
+        })?;
+        settings.validate_selectivity_settings()?;
+        Ok(settings)
     }
 
     /// Loads settings from environment variables and configuration files using default loaders.
@@ -254,6 +256,14 @@ impl Settings {
     pub(crate) fn get_embedding_model(&self) -> Result<EmbeddingModel, CustomError> {
         self.embedding_model.expose_secret().parse()
     }
+
+    fn validate_selectivity_settings(&self) -> Result<(), CustomError> {
+        validate_positive_f64(
+            "selectivity_smoothing_alpha",
+            self.selectivity_smoothing_alpha,
+        )?;
+        validate_positive_f64("selectivity_gamma", self.selectivity_gamma)
+    }
 }
 
 #[cfg(test)]
@@ -295,12 +305,21 @@ fn parse_positive_f64(name: &str, value: &str) -> Result<f64, CustomError> {
     let parsed = value.parse::<f64>().map_err(|error| {
         CustomError::ConfigParseError(format!("{name} must be a finite positive number: {error}"))
     })?;
-    if !parsed.is_finite() || parsed <= 0.0 {
+    validate_positive_f64(name, parsed).map_err(|_| {
+        CustomError::ConfigParseError(format!(
+            "{name} must be a finite positive number, got {value}"
+        ))
+    })?;
+    Ok(parsed)
+}
+
+fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+    if !value.is_finite() || value <= 0.0 {
         return Err(CustomError::ConfigParseError(format!(
             "{name} must be a finite positive number, got {value}"
         )));
     }
-    Ok(parsed)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -427,6 +446,41 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
         assert_eq!(settings.get_selectivity_gamma(), 0.5);
+    }
+
+    #[test]
+    fn test_settings_new_rejects_invalid_selectivity_numbers() {
+        for (key, value) in [
+            ("selectivity_smoothing_alpha", 0.0),
+            ("selectivity_smoothing_alpha", -1.0),
+            ("selectivity_smoothing_alpha", f64::INFINITY),
+            ("selectivity_smoothing_alpha", f64::NAN),
+            ("selectivity_gamma", 0.0),
+            ("selectivity_gamma", -1.0),
+            ("selectivity_gamma", f64::INFINITY),
+            ("selectivity_gamma", f64::NAN),
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override(key, value)
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let result = Settings::new(external_config);
+
+            assert!(
+                matches!(result, Err(CustomError::ConfigParseError(_))),
+                "{key}={value:?} should be rejected"
+            );
+        }
     }
 
     #[test]

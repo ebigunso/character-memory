@@ -26,6 +26,12 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
         key: &RetrievalStatsCounterKey,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
 
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
@@ -121,6 +127,14 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
         Ok(None)
     }
 
+    async fn global_counter(
+        &self,
+        _relation_kind: RelationType,
+        _object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(None)
+    }
+
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
         Ok(RetrievalStatsHealth::default())
     }
@@ -200,6 +214,16 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
         Ok(recomputed_counters(&lock(&self.state)?.edges)
             .get(key)
+            .copied())
+    }
+
+    async fn global_counter(
+        &self,
+        relation_kind: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        Ok(recomputed_global_counters(&lock(&self.state)?.edges)
+            .get(&(relation_kind, object_type))
             .copied())
     }
 
@@ -521,6 +545,25 @@ fn recomputed_counters(
     counters
 }
 
+fn recomputed_global_counters(
+    edges: &HashMap<String, RetrievalStatsEdge>,
+) -> HashMap<(RelationType, ObjectType), RetrievalStatsCounter> {
+    let mut counters = HashMap::new();
+    for edge in edges.values() {
+        let counter = counters
+            .entry((edge.relation_kind, edge.object_type))
+            .or_insert_with(RetrievalStatsCounter::default);
+        counter.total_count += 1;
+        if edge.is_active() {
+            counter.active_count += 1;
+        }
+        if edge.is_active() && edge.is_current {
+            counter.current_count += 1;
+        }
+    }
+    counters
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
     mutex
         .lock()
@@ -568,6 +611,48 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
+    async fn in_memory_store_counts_global_relation_object_pairs() {
+        let store = InMemoryRetrievalStatsStore::new();
+        let first_entity_id = id("550e8400-e29b-41d4-a716-446655460031");
+        let second_entity_id = id("550e8400-e29b-41d4-a716-446655460032");
+        let first_episode_id = id("550e8400-e29b-41d4-a716-446655460033");
+        let second_episode_id = id("550e8400-e29b-41d4-a716-446655460034");
+
+        store
+            .record_edges(&[
+                edge(
+                    first_entity_id,
+                    RelationType::Involves,
+                    first_episode_id,
+                    ObjectType::Episode,
+                    RetentionState::Active,
+                    true,
+                    timestamp(),
+                ),
+                edge(
+                    second_entity_id,
+                    RelationType::Involves,
+                    second_episode_id,
+                    ObjectType::Episode,
+                    RetentionState::Suppressed,
+                    false,
+                    timestamp(),
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let counter = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 2);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
     }
