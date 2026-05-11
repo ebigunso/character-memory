@@ -79,9 +79,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
                 ],
                 |row| {
                     Ok(RetrievalStatsCounter {
-                        total_count: non_negative_count(row.get(0)?)?,
-                        active_count: non_negative_count(row.get(1)?)?,
-                        current_count: non_negative_count(row.get(2)?)?,
+                        total_count: non_negative_count(0, row.get(0)?)?,
+                        active_count: non_negative_count(1, row.get(1)?)?,
+                        current_count: non_negative_count(2, row.get(2)?)?,
                     })
                 },
             )
@@ -106,9 +106,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
                 ],
                 |row| {
                     Ok(RetrievalStatsCounter {
-                        total_count: non_negative_count(row.get(0)?)?,
-                        active_count: non_negative_count(row.get(1)?)?,
-                        current_count: non_negative_count(row.get(2)?)?,
+                        total_count: non_negative_count(0, row.get(0)?)?,
+                        active_count: non_negative_count(1, row.get(1)?)?,
+                        current_count: non_negative_count(2, row.get(2)?)?,
                     })
                 },
             )
@@ -509,10 +509,10 @@ fn sqlite_error(error: rusqlite::Error) -> CustomError {
     CustomError::DatabaseError(format!("retrieval stats sqlite error: {error}"))
 }
 
-fn non_negative_count(value: i64) -> rusqlite::Result<u64> {
+fn non_negative_count(column_index: usize, value: i64) -> rusqlite::Result<u64> {
     u64::try_from(value).map_err(|_| {
         rusqlite::Error::FromSqlConversionFailure(
-            0,
+            column_index,
             rusqlite::types::Type::Integer,
             Box::new(CustomError::DatabaseError(format!(
                 "retrieval stats counter was negative: {value}"
