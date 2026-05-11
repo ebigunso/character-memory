@@ -167,7 +167,6 @@ impl InMemoryRetrievalStatsStore {
                     state: RetrievalStatsHealthState::Unhealthy,
                     last_error_message: Some(message),
                 },
-                preserve_unhealthy_on_success: true,
                 ..InMemoryState::default()
             }),
         }
@@ -180,7 +179,6 @@ struct InMemoryState {
     counters: HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter>,
     global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     health: RetrievalStatsHealth,
-    preserve_unhealthy_on_success: bool,
 }
 
 #[async_trait]
@@ -191,7 +189,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             insert_edge(&mut state.edges, edge.clone());
         }
         state.refresh_counters();
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -212,7 +209,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             }
         }
         state.refresh_counters();
-        state.mark_healthy_after_success();
         Ok(())
     }
 
@@ -252,12 +248,6 @@ impl InMemoryState {
     fn refresh_counters(&mut self) {
         self.counters = recomputed_counters(&self.edges);
         self.global_counters = recomputed_global_counters(&self.edges);
-    }
-
-    fn mark_healthy_after_success(&mut self) {
-        if !self.preserve_unhealthy_on_success {
-            self.health = RetrievalStatsHealth::default();
-        }
     }
 }
 
@@ -935,6 +925,18 @@ mod tests {
         let store = InMemoryRetrievalStatsStore::new();
         store
             .mark_unhealthy("stats write failed".to_owned())
+            .await
+            .unwrap();
+        store
+            .record_edges(&[edge(
+                id("550e8400-e29b-41d4-a716-446655460071"),
+                RelationType::Involves,
+                id("550e8400-e29b-41d4-a716-446655460072"),
+                ObjectType::Episode,
+                RetentionState::Active,
+                true,
+                timestamp(),
+            )])
             .await
             .unwrap();
 

@@ -47,7 +47,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         for edge in edges {
             upsert_edge(&transaction, edge)?;
         }
-        set_health(&transaction, RetrievalStatsHealth::default())?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -60,7 +59,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         for state in states {
             update_object_state(&transaction, state)?;
         }
-        set_health(&transaction, RetrievalStatsHealth::default())?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -108,9 +106,9 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
                 ],
                 |row| {
                     Ok(RetrievalStatsCounter {
-                        total_count: row.get::<_, i64>(0)? as u64,
-                        active_count: row.get::<_, i64>(1)? as u64,
-                        current_count: row.get::<_, i64>(2)? as u64,
+                        total_count: non_negative_count(row.get(0)?)?,
+                        active_count: non_negative_count(row.get(1)?)?,
+                        current_count: non_negative_count(row.get(2)?)?,
                     })
                 },
             )
@@ -679,6 +677,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sqlite_global_counter_rejects_negative_counts() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        {
+            let connection = lock(&store.connection).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO global_relation_counts
+                     (relation_kind, object_type, total_count, active_count, current_count)
+                     VALUES ('involves', 'episode', -1, 0, 0)",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let error = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("retrieval stats counter was negative: -1"));
+    }
+
+    #[tokio::test]
     async fn sqlite_store_preserves_unhealthy_marker_across_reopen() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("stats.sqlite3");
@@ -687,6 +711,15 @@ mod tests {
             let store = SqliteRetrievalStatsStore::open(&path).unwrap();
             store
                 .mark_unhealthy("transient stats failure".to_owned())
+                .await
+                .unwrap();
+            store
+                .record_edges(&[test_edge(
+                    id("550e8400-e29b-41d4-a716-446655461051"),
+                    id("550e8400-e29b-41d4-a716-446655461052"),
+                    RetentionState::Active,
+                    true,
+                )])
                 .await
                 .unwrap();
         }

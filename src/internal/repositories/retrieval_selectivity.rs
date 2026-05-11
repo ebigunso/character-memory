@@ -54,16 +54,39 @@ pub(crate) struct SelectivityStatsContext {
 
 impl SelectivityStatsContext {
     pub(crate) async fn load(stats_store: &dyn RetrievalStatsStore) -> Result<Self, CustomError> {
-        let health = stats_store.health().await?;
+        let health = match stats_store.health().await {
+            Ok(health) => health,
+            Err(error) => {
+                let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                return Ok(Self {
+                    health: RetrievalStatsHealth {
+                        state: RetrievalStatsHealthState::Unhealthy,
+                        last_error_message: Some(error.to_string()),
+                    },
+                    global_counters: HashMap::new(),
+                });
+            }
+        };
         let mut global_counters = HashMap::new();
         if health.state == RetrievalStatsHealthState::Healthy {
             for spec in fanout_specs() {
-                global_counters.insert(
-                    (spec.relation, spec.object_type),
-                    stats_store
-                        .global_counter(spec.relation, spec.object_type)
-                        .await?,
-                );
+                let global_counter = match stats_store
+                    .global_counter(spec.relation, spec.object_type)
+                    .await
+                {
+                    Ok(counter) => counter,
+                    Err(error) => {
+                        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                        return Ok(Self {
+                            health: RetrievalStatsHealth {
+                                state: RetrievalStatsHealthState::Unhealthy,
+                                last_error_message: Some(error.to_string()),
+                            },
+                            global_counters: HashMap::new(),
+                        });
+                    }
+                };
+                global_counters.insert((spec.relation, spec.object_type), global_counter);
             }
         }
         Ok(Self {
@@ -108,7 +131,13 @@ pub(crate) async fn selectivity_plan_for_candidate(
                     relation_kind: spec.relation,
                     object_type: spec.object_type,
                 };
-                let entity = stats_store.counter(&key).await?;
+                let entity = match stats_store.counter(&key).await {
+                    Ok(counter) => counter,
+                    Err(error) => {
+                        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                        None
+                    }
+                };
                 let global = stats_context.global_counter(spec.relation, spec.object_type);
                 match (entity, global) {
                     (Some(entity), Some(global)) => {
@@ -310,6 +339,7 @@ mod tests {
     use super::*;
     use crate::internal::models::vector::VectorSurface;
     use crate::internal::repositories::{InMemoryRetrievalStatsStore, RetrievalStatsEdge};
+    use async_trait::async_trait;
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -429,6 +459,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selectivity_plan_uses_conservative_fanout_when_stats_reads_fail() {
+        let stats = FailingRetrievalStatsStore;
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462021").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert!(plan.traces.iter().all(|trace| {
+            trace.fallback
+                && trace.chosen_fanout == 1
+                && trace.decision == SelectivityDecision::ConservativeFallback
+        }));
+    }
+
+    #[tokio::test]
     async fn selectivity_plan_uses_lifecycle_scoped_counts() {
         let stats = InMemoryRetrievalStatsStore::new();
         let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462003").unwrap();
@@ -536,5 +597,48 @@ mod tests {
         let decision = selectivity_decision(Some(1.0), 2.0, 0, false);
 
         assert_eq!(decision, SelectivityDecision::LowSelectivityRejected);
+    }
+
+    struct FailingRetrievalStatsStore;
+
+    #[async_trait]
+    impl RetrievalStatsStore for FailingRetrievalStatsStore {
+        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[crate::internal::repositories::RetrievalStatsObjectState],
+        ) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Err(CustomError::DatabaseError(
+                "stats counter read failed".to_owned(),
+            ))
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Err(CustomError::DatabaseError(
+                "stats global counter read failed".to_owned(),
+            ))
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+            Ok(RetrievalStatsHealth::default())
+        }
+
+        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+            Ok(())
+        }
     }
 }
