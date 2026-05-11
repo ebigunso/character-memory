@@ -49,11 +49,28 @@ pub(crate) struct SelectivityPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct SelectivityStatsContext {
     health: RetrievalStatsHealth,
+    specs: Vec<FanoutSpec>,
     global_counters: HashMap<(RelationType, ObjectType), Option<RetrievalStatsCounter>>,
 }
 
 impl SelectivityStatsContext {
+    #[cfg(test)]
     pub(crate) async fn load(stats_store: &dyn RetrievalStatsStore) -> Result<Self, CustomError> {
+        Self::load_with_scope(stats_store, &[], &[]).await
+    }
+
+    pub(crate) async fn load_with_scope(
+        stats_store: &dyn RetrievalStatsStore,
+        allowed_object_types: &[ObjectType],
+        allowed_relation_types: &[RelationType],
+    ) -> Result<Self, CustomError> {
+        let specs = fanout_specs()
+            .iter()
+            .copied()
+            .filter(|spec| {
+                spec_allowed_by_graph_scope(spec, allowed_object_types, allowed_relation_types)
+            })
+            .collect::<Vec<_>>();
         let health = match stats_store.health().await {
             Ok(health) => health,
             Err(error) => {
@@ -63,13 +80,14 @@ impl SelectivityStatsContext {
                         state: RetrievalStatsHealthState::Unhealthy,
                         last_error_message: Some(error.to_string()),
                     },
+                    specs,
                     global_counters: HashMap::new(),
                 });
             }
         };
         let mut global_counters = HashMap::new();
         if health.state == RetrievalStatsHealthState::Healthy {
-            for spec in fanout_specs() {
+            for spec in &specs {
                 let global_counter = match stats_store
                     .global_counter(spec.relation, spec.object_type)
                     .await
@@ -82,6 +100,7 @@ impl SelectivityStatsContext {
                                 state: RetrievalStatsHealthState::Unhealthy,
                                 last_error_message: Some(error.to_string()),
                             },
+                            specs,
                             global_counters: HashMap::new(),
                         });
                     }
@@ -91,6 +110,7 @@ impl SelectivityStatsContext {
         }
         Ok(Self {
             health,
+            specs,
             global_counters,
         })
     }
@@ -122,47 +142,48 @@ pub(crate) async fn selectivity_plan_for_candidate(
 
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
-    for spec in fanout_specs() {
+    let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
+    for spec in &stats_context.specs {
         let support_factor = semantic_support_factor(candidate.score);
-        let (score, entity_count, global_count, fallback) =
-            if stats_context.health.state == RetrievalStatsHealthState::Healthy {
-                let key = RetrievalStatsCounterKey {
-                    entity_id: candidate.object_id,
-                    relation_kind: spec.relation,
-                    object_type: spec.object_type,
-                };
-                let entity = match stats_store.counter(&key).await {
-                    Ok(counter) => counter,
-                    Err(error) => {
-                        let _ = stats_store.mark_unhealthy(error.to_string()).await;
-                        None
-                    }
-                };
-                let global = stats_context.global_counter(spec.relation, spec.object_type);
-                match (entity, global) {
-                    (Some(entity), Some(global)) => {
-                        let entity_count = count_scope.count(entity);
-                        let global_count = count_scope.count(global);
-                        if global_count > 0 {
-                            (
-                                Some(selectivity_score(
-                                    entity_count,
-                                    global_count,
-                                    policy.smoothing_alpha,
-                                )),
-                                Some(entity_count),
-                                Some(global_count),
-                                false,
-                            )
-                        } else {
-                            (None, None, None, true)
-                        }
-                    }
-                    _ => (None, None, None, true),
-                }
-            } else {
-                (None, None, None, true)
+        let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
+            let key = RetrievalStatsCounterKey {
+                entity_id: candidate.object_id,
+                relation_kind: spec.relation,
+                object_type: spec.object_type,
             };
+            let entity = match stats_store.counter(&key).await {
+                Ok(counter) => counter,
+                Err(error) => {
+                    let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                    stats_reads_failed = true;
+                    None
+                }
+            };
+            let global = stats_context.global_counter(spec.relation, spec.object_type);
+            match (entity, global) {
+                (Some(entity), Some(global)) => {
+                    let entity_count = count_scope.count(entity);
+                    let global_count = count_scope.count(global);
+                    if global_count > 0 {
+                        (
+                            Some(selectivity_score(
+                                entity_count,
+                                global_count,
+                                policy.smoothing_alpha,
+                            )),
+                            Some(entity_count),
+                            Some(global_count),
+                            false,
+                        )
+                    } else {
+                        (None, None, None, true)
+                    }
+                }
+                _ => (None, None, None, true),
+            }
+        } else {
+            (None, None, None, true)
+        };
 
         let max_fanout = spec.max_fanout.min(static_max_fanout);
         let chosen_fanout = match score {
@@ -243,6 +264,15 @@ fn semantic_support_factor(score: f32) -> f64 {
 
 fn conservative_fallback_fanout(max_fanout: usize) -> usize {
     max_fanout.min(1)
+}
+
+fn spec_allowed_by_graph_scope(
+    spec: &FanoutSpec,
+    allowed_object_types: &[ObjectType],
+    allowed_relation_types: &[RelationType],
+) -> bool {
+    (allowed_object_types.is_empty() || allowed_object_types.contains(&spec.object_type))
+        && (allowed_relation_types.is_empty() || allowed_relation_types.contains(&spec.relation))
 }
 
 fn selectivity_decision(
@@ -340,6 +370,7 @@ mod tests {
     use crate::internal::models::vector::VectorSurface;
     use crate::internal::repositories::{InMemoryRetrievalStatsStore, RetrievalStatsEdge};
     use async_trait::async_trait;
+    use std::sync::Mutex;
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -490,6 +521,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selectivity_plan_uses_conservative_fanout_after_partial_stats_read_failure() {
+        let stats = PartiallyFailingRetrievalStatsStore::default();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462022").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert!(plan.traces.iter().all(|trace| {
+            trace.fallback
+                && trace.chosen_fanout == 1
+                && trace.decision == SelectivityDecision::ConservativeFallback
+        }));
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_skips_specs_excluded_by_graph_scope() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load_with_scope(
+            &stats,
+            &[ObjectType::Episode],
+            &[RelationType::Involves],
+        )
+        .await
+        .unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462023").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.decision_count, 1);
+        assert_eq!(plan.fanout_overrides.len(), 1);
+        assert_eq!(plan.fanout_overrides[0].relation, RelationType::Involves);
+        assert_eq!(plan.fanout_overrides[0].object_type, ObjectType::Episode);
+        assert_eq!(plan.traces.len(), 1);
+        assert_eq!(plan.traces[0].relation, RelationType::Involves);
+        assert_eq!(plan.traces[0].object_type, ObjectType::Episode);
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_is_empty_when_graph_scope_excludes_all_specs() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let stats_context = SelectivityStatsContext::load_with_scope(
+            &stats,
+            &[ObjectType::Observation],
+            &[RelationType::About],
+        )
+        .await
+        .unwrap();
+        let candidate = VectorCandidateMatch::new(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462024").unwrap(),
+            ObjectType::Entity,
+            VectorSurface::Name,
+            0.95,
+        );
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &stats_context,
+            RetrievalLifecyclePolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(plan.telemetry.decision_count, 0);
+        assert!(plan.fanout_overrides.is_empty());
+        assert!(plan.traces.is_empty());
+    }
+
+    #[tokio::test]
     async fn selectivity_plan_uses_lifecycle_scoped_counts() {
         let stats = InMemoryRetrievalStatsStore::new();
         let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462003").unwrap();
@@ -631,6 +765,63 @@ mod tests {
             Err(CustomError::DatabaseError(
                 "stats global counter read failed".to_owned(),
             ))
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+            Ok(RetrievalStatsHealth::default())
+        }
+
+        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct PartiallyFailingRetrievalStatsStore {
+        counter_reads: Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for PartiallyFailingRetrievalStatsStore {
+        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[crate::internal::repositories::RetrievalStatsObjectState],
+        ) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            let mut reads = self.counter_reads.lock().unwrap();
+            *reads += 1;
+            if *reads == 1 {
+                return Err(CustomError::DatabaseError(
+                    "first stats counter read failed".to_owned(),
+                ));
+            }
+            Ok(Some(RetrievalStatsCounter {
+                total_count: 100,
+                active_count: 100,
+                current_count: 100,
+            }))
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Ok(Some(RetrievalStatsCounter {
+                total_count: 100,
+                active_count: 100,
+                current_count: 100,
+            }))
         }
 
         async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
