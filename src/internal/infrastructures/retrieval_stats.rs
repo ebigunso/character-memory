@@ -170,7 +170,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
             .optional()
             .map_err(sqlite_error)?
             .unwrap_or_default();
-        non_negative_count(count).map_err(sqlite_error)
+        non_negative_count(0, count).map_err(sqlite_error)
     }
 }
 
