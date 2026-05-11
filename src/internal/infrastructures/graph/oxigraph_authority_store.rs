@@ -576,9 +576,13 @@ impl OxigraphHttpGraphAuthorityStore {
                 )? {
                     graph_link_ids.insert(link_ref.link_id());
                     let neighbor = link_ref.other_endpoint(*object_ref);
-                    if graph_refs.insert(neighbor) {
-                        next_frontier.push(neighbor);
-                    }
+                    insert_visible_ref(
+                        query,
+                        &mut graph_refs,
+                        &mut next_frontier,
+                        neighbor,
+                        &mut bounded_failure,
+                    )?;
                 }
             }
 
@@ -740,6 +744,32 @@ fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
         }
     }
     refs_by_endpoint
+}
+
+fn insert_visible_ref(
+    query: &GraphExpansionQuery,
+    graph_refs: &mut HashSet<GraphObjectRef>,
+    next_frontier: &mut Vec<GraphObjectRef>,
+    object_ref: GraphObjectRef,
+    bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
+) -> Result<(), CustomError> {
+    if graph_refs.contains(&object_ref) {
+        return Ok(());
+    }
+    if graph_refs.len() >= query.max_nodes {
+        let failure = GraphExpansionBoundedFailure {
+            reason: GraphExpansionBoundedFailureReason::NodeLimit,
+            at: Some(object_ref),
+        };
+        if !query.failure_policy.allow_partial_results {
+            return Err(graph_expansion_bounded_error(failure));
+        }
+        bounded_failure.get_or_insert(failure);
+        return Ok(());
+    }
+    graph_refs.insert(object_ref);
+    next_frontier.push(object_ref);
+    Ok(())
 }
 
 fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
@@ -1992,9 +2022,13 @@ fn bounded_graph_visible_refs(
             )? {
                 graph_link_ids.insert(link_ref.link_id());
                 let neighbor = link_ref.other_endpoint(*object_ref);
-                if graph_refs.insert(neighbor) {
-                    next_frontier.push(neighbor);
-                }
+                insert_visible_ref(
+                    query,
+                    &mut graph_refs,
+                    &mut next_frontier,
+                    neighbor,
+                    &mut bounded_failure,
+                )?;
             }
         }
 
@@ -2643,6 +2677,41 @@ mod tests {
                 .filter(|object_ref| object_ref.object_type == ObjectType::DerivedMemory)
                 .count(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_visibility_applies_node_cap_before_hydration() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 5)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(20);
+        let selectors = SparqlGraphSelectors::new(&store.store);
+
+        let visibility = bounded_graph_visible_refs(
+            &selectors,
+            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            &query,
+        )
+        .unwrap();
+
+        assert_eq!(visibility.object_refs.len(), 5);
+        assert_eq!(
+            visibility
+                .object_refs
+                .iter()
+                .filter(|object_ref| object_ref.object_type == ObjectType::DerivedMemory)
+                .count(),
+            4
+        );
+        assert_eq!(
+            visibility.bounded_failure.unwrap().reason,
+            GraphExpansionBoundedFailureReason::NodeLimit
         );
     }
 

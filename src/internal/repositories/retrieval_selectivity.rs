@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_stats_use_conservative_zero_floor() {
+    fn zero_selectivity_score_uses_conservative_zero_floor() {
         let budget = smooth_fanout_budget(0.0, 2.0, 0, 20, 1.0);
 
         assert_eq!(budget, 0);
