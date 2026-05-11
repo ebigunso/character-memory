@@ -169,7 +169,7 @@ impl Settings {
             .map(|value| parse_positive_f64("SELECTIVITY_GAMMA", &value))
             .unwrap_or(Ok(default_selectivity_gamma()))?;
 
-        Ok(Self {
+        let settings = Self {
             qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
             oxigraph_connection_string: SecretString::new(oxigraph_connection_string.into()),
             openai_api_key: SecretString::new(openai_api_key.into()),
@@ -180,7 +180,9 @@ impl Settings {
             retrieval_stats_health_fail_mode,
             selectivity_smoothing_alpha,
             selectivity_gamma,
-        })
+        };
+        settings.validate_selectivity_settings()?;
+        Ok(settings)
     }
 
     pub fn get_qdrant_connection(&self) -> &str {
