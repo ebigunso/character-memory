@@ -339,9 +339,13 @@ fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsSt
         ConfigRetrievalStatsStoreMode::Sqlite => {
             match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
                 Ok(store) => Ok(Box::new(store)),
-                Err(error) => Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
-                    "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
-                )))),
+                Err(error) => match settings.get_retrieval_stats_health_fail_mode() {
+                    RetrievalStatsHealthFailMode::Conservative => {
+                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
+                            "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
+                        ))))
+                    }
+                },
             }
         }
         ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
@@ -736,6 +740,43 @@ mod tests {
             CustomError::EmbeddingInitializationError(message)
                 if message.contains("8") && message.contains("1536")
         ));
+    }
+
+    #[tokio::test]
+    async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
+        let settings = Settings::new(
+            ::config::Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override("retrieval_stats_store_mode", "sqlite")
+                .unwrap()
+                .set_override("retrieval_stats_path", ".")
+                .unwrap()
+                .set_override("retrieval_stats_health_fail_mode", "conservative")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let store = retrieval_stats_store(&settings).unwrap();
+        let health = store.health().await.unwrap();
+
+        assert_eq!(
+            health.state,
+            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+        );
+        assert!(health
+            .last_error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("using in-memory fallback"));
     }
 
     fn injected_memory() -> CharacterMemory {
