@@ -245,6 +245,7 @@ impl Default for RetrievalRationale {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RetrievalTelemetry {
     pub configured_candidate_limits: RetrievalCandidateLimits,
     pub configured_graph_limits: RetrievalGraphLimits,

@@ -44,11 +44,12 @@ pub use crate::api::types::{
     RelationType, RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
     RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionPressureSummary, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
-    SourceObjectCorrectionTarget, SourceProvenanceReference, Stability, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, SupersededByEvidence, SuppressionPolicy,
-    ThreadStatus, VectorCandidateTrace, VectorIndexingFailure, VectorMaintenanceFailure,
-    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    SectionPressureSummary, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
+    SelectivityTrace, SourceObjectCorrectionTarget, SourceProvenanceReference, Stability,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    SupersededByEvidence, SuppressionPolicy, ThreadStatus, VectorCandidateTrace,
+    VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
+    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
