@@ -7,9 +7,6 @@ use crate::errors::CustomError;
 use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
-use crate::internal::repositories::link_pipeline::{
-    admit_link, LinkAdmissionDecision, LinkAdmissionEvidence,
-};
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, MemoryEmbedder, RetrievalStatsStore,
     VectorCandidateStore,
@@ -113,7 +110,6 @@ where
         draft: RememberPipelineDraft,
     ) -> Result<RememberPipelineOutcome, CustomError> {
         let (objects, links) = validated_domain_values(draft)?;
-        self.reject_low_information_links(&links).await?;
         let vector_records = vector_records_for_objects(&objects);
 
         self.graph_store.upsert_objects(&objects).await?;
@@ -181,26 +177,6 @@ where
             .iter()
             .map(|record| record.object_id)
             .collect())
-    }
-
-    async fn reject_low_information_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-        for link in links {
-            if admit_link(link, LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly)
-                == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-            {
-                if let Err(error) = self
-                    .stats_store
-                    .record_rejected_low_information_link()
-                    .await
-                {
-                    let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
-                }
-                return Err(CustomError::MemoryValidation(
-                    "low-information co-occurrence link rejected".to_owned(),
-                ));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -551,7 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remember_rejects_low_information_associated_with_link_before_writes() {
+    async fn remember_accepts_caller_supplied_associated_with_links() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
         let vector = RecordingVectorStore::default();
@@ -559,7 +535,7 @@ mod tests {
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
-        let error = pipeline
+        let outcome = pipeline
             .remember(RememberPipelineDraft::new(
                 [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
                 [typed_link_draft(
@@ -572,17 +548,27 @@ mod tests {
                 )],
             ))
             .await
-            .unwrap_err();
+            .unwrap();
 
-        assert!(error
-            .to_string()
-            .contains("low-information co-occurrence link rejected"));
-        assert!(graph.calls().is_empty());
-        assert!(embedder.calls().is_empty());
-        assert!(vector.calls().is_empty());
+        assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
+        assert_eq!(
+            graph.calls(),
+            vec![
+                StoreCall::GraphObjects(vec![ids.entity]),
+                StoreCall::GraphLinks(vec![ids.extra_link])
+            ]
+        );
+        assert_eq!(
+            embedder.calls(),
+            vec![StoreCall::EmbedBatch(vec![ids.entity])]
+        );
+        assert_eq!(
+            vector.calls(),
+            vec![StoreCall::VectorUpsert(vec![ids.entity])]
+        );
         assert_eq!(
             stats.rejected_low_information_link_count().await.unwrap(),
-            1
+            0
         );
     }
 
