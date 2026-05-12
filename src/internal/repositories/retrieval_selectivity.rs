@@ -301,9 +301,12 @@ impl From<RetrievalLifecyclePolicy> for SelectivityCountScope {
     fn from(policy: RetrievalLifecyclePolicy) -> Self {
         if policy.include_archived && policy.include_suppressed && policy.include_deleted {
             Self::Total
-        } else if policy.include_non_current || policy.include_superseded {
-            Self::Active
-        } else if policy.include_archived || policy.include_suppressed || policy.include_deleted {
+        } else if policy.include_archived
+            || policy.include_suppressed
+            || policy.include_deleted
+            || policy.include_non_current
+            || policy.include_superseded
+        {
             Self::Active
         } else {
             Self::Current
