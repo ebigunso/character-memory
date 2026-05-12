@@ -574,7 +574,6 @@ impl OxigraphHttpGraphAuthorityStore {
                     incident_link_refs,
                     &mut bounded_failure,
                 )? {
-                    graph_link_ids.insert(link_ref.link_id());
                     let neighbor = link_ref.other_endpoint(*object_ref);
                     insert_visible_ref(
                         query,
@@ -583,6 +582,9 @@ impl OxigraphHttpGraphAuthorityStore {
                         neighbor,
                         &mut bounded_failure,
                     )?;
+                    if graph_refs.contains(&neighbor) {
+                        graph_link_ids.insert(link_ref.link_id());
+                    }
                 }
             }
 
@@ -2020,7 +2022,6 @@ fn bounded_graph_visible_refs(
                 incident_link_refs,
                 &mut bounded_failure,
             )? {
-                graph_link_ids.insert(link_ref.link_id());
                 let neighbor = link_ref.other_endpoint(*object_ref);
                 insert_visible_ref(
                     query,
@@ -2029,6 +2030,9 @@ fn bounded_graph_visible_refs(
                     neighbor,
                     &mut bounded_failure,
                 )?;
+                if graph_refs.contains(&neighbor) {
+                    graph_link_ids.insert(link_ref.link_id());
+                }
             }
         }
 
@@ -2701,6 +2705,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(visibility.object_refs.len(), 5);
+        assert_eq!(visibility.traversal_link_ids.len(), 4);
         assert_eq!(
             visibility
                 .object_refs
