@@ -35,6 +35,9 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError>;
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +145,13 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
     async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
         Ok(())
     }
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
+        Ok(())
+    }
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
+        Ok(0)
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +190,7 @@ struct InMemoryState {
     global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     counters_dirty: bool,
     health: RetrievalStatsHealth,
+    rejected_low_information_link_count: u64,
 }
 
 #[async_trait]
@@ -246,6 +257,15 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             last_error_message: Some(message),
         };
         Ok(())
+    }
+    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
+        let mut state = self.state.lock().await;
+        state.rejected_low_information_link_count += 1;
+        Ok(())
+    }
+
+    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
+        Ok(self.state.lock().await.rejected_low_information_link_count)
     }
 }
 
@@ -991,6 +1011,29 @@ mod tests {
         assert_eq!(
             health.last_error_message.as_deref(),
             Some("stats write failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostics_count_rejected_low_information_links() {
+        let store = InMemoryRetrievalStatsStore::new();
+        store
+            .mark_unhealthy("transient stats failure".to_owned())
+            .await
+            .unwrap();
+
+        store.record_rejected_low_information_link().await.unwrap();
+        store.record_rejected_low_information_link().await.unwrap();
+
+        assert_eq!(
+            store.rejected_low_information_link_count().await.unwrap(),
+            2
+        );
+        let health = store.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert_eq!(
+            health.last_error_message.as_deref(),
+            Some("transient stats failure")
         );
     }
 

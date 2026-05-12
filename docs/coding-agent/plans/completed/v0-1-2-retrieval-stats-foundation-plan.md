@@ -1,6 +1,6 @@
 # Plan: v0.1.2 Retrieval Stats Foundation
 
-- status: approved
+- status: completed
 - generated: 2026-05-09
 - last_updated: 2026-05-10
 - work_type: code
@@ -221,6 +221,10 @@
   - Summary: Updated plan boundary after latest main added controlled associative recall docs.
   - Validation evidence: Plan-only update; branch rebased onto `origin/main`.
   - Notes: Retrieval stats remain derived counters only and must not become weak associative hint storage.
+- 2026-05-13 Completed:
+  - Summary: PR #48 merged and its retrieval stats foundation changes were reviewed against the original authority and scope boundaries during the PR #50 closeout.
+  - Validation evidence: `cargo fmt --check`; `cargo check --lib`; focused retrieval stats, selectivity, and link-guard tests during stacked PR validation.
+  - Notes: Plan moved from active to completed as part of final v0.1.2 cleanup.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

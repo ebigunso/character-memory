@@ -1,11 +1,26 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType};
+use crate::api::types::{
+    DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType, RelationType,
+};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
     RetrievalStatsStore,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkAdmissionEvidence {
+    ExplicitCallerIntent,
+    #[cfg(test)]
+    LowSelectivityCoOccurrenceOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkAdmissionDecision {
+    Accepted,
+    RejectedLowInformationCoOccurrence,
+}
 
 pub(crate) struct LinkPipeline<'a, G>
 where
@@ -47,9 +62,32 @@ where
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
     ) -> Result<MemoryLink, CustomError> {
+        self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
+            .await
+    }
+
+    async fn link_with_evidence(
+        &self,
+        draft: MemoryLinkDraft,
+        defaults: &mut DraftDefaults,
+        evidence: LinkAdmissionEvidence,
+    ) -> Result<MemoryLink, CustomError> {
         let link = draft
             .into_domain_with_defaults(defaults)
             .map_err(validation_error)?;
+        if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+        {
+            if let Err(error) = self
+                .stats_store
+                .record_rejected_low_information_link()
+                .await
+            {
+                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
+            }
+            return Err(validation_error(
+                "low-information co-occurrence link rejected",
+            ));
+        }
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
@@ -111,6 +149,23 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
         object_type,
         ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
     )
+}
+
+pub(crate) fn admit_link(
+    link: &MemoryLink,
+    evidence: LinkAdmissionEvidence,
+) -> LinkAdmissionDecision {
+    if link.relation != RelationType::AssociatedWith {
+        return LinkAdmissionDecision::Accepted;
+    }
+
+    match evidence {
+        #[cfg(test)]
+        LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly => {
+            LinkAdmissionDecision::RejectedLowInformationCoOccurrence
+        }
+        LinkAdmissionEvidence::ExplicitCallerIntent => LinkAdmissionDecision::Accepted,
+    }
 }
 
 fn validation_error(error: impl ToString) -> CustomError {
@@ -340,6 +395,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn low_information_guard_rejects_weak_associated_with_candidate_without_graph_write() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let mut defaults = DraftDefaults::at(timestamp());
+
+        let error = pipeline
+            .link_with_evidence(
+                associated_with_link_draft(),
+                &mut defaults,
+                LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("low-information co-occurrence link rejected"));
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            1
+        );
+        assert!(graph.list_diagnostic_links().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_intent_allows_associated_with_links_by_default() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+
+        let persisted = pipeline.link(associated_with_link_draft()).await.unwrap();
+
+        assert_eq!(persisted.relation, RelationType::AssociatedWith);
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn entity_neutral_low_information_guard_does_not_check_roles() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+
+        for scenario in heterogeneous_association_scenarios() {
+            let mut defaults = DraftDefaults::at(timestamp());
+            let error = pipeline
+                .link_with_evidence(
+                    scenario.draft,
+                    &mut defaults,
+                    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
+                )
+                .await
+                .unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("low-information co-occurrence link rejected"),
+                "scenario {} should reject weak co-occurrence only",
+                scenario.label
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn link_pipeline_records_fallback_stats_when_endpoint_lookup_fails() {
         let graph = QueryObjectsFailingGraph::default();
         let stats = InMemoryRetrievalStatsStore::new();
@@ -440,6 +563,86 @@ mod tests {
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655444032"));
         draft
+    }
+
+    fn associated_with_link_draft() -> MemoryLinkDraft {
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::Observation,
+            id("550e8400-e29b-41d4-a716-446655444040"),
+            RelationType::AssociatedWith,
+            ObjectType::Observation,
+            id("550e8400-e29b-41d4-a716-446655444041"),
+        );
+        draft.id = Some(id("550e8400-e29b-41d4-a716-446655444042"));
+        draft
+    }
+
+    #[derive(Debug)]
+    struct AssociationScenario {
+        label: &'static str,
+        draft: MemoryLinkDraft,
+    }
+
+    fn heterogeneous_association_scenarios() -> Vec<AssociationScenario> {
+        [
+            (
+                "broad_person",
+                0x450_u128,
+                ObjectType::Episode,
+                ObjectType::Episode,
+            ),
+            (
+                "broad_place",
+                0x460_u128,
+                ObjectType::Observation,
+                ObjectType::Episode,
+            ),
+            (
+                "broad_project",
+                0x470_u128,
+                ObjectType::DerivedMemory,
+                ObjectType::Observation,
+            ),
+            (
+                "broad_topic",
+                0x480_u128,
+                ObjectType::DerivedMemory,
+                ObjectType::DerivedMemory,
+            ),
+            (
+                "broad_object",
+                0x490_u128,
+                ObjectType::Episode,
+                ObjectType::DerivedMemory,
+            ),
+            (
+                "custom_domain_entity",
+                0x4a0_u128,
+                ObjectType::Observation,
+                ObjectType::Observation,
+            ),
+            (
+                "assistant_domain_entity",
+                0x4b0_u128,
+                ObjectType::Episode,
+                ObjectType::Observation,
+            ),
+        ]
+        .into_iter()
+        .map(|(label, offset, from_type, to_type)| {
+            let mut draft = MemoryLinkDraft::new(
+                from_type,
+                MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
+                RelationType::AssociatedWith,
+                to_type,
+                MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0001 + offset),
+            );
+            draft.id = Some(MemoryId::from_u128(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0002 + offset,
+            ));
+            AssociationScenario { label, draft }
+        })
+        .collect()
     }
 
     fn id(value: &str) -> MemoryId {

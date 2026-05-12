@@ -620,6 +620,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remember_accepts_caller_supplied_associated_with_links() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::default();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        let outcome = pipeline
+            .remember(RememberPipelineDraft::new(
+                [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
+                [typed_link_draft(
+                    ids.extra_link,
+                    ObjectType::Entity,
+                    ids.entity,
+                    RelationType::AssociatedWith,
+                    ObjectType::Episode,
+                    ids.episode,
+                )],
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
+        assert_eq!(
+            graph.calls(),
+            vec![
+                StoreCall::GraphObjects(vec![ids.entity]),
+                StoreCall::GraphLinks(vec![ids.extra_link])
+            ]
+        );
+        assert_eq!(
+            embedder.calls(),
+            vec![StoreCall::EmbedBatch(vec![ids.entity])]
+        );
+        assert_eq!(
+            vector.calls(),
+            vec![StoreCall::VectorUpsert(vec![ids.entity])]
+        );
+        assert_eq!(
+            stats.rejected_low_information_link_count().await.unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
     async fn remember_pipeline_uses_existing_endpoint_lifecycle_for_link_stats() {
         let fixtures = representative_fixtures();
         let graph = FakeGraphAuthorityStore::new();
