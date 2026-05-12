@@ -19,10 +19,11 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    apply_fanout_limits_by_pair, bounded_expansion, derived_memories_by_provenance,
-    derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
-    GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    apply_fanout_limits_by_pair, bounded_expansion, bounded_hub_retention_limit,
+    derived_memories_by_provenance, derived_memories_by_thread, GraphAuthorityStore,
+    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionQuery,
+    GraphObjectQuery, GraphObjectRef,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -684,6 +685,8 @@ fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         })
         .collect::<Vec<_>>();
 
+    let apply_selectivity_overrides = depth == 0 && object_ref == root_ref;
+
     if incident_links.len() > query.max_hub_edges {
         let failure = GraphExpansionBoundedFailure {
             reason: GraphExpansionBoundedFailureReason::HubLimit,
@@ -693,9 +696,11 @@ fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             return Err(graph_expansion_bounded_error(failure));
         }
         bounded_failure.get_or_insert(failure);
-        incident_links.truncate(query.max_hub_edges);
+        incident_links.truncate(bounded_hub_retention_limit(
+            query,
+            apply_selectivity_overrides,
+        ));
     }
-    let apply_selectivity_overrides = depth == 0 && object_ref == root_ref;
     Ok(apply_link_ref_fanout_limits(
         query,
         object_ref,

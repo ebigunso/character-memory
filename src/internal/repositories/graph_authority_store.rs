@@ -702,6 +702,10 @@ fn bounded_expansion_plan<'a>(
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
 
+        let apply_selectivity_overrides = depth == 0
+            && object_ref.object_id == query.root_id
+            && object_ref.object_type == query.root_type;
+
         if incident_links.len() > query.max_hub_edges {
             let failure = GraphExpansionBoundedFailure {
                 reason: GraphExpansionBoundedFailureReason::HubLimit,
@@ -711,11 +715,11 @@ fn bounded_expansion_plan<'a>(
                 return Err(graph_expansion_bounded_error(failure));
             }
             bounded_failure.get_or_insert(failure);
-            incident_links.truncate(query.max_hub_edges);
+            incident_links.truncate(bounded_hub_retention_limit(
+                query,
+                apply_selectivity_overrides,
+            ));
         }
-        let apply_selectivity_overrides = depth == 0
-            && object_ref.object_id == query.root_id
-            && object_ref.object_type == query.root_type;
         incident_links = apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
 
         for (link, neighbor) in incident_links {
@@ -817,6 +821,17 @@ pub(crate) fn apply_fanout_limits_by_pair<T>(
         retained.push(item);
     }
     retained
+}
+
+pub(crate) fn bounded_hub_retention_limit(
+    query: &GraphExpansionQuery,
+    apply_selectivity_overrides: bool,
+) -> usize {
+    if apply_selectivity_overrides && !query.fanout_overrides.is_empty() {
+        query.max_hub_edges
+    } else {
+        query.max_hub_edges.min(query.max_fanout_per_node)
+    }
 }
 
 fn fanout_limit_for_pair(
@@ -1188,6 +1203,26 @@ mod tests {
 
         assert!(expansion.objects.is_empty());
         assert!(expansion.links.is_empty());
+    }
+
+    #[test]
+    fn hub_retention_limit_keeps_large_window_only_for_root_selectivity_overrides() {
+        let root_id = MemoryId::new_v4();
+        let query = GraphExpansionQuery::new(root_id, ObjectType::Entity, 1, 20)
+            .with_max_hub_edges(64)
+            .with_max_fanout_per_node(16);
+
+        assert_eq!(bounded_hub_retention_limit(&query, false), 16);
+        assert_eq!(bounded_hub_retention_limit(&query, true), 16);
+
+        let query = query.with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+            relation: RelationType::About,
+            object_type: ObjectType::DerivedMemory,
+            max_fanout: 4,
+        }]);
+
+        assert_eq!(bounded_hub_retention_limit(&query, false), 16);
+        assert_eq!(bounded_hub_retention_limit(&query, true), 64);
     }
 
     #[test]
