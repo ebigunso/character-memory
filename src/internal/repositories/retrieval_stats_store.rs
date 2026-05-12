@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 #[cfg(test)]
 use std::sync::OnceLock;
-use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use tokio::sync::Mutex;
 
 use crate::api::types::{
     MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
@@ -185,7 +185,7 @@ struct InMemoryState {
 #[async_trait]
 impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
-        let mut state = lock(&self.state)?;
+        let mut state = self.state.lock().await;
         for edge in edges {
             insert_edge(&mut state.edges, edge.clone());
         }
@@ -197,7 +197,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         &self,
         states: &[RetrievalStatsObjectState],
     ) -> Result<(), CustomError> {
-        let mut state = lock(&self.state)?;
+        let mut state = self.state.lock().await;
         for object_state in states {
             for edge in state.edges.values_mut() {
                 if edge.object_id == object_state.object_id
@@ -217,7 +217,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         &self,
         key: &RetrievalStatsCounterKey,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        let mut state = lock(&self.state)?;
+        let mut state = self.state.lock().await;
         state.refresh_counters_if_dirty();
         Ok(state.counters.get(key).copied())
     }
@@ -227,7 +227,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         relation_kind: RelationType,
         object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        let mut state = lock(&self.state)?;
+        let mut state = self.state.lock().await;
         state.refresh_counters_if_dirty();
         Ok(state
             .global_counters
@@ -236,11 +236,11 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     }
 
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
-        Ok(lock(&self.state)?.health.clone())
+        Ok(self.state.lock().await.health.clone())
     }
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
-        let mut state = lock(&self.state)?;
+        let mut state = self.state.lock().await;
         state.health = RetrievalStatsHealth {
             state: RetrievalStatsHealthState::Unhealthy,
             last_error_message: Some(message),
@@ -584,12 +584,6 @@ fn recomputed_global_counters(
     counters
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
-    mutex
-        .lock()
-        .map_err(|_| CustomError::DatabaseError("retrieval stats mutex was poisoned".to_owned()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,7 +698,7 @@ mod tests {
         store.record_edges(&[later_edge]).await.unwrap();
         store.record_edges(&[earlier_edge]).await.unwrap();
 
-        let state = lock(&store.state).unwrap();
+        let state = store.state.lock().await;
         let stored = state
             .edges
             .get(&format!("{}:involves:episode:{}", entity_id, episode_id))
@@ -784,7 +778,7 @@ mod tests {
             .await
             .unwrap();
 
-        let state = lock(&store.state).unwrap();
+        let state = store.state.lock().await;
         let stored = state
             .edges
             .get(&format!("{}:about:derived_memory:{}", entity_id, memory_id))
