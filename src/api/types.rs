@@ -32,6 +32,7 @@ pub use retrieval::{
     LifecycleOmissionSummary, MemoryObjectRef, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
     RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
+    SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
     StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
     VectorCandidateTrace,
 };

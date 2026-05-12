@@ -245,6 +245,7 @@ impl Default for RetrievalRationale {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RetrievalTelemetry {
     pub configured_candidate_limits: RetrievalCandidateLimits,
     pub configured_graph_limits: RetrievalGraphLimits,
@@ -255,7 +256,18 @@ pub struct RetrievalTelemetry {
     pub selected_graph_root_count: usize,
     pub graph_root_omission_count: usize,
     pub graph_expansion: GraphExpansionTelemetry,
+    #[serde(default)]
+    pub selectivity: SelectivityTelemetry,
     pub section_pressure: Vec<SectionPressureSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelectivityTelemetry {
+    pub decision_count: usize,
+    pub high_selectivity_count: usize,
+    pub low_selectivity_supported_count: usize,
+    pub low_selectivity_rejected_count: usize,
+    pub fallback_count: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -305,11 +317,14 @@ pub struct LifecycleOmissionSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
     pub graph_relations: Vec<GraphRelationTrace>,
     #[serde(default)]
     pub graph_expansions: Vec<GraphExpansionTrace>,
+    #[serde(default)]
+    pub selectivity_decisions: Vec<SelectivityTrace>,
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
     pub section_assignments: Vec<SectionAssignment>,
@@ -321,6 +336,7 @@ impl RetrievalTrace {
             vector_candidates: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
+            selectivity_decisions: Vec::new(),
             lifecycle_filter_decisions: Vec::new(),
             stale_candidate_omissions: Vec::new(),
             section_assignments: Vec::new(),
@@ -369,6 +385,41 @@ pub struct GraphExpansionTrace {
     pub filtered_node_count: usize,
     pub bounded_failure: Option<GraphExpansionBoundedFailureTrace>,
     pub outcome: GraphExpansionOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectivityTrace {
+    pub root: MemoryObjectRef,
+    pub relation: RelationType,
+    pub object_type: ObjectType,
+    #[serde(default)]
+    pub count_scope: SelectivityCountScope,
+    pub score: Option<f64>,
+    pub entity_count: Option<u64>,
+    pub global_count: Option<u64>,
+    pub support_factor: f64,
+    pub chosen_fanout: usize,
+    pub max_fanout: usize,
+    pub decision: SelectivityDecision,
+    pub fallback: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectivityCountScope {
+    #[default]
+    Current,
+    Active,
+    Total,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectivityDecision {
+    HighSelectivity,
+    LowSelectivitySupported,
+    LowSelectivityRejected,
+    ConservativeFallback,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -740,6 +791,7 @@ mod tests {
                 }),
                 outcome: GraphExpansionOutcome::Bounded,
             }],
+            selectivity_decisions: Vec::new(),
             lifecycle_filter_decisions: vec![LifecycleFilterDecision {
                 object: candidate,
                 retention_state: Some(RetentionState::Active),
@@ -804,6 +856,7 @@ mod tests {
         let decoded: RetrievalTrace = serde_json::from_str(encoded).unwrap();
 
         assert!(decoded.graph_expansions.is_empty());
+        assert!(decoded.selectivity_decisions.is_empty());
     }
 
     #[test]
@@ -822,6 +875,13 @@ mod tests {
                     count: 1,
                 }],
                 ..GraphExpansionTelemetry::default()
+            },
+            selectivity: SelectivityTelemetry {
+                decision_count: 2,
+                high_selectivity_count: 1,
+                low_selectivity_supported_count: 1,
+                low_selectivity_rejected_count: 0,
+                fallback_count: 0,
             },
             section_pressure: vec![SectionPressureSummary {
                 section: ContextPackSection::SalientObservations,
@@ -842,6 +902,7 @@ mod tests {
             encoded["telemetry"]["graph_expansion"]["bounded_failure_reasons"][0]["reason"],
             "hub_limit"
         );
+        assert_eq!(encoded["telemetry"]["selectivity"]["decision_count"], 2);
     }
 
     #[test]

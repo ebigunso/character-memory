@@ -19,13 +19,15 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    apply_fanout_limits_by_pair, bounded_expansion, bounded_hub_retention_limit,
+    derived_memories_by_provenance, derived_memories_by_thread, GraphAuthorityStore,
+    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionQuery,
+    GraphObjectQuery, GraphObjectRef,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
-use super::sparql_selectors::SparqlGraphSelectors;
+use super::sparql_selectors::{SparqlGraphSelectors, SparqlLinkRef};
 use super::vocabulary as vocab;
 
 pub(crate) struct OxigraphGraphAuthorityStore {
@@ -553,16 +555,36 @@ impl OxigraphHttpGraphAuthorityStore {
     ) -> Result<BoundedGraphVisibility, CustomError> {
         let mut graph_refs = HashSet::from([root_ref]);
         let mut graph_link_ids = HashSet::new();
+        let mut bounded_failure = None;
         let mut frontier = vec![root_ref];
 
-        for _ in 0..query.max_depth {
+        for depth in 0..query.max_depth {
             let link_refs = self.query_link_refs_touching(&frontier).await?;
+            let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
             let mut next_frontier = Vec::new();
-            for link_ref in link_refs {
-                graph_link_ids.insert(link_ref.link_id);
-                for endpoint in [link_ref.from, link_ref.to] {
-                    if graph_refs.insert(endpoint) {
-                        next_frontier.push(endpoint);
+            for object_ref in &frontier {
+                let incident_link_refs = link_refs_by_endpoint
+                    .get(object_ref)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                for link_ref in bounded_incident_link_refs(
+                    query,
+                    root_ref,
+                    *object_ref,
+                    depth,
+                    incident_link_refs,
+                    &mut bounded_failure,
+                )? {
+                    let neighbor = link_ref.other_endpoint(*object_ref);
+                    insert_visible_ref(
+                        query,
+                        &mut graph_refs,
+                        &mut next_frontier,
+                        neighbor,
+                        &mut bounded_failure,
+                    )?;
+                    if graph_refs.contains(&neighbor) {
+                        graph_link_ids.insert(link_ref.link_id());
                     }
                 }
             }
@@ -590,7 +612,207 @@ impl OxigraphHttpGraphAuthorityStore {
             object_refs: graph_refs,
             traversal_link_ids: graph_link_ids,
             lifecycle_link_ids,
+            bounded_failure,
         })
+    }
+}
+
+trait BoundedExpansionLinkRef: Copy {
+    fn link_id(self) -> MemoryId;
+    fn from(self) -> GraphObjectRef;
+    fn to(self) -> GraphObjectRef;
+    fn relation(self) -> RelationType;
+
+    fn other_endpoint(self, object_ref: GraphObjectRef) -> GraphObjectRef {
+        if self.from() == object_ref {
+            self.to()
+        } else {
+            self.from()
+        }
+    }
+}
+
+impl BoundedExpansionLinkRef for SparqlLinkRef {
+    fn link_id(self) -> MemoryId {
+        self.link_id
+    }
+
+    fn from(self) -> GraphObjectRef {
+        self.from
+    }
+
+    fn to(self) -> GraphObjectRef {
+        self.to
+    }
+
+    fn relation(self) -> RelationType {
+        self.relation
+    }
+}
+
+impl BoundedExpansionLinkRef for SparqlHttpLinkRef {
+    fn link_id(self) -> MemoryId {
+        self.link_id
+    }
+
+    fn from(self) -> GraphObjectRef {
+        self.from
+    }
+
+    fn to(self) -> GraphObjectRef {
+        self.to
+    }
+
+    fn relation(self) -> RelationType {
+        self.relation
+    }
+}
+
+fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
+    query: &GraphExpansionQuery,
+    root_ref: GraphObjectRef,
+    object_ref: GraphObjectRef,
+    depth: u8,
+    link_refs: &[T],
+    bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
+) -> Result<Vec<T>, CustomError> {
+    let mut incident_links = link_refs
+        .iter()
+        .copied()
+        .filter(|link_ref| relation_allowed(query, link_ref.relation()))
+        .filter(|link_ref| {
+            object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
+        })
+        .collect::<Vec<_>>();
+
+    let apply_selectivity_overrides = depth == 0 && object_ref == root_ref;
+
+    if incident_links.len() > query.max_hub_edges {
+        let failure = GraphExpansionBoundedFailure {
+            reason: GraphExpansionBoundedFailureReason::HubLimit,
+            at: Some(object_ref),
+        };
+        if !query.failure_policy.allow_partial_results {
+            return Err(graph_expansion_bounded_error(failure));
+        }
+        bounded_failure.get_or_insert(failure);
+        incident_links.truncate(bounded_hub_retention_limit(
+            query,
+            apply_selectivity_overrides,
+        ));
+    }
+    Ok(apply_link_ref_fanout_limits(
+        query,
+        object_ref,
+        incident_links,
+        apply_selectivity_overrides,
+    ))
+}
+
+fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
+    query: &GraphExpansionQuery,
+    object_ref: GraphObjectRef,
+    incident_links: Vec<T>,
+    apply_selectivity_overrides: bool,
+) -> Vec<T> {
+    apply_fanout_limits_by_pair(
+        query,
+        incident_links,
+        apply_selectivity_overrides,
+        |link_ref| {
+            let neighbor = link_ref.other_endpoint(object_ref);
+            (link_ref.relation(), neighbor.object_type)
+        },
+    )
+}
+
+fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool {
+    query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
+}
+
+fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> bool {
+    query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
+}
+
+fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
+    link_refs: &[T],
+) -> HashMap<GraphObjectRef, Vec<T>> {
+    let mut refs_by_endpoint = HashMap::<GraphObjectRef, Vec<T>>::new();
+    for link_ref in link_refs.iter().copied() {
+        refs_by_endpoint
+            .entry(link_ref.from())
+            .or_default()
+            .push(link_ref);
+        if link_ref.to() != link_ref.from() {
+            refs_by_endpoint
+                .entry(link_ref.to())
+                .or_default()
+                .push(link_ref);
+        }
+    }
+    refs_by_endpoint
+}
+
+fn insert_visible_ref(
+    query: &GraphExpansionQuery,
+    graph_refs: &mut HashSet<GraphObjectRef>,
+    next_frontier: &mut Vec<GraphObjectRef>,
+    object_ref: GraphObjectRef,
+    bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
+) -> Result<(), CustomError> {
+    if graph_refs.contains(&object_ref) {
+        return Ok(());
+    }
+    if graph_refs.len() >= query.max_nodes {
+        let failure = GraphExpansionBoundedFailure {
+            reason: GraphExpansionBoundedFailureReason::NodeLimit,
+            at: Some(object_ref),
+        };
+        if !query.failure_policy.allow_partial_results {
+            return Err(graph_expansion_bounded_error(failure));
+        }
+        bounded_failure.get_or_insert(failure);
+        return Ok(());
+    }
+    graph_refs.insert(object_ref);
+    next_frontier.push(object_ref);
+    Ok(())
+}
+
+fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
+    let location = failure
+        .at
+        .map(|object_ref| {
+            format!(
+                " at object_type={} object_id={}",
+                graph_object_type_name(object_ref.object_type),
+                object_ref.object_id
+            )
+        })
+        .unwrap_or_default();
+
+    CustomError::GraphExpansionBounded {
+        reason: bounded_failure_reason_name(failure.reason).to_owned(),
+        location,
+    }
+}
+
+fn bounded_failure_reason_name(reason: GraphExpansionBoundedFailureReason) -> &'static str {
+    match reason {
+        GraphExpansionBoundedFailureReason::NodeLimit => "node_limit",
+        GraphExpansionBoundedFailureReason::Timeout => "timeout",
+        GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
+    }
+}
+
+fn graph_object_type_name(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::Episode => "episode",
+        ObjectType::Observation => "observation",
+        ObjectType::Entity => "entity",
+        ObjectType::MemoryThread => "memory_thread",
+        ObjectType::DerivedMemory => "derived_memory",
+        ObjectType::MemoryLink => "memory_link",
     }
 }
 
@@ -1151,7 +1373,11 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &visibility.object_refs,
         )?;
 
-        bounded_expansion(query, objects, links)
+        let mut expansion = bounded_expansion(query, objects, links)?;
+        if expansion.bounded_failure.is_none() {
+            expansion.bounded_failure = visibility.bounded_failure;
+        }
+        Ok(expansion)
     }
 
     async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
@@ -1367,7 +1593,11 @@ impl GraphAuthorityStore for OxigraphHttpGraphAuthorityStore {
             })
             .collect::<Vec<_>>();
 
-        bounded_expansion(query, objects, links)
+        let mut expansion = bounded_expansion(query, objects, links)?;
+        if expansion.bounded_failure.is_none() {
+            expansion.bounded_failure = visibility.bounded_failure;
+        }
+        Ok(expansion)
     }
 
     async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
@@ -1767,6 +1997,7 @@ struct BoundedGraphVisibility {
     object_refs: HashSet<GraphObjectRef>,
     traversal_link_ids: HashSet<MemoryId>,
     lifecycle_link_ids: HashSet<MemoryId>,
+    bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
 fn bounded_graph_visible_refs(
@@ -1776,16 +2007,36 @@ fn bounded_graph_visible_refs(
 ) -> Result<BoundedGraphVisibility, CustomError> {
     let mut graph_refs = HashSet::from([root_ref]);
     let mut graph_link_ids = HashSet::new();
+    let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
 
-    for _ in 0..query.max_depth {
+    for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
+        let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
-        for link_ref in link_refs {
-            graph_link_ids.insert(link_ref.link_id);
-            for endpoint in [link_ref.from, link_ref.to] {
-                if graph_refs.insert(endpoint) {
-                    next_frontier.push(endpoint);
+        for object_ref in &frontier {
+            let incident_link_refs = link_refs_by_endpoint
+                .get(object_ref)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            for link_ref in bounded_incident_link_refs(
+                query,
+                root_ref,
+                *object_ref,
+                depth,
+                incident_link_refs,
+                &mut bounded_failure,
+            )? {
+                let neighbor = link_ref.other_endpoint(*object_ref);
+                insert_visible_ref(
+                    query,
+                    &mut graph_refs,
+                    &mut next_frontier,
+                    neighbor,
+                    &mut bounded_failure,
+                )?;
+                if graph_refs.contains(&neighbor) {
+                    graph_link_ids.insert(link_ref.link_id());
                 }
             }
         }
@@ -1812,6 +2063,7 @@ fn bounded_graph_visible_refs(
         object_refs: graph_refs,
         traversal_link_ids: graph_link_ids,
         lifecycle_link_ids,
+        bounded_failure,
     })
 }
 
@@ -1925,8 +2177,8 @@ mod tests {
     };
     use crate::internal::repositories::{
         GraphDerivedMemoryProvenanceQuery, GraphExpansionBoundedFailureReason,
-        GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-        GraphObjectRef,
+        GraphExpansionFailurePolicy, GraphExpansionFanoutOverride, GraphExpansionFilteredReason,
+        GraphExpansionLifecyclePolicy, GraphObjectRef,
     };
     use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
     use std::path::{Path, PathBuf};
@@ -2402,6 +2654,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oxigraph_visibility_applies_selectivity_fanout_before_hydration() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(20)
+            .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                max_fanout: 1,
+            }]);
+        let selectors = SparqlGraphSelectors::new(&store.store);
+
+        let visibility = bounded_graph_visible_refs(
+            &selectors,
+            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            &query,
+        )
+        .unwrap();
+
+        assert_eq!(visibility.traversal_link_ids.len(), 1);
+        assert_eq!(
+            visibility
+                .object_refs
+                .iter()
+                .filter(|object_ref| object_ref.object_type == ObjectType::DerivedMemory)
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_visibility_applies_node_cap_before_hydration() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 5)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(20);
+        let selectors = SparqlGraphSelectors::new(&store.store);
+
+        let visibility = bounded_graph_visible_refs(
+            &selectors,
+            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            &query,
+        )
+        .unwrap();
+
+        assert_eq!(visibility.object_refs.len(), 5);
+        assert_eq!(visibility.traversal_link_ids.len(), 4);
+        assert_eq!(
+            visibility
+                .object_refs
+                .iter()
+                .filter(|object_ref| object_ref.object_type == ObjectType::DerivedMemory)
+                .count(),
+            4
+        );
+        assert_eq!(
+            visibility.bounded_failure.unwrap().reason,
+            GraphExpansionBoundedFailureReason::NodeLimit
+        );
+    }
+
+    #[tokio::test]
     async fn oxigraph_expansion_applies_bounds_after_graph_visibility_filtering() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
@@ -2427,6 +2751,32 @@ mod tests {
         assert!(expansion.objects.contains(&MemoryObject::DerivedMemory(
             fixtures.derived_reflection.clone()
         )));
+    }
+
+    #[tokio::test]
+    async fn oxigraph_expansion_fails_closed_when_visibility_hits_hub_limit() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let error = store
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                    .with_max_hub_edges(1)
+                    .with_failure_policy(GraphExpansionFailurePolicy {
+                        timeout_ms: Some(250),
+                        allow_partial_results: false,
+                    }),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+        ));
     }
 
     #[tokio::test]

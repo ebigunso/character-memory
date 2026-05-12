@@ -5,6 +5,7 @@ mod link_pipeline;
 mod raw_reference_resolver;
 mod reconciliation;
 mod remember_pipeline;
+mod retrieval_selectivity;
 mod retrieval_stats_store;
 mod retrieve_pipeline;
 #[cfg(test)]
@@ -24,10 +25,11 @@ pub(crate) use correction_forget_pipeline::CorrectionForgetPipeline;
 // different subsets of the query/expansion helpers.
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
-    bounded_expansion, bounded_expansion_node_set, derived_memories_by_provenance,
-    derived_memories_by_thread, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
-    GraphDerivedMemoryThreadQuery, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredNode,
+    apply_fanout_limits_by_pair, bounded_expansion, bounded_expansion_node_set,
+    bounded_hub_retention_limit, derived_memories_by_provenance, derived_memories_by_thread,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
+    GraphExpansionFailurePolicy, GraphExpansionFanoutOverride, GraphExpansionFilteredNode,
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
     GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
@@ -63,6 +65,12 @@ pub(crate) use retrieval_stats_store::{
     retrieval_stats_edges, retrieval_stats_object_states, InMemoryRetrievalStatsStore,
     RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
     RetrievalStatsHealthState, RetrievalStatsObjectState, RetrievalStatsStore,
+};
+
+#[allow(unused_imports)]
+pub(crate) use retrieval_selectivity::{
+    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
+    SelectivityStatsContext,
 };
 
 // Continuity retrieval pipeline surface.

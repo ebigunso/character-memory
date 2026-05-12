@@ -627,6 +627,12 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+        let global = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(global.total_count, 1);
     }
 
     #[tokio::test]

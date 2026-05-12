@@ -160,8 +160,16 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) max_hub_edges: usize,
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
+    pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GraphExpansionFanoutOverride {
+    pub(crate) relation: RelationType,
+    pub(crate) object_type: ObjectType,
+    pub(crate) max_fanout: usize,
 }
 
 impl GraphExpansionQuery {
@@ -180,6 +188,7 @@ impl GraphExpansionQuery {
             max_hub_edges: usize::MAX,
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
+            fanout_overrides: Vec::new(),
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -192,6 +201,14 @@ impl GraphExpansionQuery {
 
     pub(crate) fn with_allowed_relation_types(mut self, relation_types: Vec<RelationType>) -> Self {
         self.allowed_relation_types = relation_types;
+        self
+    }
+
+    pub(crate) fn with_fanout_overrides(
+        mut self,
+        fanout_overrides: Vec<GraphExpansionFanoutOverride>,
+    ) -> Self {
+        self.fanout_overrides = fanout_overrides;
         self
     }
 
@@ -494,6 +511,7 @@ pub(crate) fn bounded_expansion_node_set(
     if query.max_fanout_per_node != usize::MAX
         || query.max_hub_edges != usize::MAX
         || !query.allowed_relation_types.is_empty()
+        || !query.fanout_overrides.is_empty()
         || query.lifecycle_policy != GraphExpansionLifecyclePolicy::default()
         || query.failure_policy != GraphExpansionFailurePolicy::default()
     {
@@ -684,6 +702,10 @@ fn bounded_expansion_plan<'a>(
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
 
+        let apply_selectivity_overrides = depth == 0
+            && object_ref.object_id == query.root_id
+            && object_ref.object_type == query.root_type;
+
         if incident_links.len() > query.max_hub_edges {
             let failure = GraphExpansionBoundedFailure {
                 reason: GraphExpansionBoundedFailureReason::HubLimit,
@@ -693,10 +715,12 @@ fn bounded_expansion_plan<'a>(
                 return Err(graph_expansion_bounded_error(failure));
             }
             bounded_failure.get_or_insert(failure);
-            incident_links.truncate(query.max_fanout_per_node.min(query.max_hub_edges));
-        } else {
-            incident_links.truncate(query.max_fanout_per_node);
+            incident_links.truncate(bounded_hub_retention_limit(
+                query,
+                apply_selectivity_overrides,
+            ));
         }
+        incident_links = apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
 
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -755,6 +779,73 @@ fn bounded_expansion_plan<'a>(
         filtered_nodes,
         bounded_failure,
     })
+}
+
+fn apply_fanout_limits<'a>(
+    query: &GraphExpansionQuery,
+    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    apply_selectivity_overrides: bool,
+) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+    apply_fanout_limits_by_pair(
+        query,
+        incident_links,
+        apply_selectivity_overrides,
+        |(link, neighbor)| (link.relation, neighbor.object_type),
+    )
+}
+
+pub(crate) fn apply_fanout_limits_by_pair<T>(
+    query: &GraphExpansionQuery,
+    mut incident_items: Vec<T>,
+    apply_selectivity_overrides: bool,
+    pair_for_item: impl Fn(&T) -> (RelationType, ObjectType),
+) -> Vec<T> {
+    if query.fanout_overrides.is_empty() || !apply_selectivity_overrides {
+        incident_items.truncate(query.max_fanout_per_node);
+        return incident_items;
+    }
+
+    let mut retained = Vec::new();
+    let mut per_pair_counts = std::collections::HashMap::<(RelationType, ObjectType), usize>::new();
+    for item in incident_items {
+        if retained.len() >= query.max_fanout_per_node {
+            break;
+        }
+        let (relation, object_type) = pair_for_item(&item);
+        let max_for_pair = fanout_limit_for_pair(query, relation, object_type);
+        let count = per_pair_counts.entry((relation, object_type)).or_default();
+        if *count >= max_for_pair {
+            continue;
+        }
+        *count += 1;
+        retained.push(item);
+    }
+    retained
+}
+
+pub(crate) fn bounded_hub_retention_limit(
+    query: &GraphExpansionQuery,
+    apply_selectivity_overrides: bool,
+) -> usize {
+    if apply_selectivity_overrides && !query.fanout_overrides.is_empty() {
+        query.max_hub_edges
+    } else {
+        query.max_hub_edges.min(query.max_fanout_per_node)
+    }
+}
+
+fn fanout_limit_for_pair(
+    query: &GraphExpansionQuery,
+    relation: RelationType,
+    object_type: ObjectType,
+) -> usize {
+    query
+        .fanout_overrides
+        .iter()
+        .find(|override_| override_.relation == relation && override_.object_type == object_type)
+        .map(|override_| override_.max_fanout)
+        .unwrap_or(query.max_fanout_per_node)
+        .min(query.max_fanout_per_node)
 }
 
 fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
@@ -1115,6 +1206,26 @@ mod tests {
     }
 
     #[test]
+    fn hub_retention_limit_keeps_large_window_only_for_root_selectivity_overrides() {
+        let root_id = MemoryId::new_v4();
+        let query = GraphExpansionQuery::new(root_id, ObjectType::Entity, 1, 20)
+            .with_max_hub_edges(64)
+            .with_max_fanout_per_node(16);
+
+        assert_eq!(bounded_hub_retention_limit(&query, false), 16);
+        assert_eq!(bounded_hub_retention_limit(&query, true), 16);
+
+        let query = query.with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+            relation: RelationType::About,
+            object_type: ObjectType::DerivedMemory,
+            max_fanout: 4,
+        }]);
+
+        assert_eq!(bounded_hub_retention_limit(&query, false), 16);
+        assert_eq!(bounded_hub_retention_limit(&query, true), 64);
+    }
+
+    #[test]
     fn bounded_expansion_validates_missing_root_before_zero_node_limit() {
         let query = GraphExpansionQuery::new(MemoryId::new_v4(), ObjectType::Entity, 1, 0);
 
@@ -1234,6 +1345,72 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn bounded_expansion_applies_selectivity_fanout_overrides_only_at_root() {
+        let fixture = representative_fixtures();
+        let root_expanded = &fixture.derived_reflection;
+        let root_pruned = &fixture.user_preference;
+        let downstream_a = &fixture.open_loop;
+        let downstream_b = &fixture.commitment;
+        let links = vec![
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0300),
+                fixture.hub_entity.id,
+                ObjectType::Entity,
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0301),
+                fixture.hub_entity.id,
+                ObjectType::Entity,
+                root_pruned.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0302),
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                downstream_a.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            test_link_with_id(
+                uuid::Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0303),
+                root_expanded.id,
+                ObjectType::DerivedMemory,
+                downstream_b.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+        ];
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 10)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(10)
+            .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                max_fanout: 1,
+            }]);
+
+        let expansion = bounded_expansion(&query, fixture.objects(), links).unwrap();
+
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == root_expanded.id)
+        }));
+        assert!(!expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == root_pruned.id)
+        }));
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == downstream_a.id)
+        }));
+        assert!(expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == downstream_b.id)
+        }));
+    }
+
     fn test_link(
         from_id: MemoryId,
         from_type: ObjectType,
@@ -1241,8 +1418,26 @@ mod tests {
         to_type: ObjectType,
         relation: RelationType,
     ) -> MemoryLink {
+        test_link_with_id(
+            MemoryId::new_v4(),
+            from_id,
+            from_type,
+            to_id,
+            to_type,
+            relation,
+        )
+    }
+
+    fn test_link_with_id(
+        id: MemoryId,
+        from_id: MemoryId,
+        from_type: ObjectType,
+        to_id: MemoryId,
+        to_type: ObjectType,
+        relation: RelationType,
+    ) -> MemoryLink {
         MemoryLink {
-            id: MemoryId::new_v4(),
+            id,
             object_type: ObjectType::MemoryLink,
             from_id,
             from_type,

@@ -564,6 +564,12 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+        let global = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(global.total_count, 1);
     }
 
     #[tokio::test]
@@ -705,6 +711,32 @@ mod tests {
             reopened.health().await.unwrap(),
             RetrievalStatsHealth::default()
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_global_counter_rejects_negative_counts() {
+        let dir = tempdir().unwrap();
+        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+        {
+            let connection = lock(&store.connection).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO global_relation_counts
+                     (relation_kind, object_type, total_count, active_count, current_count)
+                     VALUES ('involves', 'episode', -1, 0, 0)",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let error = store
+            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("retrieval stats counter was negative: -1"));
     }
 
     #[tokio::test]
