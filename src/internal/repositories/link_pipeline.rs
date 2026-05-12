@@ -84,8 +84,8 @@ where
             {
                 let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
             }
-            return Err(CustomError::MemoryValidation(
-                "low-information co-occurrence link rejected".to_owned(),
+            return Err(validation_error(
+                "low-information co-occurrence link rejected",
             ));
         }
         self.graph_store
