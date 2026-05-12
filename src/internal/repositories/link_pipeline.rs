@@ -1,5 +1,8 @@
-// Typed-link pipeline used by the public facade and internal tests.
-use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft, ObjectType, RelationType};
+// Typed-link pipeline used by the public facade and internal tests. Some
+// helpers remain available for focused test and validation paths.
+use crate::api::types::{
+    DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType, RelationType,
+};
 use crate::errors::CustomError;
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
@@ -120,12 +123,25 @@ where
 fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
     let mut refs = Vec::new();
     if object_type_has_stats_state(link.from_type) {
-        refs.push(GraphObjectRef::new(link.from_id, link.from_type));
+        push_link_stats_endpoint_ref(&mut refs, link.from_id, link.from_type);
     }
     if object_type_has_stats_state(link.to_type) {
-        refs.push(GraphObjectRef::new(link.to_id, link.to_type));
+        push_link_stats_endpoint_ref(&mut refs, link.to_id, link.to_type);
     }
     refs
+}
+
+fn push_link_stats_endpoint_ref(
+    refs: &mut Vec<GraphObjectRef>,
+    object_id: MemoryId,
+    object_type: ObjectType,
+) {
+    let object_ref = GraphObjectRef::new(object_id, object_type);
+    if refs.contains(&object_ref) {
+        return;
+    }
+
+    refs.push(object_ref);
 }
 
 fn object_type_has_stats_state(object_type: ObjectType) -> bool {
@@ -259,6 +275,31 @@ mod tests {
         assert!(error
             .to_string()
             .contains("cannot point from an object to itself"));
+    }
+
+    #[test]
+    fn link_stats_endpoint_refs_dedupes_self_referential_endpoint() {
+        let object_id = id("550e8400-e29b-41d4-a716-446655444010");
+        let link = MemoryLink {
+            id: id("550e8400-e29b-41d4-a716-446655444011"),
+            object_type: ObjectType::MemoryLink,
+            from_id: object_id,
+            from_type: ObjectType::Observation,
+            to_id: object_id,
+            to_type: ObjectType::Observation,
+            relation: RelationType::AssociatedWith,
+            confidence: 0.8,
+            rationale: None,
+            created_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_string(),
+        };
+
+        let refs = link_stats_endpoint_refs(&link);
+
+        assert_eq!(
+            refs,
+            vec![GraphObjectRef::new(object_id, ObjectType::Observation)]
+        );
     }
 
     #[tokio::test]
