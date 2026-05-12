@@ -7,17 +7,22 @@ mod internal;
 
 use async_trait::async_trait;
 
-use crate::config::settings::{EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode};
+use crate::config::settings::{
+    EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
+    RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
+};
 use crate::internal::infrastructures::external_services::{
     OpenAIEmbeddingProvider, QdrantVectorCandidateStore,
 };
 use crate::internal::infrastructures::graph::{
     OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore,
 };
+use crate::internal::infrastructures::retrieval_stats::SqliteRetrievalStatsStore;
 use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
-    CorrectionForgetPipeline, GraphAuthorityStore, LinkPipeline, MemoryEmbedder, RememberPipeline,
-    RememberPipelineDraft, RetrievePipeline, VectorCandidateStore,
+    CorrectionForgetPipeline, GraphAuthorityStore, InMemoryRetrievalStatsStore, LinkPipeline,
+    MemoryEmbedder, RememberPipeline, RememberPipelineDraft, RetrievalStatsStore, RetrievePipeline,
+    VectorCandidateStore,
 };
 
 // Re-export types for public use
@@ -45,7 +50,9 @@ pub use crate::api::types::{
     VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
     DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
-pub use crate::config::settings::{GraphStoreMode, Settings};
+pub use crate::config::settings::{
+    GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
+};
 pub use crate::errors::CustomError;
 
 // Re-export for integration tests
@@ -88,6 +95,7 @@ struct MemoryComposition {
     graph_store: Box<dyn GraphAuthorityStore>,
     vector_store: Box<dyn VectorCandidateStore>,
     embedder: Box<dyn MemoryEmbedder>,
+    stats_store: Box<dyn RetrievalStatsStore>,
 }
 
 struct EmbeddingProviderMemoryEmbedder {
@@ -114,6 +122,7 @@ impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
 
 impl CharacterMemory {
     /// Builds CharacterMemory from provider-neutral graph, vector, and embedder parts.
+    #[cfg(test)]
     pub(crate) fn from_parts(
         graph_store: Box<dyn GraphAuthorityStore>,
         vector_store: Box<dyn VectorCandidateStore>,
@@ -124,6 +133,25 @@ impl CharacterMemory {
                 graph_store,
                 vector_store,
                 embedder,
+                stats_store: Box::new(
+                    crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
+                ),
+            },
+        }
+    }
+
+    fn from_parts_with_stats(
+        graph_store: Box<dyn GraphAuthorityStore>,
+        vector_store: Box<dyn VectorCandidateStore>,
+        embedder: Box<dyn MemoryEmbedder>,
+        stats_store: Box<dyn RetrievalStatsStore>,
+    ) -> Self {
+        Self {
+            memory_composition: MemoryComposition {
+                graph_store,
+                vector_store,
+                embedder,
+                stats_store,
             },
         }
     }
@@ -183,11 +211,13 @@ impl CharacterMemory {
                 Box::new(OxigraphGraphAuthorityStore::new_in_memory()?)
             }
         };
+        let stats_store = retrieval_stats_store(&settings)?;
 
-        Ok(Self::from_parts(
+        Ok(Self::from_parts_with_stats(
             graph_store,
             Box::new(vector_store),
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
+            stats_store,
         ))
     }
 
@@ -218,10 +248,11 @@ impl CharacterMemory {
     /// Persists a remember draft through the graph-authoritative write pipeline.
     pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
         let parts = self.memory_composition();
-        let pipeline = RememberPipeline::new(
+        let pipeline = RememberPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         );
         let outcome = pipeline
             .remember(RememberPipelineDraft::new(
@@ -235,7 +266,7 @@ impl CharacterMemory {
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
         let parts = self.memory_composition();
-        LinkPipeline::new(parts.graph_store.as_ref())
+        LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
             .link(draft)
             .await
     }
@@ -261,10 +292,11 @@ impl CharacterMemory {
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         let parts = self.memory_composition();
-        CorrectionForgetPipeline::new(
+        CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         )
         .correct(draft)
         .await
@@ -276,10 +308,11 @@ impl CharacterMemory {
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         let parts = self.memory_composition();
-        CorrectionForgetPipeline::new(
+        CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
             parts.vector_store.as_ref(),
             parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
         )
         .forget(draft)
         .await
@@ -287,6 +320,24 @@ impl CharacterMemory {
 
     fn memory_composition(&self) -> &MemoryComposition {
         &self.memory_composition
+    }
+}
+
+fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsStore>, CustomError> {
+    match settings.get_retrieval_stats_store_mode() {
+        ConfigRetrievalStatsStoreMode::Sqlite => {
+            match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
+                Ok(store) => Ok(Box::new(store)),
+                Err(error) => match settings.get_retrieval_stats_health_fail_mode() {
+                    RetrievalStatsHealthFailMode::Conservative => {
+                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
+                            "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
+                        ))))
+                    }
+                },
+            }
+        }
+        ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
     }
 }
 
@@ -678,6 +729,43 @@ mod tests {
             CustomError::EmbeddingInitializationError(message)
                 if message.contains("8") && message.contains("1536")
         ));
+    }
+
+    #[tokio::test]
+    async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
+        let settings = Settings::new(
+            ::config::Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override("retrieval_stats_store_mode", "sqlite")
+                .unwrap()
+                .set_override("retrieval_stats_path", ".")
+                .unwrap()
+                .set_override("retrieval_stats_health_fail_mode", "conservative")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let store = retrieval_stats_store(&settings).unwrap();
+        let health = store.health().await.unwrap();
+
+        assert_eq!(
+            health.state,
+            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+        );
+        assert!(health
+            .last_error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("using in-memory fallback"));
     }
 
     fn injected_memory() -> CharacterMemory {

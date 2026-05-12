@@ -5,6 +5,7 @@ mod link_pipeline;
 mod raw_reference_resolver;
 mod reconciliation;
 mod remember_pipeline;
+mod retrieval_stats_store;
 mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -52,6 +53,16 @@ pub(crate) use reconciliation::{
 pub(crate) use remember_pipeline::{
     RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome,
     VectorIndexingFailure as InternalVectorIndexingFailure,
+};
+
+#[cfg(test)]
+pub(crate) use retrieval_stats_store::noop_retrieval_stats_store;
+#[allow(unused_imports)]
+pub(crate) use retrieval_stats_store::{
+    object_type_key, record_stats_after_write, relation_type_key, retention_state_key,
+    retrieval_stats_edges, retrieval_stats_object_states, InMemoryRetrievalStatsStore,
+    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+    RetrievalStatsHealthState, RetrievalStatsObjectState, RetrievalStatsStore,
 };
 
 // Continuity retrieval pipeline surface.

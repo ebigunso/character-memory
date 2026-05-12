@@ -1,22 +1,40 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{DraftDefaults, MemoryLink, MemoryLinkDraft};
+use crate::api::types::{DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType};
 use crate::errors::CustomError;
-use crate::internal::repositories::GraphAuthorityStore;
+use crate::internal::repositories::{
+    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
+    RetrievalStatsStore,
+};
 
 pub(crate) struct LinkPipeline<'a, G>
 where
     G: GraphAuthorityStore + ?Sized,
 {
     graph_store: &'a G,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G> LinkPipeline<'a, G>
 where
     G: GraphAuthorityStore + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G) -> Self {
-        Self { graph_store }
+        Self {
+            graph_store,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            stats_store,
+        }
     }
 
     pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
@@ -35,8 +53,64 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
+        self.record_link_stats_after_write(&link).await;
         Ok(link)
     }
+
+    async fn record_link_stats_after_write(&self, link: &MemoryLink) {
+        let endpoint_refs = link_stats_endpoint_refs(link);
+        if endpoint_refs.is_empty() {
+            record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
+            return;
+        }
+
+        match self
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
+            .await
+        {
+            Ok(objects) => {
+                record_stats_after_write(self.stats_store, &objects, std::slice::from_ref(link))
+                    .await;
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
+                let _ = self.stats_store.mark_unhealthy(error_message).await;
+            }
+        }
+    }
+}
+
+fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
+    let mut refs = Vec::new();
+    if object_type_has_stats_state(link.from_type) {
+        push_link_stats_endpoint_ref(&mut refs, link.from_id, link.from_type);
+    }
+    if object_type_has_stats_state(link.to_type) {
+        push_link_stats_endpoint_ref(&mut refs, link.to_id, link.to_type);
+    }
+    refs
+}
+
+fn push_link_stats_endpoint_ref(
+    refs: &mut Vec<GraphObjectRef>,
+    object_id: MemoryId,
+    object_type: ObjectType,
+) {
+    let object_ref = GraphObjectRef::new(object_id, object_type);
+    if refs.contains(&object_ref) {
+        return;
+    }
+
+    refs.push(object_ref);
+}
+
+fn object_type_has_stats_state(object_type: ObjectType) -> bool {
+    matches!(
+        object_type,
+        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
+    )
 }
 
 fn validation_error(error: impl ToString) -> CustomError {
@@ -46,16 +120,22 @@ fn validation_error(error: impl ToString) -> CustomError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use crate::api::types::{
-        MemoryId, MemoryObject, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
+        DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
     };
-    use crate::internal::repositories::{GraphAuthorityStore, GraphExpansionQuery};
+    use crate::internal::repositories::{
+        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+        GraphExpansion, GraphExpansionQuery, InMemoryRetrievalStatsStore, RetrievalStatsCounterKey,
+        RetrievalStatsStore,
+    };
 
     #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
@@ -142,6 +222,31 @@ mod tests {
             .contains("cannot point from an object to itself"));
     }
 
+    #[test]
+    fn link_stats_endpoint_refs_dedupes_self_referential_endpoint() {
+        let object_id = id("550e8400-e29b-41d4-a716-446655444010");
+        let link = MemoryLink {
+            id: id("550e8400-e29b-41d4-a716-446655444011"),
+            object_type: ObjectType::MemoryLink,
+            from_id: object_id,
+            from_type: ObjectType::Observation,
+            to_id: object_id,
+            to_type: ObjectType::Observation,
+            relation: RelationType::AssociatedWith,
+            confidence: 0.8,
+            rationale: None,
+            created_at: timestamp(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_string(),
+        };
+
+        let refs = link_stats_endpoint_refs(&link);
+
+        assert_eq!(
+            refs,
+            vec![GraphObjectRef::new(object_id, ObjectType::Observation)]
+        );
+    }
+
     #[tokio::test]
     async fn rejects_memory_link_endpoints_before_graph_write() {
         let graph = FakeGraphAuthorityStore::new();
@@ -169,6 +274,160 @@ mod tests {
         let persisted = pipeline.link(valid_link_draft()).await.unwrap();
 
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_entity_relation_stats_after_graph_success() {
+        let graph = FakeGraphAuthorityStore::new();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = valid_link_draft();
+        let entity_id = draft.to_id;
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_endpoint_lifecycle_state_in_stats() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let mut suppressed_episode = fixtures.episode.clone();
+        suppressed_episode.retention_state = RetentionState::Suppressed;
+        graph
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::Episode(suppressed_episode.clone()),
+            ])
+            .await
+            .unwrap();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = MemoryLinkDraft::new(
+            ObjectType::Entity,
+            fixtures.hub_entity.id,
+            RelationType::Involves,
+            ObjectType::Episode,
+            suppressed_episode.id,
+        );
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: fixtures.hub_entity.id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
+    }
+
+    #[tokio::test]
+    async fn link_pipeline_records_fallback_stats_when_endpoint_lookup_fails() {
+        let graph = QueryObjectsFailingGraph::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = valid_link_draft();
+        let entity_id = draft.to_id;
+
+        let persisted = pipeline.link(draft).await.unwrap();
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: persisted.relation,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+        assert_eq!(
+            stats.health().await.unwrap().state,
+            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+        );
+    }
+
+    #[derive(Default)]
+    struct QueryObjectsFailingGraph {
+        links: std::sync::Mutex<Vec<MemoryLink>>,
+    }
+
+    #[async_trait]
+    impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
+            Ok(())
+        }
+
+        async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+            self.links.lock().unwrap().extend_from_slice(links);
+            Ok(())
+        }
+
+        async fn upsert_objects_and_links(
+            &self,
+            _objects: &[MemoryObject],
+            links: &[MemoryLink],
+        ) -> Result<(), CustomError> {
+            self.upsert_links(links).await
+        }
+
+        async fn query_objects(
+            &self,
+            _query: &GraphObjectQuery,
+        ) -> Result<Vec<MemoryObject>, CustomError> {
+            Err(CustomError::DatabaseError(
+                "endpoint lifecycle lookup failed".to_owned(),
+            ))
+        }
+
+        async fn query_derived_memories_by_provenance(
+            &self,
+            _query: &GraphDerivedMemoryProvenanceQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_derived_memories_by_thread(
+            &self,
+            _query: &GraphDerivedMemoryThreadQuery,
+        ) -> Result<Vec<DerivedMemory>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn expand_bounded(
+            &self,
+            _query: &GraphExpansionQuery,
+        ) -> Result<GraphExpansion, CustomError> {
+            Ok(GraphExpansion::new(Vec::new(), Vec::new()))
+        }
+
+        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(self.links.lock().unwrap().clone())
+        }
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {

@@ -2,12 +2,16 @@
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
     DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft,
+    ObjectType,
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
-use crate::internal::repositories::{GraphAuthorityStore, MemoryEmbedder, VectorCandidateStore};
+use crate::internal::repositories::{
+    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
+    MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RememberPipelineDraft {
@@ -69,6 +73,7 @@ where
     graph_store: &'a G,
     vector_store: &'a V,
     embedder: &'a E,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G, V, E> RememberPipeline<'a, G, V, E>
@@ -77,11 +82,27 @@ where
     V: VectorCandidateStore + ?Sized,
     E: MemoryEmbedder + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
         Self {
             graph_store,
             vector_store,
             embedder,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            vector_store,
+            embedder,
+            stats_store,
         }
     }
 
@@ -97,6 +118,8 @@ where
 
         let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
         if vector_records.is_empty() {
+            self.record_remember_stats_after_write(&objects, &links)
+                .await;
             return Ok(outcome);
         }
 
@@ -115,7 +138,39 @@ where
             }
         }
 
+        self.record_remember_stats_after_write(&objects, &links)
+            .await;
+
         Ok(outcome)
+    }
+
+    async fn record_remember_stats_after_write(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) {
+        let endpoint_refs = remember_stats_endpoint_refs(objects, links);
+        if endpoint_refs.is_empty() {
+            record_stats_after_write(self.stats_store, objects, links).await;
+            return;
+        }
+
+        match self
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
+            .await
+        {
+            Ok(endpoint_objects) => {
+                let stats_objects =
+                    stats_objects_with_endpoint_lifecycle(objects, endpoint_objects);
+                record_stats_after_write(self.stats_store, &stats_objects, links).await;
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                record_stats_after_write(self.stats_store, objects, links).await;
+                let _ = self.stats_store.mark_unhealthy(error_message).await;
+            }
+        }
     }
 
     async fn index_vector_records(
@@ -192,18 +247,76 @@ fn vector_records_for_objects(objects: &[MemoryObject]) -> Vec<VectorRecord> {
         .collect()
 }
 
+fn remember_stats_endpoint_refs(
+    objects: &[MemoryObject],
+    links: &[MemoryLink],
+) -> Vec<GraphObjectRef> {
+    let mut refs = Vec::new();
+    for link in links {
+        push_stats_endpoint_ref(&mut refs, objects, link.from_id, link.from_type);
+        push_stats_endpoint_ref(&mut refs, objects, link.to_id, link.to_type);
+    }
+    refs
+}
+
+fn push_stats_endpoint_ref(
+    refs: &mut Vec<GraphObjectRef>,
+    objects: &[MemoryObject],
+    object_id: MemoryId,
+    object_type: ObjectType,
+) {
+    if !object_type_has_stats_state(object_type)
+        || objects
+            .iter()
+            .any(|object| memory_object_identity(object) == (object_id, object_type))
+        || refs.iter().any(|object_ref| {
+            object_ref.object_id == object_id && object_ref.object_type == object_type
+        })
+    {
+        return;
+    }
+
+    refs.push(GraphObjectRef::new(object_id, object_type));
+}
+
+fn stats_objects_with_endpoint_lifecycle(
+    objects: &[MemoryObject],
+    endpoint_objects: Vec<MemoryObject>,
+) -> Vec<MemoryObject> {
+    let mut stats_objects = objects.to_vec();
+    for endpoint_object in endpoint_objects {
+        if !stats_objects.iter().any(|object| {
+            memory_object_identity(object) == memory_object_identity(&endpoint_object)
+        }) {
+            stats_objects.push(endpoint_object);
+        }
+    }
+    stats_objects
+}
+
+fn object_type_has_stats_state(object_type: ObjectType) -> bool {
+    matches!(
+        object_type,
+        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
+    )
+}
+
 fn validation_error(error: impl ToString) -> CustomError {
     CustomError::MemoryValidation(error.to_string())
 }
 
 fn memory_object_id(object: &MemoryObject) -> MemoryId {
+    memory_object_identity(object).0
+}
+
+fn memory_object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
     match object {
-        MemoryObject::Episode(object) => object.id,
-        MemoryObject::Observation(object) => object.id,
-        MemoryObject::Entity(object) => object.id,
-        MemoryObject::MemoryThread(object) => object.id,
-        MemoryObject::DerivedMemory(object) => object.id,
-        MemoryObject::MemoryLink(object) => object.id,
+        MemoryObject::Episode(object) => (object.id, object.object_type),
+        MemoryObject::Observation(object) => (object.id, object.object_type),
+        MemoryObject::Entity(object) => (object.id, object.object_type),
+        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
+        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
+        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
     }
 }
 
@@ -217,12 +330,18 @@ mod tests {
 
     use crate::api::types::{
         DerivedMemoryDraft, DerivedType, EntityDraft, EntityType, EpisodeDraft, MemoryThreadDraft,
-        ObjectType, ObservationDraft, RelationType,
+        ObjectType, ObservationDraft, RelationType, RetentionState,
     };
     use crate::internal::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
     };
+    use crate::internal::repositories::test_support::{
+        representative_fixtures, FakeGraphAuthorityStore,
+    };
     use crate::internal::repositories::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
+    use crate::internal::repositories::{
+        InMemoryRetrievalStatsStore, RetrievalStatsCounterKey, RetrievalStatsStore,
+    };
 
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
@@ -460,6 +579,94 @@ mod tests {
             "embedder returned 4 embeddings for 5 vector records"
         );
         assert!(vector.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remember_pipeline_records_stats_after_vector_attempt() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::default();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        pipeline
+            .remember(RememberPipelineDraft::new(
+                [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
+                [typed_link_draft(
+                    ids.extra_link,
+                    ObjectType::Entity,
+                    ids.entity,
+                    RelationType::Mentions,
+                    ObjectType::Episode,
+                    ids.episode,
+                )],
+            ))
+            .await
+            .expect("stats should not change remember outcome");
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: ids.entity,
+                relation_kind: RelationType::Mentions,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
+    }
+
+    #[tokio::test]
+    async fn remember_pipeline_uses_existing_endpoint_lifecycle_for_link_stats() {
+        let fixtures = representative_fixtures();
+        let graph = FakeGraphAuthorityStore::new();
+        graph
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+            ])
+            .await
+            .unwrap();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        pipeline
+            .remember(RememberPipelineDraft::new(
+                Vec::<MemoryObjectDraft>::new(),
+                [typed_link_draft(
+                    id("550e8400-e29b-41d4-a716-446655443008"),
+                    ObjectType::Entity,
+                    fixtures.hub_entity.id,
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                    fixtures.suppressed_seed.id,
+                )],
+            ))
+            .await
+            .expect("link-only remember should persist and record stats");
+
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: fixtures.hub_entity.id,
+                relation_kind: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fixtures.suppressed_seed.retention_state,
+            RetentionState::Suppressed
+        );
+        assert!(!fixtures.suppressed_seed.is_current);
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
     }
 
     #[derive(Debug, Clone, Copy)]

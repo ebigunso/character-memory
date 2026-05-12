@@ -16,9 +16,9 @@ use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
 use crate::internal::repositories::{
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef, MemoryEmbedder,
-    VectorCandidateStore,
+    record_stats_after_write, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
+    GraphDerivedMemoryThreadQuery, GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
+    MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
 };
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
@@ -30,6 +30,7 @@ where
     graph_store: &'a G,
     vector_store: &'a V,
     embedder: &'a E,
+    stats_store: &'a dyn RetrievalStatsStore,
 }
 
 impl<'a, G, V, E> CorrectionForgetPipeline<'a, G, V, E>
@@ -38,11 +39,27 @@ where
     V: VectorCandidateStore + ?Sized,
     E: MemoryEmbedder + ?Sized,
 {
+    #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
         Self {
             graph_store,
             vector_store,
             embedder,
+            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+        }
+    }
+
+    pub(crate) fn new_with_stats(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        stats_store: &'a dyn RetrievalStatsStore,
+    ) -> Self {
+        Self {
+            graph_store,
+            vector_store,
+            embedder,
+            stats_store,
         }
     }
 
@@ -62,6 +79,7 @@ where
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await;
         apply_vector_result(&mut outcome, vector_result);
+        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
     }
 
@@ -77,6 +95,7 @@ where
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await;
         apply_vector_result(&mut outcome, vector_result);
+        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
     }
 
@@ -1114,7 +1133,10 @@ mod tests {
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
     };
-    use crate::internal::repositories::{GraphExpansion, GraphExpansionQuery, RetrievePipeline};
+    use crate::internal::repositories::{
+        GraphExpansion, GraphExpansionQuery, RetrievalStatsCounter, RetrievalStatsCounterKey,
+        RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsObjectState, RetrievePipeline,
+    };
 
     #[tokio::test]
     async fn correction_writes_graph_before_vector_maintenance_in_stable_order() {
@@ -1163,6 +1185,92 @@ mod tests {
             ]
         );
         assert!(outcome.vector_maintenance_failure.is_none());
+    }
+
+    #[tokio::test]
+    async fn correction_stats_failure_runs_after_vector_and_preserves_outcome() {
+        let ids = fixed_ids();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let graph = RecordingGraphStore {
+            objects: Mutex::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]),
+            calls: calls.clone(),
+            ..RecordingGraphStore::default()
+        };
+        let vector = RecordingVectorStore {
+            calls: calls.clone(),
+            fail_delete: false,
+        };
+        let embedder = RecordingEmbedder {
+            calls: calls.clone(),
+        };
+        let stats = RecordingStatsStore {
+            calls: calls.clone(),
+            fail_edges: true,
+        };
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        let outcome = pipeline
+            .correct(correction_draft(&ids))
+            .await
+            .expect("stats failure should not change lifecycle outcome");
+
+        assert!(outcome.vector_maintenance_failure.is_none());
+        assert_eq!(
+            lock(&calls).clone(),
+            vec![
+                StoreCall::GraphQuery(vec![ids.old]),
+                StoreCall::GraphObjects(vec![ids.old, ids.replacement]),
+                StoreCall::GraphLinks(vec![(ids.replacement, ids.old)]),
+                StoreCall::VectorDelete(vec![ids.old]),
+                StoreCall::EmbedBatch(vec![ids.replacement]),
+                StoreCall::VectorUpsert(vec![ids.replacement]),
+                StoreCall::StatsEdges(0),
+                StoreCall::StatsUnhealthy,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn forget_records_stats_after_vector_maintenance() {
+        let ids = fixed_ids();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let graph = RecordingGraphStore {
+            objects: Mutex::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]),
+            calls: calls.clone(),
+            ..RecordingGraphStore::default()
+        };
+        let vector = RecordingVectorStore {
+            calls: calls.clone(),
+            fail_delete: false,
+        };
+        let embedder = RecordingEmbedder {
+            calls: calls.clone(),
+        };
+        let stats = RecordingStatsStore {
+            calls: calls.clone(),
+            fail_edges: false,
+        };
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        let outcome = pipeline
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::DerivedMemory(ids.old),
+                "Suppress stale derived memory.",
+            ))
+            .await
+            .expect("forget should record stats after vector maintenance");
+
+        assert!(outcome.vector_maintenance_failure.is_none());
+        assert_eq!(
+            lock(&calls).clone(),
+            vec![
+                StoreCall::GraphQuery(vec![ids.old]),
+                StoreCall::GraphObjects(vec![ids.old]),
+                StoreCall::VectorDelete(vec![ids.old]),
+                StoreCall::StatsEdges(0),
+                StoreCall::StatsObjectStates(1),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -2138,6 +2246,9 @@ mod tests {
         EmbedBatch(Vec<MemoryId>),
         VectorUpsert(Vec<MemoryId>),
         VectorDelete(Vec<MemoryId>),
+        StatsEdges(usize),
+        StatsObjectStates(usize),
+        StatsUnhealthy,
     }
 
     #[derive(Debug, Default)]
@@ -2405,6 +2516,57 @@ mod tests {
                 inputs.iter().filter_map(|input| input.object_id).collect(),
             ));
             Ok(inputs.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct RecordingStatsStore {
+        calls: Arc<Mutex<Vec<StoreCall>>>,
+        fail_edges: bool,
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for RecordingStatsStore {
+        async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+            lock(&self.calls).push(StoreCall::StatsEdges(edges.len()));
+            if self.fail_edges {
+                return Err(CustomError::DatabaseError(
+                    "stats edge write failed".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+
+        async fn record_object_states(
+            &self,
+            states: &[RetrievalStatsObjectState],
+        ) -> Result<(), CustomError> {
+            lock(&self.calls).push(StoreCall::StatsObjectStates(states.len()));
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+            Ok(RetrievalStatsHealth::default())
+        }
+
+        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+            lock(&self.calls).push(StoreCall::StatsUnhealthy);
+            Ok(())
         }
     }
 
