@@ -26,12 +26,12 @@ pub(crate) use correction_forget_pipeline::CorrectionForgetPipeline;
 #[allow(unused_imports)]
 pub(crate) use graph_authority_store::{
     apply_fanout_limits_by_pair, bounded_expansion, bounded_expansion_node_set,
-    derived_memories_by_provenance, derived_memories_by_thread, GraphAuthorityStore,
-    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-    GraphExpansionFanoutOverride, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation, GraphObjectQuery,
-    GraphObjectRef,
+    bounded_hub_retention_limit, derived_memories_by_provenance, derived_memories_by_thread,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
+    GraphExpansionFailurePolicy, GraphExpansionFanoutOverride, GraphExpansionFilteredNode,
+    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
+    GraphExpansionRelation, GraphObjectQuery, GraphObjectRef,
 };
 
 #[allow(unused_imports)]
