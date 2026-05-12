@@ -9,11 +9,9 @@ use crate::internal::repositories::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
     ExplicitCallerIntent,
+    #[cfg(test)]
     LowSelectivityCoOccurrenceOnly,
 }
-
-const LOW_INFORMATION_LINK_ADMISSION_EVIDENCE: LinkAdmissionEvidence =
-    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionDecision {
@@ -146,7 +144,8 @@ pub(crate) fn admit_link(
     }
 
     match evidence {
-        LOW_INFORMATION_LINK_ADMISSION_EVIDENCE => {
+        #[cfg(test)]
+        LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly => {
             LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         }
         LinkAdmissionEvidence::ExplicitCallerIntent => LinkAdmissionDecision::Accepted,
