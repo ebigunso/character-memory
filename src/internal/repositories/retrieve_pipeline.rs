@@ -1354,7 +1354,6 @@ mod tests {
     };
     use crate::internal::repositories::{
         InMemoryRetrievalStatsStore, RetrievalSelectivityPolicy, RetrievalStatsEdge,
-        RetrievalStatsStore,
     };
 
     #[tokio::test]
