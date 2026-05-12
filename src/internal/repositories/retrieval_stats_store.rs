@@ -35,7 +35,6 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
     async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
 
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
-
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError>;
 
     async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError>;
@@ -146,7 +145,6 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
     async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
         Ok(())
     }
-
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
         Ok(())
     }
@@ -260,7 +258,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         };
         Ok(())
     }
-
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
         let mut state = self.state.lock().await;
         state.rejected_low_information_link_count += 1;

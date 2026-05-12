@@ -1,6 +1,6 @@
 # Plan: v0.1.2 Selectivity Fanout And Retrieval Rationale
 
-- status: approved
+- status: completed
 - generated: 2026-05-09
 - last_updated: 2026-05-10
 - work_type: code
@@ -239,6 +239,10 @@
   - Summary: Updated plan boundary after latest main added controlled associative recall and expanded future observability docs.
   - Validation evidence: Plan-only update; branch rebased onto `origin/main`.
   - Notes: v0.1.2 remains limited to lightweight additions on existing retrieval rationale/telemetry/trace surfaces.
+- 2026-05-13 Completed:
+  - Summary: PR #49 merged after conflict resolution against PR #48 and plan-intent review confirmed the selectivity fanout implementation remained within the approved v0.1.2 scope.
+  - Validation evidence: `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings`; `cargo check --lib`; focused selectivity and retrieve pipeline tests before merge.
+  - Notes: Plan moved from active to completed as part of final v0.1.2 cleanup.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
