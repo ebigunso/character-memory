@@ -40,7 +40,7 @@ pub(crate) use link_pipeline::LinkPipeline;
 // Source-reference contracts remain internal; core stores opaque references,
 // not caller-owned source material.
 #[allow(unused_imports)]
-pub(crate) use source_reference::{SourceReference, SourceReferenceResolver};
+pub(crate) use source_reference::{ResolvedSourceReference, SourceReferenceResolver};
 
 // Internal/admin reconciliation diagnostics. These remain out of the public
 // CharacterMemory facade until a governance surface is planned.

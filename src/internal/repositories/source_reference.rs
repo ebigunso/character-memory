@@ -8,28 +8,34 @@ use async_trait::async_trait;
 use crate::errors::CustomError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SourceReference {
+pub(crate) struct ResolvedSourceReference {
     pub(crate) reference: String,
-    pub(crate) text: String,
+    pub(crate) resolved_text: String,
 }
 
-impl SourceReference {
-    pub(crate) fn new(reference: impl Into<String>, text: impl Into<String>) -> Self {
+impl ResolvedSourceReference {
+    pub(crate) fn new(reference: impl Into<String>, resolved_text: impl Into<String>) -> Self {
         Self {
             reference: reference.into(),
-            text: text.into(),
+            resolved_text: resolved_text.into(),
         }
     }
 }
 
 #[async_trait]
 pub(crate) trait SourceReferenceResolver: Send + Sync {
-    async fn resolve(&self, reference: &str) -> Result<Option<SourceReference>, CustomError>;
+    async fn resolve(
+        &self,
+        reference: &str,
+    ) -> Result<Option<ResolvedSourceReference>, CustomError>;
 }
 
 #[async_trait]
 impl<T: SourceReferenceResolver + ?Sized> SourceReferenceResolver for Box<T> {
-    async fn resolve(&self, reference: &str) -> Result<Option<SourceReference>, CustomError> {
+    async fn resolve(
+        &self,
+        reference: &str,
+    ) -> Result<Option<ResolvedSourceReference>, CustomError> {
         (**self).resolve(reference).await
     }
 }
@@ -45,14 +51,17 @@ mod tests {
 
     #[derive(Debug)]
     enum StaticSourceReferenceResult {
-        Resolved(Option<SourceReference>),
+        Resolved(Option<ResolvedSourceReference>),
         DatabaseError(String),
         MemoryValidation(String),
     }
 
     #[async_trait]
     impl SourceReferenceResolver for StaticSourceReferenceResolver {
-        async fn resolve(&self, _reference: &str) -> Result<Option<SourceReference>, CustomError> {
+        async fn resolve(
+            &self,
+            _reference: &str,
+        ) -> Result<Option<ResolvedSourceReference>, CustomError> {
             match &self.result {
                 StaticSourceReferenceResult::Resolved(source_reference) => {
                     Ok(source_reference.clone())
@@ -69,16 +78,16 @@ mod tests {
 
     #[test]
     fn source_reference_is_resolved_content_not_storage_configuration() {
-        let source = SourceReference::new("chat://conversation/1#turn=2", "hello");
+        let source = ResolvedSourceReference::new("chat://conversation/1#turn=2", "hello");
 
         assert_eq!(source.reference, "chat://conversation/1#turn=2");
-        assert_eq!(source.text, "hello");
+        assert_eq!(source.resolved_text, "hello");
     }
 
     #[tokio::test]
     async fn source_reference_resolver_can_resolve_internal_source_content() {
         let resolver = StaticSourceReferenceResolver {
-            result: StaticSourceReferenceResult::Resolved(Some(SourceReference::new(
+            result: StaticSourceReferenceResult::Resolved(Some(ResolvedSourceReference::new(
                 "raw://conversation/1#turn=2",
                 "resolved fixture text",
             ))),
@@ -91,7 +100,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.reference, "raw://conversation/1#turn=2");
-        assert_eq!(resolved.text, "resolved fixture text");
+        assert_eq!(resolved.resolved_text, "resolved fixture text");
     }
 
     #[tokio::test]
