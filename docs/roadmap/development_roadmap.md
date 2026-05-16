@@ -1233,7 +1233,7 @@ ClusterSummary
 support human-like serendipitous recall
 avoid broad-entity clique growth
 represent associative structures inside graph authority
-track member-level status, role, strength, and rationale
+track member-level status, role, support evidence, and rationale
 support query-time activation before durable association
 promote associations only with repeated or multi-signal support
 use summaries and exemplars for retrieval quality
