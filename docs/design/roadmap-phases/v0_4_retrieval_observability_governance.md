@@ -187,6 +187,30 @@ CoactivationDiagnostic
 
 These concepts are diagnostic and report-only in v0.4. They prepare the retrieval layer to explain controlled associative recall in v0.5 without implementing the associative cluster machinery in this phase.
 
+## 2.8 RetrievalIntent
+
+v0.4 adds query-time retrieval intent as part of retrieval governance.
+
+Planned shape:
+
+```rust
+enum RetrievalIntent {
+    Continuity,
+    CurrentState,
+    CorrectionReview,
+    SourceAudit,
+    AssociativeProbe,
+}
+```
+
+`RetrievalIntent` is an input to retrieval policy. It is not persisted on memory objects.
+
+The default intent is `Continuity`.
+
+`SourceAudit` returns provenance paths and source-reference metadata. It does not resolve or search raw logs.
+
+`AssociativeProbe` exposes weak activation and association diagnostics. It does not automatically promote weak associations to durable graph truth.
+
 ---
 
 # 3. Retrieval observability

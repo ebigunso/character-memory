@@ -2,6 +2,7 @@
 status: accepted
 adr_type: design
 date: 2026-04-26
+revision_dates: ["2026-05-16"]
 deciders: ["ebigunso"]
 consulted: ["GPT-5.5 Pro"]
 informed: []
@@ -10,6 +11,10 @@ superseded_by: null
 ---
 
 # ADR-D-0008: Preserve source references because summaries are not source material
+
+## Revision History
+
+- 2026-05-16: Clarified that this ADR requires opaque source references, not raw source storage, and linked ADR-D-0015 for the core raw-source storage boundary.
 
 ## Context and Problem Statement
 
@@ -29,6 +34,8 @@ Episodes should include `raw_ref` or an equivalent pointer to the source convers
 The graph/vector layer may store summaries, excerpts, and derived memories, but these are not substitutes for source material.
 
 v0.1 does not store raw transcripts directly in graph/vector memory stores.
+
+This ADR requires source references, not raw source storage. Source references are opaque provenance handles unless another ADR explicitly introduces a source-storage integration. Character Memory core does not assume that `raw_ref` values are resolvable by the library.
 
 ## Character Memory Relevance
 
@@ -74,3 +81,7 @@ This balances auditability with storage practicality.
 ## Revisit When
 
 Revisit if applications cannot reliably preserve raw source material or if privacy requirements require short source retention windows.
+
+## More Information
+
+See ADR-D-0015 for the core boundary that raw source storage remains outside Character Memory core.

@@ -183,9 +183,7 @@ Intent:
 
 Preserve human-like "this reminds me of that" recall without letting recurring entities create noisy graph cliques or false continuity.
 
-Revisit when:
-
-Revisit during v0.5 controlled associative recall and clustering. If member-level lifecycle proves too heavy, simplify fields before removing the distinction between unit lifecycle and member lifecycle.
+v0.5 implements this through controlled associative recall, graph-internal associative units, member-level lifecycle, association support evidence, and bounded expansion.
 
 ## 2.12 Generated and manual writes should share one safe path
 
@@ -207,7 +205,43 @@ future generated input
 
 Future assisted generation should improve usability without weakening Character Memory invariants.
 
-Revisit during v0.6 assisted remember workflow. Generated processors should plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+v0.6 generated processors plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+
+## 2.13 Core stores curated memory and opaque source provenance, not raw logs
+
+Character Memory core stores curated memory objects and provenance handles.
+
+Core memory objects include:
+
+```text
+Episode
+Observation
+Entity
+MemoryThread
+DerivedMemory
+MemoryLink
+ContinuityContextPack inputs
+currentness/lifecycle state
+provenance links
+source references and source spans
+```
+
+Core memory storage does not include:
+
+```text
+raw conversation-log storage
+raw transcript storage
+verbose tool-output storage
+raw file/blob storage
+raw image/audio/video storage
+raw sensor-log storage
+raw-log search
+public raw-reference resolution
+```
+
+`raw_ref` and source-span fields are opaque provenance handles. They identify caller-managed source material but are not themselves raw source storage.
+
+Assisted remember workflows may accept raw or semi-raw input as transient processing input. They produce validated candidates and write plans; they do not persist the raw input.
 
 ---
 
@@ -224,8 +258,8 @@ Revisit during v0.6 assisted remember workflow. Generated processors should plug
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
 | v0.5 | Controlled associative recall and clustering | Query-time associative activation, graph-internal AssociativeUnit structures, member-level AssociativeMembership lifecycle, AssociationSupport evidence, cluster summaries, promotion/decay policy, and bounded cluster expansion for serendipitous recall without broad pairwise edge pollution. |
-| v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from raw conversation or transcript-like input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. |
-| v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory. |
+| v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from caller-provided transient conversation, transcript-like, or structured interaction input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. Raw input is not persisted by Character Memory core. |
+| v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory, and embodied context through symbolic memory objects and opaque external source references. Raw media and sensor logs are not stored by Character Memory core. |
 
 Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
 
@@ -244,12 +278,14 @@ Core model package
 Storage interfaces
 Default Qdrant candidate-recall adapter
 Default Oxigraph graph-authority adapter
-Raw store interface
+Opaque source-reference and source-span utilities
 Schema/versioning utilities
 Stable ID/IRI utilities
 Test fixtures
 Migration hooks
 ```
+
+Phase 0 does not implement raw-log storage, raw-log search, or public raw-reference resolution. Source-reference utilities represent caller-managed source material for provenance.
 
 ## Implemented module layout
 
@@ -307,7 +343,7 @@ src/
       embedder.rs
       graph_authority_store.rs
       link_pipeline.rs
-      raw_reference_resolver.rs
+      source_reference.rs
       reconciliation.rs
       remember_pipeline.rs
       retrieve_pipeline.rs
@@ -907,6 +943,33 @@ observation ID
 
 Behavior-influencing `DerivedMemory` candidates must have provenance to an `Episode` or `Observation`.
 
+## Candidate origin metadata
+
+v0.1.3 adds narrow origin metadata to `CandidateProvenance` so future generated candidates can share the same write path as manual candidates without conflating caller-supplied rationale with processor-inferred rationale.
+
+Planned fields:
+
+```rust
+enum CandidateProducerKind {
+    Caller,
+    DeterministicHelper,
+    RuleProcessor,
+    ModelProcessor,
+    ImportTool,
+    System,
+    Unknown,
+}
+
+enum RationaleOrigin {
+    ProvidedByCaller,
+    ProvidedByProcessor,
+    InferredByProcessor,
+    Unavailable,
+}
+```
+
+These fields are write-time provenance. They do not introduce a generic `MetaMemory` object and do not add generic confidence, generic assumptions, generic alternatives, generic context edges, or durable retrieval reasons.
+
 ## Validation rules
 
 Validation should check at least:
@@ -977,13 +1040,11 @@ RetrievalStatsStore remains derived policy metadata only.
 No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
 ```
 
-## Revisit when
+## v0.6 integration path
 
-Revisit during v0.6 assisted remember workflow.
+v0.6 model-assisted processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
 
-At that point, model-assisted processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
-
-The v0.6 work may add admission states such as:
+The v0.6 work owns generated-candidate admission states such as:
 
 ```text
 Accepted
@@ -993,7 +1054,7 @@ Rejected
 Invalid
 ```
 
-But v0.1.3 should keep candidate state simpler unless implementation clearly requires more.
+v0.1.3 keeps candidate state simpler unless implementation clearly requires more.
 
 ---
 
@@ -1123,6 +1184,30 @@ Diagnostics remain report-only and do not override Oxigraph lifecycle/currentnes
 
 v0.4 should not implement the associative cluster machinery itself. It should make retrieval decisions and blocked expansions observable so v0.5 can safely add controlled associative recall.
 
+## Retrieval intent
+
+v0.4 adds query-time retrieval intent as part of retrieval governance.
+
+Planned shape:
+
+```rust
+enum RetrievalIntent {
+    Continuity,
+    CurrentState,
+    CorrectionReview,
+    SourceAudit,
+    AssociativeProbe,
+}
+```
+
+`RetrievalIntent` is an input to retrieval policy. It is not persisted on memory objects.
+
+The default intent is `Continuity`.
+
+`SourceAudit` returns provenance paths and source-reference metadata. It does not resolve or search raw logs.
+
+`AssociativeProbe` exposes weak activation and association diagnostics. It does not automatically promote weak associations to durable graph truth.
+
 ---
 
 # 13. v0.5: controlled associative recall and clustering
@@ -1154,6 +1239,37 @@ use summaries and exemplars for retrieval quality
 keep cluster expansion bounded and explainable
 ```
 
+## Association support over durable association scores
+
+v0.5 persists association structure and support evidence.
+
+Persisted graph concepts:
+
+```text
+AssociativeUnit
+AssociativeMembership
+AssociativeMembership.status
+AssociativeMembership.role, when needed
+AssociationSupport
+AssociationSupport.support_type
+AssociationSupport.support_source_id
+AssociationSupport.created_at
+```
+
+Derived or rebuildable values:
+
+```text
+membership_strength
+membership_confidence
+membership_salience
+supporting_signal_count
+last_reinforced_at
+activation score
+review priority
+```
+
+Durable graph truth is the associative unit, membership lifecycle, and support evidence. Retrieval-time and maintenance-time policy compute scores from that evidence.
+
 ---
 
 # 14. v0.6: assisted remember workflow and memory candidate generation
@@ -1162,15 +1278,16 @@ Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md
 
 ## Intent
 
-Let callers provide raw conversation, transcript-like input, or structured interaction logs to `remember()`, while the library generates validated memory candidates and write plans.
+Let callers provide bounded raw, transcript-like, or structured interaction input transiently to `remember()`, while the library generates validated memory candidates and write plans.
 
 The caller still decides:
 
 ```text
 when to call remember()
-what raw data to offer
+what input to offer
 what processing policy to use
 whether generated candidates are committed, reviewed, or discarded
+where source material is retained outside Character Memory, if retained
 ```
 
 The library helps decide:
@@ -1181,6 +1298,8 @@ how candidates are validated
 how candidates preserve provenance
 how accepted candidates are committed
 ```
+
+The library does not persist the raw input.
 
 ## Why this comes later
 

@@ -2,18 +2,19 @@
 
 ## Version intent
 
-Make Character Memory easier to use by allowing callers to pass raw conversation or transcript-like input into the remember workflow while the library generates structured memory candidates.
+Make Character Memory easier to use by allowing callers to pass bounded raw, transcript-like, or structured interaction input transiently into the assisted remember workflow while the library generates structured memory candidates.
 
-This phase should not remove caller control.
+This phase keeps caller control over memory creation.
 
 The caller decides:
 
 ```text
 when to remember
-what raw input to offer
+what input to offer
 which processors may run
 what privacy policy applies
-whether candidates are committed or reviewed
+whether candidates are committed, reviewed, deferred, or discarded
+where source material is retained outside Character Memory, if retained
 ```
 
 The library provides:
@@ -26,6 +27,8 @@ write-plan construction
 diagnostics
 commit through the v0.1.3 path
 ```
+
+The library does not persist the raw input.
 
 ## Relationship to v0.1.3
 
@@ -51,6 +54,41 @@ idempotency checks
 commit pipeline
 ```
 
+## Raw input boundary
+
+Raw input passed to v0.6 processors is transient processing input.
+
+Character Memory may use that input to produce:
+
+```text
+EpisodeCandidate
+ObservationCandidate
+EntityCandidate
+Thread/scope link candidate
+DerivedMemoryCandidate
+MemoryLinkCandidate
+salience/admission candidate
+embedding surface candidate
+CandidateProvenance
+RememberDiagnostics
+```
+
+Character Memory does not persist the raw input itself.
+
+When the caller supplies source references, generated candidates preserve:
+
+```text
+raw_ref
+source_kind
+source_span
+message_id
+turn_range
+timestamp_range
+modality
+```
+
+Those references remain opaque provenance handles. They do not require Character Memory core to resolve, retain, search, export, delete, redact, encrypt, or otherwise manage the underlying source material.
+
 ## Why this comes after retrieval and governance work
 
 Generated memories are only useful if the system can evaluate whether they improve recall and continuity.
@@ -71,7 +109,8 @@ Those layers make it possible to judge whether generated candidates help or poll
 ## Goals
 
 ```text
-normalize raw chat/transcript-like input
+accept bounded caller-provided raw/transcript-like input as transient processor input
+normalize supported input envelopes for candidate generation
 optionally segment input into episode candidates
 generate episode summaries
 extract salient observation candidates
@@ -82,6 +121,7 @@ generate DerivedMemory candidates
 score salience/admission candidates
 generate natural-language embedding surfaces
 respect privacy/exclusion policy before processor calls
+preserve caller-supplied source references and source spans
 return inspectable RememberWritePlan
 support draft/review/commit workflows through v0.1.3 primitives
 ```
@@ -90,6 +130,14 @@ support draft/review/commit workflows through v0.1.3 primitives
 
 ```text
 autonomous background log scanning
+raw conversation-log storage
+raw transcript storage
+verbose tool-output storage
+raw file/blob storage
+raw image/audio/video storage
+raw sensor-log storage
+raw-log search
+public raw-reference resolution
 raw audio transcription
 raw image/video understanding
 robotic sensor fusion
@@ -180,6 +228,11 @@ processor-level redaction
 
 ```text
 Caller can pass raw chat/transcript-like input and receive a RememberWritePlan.
+Raw/transcript-like input can generate candidates without being persisted by Character Memory.
+Generated candidates preserve caller-supplied raw_ref/source-span provenance.
+raw_ref remains opaque to Character Memory core.
+No raw-log search API is added.
+No public raw-reference resolution API is added.
 Caller can request draft-only generation through prepare-like behavior.
 Generated DerivedMemory candidates include provenance.
 Explicit corrections generate correction candidates.

@@ -245,6 +245,37 @@ CommitmentLifecycle
 
 Association support should be used to explain promotion, demotion, decay, or retrieval inclusion decisions.
 
+## Association support over durable association scores
+
+v0.5 persists association structure and support evidence.
+
+Persisted graph concepts:
+
+```text
+AssociativeUnit
+AssociativeMembership
+AssociativeMembership.status
+AssociativeMembership.role, when needed
+AssociationSupport
+AssociationSupport.support_type
+AssociationSupport.support_source_id
+AssociationSupport.created_at
+```
+
+Derived or rebuildable values:
+
+```text
+membership_strength
+membership_confidence
+membership_salience
+supporting_signal_count
+last_reinforced_at
+activation score
+review priority
+```
+
+Durable graph truth is the associative unit, membership lifecycle, and support evidence. Retrieval-time and maintenance-time policy compute scores from that evidence.
+
 ## Query-time activation
 
 Before creating or updating any persistent associative unit, retrieval should be able to activate memories through the existing graph.

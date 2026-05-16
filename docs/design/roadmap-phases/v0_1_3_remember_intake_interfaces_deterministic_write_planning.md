@@ -160,6 +160,38 @@ observation ID
 
 Behavior-influencing `DerivedMemoryCandidate` values must carry provenance to an `Episode` or `Observation`.
 
+`CandidateProvenance` also records narrow candidate-origin facts that cannot be reliably reconstructed after commit.
+
+Planned fields:
+
+```rust
+enum CandidateProducerKind {
+    Caller,
+    DeterministicHelper,
+    RuleProcessor,
+    ModelProcessor,
+    ImportTool,
+    System,
+    Unknown,
+}
+
+enum RationaleOrigin {
+    ProvidedByCaller,
+    ProvidedByProcessor,
+    InferredByProcessor,
+    Unavailable,
+}
+```
+
+These fields answer:
+
+```text
+who or what proposed the candidate
+whether rationale was caller-provided, processor-provided, inferred, or unavailable
+```
+
+They are intentionally narrow. v0.1.3 does not add a generic `MetaMemory` object, generic confidence field, parallel context-edge graph, durable retrieval reasons, or generic evidence-reference metadata that duplicates graph-authoritative provenance.
+
 ### RememberWritePlan
 
 An inspectable plan describing what would be written if committed.
@@ -326,6 +358,12 @@ raw audio/video processing
 full assisted remember workflow
 application review callback framework
 learned write policy
+generic MetaMemory object
+generic durable rationale metadata on every memory object
+parallel context-edge graph
+raw-log storage
+raw-log search
+public raw-reference resolution
 ```
 
 ## Validation rules
@@ -344,6 +382,10 @@ Qdrant vector candidates point to graph objects in the same write plan or existi
 RetrievalStatsStore updates only reference accepted graph-authoritative relationships
 source spans are structurally valid when provided
 idempotency keys prevent duplicate retry writes
+candidate producer kind is valid when present
+rationale origin is explicit when rationale text is supplied
+inferred rationale is not represented as caller-provided rationale
+raw_ref values are treated as opaque source references, not resolved raw content
 ```
 
 Invalid plans should not commit.
@@ -405,15 +447,16 @@ Qdrant remains candidate recall only.
 Oxigraph remains authoritative for object existence, links, provenance, lifecycle, currentness, and final inclusion.
 RetrievalStatsStore remains derived policy metadata only.
 No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
+CandidateProvenance records candidate producer kind and rationale origin.
+Missing rationale can be represented explicitly as unavailable.
+No v0.1.3 helper persists raw logs or resolves raw_ref values.
 ```
 
-## Revisit when
+## v0.6 integration path
 
-Revisit during v0.6 assisted remember workflow.
+v0.6 generated memory processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
 
-At that point, generated memory processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
-
-The future v0.6 work may add admission states such as:
+The v0.6 work owns generated-candidate admission states such as:
 
 ```text
 Accepted
@@ -423,4 +466,4 @@ Rejected
 Invalid
 ```
 
-v0.1.3 should not add those states unless implementation clearly requires them.
+v0.1.3 does not add those states.
