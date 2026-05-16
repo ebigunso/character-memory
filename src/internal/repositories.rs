@@ -2,12 +2,12 @@ mod correction_forget_pipeline;
 mod embedder;
 mod graph_authority_store;
 mod link_pipeline;
-mod raw_reference_resolver;
 mod reconciliation;
 mod remember_pipeline;
 mod retrieval_selectivity;
 mod retrieval_stats_store;
 mod retrieve_pipeline;
+mod source_reference;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vector_candidate_store;
@@ -37,9 +37,10 @@ pub(crate) use graph_authority_store::{
 #[allow(unused_imports)]
 pub(crate) use link_pipeline::LinkPipeline;
 
-// Raw-reference contracts remain internal until production raw storage lands.
+// Source-reference contracts remain internal; core stores opaque references,
+// not caller-owned source material.
 #[allow(unused_imports)]
-pub(crate) use raw_reference_resolver::{RawReference, RawReferenceResolver};
+pub(crate) use source_reference::{SourceReference, SourceReferenceResolver};
 
 // Internal/admin reconciliation diagnostics. These remain out of the public
 // CharacterMemory facade until a governance surface is planned.

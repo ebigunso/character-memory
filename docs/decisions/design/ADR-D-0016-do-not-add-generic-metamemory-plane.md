@@ -37,7 +37,7 @@ generic intent
 generic assumptions
 generic alternatives
 generic decision context
-generic evidence_refs duplicate
+generic evidence_refs that duplicate provenance
 generic context_edges meta-graph
 allowed retrieval profiles
 review priority

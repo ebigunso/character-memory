@@ -223,7 +223,8 @@ MemoryLink
 ContinuityContextPack inputs
 currentness/lifecycle state
 provenance links
-source references and source spans
+source references
+source spans once introduced by v0.1.3 write planning
 ```
 
 Core memory storage does not include:
@@ -278,14 +279,14 @@ Core model package
 Storage interfaces
 Default Qdrant candidate-recall adapter
 Default Oxigraph graph-authority adapter
-Opaque source-reference and source-span utilities
+Opaque source-reference utilities
 Schema/versioning utilities
 Stable ID/IRI utilities
 Test fixtures
 Migration hooks
 ```
 
-Phase 0 does not implement raw-log storage, raw-log search, or public raw-reference resolution. Source-reference utilities represent caller-managed source material for provenance.
+Phase 0 does not implement raw-log storage, raw-log search, public raw-reference resolution, or source-span utilities. Source-reference utilities represent caller-managed source material for provenance. v0.1.3 introduces source-span handling as part of generation-ready write planning.
 
 ## Implemented module layout
 

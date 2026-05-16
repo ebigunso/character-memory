@@ -128,7 +128,7 @@ The default implementation is backed by Qdrant and an Oxigraph HTTP service.
 
 Qdrant is used for vector candidate recall. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=service` with `OXIGRAPH_CONNECTION_STRING=http://localhost:7878`. Embedded filesystem persistence remains available with `GRAPH_STORE_MODE=persistent`; deterministic tests and fixtures use `GRAPH_STORE_MODE=in_memory`.
 
-Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers and source spans for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
+Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
 
 Integration tests that exercise external vector storage require a local Qdrant instance reachable over gRPC.
 
