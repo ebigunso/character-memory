@@ -126,12 +126,8 @@ cue_entity_ids
 cue_concept_ids
 cue_terms
 summary_text
-strength
-salience
-confidence
 created_at
 updated_at
-last_reinforced_at
 review_after
 membership_materialization
 ```
@@ -159,13 +155,8 @@ unit_id
 member_memory_id
 membership_status
 member_role
-membership_strength
-membership_confidence
-membership_salience
-supporting_signal_count
 added_at
 updated_at
-last_reinforced_at
 review_after
 rationale
 ```
@@ -219,10 +210,9 @@ Suggested fields:
 ```text
 id
 support_target_id
-support_kind
-source_memory_ids
+support_type
+support_source_id
 retrieval_trace_id
-weight
 created_at
 rationale
 ```
@@ -244,6 +234,37 @@ CommitmentLifecycle
 ```
 
 Association support should be used to explain promotion, demotion, decay, or retrieval inclusion decisions.
+
+## Association support over durable association scores
+
+v0.5 persists association structure and support evidence.
+
+Persisted graph concepts:
+
+```text
+AssociativeUnit
+AssociativeMembership
+AssociativeMembership.status
+AssociativeMembership.role, when needed
+AssociationSupport
+AssociationSupport.support_type
+AssociationSupport.support_source_id
+AssociationSupport.created_at
+```
+
+Derived or rebuildable values:
+
+```text
+membership_strength
+membership_confidence
+membership_salience
+supporting_signal_count
+last_reinforced_at
+activation score
+review priority
+```
+
+Durable graph truth is the associative unit, membership lifecycle, and support evidence. Retrieval-time and maintenance-time policy compute scores from that evidence.
 
 ## Query-time activation
 
@@ -422,7 +443,7 @@ select exemplars
 support human-like serendipitous recall
 avoid broad-entity clique growth
 represent associative structures inside graph authority
-track member-level status, role, strength, and rationale
+track member-level status, role, support evidence, and rationale
 support query-time activation before durable association
 promote associations only with repeated or multi-signal support
 use summaries and exemplars for retrieval quality, not as hidden substitutes for lost membership

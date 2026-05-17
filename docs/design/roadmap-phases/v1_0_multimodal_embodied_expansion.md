@@ -182,17 +182,24 @@ A result or consequence of an action.
 
 # 4. Multimodal storage policy
 
-Do not store raw media directly in the graph.
+Do not store raw media or raw sensory logs directly in the Character Memory graph, vector store, or default core library storage.
 
 Use:
 
 ```text
-raw media archive → audio/video/sensor files or references
-graph → symbolic observations, entities, actions, outcomes
-vector store → natural-language surfaces over salient observations
+external source material
+  → audio/video/sensor files, transcripts, documents, screen logs, or references managed outside Character Memory
+
+Character Memory graph
+  → symbolic observations, entities, actions, outcomes, places, objects, threads, provenance links
+
+vector store
+  → natural-language surfaces over salient symbolic observations
 ```
 
-This keeps the Character Memory graph tractable.
+`raw_ref` remains an opaque provenance bridge into external source material. It is not a Character Memory-owned media archive and does not imply public raw-reference resolution.
+
+This keeps multimodal expansion focused on symbolic continuity memory rather than raw media or sensor-log infrastructure.
 
 ---
 

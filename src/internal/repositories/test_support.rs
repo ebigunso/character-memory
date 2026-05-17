@@ -25,8 +25,8 @@ use crate::internal::models::vector::{
 use crate::internal::repositories::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder, RawReference,
-    RawReferenceResolver, VectorCandidateStore,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder, ResolvedSourceReference,
+    SourceReferenceResolver, VectorCandidateStore,
 };
 
 #[derive(Debug, Default)]
@@ -400,11 +400,11 @@ impl MemoryEmbedder for DeterministicMemoryEmbedder {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct FixtureRawReferenceResolver {
-    entries: Mutex<Vec<RawReference>>,
+pub(crate) struct FixtureSourceReferenceResolver {
+    entries: Mutex<Vec<ResolvedSourceReference>>,
 }
 
-impl FixtureRawReferenceResolver {
+impl FixtureSourceReferenceResolver {
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -414,10 +414,10 @@ impl FixtureRawReferenceResolver {
         reference: impl Into<String>,
         text: impl Into<String>,
     ) -> Result<(), CustomError> {
-        let raw_reference = RawReference::new(reference, text);
+        let source_reference = ResolvedSourceReference::new(reference, text);
         let mut entries = lock(&self.entries)?;
-        entries.retain(|entry| entry.reference != raw_reference.reference);
-        entries.push(raw_reference);
+        entries.retain(|entry| entry.reference != source_reference.reference);
+        entries.push(source_reference);
         Ok(())
     }
 
@@ -433,8 +433,11 @@ impl FixtureRawReferenceResolver {
 }
 
 #[async_trait]
-impl RawReferenceResolver for FixtureRawReferenceResolver {
-    async fn resolve(&self, reference: &str) -> Result<Option<RawReference>, CustomError> {
+impl SourceReferenceResolver for FixtureSourceReferenceResolver {
+    async fn resolve(
+        &self,
+        reference: &str,
+    ) -> Result<Option<ResolvedSourceReference>, CustomError> {
         Ok(lock(&self.entries)?
             .iter()
             .find(|entry| entry.reference == reference)
@@ -1657,8 +1660,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_reference_resolver_resolves_in_memory_fixture_content() {
-        let resolver = FixtureRawReferenceResolver::new();
+    async fn source_reference_resolver_resolves_in_memory_fixture_content() {
+        let resolver = FixtureSourceReferenceResolver::new();
 
         resolver
             .insert("raw://fixture/conversation#turn=1", "raw fixture text")
@@ -1670,12 +1673,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.text, "raw fixture text");
+        assert_eq!(resolved.resolved_text, "raw fixture text");
     }
 
     #[tokio::test]
-    async fn raw_reference_resolver_reports_unavailable_reference_as_none() {
-        let resolver = FixtureRawReferenceResolver::new();
+    async fn source_reference_resolver_reports_unavailable_reference_as_none() {
+        let resolver = FixtureSourceReferenceResolver::new();
 
         resolver
             .insert("raw://fixture/conversation#turn=1", "raw fixture text")
@@ -1689,8 +1692,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_reference_resolver_overwrites_duplicate_references_deterministically() {
-        let resolver = FixtureRawReferenceResolver::new();
+    async fn source_reference_resolver_overwrites_duplicate_references_deterministically() {
+        let resolver = FixtureSourceReferenceResolver::new();
 
         resolver
             .insert("raw://fixture/conversation#turn=1", "first fixture text")
@@ -1711,13 +1714,13 @@ mod tests {
         assert_eq!(first, second);
         let resolved = first.unwrap();
         assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.text, "updated fixture text");
+        assert_eq!(resolved.resolved_text, "updated fixture text");
     }
 
     #[tokio::test]
-    async fn raw_reference_resolver_uses_fixture_backed_file_content() {
-        let resolver = FixtureRawReferenceResolver::new();
-        let path = std::env::temp_dir().join(format!("cmem-raw-ref-{}.txt", Uuid::new_v4()));
+    async fn source_reference_resolver_uses_fixture_backed_file_content() {
+        let resolver = FixtureSourceReferenceResolver::new();
+        let path = std::env::temp_dir().join(format!("cmem-source-ref-{}.txt", Uuid::new_v4()));
         fs::write(&path, "raw fixture text").unwrap();
 
         resolver
@@ -1730,7 +1733,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.reference, "file:fixture/raw-reference.txt");
-        assert_eq!(resolved.text, "raw fixture text");
+        assert_eq!(resolved.resolved_text, "raw fixture text");
 
         fs::remove_file(path).unwrap();
     }

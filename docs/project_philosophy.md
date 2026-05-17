@@ -101,7 +101,7 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 
 | Concept | Meaning | Implementation implication |
 |---|---|---|
-| Episode | A remembered event or interaction. | Store event content, time, participants, context, and provenance. Preserve raw episode data where possible. |
+| Episode | A remembered event or interaction. | Store event content, time, participants, context, and provenance. Preserve enough episode detail and source provenance for later correction, inspection, and reflection. |
 | Entity | A person, project, place, object, topic, character, organization, or recurring concept. | Extract and link entities so memories can be retrieved through relationships, not only similar wording. Treat entity roles as application-level interpretation, not core schema truth. |
 | Temporal context | When something happened and how events relate over time. | Support recency, sequence, duration, intervals, anniversaries, and change over time. |
 | Relation | A typed or inferred connection between memories and entities. | Represent relationships such as involved in, caused by, follows from, contradicts, resolved by, or similar to. |
@@ -163,11 +163,12 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **Design for character continuity first.** Backend choices, vector indexes, and graph storage are implementation details. The user-visible outcome is an assistant or character that remembers and behaves consistently over time.
 - **Prefer episodes over isolated facts.** Facts are useful, but character is shaped by remembered events. Preserve the context in which facts emerged.
 - **Preserve provenance.** Derived reflections and character signals should link back to source memories. This keeps the system auditable and correctable.
+- **Treat raw source material as evidence, not the memory substrate.** Character Memory should model remembered experience through episodes, observations, entities, links, reflections, and current continuity views. Source material should ground those memories through provenance, but the core memory model should not be shaped around raw archival logs.
 - **Make time a first-class dimension.** A timestamp is not enough. The system should understand before and after, recent and old, repeated and one-off, ongoing and resolved.
 - **Make entities first-class.** People, projects, places, characters, objects, and recurring concepts are anchors for recall. Entity continuity is central to relationship and scope continuity.
 - **Keep entity policy use-case agnostic.** The core library should not special-case user, assistant, player, NPC, protagonist, or other application roles. Application-specific layers can provide scope and role hints.
 - **Bound entity expansion.** Recurring entities should support recall without causing unbounded graph traversal or accidental pairwise link growth.
-- **Do not collapse memory into summaries only.** Summaries are useful for compression, but raw episodes or detailed episode records should remain available when possible.
+- **Do not collapse memory into unsupported summaries only.** Summaries are useful for compression, but behavior-influencing memory should remain grounded in episodes, observations, provenance, and correction paths.
 - **Let memory influence behavior, not dictate it.** The LLM should receive memory as grounded context. It should not be forced into brittle rules from stale memories.
 - **Support correction and forgetting.** Persistent memory must support updates, contradictions, deletion, decay, and user-controlled correction.
 - **Expose retrieval rationale.** Implementation designers and application developers need to understand why a memory was retrieved.
