@@ -485,13 +485,20 @@ fn parse_env_fanout_budget(
                 parse_usize(min_name, &min_value)?,
                 parse_usize(max_name, &max_value)?,
             );
-            validate_fanout_budget(&format!("{min_name}/{max_name}"), budget)?;
+            validate_fanout_budget(fanout_env_budget_name(min_name, max_name), budget)?;
             Ok(Some(budget))
         }
         _ => Err(CustomError::ConfigParseError(format!(
             "{min_name} and {max_name} must be provided together"
         ))),
     }
+}
+
+fn fanout_env_budget_name<'a>(min_name: &'a str, max_name: &'a str) -> &'a str {
+    min_name
+        .strip_suffix("_MIN")
+        .filter(|base| max_name == format!("{base}_MAX"))
+        .unwrap_or(min_name)
 }
 
 fn parse_usize(name: &str, value: &str) -> Result<usize, CustomError> {
@@ -748,6 +755,25 @@ mod tests {
             result,
             Err(CustomError::ConfigParseError(message))
                 if message.contains("retrieval.fanout.about_entity.derived_memory")
+        ));
+    }
+
+    #[test]
+    fn env_fanout_budget_error_uses_base_env_name() {
+        let result = validate_fanout_budget(
+            fanout_env_budget_name(
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
+            ),
+            FanoutBudgetSettings::new(9, 8),
+        );
+
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY.min")
+                    && !message.contains("_MIN/")
+                    && !message.contains("_MAX.min")
         ));
     }
 

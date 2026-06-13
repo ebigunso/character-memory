@@ -44,6 +44,10 @@ impl RetrievalSelectivityPolicy {
             {
                 spec.min_fanout = min_fanout;
                 spec.max_fanout = max_fanout;
+            } else {
+                return Err(CustomError::ConfigParseError(format!(
+                    "unsupported retrieval fanout override for relation={relation:?} object_type={object_type:?}"
+                )));
             }
         }
         Ok(Self {
@@ -514,6 +518,23 @@ mod tests {
         assert!(
             matches!(result, Err(CustomError::ConfigParseError(message)) if message.contains("min <= max"))
         );
+    }
+
+    #[test]
+    fn selectivity_policy_rejects_unknown_fanout_override_targets() {
+        let result = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+            1.0,
+            1.0,
+            [(RelationType::About, ObjectType::Episode, 0, 8)],
+        );
+
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("unsupported retrieval fanout override")
+                    && message.contains("About")
+                    && message.contains("Episode")
+        ));
     }
 
     #[tokio::test]
