@@ -365,7 +365,7 @@ async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError>;
 
 Optional low-level diagnostics:
 
-```rust
+```text
 RetrieveOutcome may include light RetrievalRationale or RetrievalTelemetry when the caller enables diagnostic output.
 ```
 

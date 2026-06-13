@@ -21,7 +21,7 @@ Purpose:
 
 ## Entries
 
-## 2026-06-12 - Cast usize To i64 For config Crate set_override In Test Settings  [tags: tooling, validation]
+## 2026-06-12 - Cast `usize` To `i64` For `config` Crate `set_override` In Test Settings  [tags: tooling, validation]
 
 Context:
 - Plan: v0.1.2 closeout divergence fixes

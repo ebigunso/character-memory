@@ -92,7 +92,7 @@ correction episode explains why
 old memory remains historical; suppression removes influence, never the record
 ```
 
-Destructive deletion is not a memory operation. Erasure exists only as an out-of-band operational purge (compliance, security remediation, operator-directed alteration) that tombstones dangling provenance targets. See ADR-D-0017.
+Destructive deletion is not a memory operation. Erasure exists only as an out-of-band operational purge (compliance, security remediation, operator-directed alteration) that tombstones dangling provenance targets. See [ADR-D-0017](../decisions/design/ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md).
 
 ## 2.6 Retrieval should be explainable
 
