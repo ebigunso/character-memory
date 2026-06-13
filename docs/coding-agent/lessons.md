@@ -21,6 +21,72 @@ Purpose:
 
 ## Entries
 
+## 2026-06-12 - Cast usize To i64 For config Crate set_override In Test Settings  [tags: tooling, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_3 facade integration tests
+- Roles involved: Worker
+
+Symptom:
+- Integration test compilation failed when passing `usize` values to `config::ConfigBuilder::set_override`.
+
+Root cause:
+- The config crate's `Value` conversion supports signed integer types such as `i64` but not `usize`.
+
+Fix applied:
+- Cast fanout override values to `i64` before calling `set_override`.
+
+Prevention:
+- When constructing test `Settings` through `config::ConfigBuilder`, cast `usize` numeric overrides to `i64` or another supported config value type.
+
+Evidence:
+- tests/test_utils.rs helper compiles and full validation passes after the cast.
+
+## 2026-06-12 - Constrain Graph Roots When Asserting Entity-Root Fanout  [tags: planning, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_3 facade integration tests
+- Roles involved: Worker
+
+Symptom:
+- A fanout-override assertion failed because returned derived memories were also reachable through additional vector roots, masking the entity-root fanout constraint.
+
+Root cause:
+- The retrieval context allowed multiple graph roots while the test intended to isolate entity-root selectivity behavior.
+
+Fix applied:
+- Limited the test retrieval context to a single selected entity graph root.
+
+Prevention:
+- Facade tests for entity-root-only selectivity should constrain graph root selection enough to isolate the entity root under test.
+
+Evidence:
+- tests/v0_1_2_retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
+
+## 2026-06-12 - Start Qdrant Before Full cargo test Validation  [tags: validation, tooling]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_1 required validation
+- Roles involved: Worker
+
+Symptom:
+- `cargo test` failed in tests/initialization_tests.rs because Qdrant was configured but unreachable at localhost:6334; the failure surfaced as a wrapped Qdrant transport error instead of a clean skip.
+
+Root cause:
+- Live-gated integration tests can fail rather than skip when Qdrant configuration resolves but the service is down.
+
+Fix applied:
+- Started Qdrant with `docker compose -f docker-compose.qdrant.yml up -d` and reran the exact required validation command.
+
+Prevention:
+- Before full `cargo test` validation, verify local Qdrant is up (`docker compose -f docker-compose.qdrant.yml ps`) and start it if needed.
+
+Evidence:
+- Final validation runs in Task_1, Task_3, and Task_4 all passed with Qdrant running.
+
 ## 2026-05-10 - Dispatch Research Before Broad Discovery On Non-Trivial Work  [tags: workflow, planning, delegation]
 
 Context:

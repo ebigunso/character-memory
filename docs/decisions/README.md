@@ -61,6 +61,7 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-D-0014: Represent associative membership lifecycle separately from associative unit lifecycle](design/ADR-D-0014-represent-associative-membership-lifecycle-separately.md)
 - [ADR-D-0015: Keep raw source storage outside Character Memory core](design/ADR-D-0015-keep-raw-source-storage-outside-core.md)
 - [ADR-D-0016: Do not add a generic MetaMemory plane to core](design/ADR-D-0016-do-not-add-generic-metamemory-plane.md)
+- [ADR-D-0017: Keep the memory record append-only, with erasure as an out-of-band operational action](design/ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md)
 
 ### Implementation Decisions
 
