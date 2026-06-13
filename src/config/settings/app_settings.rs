@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::api::types::{ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::internal::models::vector::EmbeddingModel;
 
@@ -25,6 +26,50 @@ pub struct Settings {
     selectivity_smoothing_alpha: f64,
     #[serde(default = "default_selectivity_gamma")]
     selectivity_gamma: f64,
+    #[serde(default)]
+    retrieval: RetrievalSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+struct RetrievalSettings {
+    #[serde(default)]
+    fanout: RetrievalFanoutSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+struct RetrievalFanoutSettings {
+    #[serde(default)]
+    about_entity: FanoutObjectSettings,
+    #[serde(default)]
+    participant_entity: FanoutObjectSettings,
+    #[serde(default)]
+    part_of_thread: FanoutObjectSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+struct FanoutObjectSettings {
+    derived_memory: Option<FanoutBudgetSettings>,
+    episode: Option<FanoutBudgetSettings>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub(crate) struct FanoutBudgetSettings {
+    min: usize,
+    max: usize,
+}
+
+impl FanoutBudgetSettings {
+    pub(crate) fn new(min: usize, max: usize) -> Self {
+        Self { min, max }
+    }
+
+    pub(crate) fn min(self) -> usize {
+        self.min
+    }
+
+    pub(crate) fn max(self) -> usize {
+        self.max
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -113,6 +158,7 @@ impl Settings {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
         })?;
         settings.validate_selectivity_settings()?;
+        settings.validate_fanout_settings()?;
         Ok(settings)
     }
 
@@ -168,6 +214,9 @@ impl Settings {
         let selectivity_gamma = env::var("SELECTIVITY_GAMMA")
             .map(|value| parse_positive_f64("SELECTIVITY_GAMMA", &value))
             .unwrap_or(Ok(default_selectivity_gamma()))?;
+        let retrieval = RetrievalSettings {
+            fanout: load_env_fanout_settings()?,
+        };
 
         let settings = Self {
             qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
@@ -180,8 +229,10 @@ impl Settings {
             retrieval_stats_health_fail_mode,
             selectivity_smoothing_alpha,
             selectivity_gamma,
+            retrieval,
         };
         settings.validate_selectivity_settings()?;
+        settings.validate_fanout_settings()?;
         Ok(settings)
     }
 
@@ -215,6 +266,12 @@ impl Settings {
 
     pub fn get_selectivity_gamma(&self) -> f64 {
         self.selectivity_gamma
+    }
+
+    pub(crate) fn get_retrieval_fanout_budgets(
+        &self,
+    ) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
+        self.retrieval.fanout.budgets()
     }
 
     pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
@@ -266,6 +323,80 @@ impl Settings {
         )?;
         validate_positive_f64("selectivity_gamma", self.selectivity_gamma)
     }
+
+    fn validate_fanout_settings(&self) -> Result<(), CustomError> {
+        self.retrieval.fanout.validate_supported_targets()?;
+        for (relation, object_type, budget) in self.get_retrieval_fanout_budgets() {
+            validate_fanout_budget(
+                &format!(
+                    "retrieval.fanout.{}.{}",
+                    fanout_relation_name(relation),
+                    fanout_object_type_name(object_type)
+                ),
+                budget,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl RetrievalFanoutSettings {
+    fn validate_supported_targets(&self) -> Result<(), CustomError> {
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.about_entity.episode",
+            self.about_entity.episode,
+        )?;
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.participant_entity.derived_memory",
+            self.participant_entity.derived_memory,
+        )?;
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.part_of_thread.episode",
+            self.part_of_thread.episode,
+        )?;
+        Ok(())
+    }
+
+    fn budgets(&self) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
+        let mut budgets = default_retrieval_fanout_budgets();
+        if let Some(budget) = self.about_entity.derived_memory {
+            upsert_fanout_budget(
+                &mut budgets,
+                RelationType::About,
+                ObjectType::DerivedMemory,
+                budget,
+            );
+        }
+        if let Some(budget) = self.participant_entity.episode {
+            upsert_fanout_budget(
+                &mut budgets,
+                RelationType::Involves,
+                ObjectType::Episode,
+                budget,
+            );
+        }
+        if let Some(budget) = self.part_of_thread.derived_memory {
+            upsert_fanout_budget(
+                &mut budgets,
+                RelationType::PartOfThread,
+                ObjectType::DerivedMemory,
+                budget,
+            );
+        }
+        budgets
+    }
+}
+
+fn reject_unsupported_fanout_target(
+    name: &str,
+    budget: Option<FanoutBudgetSettings>,
+) -> Result<(), CustomError> {
+    if budget.is_some() {
+        return Err(CustomError::ConfigParseError(format!(
+            "unsupported retrieval fanout target: {name}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -287,6 +418,7 @@ impl Settings {
             retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode::Conservative,
             selectivity_smoothing_alpha: default_selectivity_smoothing_alpha(),
             selectivity_gamma: default_selectivity_gamma(),
+            retrieval: RetrievalSettings::default(),
         }
     }
 }
@@ -301,6 +433,107 @@ fn default_selectivity_smoothing_alpha() -> f64 {
 
 fn default_selectivity_gamma() -> f64 {
     1.0
+}
+
+pub(crate) fn default_retrieval_fanout_budgets(
+) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
+    vec![
+        (
+            RelationType::About,
+            ObjectType::DerivedMemory,
+            FanoutBudgetSettings::new(0, 20),
+        ),
+        (
+            RelationType::Involves,
+            ObjectType::Episode,
+            FanoutBudgetSettings::new(0, 5),
+        ),
+        (
+            RelationType::PartOfThread,
+            ObjectType::DerivedMemory,
+            FanoutBudgetSettings::new(0, 15),
+        ),
+    ]
+}
+
+fn upsert_fanout_budget(
+    budgets: &mut Vec<(RelationType, ObjectType, FanoutBudgetSettings)>,
+    relation: RelationType,
+    object_type: ObjectType,
+    budget: FanoutBudgetSettings,
+) {
+    if let Some((_, _, existing)) =
+        budgets
+            .iter_mut()
+            .find(|(item_relation, item_object_type, _)| {
+                *item_relation == relation && *item_object_type == object_type
+            })
+    {
+        *existing = budget;
+    } else {
+        budgets.push((relation, object_type, budget));
+    }
+}
+
+fn load_env_fanout_settings() -> Result<RetrievalFanoutSettings, CustomError> {
+    Ok(RetrievalFanoutSettings {
+        about_entity: FanoutObjectSettings {
+            derived_memory: parse_env_fanout_budget(
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
+            )?,
+            episode: None,
+        },
+        participant_entity: FanoutObjectSettings {
+            derived_memory: None,
+            episode: parse_env_fanout_budget(
+                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MIN",
+                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MAX",
+            )?,
+        },
+        part_of_thread: FanoutObjectSettings {
+            derived_memory: parse_env_fanout_budget(
+                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MIN",
+                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MAX",
+            )?,
+            episode: None,
+        },
+    })
+}
+
+fn parse_env_fanout_budget(
+    min_name: &str,
+    max_name: &str,
+) -> Result<Option<FanoutBudgetSettings>, CustomError> {
+    let min_value = env::var(min_name).ok();
+    let max_value = env::var(max_name).ok();
+    match (min_value, max_value) {
+        (None, None) => Ok(None),
+        (Some(min_value), Some(max_value)) => {
+            let budget = FanoutBudgetSettings::new(
+                parse_usize(min_name, &min_value)?,
+                parse_usize(max_name, &max_value)?,
+            );
+            validate_fanout_budget(fanout_env_budget_name(min_name, max_name), budget)?;
+            Ok(Some(budget))
+        }
+        _ => Err(CustomError::ConfigParseError(format!(
+            "{min_name} and {max_name} must be provided together"
+        ))),
+    }
+}
+
+fn fanout_env_budget_name<'a>(min_name: &'a str, max_name: &'a str) -> &'a str {
+    min_name
+        .strip_suffix("_MIN")
+        .filter(|base| max_name == format!("{base}_MAX"))
+        .unwrap_or(min_name)
+}
+
+fn parse_usize(name: &str, value: &str) -> Result<usize, CustomError> {
+    value.parse::<usize>().map_err(|error| {
+        CustomError::ConfigParseError(format!("{name} must be a non-negative integer: {error}"))
+    })
 }
 
 fn parse_positive_f64(name: &str, value: &str) -> Result<f64, CustomError> {
@@ -322,6 +555,33 @@ fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
         )));
     }
     Ok(())
+}
+
+fn validate_fanout_budget(name: &str, budget: FanoutBudgetSettings) -> Result<(), CustomError> {
+    if budget.min > budget.max {
+        return Err(CustomError::ConfigParseError(format!(
+            "{name}.min must be less than or equal to {name}.max, got min={} max={}",
+            budget.min, budget.max
+        )));
+    }
+    Ok(())
+}
+
+fn fanout_relation_name(relation: RelationType) -> &'static str {
+    match relation {
+        RelationType::About => "about_entity",
+        RelationType::Involves => "participant_entity",
+        RelationType::PartOfThread => "part_of_thread",
+        _ => "unsupported_relation",
+    }
+}
+
+fn fanout_object_type_name(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::DerivedMemory => "derived_memory",
+        ObjectType::Episode => "episode",
+        _ => "unsupported_object_type",
+    }
 }
 
 #[cfg(test)]
@@ -364,6 +624,10 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 1.0);
         assert_eq!(settings.get_selectivity_gamma(), 1.0);
+        assert_eq!(
+            settings.get_retrieval_fanout_budgets(),
+            default_retrieval_fanout_budgets()
+        );
     }
 
     #[test]
@@ -448,6 +712,132 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
         assert_eq!(settings.get_selectivity_gamma(), 0.5);
+    }
+
+    #[test]
+    fn test_settings_new_accepts_nested_retrieval_fanout_overrides() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("retrieval.fanout.about_entity.derived_memory.min", 2)
+            .unwrap()
+            .set_override("retrieval.fanout.about_entity.derived_memory.max", 8)
+            .unwrap()
+            .set_override("retrieval.fanout.participant_entity.episode.min", 1)
+            .unwrap()
+            .set_override("retrieval.fanout.participant_entity.episode.max", 3)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let settings = Settings::new(external_config).unwrap();
+
+        assert_eq!(
+            settings.get_retrieval_fanout_budgets(),
+            vec![
+                (
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                    FanoutBudgetSettings::new(2, 8),
+                ),
+                (
+                    RelationType::Involves,
+                    ObjectType::Episode,
+                    FanoutBudgetSettings::new(1, 3),
+                ),
+                (
+                    RelationType::PartOfThread,
+                    ObjectType::DerivedMemory,
+                    FanoutBudgetSettings::new(0, 15),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_settings_new_rejects_invalid_retrieval_fanout_budget() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("retrieval.fanout.about_entity.derived_memory.min", 9)
+            .unwrap()
+            .set_override("retrieval.fanout.about_entity.derived_memory.max", 8)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let result = Settings::new(external_config);
+
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("retrieval.fanout.about_entity.derived_memory")
+        ));
+    }
+
+    #[test]
+    fn test_settings_new_rejects_unsupported_retrieval_fanout_targets() {
+        for target in [
+            "retrieval.fanout.about_entity.episode",
+            "retrieval.fanout.participant_entity.derived_memory",
+            "retrieval.fanout.part_of_thread.episode",
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override(format!("{target}.min"), 0)
+                .unwrap()
+                .set_override(format!("{target}.max"), 1)
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let result = Settings::new(external_config);
+
+            assert!(
+                matches!(result, Err(CustomError::ConfigParseError(message))
+                    if message.contains("unsupported retrieval fanout target")
+                        && message.contains(target)),
+                "{target} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn env_fanout_budget_error_uses_base_env_name() {
+        let result = validate_fanout_budget(
+            fanout_env_budget_name(
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
+                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
+            ),
+            FanoutBudgetSettings::new(9, 8),
+        );
+
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigParseError(message))
+                if message.contains("RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY.min")
+                    && !message.contains("_MIN/")
+                    && !message.contains("_MAX.min")
+        ));
     }
 
     #[test]

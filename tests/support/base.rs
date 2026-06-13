@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
-use character_memory::{CharacterMemory, CustomError, EmbeddingProvider};
+use character_memory::{CustomError, EmbeddingProvider};
 use qdrant_client::{Qdrant, QdrantError};
 use std::io::ErrorKind;
 use std::sync::Once;
@@ -9,24 +9,22 @@ use uuid::Uuid;
 
 static INIT: Once = Once::new();
 
-// Initialize environment once for all tests
 pub fn initialize() {
     INIT.call_once(|| {
         std::env::set_var("GRAPH_STORE_MODE", "in_memory");
     });
 }
 
-// Create a unique collection name for parallel test execution
 pub fn unique_collection_name() -> String {
     format!("test_collection_{}", Uuid::new_v4())
 }
 
-struct DeterministicEmbeddingProvider {
+pub struct DeterministicEmbeddingProvider {
     vector_size: usize,
 }
 
 impl DeterministicEmbeddingProvider {
-    fn new(vector_size: usize) -> Self {
+    pub fn new(vector_size: usize) -> Self {
         Self { vector_size }
     }
 
@@ -77,28 +75,6 @@ fn stable_hash(text: &str) -> usize {
     })
 }
 
-// Setup CharacterMemory instance with a unique collection
-pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), CustomError> {
-    initialize();
-
-    let collection_name = unique_collection_name();
-
-    // Use the load_test_settings function from the test_utils module
-    let settings = load_test_settings()?;
-    let embed_provider = Box::new(DeterministicEmbeddingProvider::new(
-        settings.get_embedding_vector_size()?,
-    ));
-
-    let character_memory = CharacterMemory::new_with_embedding_provider(
-        settings,
-        collection_name.clone(),
-        embed_provider,
-    )
-    .await?;
-
-    Ok((character_memory, collection_name))
-}
-
 pub fn is_qdrant_unavailable_error(error: &QdrantError) -> bool {
     match error {
         QdrantError::ResponseError { status } => status.code() == Code::Unavailable,
@@ -115,7 +91,6 @@ pub fn is_qdrant_unavailable_error(error: &QdrantError) -> bool {
     }
 }
 
-// Cleanup after tests by deleting the collection
 pub async fn cleanup_collection(collection_name: &str) {
     let settings = load_test_settings().expect("Failed to load settings from environment");
 
@@ -124,9 +99,5 @@ pub async fn cleanup_collection(collection_name: &str) {
         .build()
         .expect("Failed to create Qdrant client");
 
-    // Delete the collection
     let _ = client.delete_collection(collection_name).await;
-
-    // We don't assert on the result because the collection might not exist
-    // if the test failed before creating it
 }

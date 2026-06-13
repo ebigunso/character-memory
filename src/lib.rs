@@ -217,9 +217,13 @@ impl CharacterMemory {
             }
         };
         let stats_store = retrieval_stats_store(&settings)?;
-        let selectivity_policy = RetrievalSelectivityPolicy::try_new(
+        let fanout_budgets = settings.get_retrieval_fanout_budgets().into_iter().map(
+            |(relation, object_type, budget)| (relation, object_type, budget.min(), budget.max()),
+        );
+        let selectivity_policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
             settings.get_selectivity_smoothing_alpha(),
             settings.get_selectivity_gamma(),
+            fanout_budgets,
         )?;
 
         Ok(Self::from_parts_with_stats(

@@ -6,6 +6,7 @@ use character_memory::{
 };
 use uuid::Uuid;
 
+#[path = "support/basic.rs"]
 mod test_utils;
 
 #[tokio::test]
