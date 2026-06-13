@@ -15,6 +15,7 @@ use crate::internal::repositories::{
 pub(crate) struct RetrievalSelectivityPolicy {
     smoothing_alpha: f64,
     gamma: f64,
+    fanout_specs: [FanoutSpec; 3],
 }
 
 impl RetrievalSelectivityPolicy {
@@ -24,12 +25,39 @@ impl RetrievalSelectivityPolicy {
     }
 
     pub(crate) fn try_new(smoothing_alpha: f64, gamma: f64) -> Result<Self, CustomError> {
+        Self::try_new_with_fanout_budgets(smoothing_alpha, gamma, [])
+    }
+
+    pub(crate) fn try_new_with_fanout_budgets(
+        smoothing_alpha: f64,
+        gamma: f64,
+        fanout_budgets: impl IntoIterator<Item = (RelationType, ObjectType, usize, usize)>,
+    ) -> Result<Self, CustomError> {
         validate_positive_f64("selectivity_smoothing_alpha", smoothing_alpha)?;
         validate_positive_f64("selectivity_gamma", gamma)?;
+        let mut fanout_specs = default_fanout_specs();
+        for (relation, object_type, min_fanout, max_fanout) in fanout_budgets {
+            validate_fanout_budget(relation, object_type, min_fanout, max_fanout)?;
+            if let Some(spec) = fanout_specs
+                .iter_mut()
+                .find(|spec| spec.relation == relation && spec.object_type == object_type)
+            {
+                spec.min_fanout = min_fanout;
+                spec.max_fanout = max_fanout;
+            }
+        }
         Ok(Self {
             smoothing_alpha,
             gamma,
+            fanout_specs,
         })
+    }
+
+    fn fanout_spec(&self, relation: RelationType, object_type: ObjectType) -> Option<FanoutSpec> {
+        self.fanout_specs
+            .iter()
+            .copied()
+            .find(|spec| spec.relation == relation && spec.object_type == object_type)
     }
 }
 
@@ -185,15 +213,15 @@ pub(crate) async fn selectivity_plan_for_candidate(
             (None, None, None, true)
         };
 
-        let max_fanout = spec.max_fanout.min(static_max_fanout);
+        let budget_spec = policy
+            .fanout_spec(spec.relation, spec.object_type)
+            .unwrap_or(*spec);
+        let max_fanout = budget_spec.max_fanout.min(static_max_fanout);
+        let min_fanout = budget_spec.min_fanout.min(max_fanout);
         let chosen_fanout = match score {
-            Some(score) => smooth_fanout_budget(
-                score,
-                support_factor,
-                spec.min_fanout,
-                max_fanout,
-                policy.gamma,
-            ),
+            Some(score) => {
+                smooth_fanout_budget(score, support_factor, min_fanout, max_fanout, policy.gamma)
+            }
             None => conservative_fallback_fanout(max_fanout),
         };
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
@@ -228,6 +256,20 @@ fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
     if !value.is_finite() || value <= 0.0 {
         return Err(CustomError::ConfigParseError(format!(
             "{name} must be a finite positive number, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_fanout_budget(
+    relation: RelationType,
+    object_type: ObjectType,
+    min_fanout: usize,
+    max_fanout: usize,
+) -> Result<(), CustomError> {
+    if min_fanout > max_fanout {
+        return Err(CustomError::ConfigParseError(format!(
+            "retrieval fanout budget for {relation:?}->{object_type:?} must have min <= max, got min={min_fanout} max={max_fanout}"
         )));
     }
     Ok(())
@@ -338,7 +380,7 @@ fn increment_telemetry(telemetry: &mut SelectivityTelemetry, decision: Selectivi
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FanoutSpec {
     relation: RelationType,
     object_type: ObjectType,
@@ -347,27 +389,33 @@ struct FanoutSpec {
 }
 
 fn fanout_specs() -> &'static [FanoutSpec] {
-    &[
-        FanoutSpec {
-            relation: RelationType::About,
-            object_type: ObjectType::DerivedMemory,
-            min_fanout: 0,
-            max_fanout: 20,
-        },
-        FanoutSpec {
-            relation: RelationType::Involves,
-            object_type: ObjectType::Episode,
-            min_fanout: 0,
-            max_fanout: 5,
-        },
-        FanoutSpec {
-            relation: RelationType::PartOfThread,
-            object_type: ObjectType::DerivedMemory,
-            min_fanout: 0,
-            max_fanout: 15,
-        },
-    ]
+    &DEFAULT_FANOUT_SPECS
 }
+
+fn default_fanout_specs() -> [FanoutSpec; 3] {
+    DEFAULT_FANOUT_SPECS
+}
+
+const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
+    FanoutSpec {
+        relation: RelationType::About,
+        object_type: ObjectType::DerivedMemory,
+        min_fanout: 0,
+        max_fanout: 20,
+    },
+    FanoutSpec {
+        relation: RelationType::Involves,
+        object_type: ObjectType::Episode,
+        min_fanout: 0,
+        max_fanout: 5,
+    },
+    FanoutSpec {
+        relation: RelationType::PartOfThread,
+        object_type: ObjectType::DerivedMemory,
+        min_fanout: 0,
+        max_fanout: 15,
+    },
+];
 
 #[cfg(test)]
 mod tests {
@@ -417,6 +465,55 @@ mod tests {
             invalid_gamma,
             Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
         ));
+    }
+
+    #[test]
+    fn selectivity_policy_preserves_default_fanout_specs() {
+        let policy = RetrievalSelectivityPolicy::default();
+
+        assert_eq!(policy.fanout_specs, default_fanout_specs());
+    }
+
+    #[test]
+    fn selectivity_policy_accepts_fanout_budget_overrides() {
+        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+            1.0,
+            1.0,
+            [(RelationType::About, ObjectType::DerivedMemory, 2, 8)],
+        )
+        .unwrap();
+
+        assert_eq!(
+            policy
+                .fanout_spec(RelationType::About, ObjectType::DerivedMemory)
+                .unwrap(),
+            FanoutSpec {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                min_fanout: 2,
+                max_fanout: 8,
+            }
+        );
+        assert_eq!(
+            policy
+                .fanout_spec(RelationType::PartOfThread, ObjectType::DerivedMemory)
+                .unwrap()
+                .max_fanout,
+            15
+        );
+    }
+
+    #[test]
+    fn selectivity_policy_rejects_invalid_fanout_budgets() {
+        let result = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+            1.0,
+            1.0,
+            [(RelationType::About, ObjectType::DerivedMemory, 9, 8)],
+        );
+
+        assert!(
+            matches!(result, Err(CustomError::ConfigParseError(message)) if message.contains("min <= max"))
+        );
     }
 
     #[tokio::test]
@@ -492,6 +589,59 @@ mod tests {
                 && trace.chosen_fanout == 1
                 && trace.decision == SelectivityDecision::ConservativeFallback
         }));
+    }
+
+    #[tokio::test]
+    async fn selectivity_plan_uses_configured_fanout_budget() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462101").unwrap();
+        let derived_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462102").unwrap();
+        stats
+            .record_edges(&[RetrievalStatsEdge {
+                edge_key: format!("{entity_id}:about:derived_memory:current"),
+                entity_id,
+                relation_kind: RelationType::About,
+                object_id: derived_id,
+                object_type: ObjectType::DerivedMemory,
+                retention_state: crate::api::types::RetentionState::Active,
+                is_current: true,
+                first_seen_at: chrono::DateTime::UNIX_EPOCH,
+                last_seen_at: chrono::DateTime::UNIX_EPOCH,
+            }])
+            .await
+            .unwrap();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+            1.0,
+            1.0,
+            [(RelationType::About, ObjectType::DerivedMemory, 4, 4)],
+        )
+        .unwrap();
+        let candidate =
+            VectorCandidateMatch::new(entity_id, ObjectType::Entity, VectorSurface::Name, 0.95);
+
+        let plan = selectivity_plan_for_candidate(
+            &candidate,
+            20,
+            &stats,
+            policy,
+            &stats_context,
+            RetrievalLifecyclePolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        let about = plan
+            .traces
+            .iter()
+            .find(|trace| {
+                trace.relation == RelationType::About
+                    && trace.object_type == ObjectType::DerivedMemory
+            })
+            .unwrap();
+        assert_eq!(about.max_fanout, 4);
+        assert_eq!(about.chosen_fanout, 4);
     }
 
     #[tokio::test]
