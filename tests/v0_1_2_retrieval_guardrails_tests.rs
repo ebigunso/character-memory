@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use tempfile::TempDir;
 use uuid::Uuid;
 
+#[path = "support/persistent.rs"]
 mod test_utils;
 
 #[tokio::test]

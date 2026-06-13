@@ -226,7 +226,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
             Some(score) => {
                 smooth_fanout_budget(score, support_factor, min_fanout, max_fanout, policy.gamma)
             }
-            None => conservative_fallback_fanout(max_fanout),
+            None => conservative_fallback_fanout(min_fanout, max_fanout),
         };
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
         increment_telemetry(&mut plan.telemetry, decision);
@@ -308,8 +308,8 @@ fn semantic_support_factor(score: f32) -> f64 {
     1.0 + score.clamp(0.0, 1.0) as f64
 }
 
-fn conservative_fallback_fanout(max_fanout: usize) -> usize {
-    max_fanout.min(1)
+fn conservative_fallback_fanout(min_fanout: usize, max_fanout: usize) -> usize {
+    max_fanout.min(min_fanout.max(1))
 }
 
 fn spec_allowed_by_graph_scope(
@@ -453,6 +453,13 @@ mod tests {
         let budget = smooth_fanout_budget(0.0, 2.0, 0, 20, 1.0);
 
         assert_eq!(budget, 0);
+    }
+
+    #[test]
+    fn fallback_fanout_honors_configured_minimum_within_cap() {
+        assert_eq!(conservative_fallback_fanout(0, 20), 1);
+        assert_eq!(conservative_fallback_fanout(4, 20), 4);
+        assert_eq!(conservative_fallback_fanout(4, 2), 2);
     }
 
     #[test]

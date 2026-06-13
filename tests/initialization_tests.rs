@@ -1,5 +1,6 @@
 use character_memory::CustomError;
 
+#[path = "support/basic.rs"]
 mod test_utils;
 use test_utils::{cleanup_collection, is_qdrant_unavailable_error, try_setup_character_memory};
 
