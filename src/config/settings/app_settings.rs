@@ -325,6 +325,7 @@ impl Settings {
     }
 
     fn validate_fanout_settings(&self) -> Result<(), CustomError> {
+        self.retrieval.fanout.validate_supported_targets()?;
         for (relation, object_type, budget) in self.get_retrieval_fanout_budgets() {
             validate_fanout_budget(
                 &format!(
@@ -340,6 +341,22 @@ impl Settings {
 }
 
 impl RetrievalFanoutSettings {
+    fn validate_supported_targets(&self) -> Result<(), CustomError> {
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.about_entity.episode",
+            self.about_entity.episode,
+        )?;
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.participant_entity.derived_memory",
+            self.participant_entity.derived_memory,
+        )?;
+        reject_unsupported_fanout_target(
+            "retrieval.fanout.part_of_thread.episode",
+            self.part_of_thread.episode,
+        )?;
+        Ok(())
+    }
+
     fn budgets(&self) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
         let mut budgets = default_retrieval_fanout_budgets();
         if let Some(budget) = self.about_entity.derived_memory {
@@ -368,6 +385,18 @@ impl RetrievalFanoutSettings {
         }
         budgets
     }
+}
+
+fn reject_unsupported_fanout_target(
+    name: &str,
+    budget: Option<FanoutBudgetSettings>,
+) -> Result<(), CustomError> {
+    if budget.is_some() {
+        return Err(CustomError::ConfigParseError(format!(
+            "unsupported retrieval fanout target: {name}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -756,6 +785,40 @@ mod tests {
             Err(CustomError::ConfigParseError(message))
                 if message.contains("retrieval.fanout.about_entity.derived_memory")
         ));
+    }
+
+    #[test]
+    fn test_settings_new_rejects_unsupported_retrieval_fanout_targets() {
+        for target in [
+            "retrieval.fanout.about_entity.episode",
+            "retrieval.fanout.participant_entity.derived_memory",
+            "retrieval.fanout.part_of_thread.episode",
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override(format!("{target}.min"), 0)
+                .unwrap()
+                .set_override(format!("{target}.max"), 1)
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let result = Settings::new(external_config);
+
+            assert!(
+                matches!(result, Err(CustomError::ConfigParseError(message))
+                    if message.contains("unsupported retrieval fanout target")
+                        && message.contains(target)),
+                "{target} should be rejected"
+            );
+        }
     }
 
     #[test]
