@@ -21,6 +21,29 @@ Purpose:
 
 ## Entries
 
+## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: PR review and CI remediation follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- A warning-deny CI failure was initially approached with a broad suppression attribute before stepping back to consider whether the test helper structure itself was the root cause.
+
+Root cause:
+- Treated the immediate failing warning as the problem, instead of first asking what design or ownership boundary made the warning appear.
+
+Fix applied:
+- Reworked the integration test support layout so each test target imports only the helpers it needs, eliminating the warning naturally.
+
+Prevention:
+- When fixing a defect, first identify the smallest root cause that explains the symptom. Prefer structural or semantic fixes over suppressions, wrappers, retries, or local patches that merely hide the failure.
+- Use symptom patches only when the root cause is out of scope, externally owned, or explicitly accepted as a tradeoff; document that decision.
+
+Evidence:
+- The test support split removed the need for `dead_code` allowances and passed Clippy/test-target validation with warnings denied.
+
 ## 2026-06-14 - Prefer Targeted Test Support Modules Over Broad `dead_code` Allows  [tags: validation, ci, maintainability]
 
 Context:
