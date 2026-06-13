@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-06-14 - Prefer Targeted Test Support Modules Over Broad `dead_code` Allows  [tags: validation, ci, maintainability]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: PR #53 review and CI remediation
+- Roles involved: Orchestrator
+
+Symptom:
+- Initial CI remediation used a broad `#![allow(dead_code)]` in the shared integration test helper module to silence warnings denied by Clippy and test target compilation.
+
+Root cause:
+- `tests/test_utils.rs` was compiled both as a standalone integration test target and as a helper module in each integration test. Different targets used different helper subsets, causing warning-deny failures. The first fix treated the warning as noise instead of the helper layout as the design problem.
+
+Fix applied:
+- Replaced the catch-all integration helper target with targeted modules under `tests/support/`, so each integration test imports only the helper set it needs.
+
+Prevention:
+- When CI fails under `-D warnings`, first ask whether the code layout can avoid the warning naturally. Use `allow` attributes only when unused code is intentional and no cleaner structure exists.
+
+Evidence:
+- `cargo clippy --all-targets -- -D warnings`, `cargo test --no-run`, and `cargo test` pass after splitting test support modules without any dead-code allowance.
+
 ## 2026-06-12 - Cast `usize` To `i64` For `config` Crate `set_override` In Test Settings  [tags: tooling, validation]
 
 Context:
