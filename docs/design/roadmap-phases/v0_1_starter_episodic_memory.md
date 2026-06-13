@@ -269,6 +269,8 @@ fulfills_commitment
 associated_with
 ```
 
+Admission note: `associated_with`-style links are admissible only with stronger evidence or explicit application intent until v0.5 associative structures exist. Shared low-selectivity co-occurrence alone must not create durable pairwise links; see [ADR-I-0011](../../decisions/implementation/ADR-I-0011-guard-against-low-information-co-occurrence-links.md).
+
 ---
 
 # 4. Starter write pipeline
@@ -363,11 +365,11 @@ async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError>;
 
 Optional low-level diagnostics:
 
-```rust
-RetrieveOutcome may include a RetrievalTrace when the caller enables trace output.
+```text
+RetrieveOutcome may include light RetrievalRationale or RetrievalTelemetry when the caller enables diagnostic output.
 ```
 
-Low-level graph/vector APIs are internal in v0.1; public diagnostics are exposed through optional retrieval trace output.
+Low-level graph/vector APIs are internal in v0.1; public diagnostics are limited to optional per-retrieval rationale or telemetry. Durable first-class `RetrievalTrace` objects are deferred to v0.4.
 
 ---
 

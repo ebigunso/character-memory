@@ -82,15 +82,17 @@ current relationship state
 current factual beliefs, once the later belief layer exists
 ```
 
-## 2.5 Correction should usually supersede, not erase
+## 2.5 Correction supersedes; the record is append-only
 
 Most corrections should create new memory and links:
 
 ```text
 new memory supersedes old memory
 correction episode explains why
-old memory remains historical unless suppressed or a later explicit destructive policy is implemented
+old memory remains historical; suppression removes influence, never the record
 ```
+
+Destructive deletion is not a memory operation. Erasure exists only as an out-of-band operational purge (compliance, security remediation, operator-directed alteration) that tombstones dangling provenance targets. See [ADR-D-0017](../decisions/design/ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md).
 
 ## 2.6 Retrieval should be explainable
 
@@ -255,6 +257,8 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
 | v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, draft/validate/commit flow, and shared manual/future-generated commit machinery. |
+| v0.1.4 | Continuity evaluation harness | New. Deterministic long-horizon evaluation harness: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
+| v0.1.5 | Eval-driven v0.1 family closeout | New. Run the evaluation harness, record findings, tune selectivity/fanout defaults from measured data, fix revealed retrieval/guardrail/write-path/persistence issues, and close out the v0.1 family before v0.2. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
@@ -1059,7 +1063,116 @@ v0.1.3 keeps candidate state simpler unless implementation clearly requires more
 
 ---
 
-# 10. v0.2: scoped continuity and reflection
+# 10. v0.1.4: continuity evaluation harness
+
+Detailed draft: [`v0_1_4_continuity_evaluation_harness.md`](../design/roadmap-phases/v0_1_4_continuity_evaluation_harness.md)
+
+## Intent
+
+Close the gap between structural acceptance tests and the actual product goal before richer continuity features build on the v0.1 substrate.
+
+The philosophy's success criteria are behavioral and longitudinal: recall after long gaps, entity anchoring without hub flooding, stable behavior shaped by history. The v0.1 family has so far been validated through structural acceptance tests and diagnostics. v0.1.4 adds a way to measure whether retrieval actually serves continuity under long-horizon workloads.
+
+The intended sequence is:
+
+```text
+v0.1.3 completes the generation-ready write path
+v0.1.4 builds the harness that exercises the full write and retrieve paths
+v0.1.5 runs the harness, fixes what it reveals, and closes the v0.1 family
+then v0.2 builds scoped continuity on a measured substrate
+```
+
+## Goals
+
+```text
+build deterministic synthetic long-horizon interaction fixtures
+cover months-scale episode accumulation, recurring entities, corrections, supersession, suppression, and thread drift
+provide a minimal example assistant loop exercising remember/retrieve/correct/forget/link and prepare/validate/commit
+define continuity-oriented retrieval-quality metrics
+measure selectivity and fanout behavior under hub-entity stress
+measure restart and persistence behavior under eval workloads
+produce repeatable machine-readable eval reports
+```
+
+## Metrics direction
+
+```text
+continuity recall: relevant past episodes surface after long gaps without exact wording
+entity continuity: recurring entities anchor recall without flooding context
+temporal retrieval quality: recency, order, and interval relevance
+correction safety: suppressed and superseded memories stay excluded
+rationale quality: retrieved memories carry inspectable retrieval reasons
+context pollution rate: low-relevance memories admitted into context packs
+fanout discipline: bounded expansion under high-degree fixtures
+```
+
+## Non-goals
+
+```text
+learned retrieval policy
+public benchmark publication
+live LLM calls inside deterministic eval runs
+CI-blocking quality gates
+new memory object types
+new public memory facade APIs
+```
+
+## Acceptance criteria
+
+```text
+Eval runs are deterministic and reproducible under fixed fixtures.
+Fixtures include heterogeneous high-degree entities: people, places, projects, topics, objects, and arbitrary custom entities.
+The harness exercises lifecycle facades and the prepare/validate/commit path.
+Eval reports include metric values and per-query retrieval rationale samples.
+Eval runs require no external LLM calls.
+Selectivity and fanout measurements are recorded in a form usable for tuning defaults.
+```
+
+---
+
+# 11. v0.1.5: eval-driven v0.1 family closeout
+
+Detailed draft: [`v0_1_5_eval_driven_v0_1_family_closeout.md`](../design/roadmap-phases/v0_1_5_eval_driven_v0_1_family_closeout.md)
+
+## Intent
+
+Run the v0.1.4 harness against the full v0.1 family feature surface, identify weaknesses, fix them, and close out the v0.1 family before scoped continuity work begins.
+
+## Goals
+
+```text
+run the evaluation harness across v0.1 through v0.1.4 behavior
+record findings as a structured eval report
+classify findings: fix now, defer with rationale and target phase, or accept as designed
+fix revealed retrieval, guardrail, write-path, and persistence issues
+tune selectivity and fanout defaults (alpha, gamma, relation budgets) from measured data
+re-run the harness to confirm fixes and tuned defaults
+declare the v0.1 family closed for v0.2 entry
+```
+
+## Non-goals
+
+```text
+v0.2 continuity concepts
+new memory object types
+new retrieval signals beyond tuning what exists
+harness feature growth beyond what findings require
+```
+
+## Acceptance criteria
+
+```text
+Eval findings are recorded with severity and disposition.
+Every fix-now finding is resolved and covered by a regression test or fixture.
+Deferred findings carry rationale and a target phase.
+Tuned defaults are documented together with the measurements that justified them.
+All v0.1 through v0.1.4 acceptance criteria still pass after fixes.
+v0.2 entry is explicitly confirmed against the closed v0.1 family.
+```
+
+---
+
+# 12. v0.2: scoped continuity and reflection
 
 Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
@@ -1098,7 +1211,7 @@ Open loops and commitments can be retrieved by scope without assuming who the ma
 
 ---
 
-# 11. v0.3: factual rigor, temporal validity, and entity evolution
+# 13. v0.3: factual rigor, temporal validity, and entity evolution
 
 Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
@@ -1129,7 +1242,7 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 12. v0.4: retrieval observability and governance
+# 14. v0.4: retrieval observability and governance
 
 Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
 
@@ -1211,7 +1324,7 @@ The default intent is `Continuity`.
 
 ---
 
-# 13. v0.5: controlled associative recall and clustering
+# 15. v0.5: controlled associative recall and clustering
 
 Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
 
@@ -1273,7 +1386,7 @@ Durable graph truth is the associative unit, membership lifecycle, and support e
 
 ---
 
-# 14. v0.6: assisted remember workflow and memory candidate generation
+# 16. v0.6: assisted remember workflow and memory candidate generation
 
 Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](../design/roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
 
@@ -1367,7 +1480,7 @@ Generated candidates use the same validation and commit path as manual candidate
 
 ---
 
-# 15. v1.0+: multimodal and embodied expansion
+# 17. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -1395,7 +1508,7 @@ This is a future path, not starter scope.
 
 ---
 
-# 16. Public API evolution
+# 18. Public API evolution
 
 ## v0.1 API
 
@@ -1477,6 +1590,12 @@ let outcome = memory.commit(approved_plan, commit_options).await?;
 
 `RequireApproval` and `ApplicationReviewCallback` are not core v0.1.3 commit modes. They are application workflows or future adapters.
 
+## v0.1.4 / v0.1.5 API surface
+
+The evaluation harness is a development and measurement tool. It adds no public memory facade APIs.
+
+v0.1.5 may adjust configuration defaults (selectivity smoothing, fanout budgets) based on measured data, but it does not change the public API shape.
+
 ## v0.2 API additions
 
 ```rust
@@ -1537,7 +1656,7 @@ Generated processors should produce `MemoryCandidate` and `RememberWritePlan` va
 
 ---
 
-# 17. YAGNI rules
+# 19. YAGNI rules
 
 Do not implement in v0.1 / v0.1.2:
 

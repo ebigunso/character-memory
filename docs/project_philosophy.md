@@ -170,7 +170,7 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **Bound entity expansion.** Recurring entities should support recall without causing unbounded graph traversal or accidental pairwise link growth.
 - **Do not collapse memory into unsupported summaries only.** Summaries are useful for compression, but behavior-influencing memory should remain grounded in episodes, observations, provenance, and correction paths.
 - **Let memory influence behavior, not dictate it.** The LLM should receive memory as grounded context. It should not be forced into brittle rules from stale memories.
-- **Support correction and forgetting.** Persistent memory must support updates, contradictions, deletion, decay, and user-controlled correction.
+- **Support correction and forgetting.** Persistent memory must support updates, contradictions, suppression, decay, and user-controlled correction. The memory record itself is append-only: forgetting changes influence, not history. Destructive deletion is not a memory operation; erasure exists only as an out-of-band operational action for compliance, security remediation, or explicit operator-directed alteration.
 - **Expose retrieval rationale.** Implementation designers and application developers need to understand why a memory was retrieved.
 - **Stay backend-agnostic where practical.** The default stack can use OpenAI and Qdrant, but the philosophy should not depend on either vendor.
 
@@ -188,7 +188,7 @@ The API should reinforce the intended mental model. Names and workflows should m
 - **link** to connect entities, memories, and relations.
 - **reinforce** to update salience or character signals based on repeated evidence.
 - **correct** to update or revise memory when the user or system clarifies something.
-- **forget** to delete, suppress, or decay memories when appropriate.
+- **forget** to suppress, archive, or decay memories when appropriate. Forgetting is never destructive; the record remains for audit, correction, and un-suppression.
 
 ### 9.2 Data model expectations
 

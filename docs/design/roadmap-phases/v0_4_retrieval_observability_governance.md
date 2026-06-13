@@ -61,6 +61,8 @@ Why was a possible cluster member included, excluded, or rejected?
 
 A diagnostic object explaining retrieval.
 
+Earlier v0.1-family phases expose only light per-retrieval rationale/telemetry and internal/admin-facing reconciliation diagnostics. v0.4 is where durable first-class `RetrievalTrace` objects become part of retrieval observability.
+
 ```json
 {
   "id": "trace_...",

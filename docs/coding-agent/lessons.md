@@ -21,6 +21,117 @@ Purpose:
 
 ## Entries
 
+## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: PR review and CI remediation follow-up
+- Roles involved: Orchestrator
+
+Symptom:
+- A warning-deny CI failure was initially approached with a broad suppression attribute before stepping back to consider whether the test helper structure itself was the root cause.
+
+Root cause:
+- Treated the immediate failing warning as the problem, instead of first asking what design or ownership boundary made the warning appear.
+
+Fix applied:
+- Reworked the integration test support layout so each test target imports only the helpers it needs, eliminating the warning naturally.
+
+Prevention:
+- When fixing a defect, first identify the smallest root cause that explains the symptom. Prefer structural or semantic fixes over suppressions, wrappers, retries, or local patches that merely hide the failure.
+- Use symptom patches only when the root cause is out of scope, externally owned, or explicitly accepted as a tradeoff; document that decision.
+
+Evidence:
+- The test support split removed the need for `dead_code` allowances and passed Clippy/test-target validation with warnings denied.
+
+## 2026-06-14 - Prefer Targeted Test Support Modules Over Broad `dead_code` Allows  [tags: validation, ci, maintainability]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: PR #53 review and CI remediation
+- Roles involved: Orchestrator
+
+Symptom:
+- Initial CI remediation used a broad `#![allow(dead_code)]` in the shared integration test helper module to silence warnings denied by Clippy and test target compilation.
+
+Root cause:
+- `tests/test_utils.rs` was compiled both as a standalone integration test target and as a helper module in each integration test. Different targets used different helper subsets, causing warning-deny failures. The first fix treated the warning as noise instead of the helper layout as the design problem.
+
+Fix applied:
+- Replaced the catch-all integration helper target with targeted modules under `tests/support/`, so each integration test imports only the helper set it needs.
+
+Prevention:
+- When CI fails under `-D warnings`, first ask whether the code layout can avoid the warning naturally. Use `allow` attributes only when unused code is intentional and no cleaner structure exists.
+
+Evidence:
+- `cargo clippy --all-targets -- -D warnings`, `cargo test --no-run`, and `cargo test` pass after splitting test support modules without any dead-code allowance.
+
+## 2026-06-12 - Cast `usize` To `i64` For `config` Crate `set_override` In Test Settings  [tags: tooling, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_3 facade integration tests
+- Roles involved: Worker
+
+Symptom:
+- Integration test compilation failed when passing `usize` values to `config::ConfigBuilder::set_override`.
+
+Root cause:
+- The config crate's `Value` conversion supports signed integer types such as `i64` but not `usize`.
+
+Fix applied:
+- Cast fanout override values to `i64` before calling `set_override`.
+
+Prevention:
+- When constructing test `Settings` through `config::ConfigBuilder`, cast `usize` numeric overrides to `i64` or another supported config value type.
+
+Evidence:
+- tests/test_utils.rs helper compiles and full validation passes after the cast.
+
+## 2026-06-12 - Constrain Graph Roots When Asserting Entity-Root Fanout  [tags: planning, validation]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_3 facade integration tests
+- Roles involved: Worker
+
+Symptom:
+- A fanout-override assertion failed because returned derived memories were also reachable through additional vector roots, masking the entity-root fanout constraint.
+
+Root cause:
+- The retrieval context allowed multiple graph roots while the test intended to isolate entity-root selectivity behavior.
+
+Fix applied:
+- Limited the test retrieval context to a single selected entity graph root.
+
+Prevention:
+- Facade tests for entity-root-only selectivity should constrain graph root selection enough to isolate the entity root under test.
+
+Evidence:
+- tests/v0_1_2_retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
+
+## 2026-06-12 - Start Qdrant Before Full cargo test Validation  [tags: validation, tooling]
+
+Context:
+- Plan: v0.1.2 closeout divergence fixes
+- Task/Wave: Task_1 required validation
+- Roles involved: Worker
+
+Symptom:
+- `cargo test` failed in tests/initialization_tests.rs because Qdrant was configured but unreachable at localhost:6334; the failure surfaced as a wrapped Qdrant transport error instead of a clean skip.
+
+Root cause:
+- Live-gated integration tests can fail rather than skip when Qdrant configuration resolves but the service is down.
+
+Fix applied:
+- Started Qdrant with `docker compose -f docker-compose.qdrant.yml up -d` and reran the exact required validation command.
+
+Prevention:
+- Before full `cargo test` validation, verify local Qdrant is up (`docker compose -f docker-compose.qdrant.yml ps`) and start it if needed.
+
+Evidence:
+- Final validation runs in Task_1, Task_3, and Task_4 all passed with Qdrant running.
+
 ## 2026-05-10 - Dispatch Research Before Broad Discovery On Non-Trivial Work  [tags: workflow, planning, delegation]
 
 Context:

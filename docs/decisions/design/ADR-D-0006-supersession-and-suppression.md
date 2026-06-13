@@ -35,6 +35,8 @@ defer destructive redaction/delete until explicit production policy support exis
 
 Corrections should normally create new records and link them to old records via `supersedes` or equivalent relations. Forgetting should normally suppress or archive records from default retrieval. Physical redaction/delete remains outside v0.1 production support until explicit policy and storage behavior are implemented.
 
+> **Resolved by ADR-D-0017 (2026-06-12):** the deferred destructive-deletion question is now settled. The memory record is append-only; destructive deletion is never a memory operation. Erasure exists only as an out-of-band operational purge. See [ADR-D-0017](ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md).
+
 ## Character Memory Relevance
 
 Character continuity includes mistakes, corrections, and changed understanding. The assistant should be able to stop relying on an outdated memory while still preserving the fact that it once had that memory, unless the user or policy requires deletion.
@@ -79,4 +81,4 @@ This preserves continuity and auditability while respecting forgetting and corre
 
 ## Revisit When
 
-Revisit when privacy, legal, or user-control requirements demand stronger deletion semantics by default.
+Revisit when privacy, legal, or user-control requirements demand stronger deletion semantics by default. (Resolved direction: ADR-D-0017 keeps the record append-only and routes erasure through an out-of-band operational purge.)

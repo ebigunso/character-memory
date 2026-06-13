@@ -62,6 +62,12 @@ Character Memory is not:
 
 It is a memory layer for persistent AI assistants and companions.
 
+## Memory permanence and data erasure
+
+Character Memory treats the memory record as append-only. Forgetting works through suppression, archival, supersession, and decay — it removes influence, not history. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
+
+Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action, not a memory operation; see [ADR-D-0017](docs/decisions/design/ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md) for the full decision and its boundaries.
+
 ## Typical usage
 
 A typical assistant loop looks like this:

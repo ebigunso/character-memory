@@ -470,6 +470,12 @@ They must not be the core fanout mechanism.
 
 Revisit the formula if diagnostics show poor correlation between selectivity score and retrieval quality, or if score changes produce unstable context packs. The next step should be adjusting formula/configuration, not persisting categories.
 
+## 7.1 v0.1.2 application boundary
+
+In v0.1.2, continuous selectivity is applied only when the vector root candidate is an Entity. This is the intended phase boundary: selectivity shapes fanout from entity-root retrieval candidates, while non-entity roots continue to use the existing bounded graph expansion and Oxigraph lifecycle/currentness validation.
+
+Do not widen selectivity application to every graph expansion path in this phase. Revisit the scope with eval-harness evidence in [`v0_1_5_eval_driven_v0_1_family_closeout.md`](v0_1_5_eval_driven_v0_1_family_closeout.md), especially if diagnostics show that non-entity roots create the same low-information expansion risks.
+
 ---
 
 # 8. Smooth fanout policy

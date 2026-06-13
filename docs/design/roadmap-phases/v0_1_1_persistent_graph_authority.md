@@ -210,6 +210,8 @@ Initial reconciliation may report rather than fully repair all cases.
 
 This phase keeps reconciliation internal/admin-facing. It does not expose diagnostics through the public `CharacterMemory` facade.
 
+Retrieval diagnostics in this phase remain reconciliation-oriented and admin-facing. The v0.1 family may expose light per-retrieval rationale or telemetry, but durable first-class `RetrievalTrace` objects are deferred to v0.4.
+
 Minimum behavior:
 
 ```text
