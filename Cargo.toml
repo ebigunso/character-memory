@@ -26,7 +26,7 @@ tokio = { version = "1.52.1", features = ["full"] }
 async-trait = "0.1.86"
 
 # Utils
-uuid = { version = "1.23.1", features = ["v4", "serde"] }
+uuid = { version = "1.23.1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 
 [dev-dependencies]
