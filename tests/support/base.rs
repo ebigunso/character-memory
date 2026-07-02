@@ -3,17 +3,8 @@ use character_memory::test_utils::load_test_settings;
 use character_memory::{CustomError, EmbeddingProvider};
 use qdrant_client::{Qdrant, QdrantError};
 use std::io::ErrorKind;
-use std::sync::Once;
 use tonic::Code;
 use uuid::Uuid;
-
-static INIT: Once = Once::new();
-
-pub fn initialize() {
-    INIT.call_once(|| {
-        std::env::set_var("GRAPH_STORE_MODE", "in_memory");
-    });
-}
 
 pub fn unique_collection_name() -> String {
     format!("test_collection_{}", Uuid::new_v4())
@@ -100,4 +91,8 @@ pub async fn cleanup_collection(collection_name: &str) {
         .expect("Failed to create Qdrant client");
 
     let _ = client.delete_collection(collection_name).await;
+}
+
+pub fn config_error(error: config::ConfigError) -> CustomError {
+    CustomError::ConfigParseError(error.to_string())
 }

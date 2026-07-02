@@ -21,6 +21,73 @@ Purpose:
 
 ## Entries
 
+## 2026-07-03 - Qdrant Builder .timeout() Is A Server-Side Operation Parameter, Not A Client Bound  [tags: tooling, validation]
+
+Context:
+- Plan: stabilize v0.1.2 retrieval guardrails
+- Task/Wave: Task_3
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- Qdrant mutating operations (upsert/delete/scroll) were several seconds slower than raw REST/gRPC probes of the same operations.
+
+Root cause:
+- UpsertPointsBuilder/DeletePointsBuilder/ScrollPointsBuilder `.timeout(secs)` sets the proto request field (a server-side operation timeout), not a client deadline. The client deadline is configured once via QdrantConfig::timeout. Setting the per-request field added measurable server-side wait overhead per call.
+
+Fix applied:
+- Removed per-request `.timeout()` from mutation/scroll builders; kept the 30s client-level QdrantConfig timeout (isolated upsert: 2.41s → 0.048s).
+
+Prevention:
+- Bound Qdrant client calls via QdrantConfig::timeout only; use per-request `.timeout()` solely when a specific server-side operation limit is intended and probe-verified.
+
+Evidence:
+- Live probe timings recorded in the stabilization plan Decision Log; config unit test pins client-level timeout.
+
+## 2026-07-03 - Local-Only gRPC Mutation Stall After Idle Is A Known Environment Constraint  [tags: tooling, validation, ci]
+
+Context:
+- Plan: stabilize v0.1.2 retrieval guardrails
+- Task/Wave: Task_3b/3c/3d diagnosis chain
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- On this development machine, the first Qdrant gRPC MUTATION after ~10s of wall-clock idle stalls to the 30s client deadline (often 60s with the client's automatic retry) and fails with "operation was cancelled: Timeout expired". Reads after idle stay fast; Python gRPC and REST clients are immune; requests do reach the server.
+
+Root cause:
+- Not established in code. Experimentally excluded: Docker Desktop port proxy (fails with host networking and with a native Windows Qdrant binary), tokio runtime starvation (fails on multi-thread runtime), stale client/channel state (fresh client also fails), dependency and toolchain drift (June-green lockfile unchanged). Remaining suspects are in the machine's loopback stack interacting with tonic/h2 mutation traffic.
+
+Fix applied:
+- None in production code (correctly so). A live-gated #[ignore] canary test (qdrant_channel_survives_idle_gap_before_mutating_upsert) encodes the failure signature; CI on Linux is the authoritative green signal.
+
+Prevention:
+- If guardrail/facade integration tests fail locally at the remember stage with vector_indexing_failure timeouts, run the canary test first; if it fails, treat the machine as affected and rely on CI instead of re-diagnosing.
+- Re-run the canary after Docker Desktop, Windows, or network-stack updates to detect recovery or regression.
+
+Evidence:
+- Full falsification matrix in the stabilization plan Decision Log (entries 2–6).
+
+## 2026-07-02 - Append To Append-Only Logs, Never Replace Entries  [tags: planning, workflow]
+
+Context:
+- Plan: stabilize v0.1.2 retrieval guardrails
+- Task/Wave: Decision Log maintenance during replans
+- Roles involved: Orchestrator
+
+Symptom:
+- Twice in one session, a string-replacement edit targeted the latest Decision Log entry as its anchor and replaced it with the new entry, destroying history in an append-only log.
+
+Root cause:
+- Using the previous entry's text as the replacement anchor conflates "insertion point" with "content to replace".
+
+Fix applied:
+- Restored the overwritten entries immediately after each incident.
+
+Prevention:
+- When appending to append-only sections, anchor on the previous entry and produce previous entry + new entry in the replacement, or anchor on the section's tail marker. Verify the log length grew after the edit.
+
+Evidence:
+- Both overwritten Decision Log entries in the stabilization plan were restored in follow-up edits.
+
 ## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
 
 Context:
