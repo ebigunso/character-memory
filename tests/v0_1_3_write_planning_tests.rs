@@ -894,19 +894,25 @@ fn missing_link_target_plan() -> RememberWritePlan {
 }
 
 fn generated_style_plan() -> RememberWritePlan {
+    let timestamp = fixed_timestamp();
     let entity_id = id("550e8400-e29b-41d4-a716-446655613301");
     let episode_id = id("550e8400-e29b-41d4-a716-446655613302");
     let derived_id = id("550e8400-e29b-41d4-a716-446655613303");
     let mut entity = EntityDraft::new(EntityType::Project, "generated-style entity");
     entity.id = Some(entity_id);
+    entity.created_at = Some(timestamp);
+    entity.updated_at = Some(timestamp);
     entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut episode = EpisodeDraft::new("generated-style source episode");
     episode.id = Some(episode_id);
+    episode.created_at = Some(timestamp);
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut derived = DerivedMemoryDraft::new(DerivedType::Claim, "generated-style derived memory");
     derived.id = Some(derived_id);
     derived.derived_from_episode_ids.push(episode_id);
     derived.entity_ids.push(entity_id);
+    derived.created_at = Some(timestamp);
+    derived.updated_at = Some(timestamp);
     derived.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
 
     RememberWritePlan::new(
@@ -983,7 +989,6 @@ fn graph_only_commit_options() -> CommitOptions {
     CommitOptions {
         update_vectors: false,
         update_stats: false,
-        ..CommitOptions::default()
     }
 }
 

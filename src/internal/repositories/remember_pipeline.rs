@@ -134,20 +134,11 @@ where
         plan: RememberWritePlan,
         options: CommitOptions,
     ) -> Result<RememberPipelineOutcome, CustomError> {
-        let verdict = WritePlanValidator::new(self.graph_store)
+        WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
             .into_result()?;
-        let mut diagnostics = plan.diagnostics.clone();
-        diagnostics.validation_failures.extend(
-            verdict
-                .validations
-                .iter()
-                .filter(|validation| {
-                    validation.status != crate::api::types::CandidateValidationStatus::Valid
-                })
-                .cloned(),
-        );
+        let diagnostics = plan.diagnostics.clone();
         let values = WritePlanCommitValues::from_plan(plan)?;
         let vector_targets = if options.update_vectors {
             VectorWriteIntent::PlanTargets(values.vector_targets)

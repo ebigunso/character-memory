@@ -838,7 +838,6 @@ impl Default for PrepareOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommitOptions {
-    pub require_valid_plan: bool,
     pub update_vectors: bool,
     /// Record derived retrieval-stats bookkeeping from committed graph writes.
     /// Stats update candidates are validation/inspection artifacts and do not constrain recording.
@@ -848,7 +847,6 @@ pub struct CommitOptions {
 impl Default for CommitOptions {
     fn default() -> Self {
         Self {
-            require_valid_plan: true,
             update_vectors: true,
             update_stats: true,
         }

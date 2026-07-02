@@ -420,12 +420,6 @@ impl From<crate::internal::repositories::RememberPipelineOutcome> for RememberOu
         let vector_indexing_failure = value
             .vector_indexing_failure
             .map(VectorIndexingFailure::from);
-        let mut repair_needed = vector_indexing_failure
-            .clone()
-            .map(RepairMarker::from)
-            .into_iter()
-            .collect::<Vec<_>>();
-        repair_needed.extend(value.repair_needed);
 
         Self {
             persisted_object_ids: value.persisted_object_ids,
@@ -433,7 +427,7 @@ impl From<crate::internal::repositories::RememberPipelineOutcome> for RememberOu
             vector_indexed_object_ids: value.vector_indexed_object_ids,
             vector_indexing_failure,
             stats_update_status: value.stats_update_status,
-            repair_needed,
+            repair_needed: value.repair_needed,
             diagnostics: value.diagnostics,
         }
     }
@@ -582,6 +576,14 @@ mod tests {
 
         assert!(first.vector_indexing_failure.is_some());
         assert!(second.vector_indexing_failure.is_some());
+        assert_eq!(
+            first
+                .repair_needed
+                .iter()
+                .filter(|marker| matches!(marker, RepairMarker::VectorIndex { .. }))
+                .count(),
+            1
+        );
         let graph = memory.memory_composition.graph_store.as_ref();
         assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 2);
         assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);

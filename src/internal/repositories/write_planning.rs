@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use crate::api::types::{
     CandidateProducerKind, CandidateRationale, CandidateValidation, CandidateValidationStatus,
-    DraftDefaults, MemoryCandidate, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
-    ObjectType, RememberWritePlan, RetentionState,
+    DraftDefaults, EpisodeDraft, MemoryCandidate, MemoryId, MemoryLink, MemoryLinkDraft,
+    MemoryObject, MemoryObjectRef, MemoryThreadDraft, ObjectType, RememberWritePlan,
+    RetentionState,
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
@@ -224,6 +225,7 @@ impl PlanValidationContext {
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
                 ));
+                errors.extend(validate_episode_timestamps(&candidate.draft));
                 match candidate
                     .draft
                     .clone()
@@ -239,6 +241,10 @@ impl PlanValidationContext {
                     "observation candidate",
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
+                ));
+                errors.extend(validate_required_created_at(
+                    "observation candidate",
+                    candidate.draft.created_at,
                 ));
                 match candidate
                     .draft
@@ -258,6 +264,11 @@ impl PlanValidationContext {
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
                 ));
+                errors.extend(validate_required_created_and_updated_at(
+                    "entity candidate",
+                    candidate.draft.created_at,
+                    candidate.draft.updated_at,
+                ));
                 match candidate
                     .draft
                     .clone()
@@ -274,6 +285,7 @@ impl PlanValidationContext {
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
                 ));
+                errors.extend(validate_memory_thread_timestamps(&candidate.draft));
                 match candidate
                     .draft
                     .clone()
@@ -291,6 +303,11 @@ impl PlanValidationContext {
                     "derived memory candidate",
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
+                ));
+                errors.extend(validate_required_created_and_updated_at(
+                    "derived memory candidate",
+                    candidate.draft.created_at,
+                    candidate.draft.updated_at,
                 ));
                 match candidate
                     .draft
@@ -314,6 +331,7 @@ impl PlanValidationContext {
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
                 ));
+                errors.extend(validate_memory_link_timestamps(&candidate.draft));
                 match candidate
                     .draft
                     .clone()
@@ -336,6 +354,10 @@ impl PlanValidationContext {
                     candidate.target.into(),
                     "vector index candidate target",
                 ));
+                errors.extend(self.validate_in_plan_ref(
+                    candidate.target.into(),
+                    "vector index candidate target",
+                ));
             }
             MemoryCandidate::StatsUpdate(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
@@ -349,11 +371,18 @@ impl PlanValidationContext {
                     candidate.subject.into(),
                     "stats update candidate subject",
                 ));
+                errors.extend(self.validate_in_plan_ref(
+                    candidate.subject.into(),
+                    "stats update candidate subject",
+                ));
                 if let Some(object) = candidate.object {
                     errors.extend(self.validate_graph_authoritative_ref(
                         object.into(),
                         "stats update candidate object",
                     ));
+                    errors.extend(
+                        self.validate_in_plan_ref(object.into(), "stats update candidate object"),
+                    );
                 }
             }
         }
@@ -412,6 +441,17 @@ impl PlanValidationContext {
             object_ref.object_type, object_ref.object_id
         )]
     }
+
+    fn validate_in_plan_ref(&self, object_ref: GraphObjectRef, label: &str) -> Vec<String> {
+        if self.plan_refs.contains(&object_ref) {
+            return Vec::new();
+        }
+
+        vec![format!(
+            "{label} must reference an object candidate in the write plan: {:?} {}",
+            object_ref.object_type, object_ref.object_id
+        )]
+    }
 }
 
 fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<String> {
@@ -442,43 +482,40 @@ impl WritePlanCommitValues {
         for candidate in plan.candidates {
             match candidate {
                 MemoryCandidate::Episode(candidate) => objects.push(MemoryObject::Episode(
-                    candidate
-                        .draft
+                    stable_episode_draft(candidate.draft)?
                         .into_domain_with_defaults(&mut defaults)
                         .map_err(validation_error)?,
                 )),
                 MemoryCandidate::Observation(candidate) => objects.push(MemoryObject::Observation(
-                    candidate
-                        .draft
+                    require_created_at(candidate.draft, "observation candidate")?
                         .into_domain_with_defaults(&mut defaults)
                         .map_err(validation_error)?,
                 )),
                 MemoryCandidate::Entity(candidate) => objects.push(MemoryObject::Entity(
-                    candidate
-                        .draft
+                    require_created_and_updated_at(candidate.draft, "entity candidate")?
                         .into_domain_with_defaults(&mut defaults)
                         .map_err(validation_error)?,
                 )),
                 MemoryCandidate::MemoryThread(candidate) => {
                     objects.push(MemoryObject::MemoryThread(
-                        candidate
-                            .draft
+                        stable_memory_thread_draft(candidate.draft)?
                             .into_domain_with_defaults(&mut defaults)
                             .map_err(validation_error)?,
                     ));
                 }
                 MemoryCandidate::DerivedMemory(candidate) => {
                     objects.push(MemoryObject::DerivedMemory(
-                        candidate
-                            .draft
-                            .into_domain_with_defaults(&mut defaults)
-                            .map_err(validation_error)?,
+                        require_created_and_updated_at(
+                            candidate.draft,
+                            "derived memory candidate",
+                        )?
+                        .into_domain_with_defaults(&mut defaults)
+                        .map_err(validation_error)?,
                     ));
                 }
                 MemoryCandidate::MemoryLink(candidate) => {
                     links.push(
-                        candidate
-                            .draft
+                        stable_memory_link_draft(candidate.draft)?
                             .into_domain_with_defaults(&mut defaults)
                             .map_err(validation_error)?,
                     );
@@ -494,6 +531,156 @@ impl WritePlanCommitValues {
             vector_targets,
         })
     }
+}
+
+trait CandidateCreatedAt {
+    fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>>;
+}
+
+trait CandidateUpdatedAt: CandidateCreatedAt {
+    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>>;
+}
+
+impl CandidateCreatedAt for crate::api::types::ObservationDraft {
+    fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.created_at
+    }
+}
+
+impl CandidateCreatedAt for crate::api::types::EntityDraft {
+    fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.created_at
+    }
+}
+
+impl CandidateUpdatedAt for crate::api::types::EntityDraft {
+    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.updated_at
+    }
+}
+
+impl CandidateCreatedAt for crate::api::types::DerivedMemoryDraft {
+    fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.created_at
+    }
+}
+
+impl CandidateUpdatedAt for crate::api::types::DerivedMemoryDraft {
+    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.updated_at
+    }
+}
+
+fn require_created_at<T>(draft: T, label: &str) -> Result<T, CustomError>
+where
+    T: CandidateCreatedAt,
+{
+    if draft.created_at().is_none() {
+        return Err(validation_error(format!(
+            "{label} created_at must be present for deterministic commit"
+        )));
+    }
+    Ok(draft)
+}
+
+fn require_created_and_updated_at<T>(draft: T, label: &str) -> Result<T, CustomError>
+where
+    T: CandidateUpdatedAt,
+{
+    require_created_at(draft, label).and_then(|draft| {
+        if draft.updated_at().is_none() {
+            return Err(validation_error(format!(
+                "{label} updated_at must be present for deterministic commit"
+            )));
+        }
+        Ok(draft)
+    })
+}
+
+fn stable_episode_draft(draft: EpisodeDraft) -> Result<EpisodeDraft, CustomError> {
+    if draft.created_at.is_none() {
+        return Err(validation_error(
+            "episode candidate created_at must be present for deterministic commit",
+        ));
+    }
+    Ok(draft)
+}
+
+fn stable_memory_thread_draft(draft: MemoryThreadDraft) -> Result<MemoryThreadDraft, CustomError> {
+    if draft.created_at.is_none() {
+        return Err(validation_error(
+            "memory thread candidate created_at must be present for deterministic commit",
+        ));
+    }
+    if draft.updated_at.is_none() {
+        return Err(validation_error(
+            "memory thread candidate updated_at must be present for deterministic commit",
+        ));
+    }
+    if draft.last_touched_at.is_none() {
+        return Err(validation_error(
+            "memory thread candidate last_touched_at must be present for deterministic commit",
+        ));
+    }
+    Ok(draft)
+}
+
+fn stable_memory_link_draft(draft: MemoryLinkDraft) -> Result<MemoryLinkDraft, CustomError> {
+    if draft.created_at.is_none() {
+        return Err(validation_error(
+            "memory link candidate created_at must be present for deterministic commit",
+        ));
+    }
+    Ok(draft)
+}
+
+fn validate_episode_timestamps(draft: &EpisodeDraft) -> Vec<String> {
+    validate_required_created_at("episode candidate", draft.created_at)
+}
+
+fn validate_memory_thread_timestamps(draft: &MemoryThreadDraft) -> Vec<String> {
+    let mut errors = validate_required_created_and_updated_at(
+        "memory thread candidate",
+        draft.created_at,
+        draft.updated_at,
+    );
+    if draft.last_touched_at.is_none() {
+        errors.push(
+            "memory thread candidate last_touched_at must be present for deterministic commit"
+                .to_owned(),
+        );
+    }
+    errors
+}
+
+fn validate_memory_link_timestamps(draft: &MemoryLinkDraft) -> Vec<String> {
+    validate_required_created_at("memory link candidate", draft.created_at)
+}
+
+fn validate_required_created_at(
+    label: &str,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Vec<String> {
+    if created_at.is_none() {
+        return vec![format!(
+            "{label} created_at must be present for deterministic commit"
+        )];
+    }
+    Vec::new()
+}
+
+fn validate_required_created_and_updated_at(
+    label: &str,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Vec<String> {
+    let mut errors = validate_required_created_at(label, created_at);
+    if updated_at.is_none() {
+        errors.push(format!(
+            "{label} updated_at must be present for deterministic commit"
+        ));
+    }
+    errors
 }
 
 fn validate_object(object: &MemoryObject) -> Vec<String> {
@@ -628,9 +815,9 @@ mod tests {
 
     use crate::api::types::write_plan::RememberPlanDefaults;
     use crate::api::types::{
-        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EpisodeDraft,
-        MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability, StatsUpdateCandidate,
-        VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
+        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EntityDraft,
+        EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability,
+        StatsUpdateCandidate, VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
@@ -903,6 +1090,97 @@ mod tests {
             .unwrap();
 
         assert_rejected_with(&verdict, "vector index candidate target does not exist");
+    }
+
+    #[tokio::test]
+    async fn rejects_vector_index_for_graph_only_object() {
+        let graph = graph_with_fixtures().await;
+        let fixtures = representative_fixtures();
+        let plan =
+            valid_plan().with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+                MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+                "embedding text",
+                CandidateProvenance::caller("caller supplied vector candidate"),
+            )));
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert_rejected_with(
+            &verdict,
+            "must reference an object candidate in the write plan",
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_stats_update_for_graph_only_object() {
+        let graph = graph_with_fixtures().await;
+        let fixtures = representative_fixtures();
+        let plan =
+            valid_plan().with_candidate(MemoryCandidate::StatsUpdate(StatsUpdateCandidate::new(
+                MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+                CandidateProvenance::caller("caller supplied stats candidate"),
+            )));
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert_rejected_with(
+            &verdict,
+            "must reference an object candidate in the write plan",
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_candidate_timestamps() {
+        let graph = FakeGraphAuthorityStore::new();
+        let mut draft = EntityDraft::new(crate::api::types::EntityType::Project, "no timestamps");
+        draft.id = Some(id("550e8400-e29b-41d4-a716-446655445055"));
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = valid_plan().with_candidate(MemoryCandidate::Entity(
+            crate::api::types::EntityCandidate::new(
+                draft,
+                CandidateProvenance::caller("caller supplied entity"),
+            ),
+        ));
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert_rejected_with(&verdict, "entity candidate created_at must be present");
+        assert_rejected_with(&verdict, "entity candidate updated_at must be present");
+    }
+
+    #[test]
+    fn commit_values_reject_missing_timestamps_before_defaults() {
+        let mut draft = EpisodeDraft::new("missing timestamp defense");
+        draft.id = Some(id("550e8400-e29b-41d4-a716-446655445056"));
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655445057"),
+            "missing-timestamp-defense",
+        )
+        .with_candidate(MemoryCandidate::Episode(
+            crate::api::types::EpisodeCandidate::new(
+                draft,
+                CandidateProvenance::caller("caller supplied episode"),
+            ),
+        ));
+
+        let error = match WritePlanCommitValues::from_plan(plan) {
+            Ok(_) => panic!("missing timestamp plan should reject before defaults"),
+            Err(error) => error,
+        };
+
+        assert!(error
+            .to_string()
+            .contains("episode candidate created_at must be present"));
     }
 
     #[tokio::test]
