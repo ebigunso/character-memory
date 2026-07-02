@@ -32,7 +32,7 @@ async fn stats_persist_across_facade_reopen() {
     };
 
     let test_result = async {
-        memory
+        let remember_outcome = memory
             .remember(
                 RememberDraft::new([
                     MemoryObjectDraft::Entity(entity(entity_id, EntityType::Person, "Aster Archive")),
@@ -70,6 +70,10 @@ async fn stats_persist_across_facade_reopen() {
             )
             .await
             .map_err(|error| format!("initial remember should populate graph/vector/stats stores: {error}"))?;
+        ensure_vectors_indexed(
+            &remember_outcome,
+            "initial stats persistence remember should index vectors",
+        )?;
 
         drop(memory);
 
@@ -131,7 +135,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     };
 
     let test_result = async {
-        memory
+        let remember_outcome = memory
             .remember(
                 RememberDraft::new([
                     MemoryObjectDraft::Entity(entity(
@@ -180,6 +184,10 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
             )
             .await
             .map_err(|error| format!("initial lifecycle remember should succeed: {error}"))?;
+        ensure_vectors_indexed(
+            &remember_outcome,
+            "initial lifecycle remember should index vectors",
+        )?;
 
         let mut replacement = ReplacementDerivedMemoryDraft::new(
             DerivedType::Correction,
@@ -266,10 +274,14 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
     };
 
     let test_result = async {
-        memory
+        let remember_outcome = memory
             .remember(high_degree_fixture(&ids))
             .await
             .map_err(|error| format!("high-degree fixture remember should succeed: {error}"))?;
+        ensure_vectors_indexed(
+            &remember_outcome,
+            "high-degree fixture remember should index vectors",
+        )?;
 
         let default = memory
             .retrieve(entity_root_context("Vector Orchard"))
@@ -579,4 +591,21 @@ fn ensure(condition: bool, message: &'static str) -> Result<(), String> {
     } else {
         Err(message.to_owned())
     }
+}
+
+fn ensure_vectors_indexed(
+    outcome: &character_memory::RememberOutcome,
+    context: &'static str,
+) -> Result<(), String> {
+    if let Some(failure) = &outcome.vector_indexing_failure {
+        return Err(format!(
+            "{context}: vector indexing failed for object ids {:?}; persisted object ids {:?}; indexed object ids {:?}; error: {}",
+            failure.unindexed_object_ids,
+            outcome.persisted_object_ids,
+            outcome.vector_indexed_object_ids,
+            failure.error_message
+        ));
+    }
+
+    Ok(())
 }
