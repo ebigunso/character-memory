@@ -556,7 +556,7 @@ mod tests {
             .await
             .expect_err("same deterministic IDs with different content should reject");
 
-        assert!(error.to_string().contains("divergent object content"));
+        assert!(error.to_string().contains("deterministic ID collided"));
     }
 
     #[tokio::test]

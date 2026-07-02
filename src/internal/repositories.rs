@@ -87,6 +87,6 @@ pub(crate) use vector_candidate_store::VectorCandidateStore;
 
 #[allow(unused_imports)]
 pub(crate) use write_planning::{
-    plan_fingerprint, WritePlanCommitValues, WritePlanValidationDecision,
-    WritePlanValidationVerdict, WritePlanValidator,
+    WritePlanCommitValues, WritePlanValidationDecision, WritePlanValidationVerdict,
+    WritePlanValidator,
 };

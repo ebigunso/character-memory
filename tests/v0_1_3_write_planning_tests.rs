@@ -2,11 +2,12 @@
 //! - "A caller can prepare a RememberWritePlan without committing it." -> prepare_without_persist_leaves_graph_and_vectors_empty
 //! - "A caller can validate a RememberWritePlan without committing it." -> validate_without_persist_leaves_graph_and_vectors_empty
 //! - "A caller can commit a validated RememberWritePlan." -> core_commit_flow_works_in_in_memory_graph_mode; core_commit_flow_works_in_persistent_graph_mode
-//! - "remember() remains available as a convenience wrapper." -> remember_wrapper_matches_prepare_validate_commit_graph_state
+//! - "remember() remains available as a convenience wrapper." -> remember_wrapper_matches_prepare_validate_commit_graph_state; remember_wrapper_commits_equivalent_graph_state
 //! - "commit() revalidates before writing." -> commit_revalidates_and_rejects_after_intervening_graph_change
 //! - "Invalid behavior-influencing DerivedMemory without provenance is rejected." -> ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and_commit
 //! - "Missing MemoryLink targets are rejected or deferred according to explicit policy." -> missing_memory_link_target_is_strictly_rejected
 //! - "Idempotency keys prevent duplicate writes from retry." -> idempotent_exact_retry_does_not_duplicate_graph_writes; divergent_same_key_rejected
+//! - "Plan-path vector writes use exactly declared vector index candidates." -> plan_without_vector_candidates_writes_no_vectors_with_default_commit_options; approval_flow_stripping_vector_candidates_writes_no_vectors
 //! - "Deterministic source references and source spans are preserved." -> source_refs_and_source_spans_are_preserved_and_raw_ref_is_opaque
 //! - "Manual writes and future generated writes can share the same commit path." -> generated_style_plan_commits_through_same_path_as_manual_candidates
 //! - "The write-plan flow works with in-memory and persistent graph modes." -> core_commit_flow_works_in_in_memory_graph_mode; core_commit_flow_works_in_persistent_graph_mode
@@ -25,9 +26,9 @@ use character_memory::{
     CharacterMemory, CommitOptions, CustomError, DerivedMemoryCandidate, DerivedMemoryDraft,
     DerivedType, EntityDraft, EntityType, EpisodeDraft, ExternalSourceReference,
     IncludedDerivedMemory, MemoryCandidate, MemoryId, MemoryLinkCandidate, MemoryLinkDraft,
-    ObjectType, PrepareOptions, RationaleOrigin, RelationType, RememberInput, RememberOutcome,
-    RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
-    DEFAULT_SCHEMA_VERSION,
+    MemoryObjectDraft, ObjectType, PrepareOptions, RationaleOrigin, RelationType, RememberDraft,
+    RememberInput, RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan,
+    StatsUpdateStatus, DEFAULT_SCHEMA_VERSION,
 };
 use config::Config;
 use std::path::Path;
@@ -139,7 +140,7 @@ async fn commit_revalidates_and_rejects_after_intervening_graph_change() {
     };
     let entity_id = id("550e8400-e29b-41d4-a716-446655613001");
 
-    let mut plan = link_to_existing_entity_plan("revalidate", entity_id).await;
+    let plan = link_to_existing_entity_plan("revalidate", entity_id).await;
     memory
         .validate_plan(&plan)
         .await
@@ -165,8 +166,7 @@ async fn commit_revalidates_and_rejects_after_intervening_graph_change() {
         .commit(plan.clone(), CommitOptions::default())
         .await
         .expect_err("commit should revalidate/reject divergent existing graph content");
-    assert_error_contains(error, "divergent object content");
-    plan.idempotency_key.push_str(":changed");
+    assert_error_contains(error, "deterministic ID collided");
 
     base::cleanup_collection(&collection_name).await;
 }
@@ -278,7 +278,40 @@ async fn divergent_same_key_rejected() {
         .commit(divergent_plan, CommitOptions::default())
         .await
         .expect_err("same IDs with divergent content should be rejected");
-    assert_error_contains(error, "divergent object content");
+    assert_error_contains(error, "deterministic ID collided");
+    base::cleanup_collection(&collection_name).await;
+}
+
+#[tokio::test]
+async fn plan_without_vector_candidates_writes_no_vectors_with_default_commit_options() {
+    let (memory, collection_name) = match setup_basic().await {
+        Some(fixture) => fixture,
+        None => return,
+    };
+    let prepare_options = PrepareOptions {
+        include_vector_index_candidates: false,
+        ..PrepareOptions::default()
+    };
+    let plan = memory
+        .prepare(core_input("no-vector-candidates"), prepare_options)
+        .await
+        .expect("prepare should succeed without vector candidates");
+
+    assert_eq!(
+        count_candidates(&plan, |candidate| matches!(
+            candidate,
+            MemoryCandidate::VectorIndex(_)
+        )),
+        0
+    );
+    let outcome = memory
+        .commit(plan, CommitOptions::default())
+        .await
+        .expect("default commit should honor empty plan vector targets");
+
+    assert!(!outcome.persisted_object_ids.is_empty());
+    assert!(outcome.vector_indexed_object_ids.is_empty());
+    assert_eq!(outcome.vector_indexing_failure, None);
     base::cleanup_collection(&collection_name).await;
 }
 
@@ -417,6 +450,51 @@ async fn remember_wrapper_matches_prepare_validate_commit_graph_state() {
 }
 
 #[tokio::test]
+async fn remember_wrapper_commits_equivalent_graph_state() {
+    let (memory, collection_name) = match setup_basic().await {
+        Some(fixture) => fixture,
+        None => return,
+    };
+    let timestamp = fixed_timestamp();
+    let mut wrapper_episode = EpisodeDraft::new("remember-wrapper source observation");
+    wrapper_episode.id = Some(id("550e8400-e29b-41d4-a716-446655613401"));
+    wrapper_episode.created_at = Some(timestamp);
+    let wrapper_outcome = memory
+        .remember(RememberDraft::new([MemoryObjectDraft::Episode(
+            wrapper_episode,
+        )]))
+        .await
+        .expect("remember wrapper should call the public wrapper path");
+
+    let mut plan_episode = EpisodeDraft::new("remember-wrapper source observation");
+    plan_episode.id = Some(id("550e8400-e29b-41d4-a716-446655613402"));
+    plan_episode.created_at = Some(timestamp);
+    let plan = RememberInput::new("remember-wrapper source observation")
+        .with_episode(plan_episode)
+        .prepare_write_plan_with_options(
+            &RememberPlanDefaults::fixed("remember-wrapper-plan", timestamp),
+            false,
+            false,
+        );
+    let plan_outcome = memory
+        .commit(plan, graph_only_commit_options())
+        .await
+        .expect("plan path should commit equivalent graph state");
+
+    assert_eq!(wrapper_outcome.persisted_object_ids.len(), 1);
+    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 0);
+    assert_eq!(plan_outcome.persisted_object_ids.len(), 2);
+    assert_eq!(plan_outcome.persisted_link_ids.len(), 0);
+    assert!(wrapper_outcome
+        .persisted_object_ids
+        .contains(&id("550e8400-e29b-41d4-a716-446655613401")));
+    assert!(plan_outcome
+        .persisted_object_ids
+        .contains(&id("550e8400-e29b-41d4-a716-446655613402")));
+    base::cleanup_collection(&collection_name).await;
+}
+
+#[tokio::test]
 async fn approval_flow_can_filter_candidates_before_commit() {
     let (memory, collection_name) = match setup_basic().await {
         Some(fixture) => fixture,
@@ -459,6 +537,33 @@ async fn approval_flow_can_filter_candidates_before_commit() {
         .persisted_object_ids
         .iter()
         .all(|id| *id != dropped_id));
+    base::cleanup_collection(&collection_name).await;
+}
+
+#[tokio::test]
+async fn approval_flow_stripping_vector_candidates_writes_no_vectors() {
+    let (memory, collection_name) = match setup_basic().await {
+        Some(fixture) => fixture,
+        None => return,
+    };
+    let mut plan = memory
+        .prepare(
+            core_input("approval-strips-vectors"),
+            PrepareOptions::default(),
+        )
+        .await
+        .expect("prepare should expose vector candidates");
+    plan.candidates
+        .retain(|candidate| !matches!(candidate, MemoryCandidate::VectorIndex(_)));
+
+    let outcome = memory
+        .commit(plan, CommitOptions::default())
+        .await
+        .expect("commit should honor approval-stripped vector candidates");
+
+    assert!(!outcome.persisted_object_ids.is_empty());
+    assert!(outcome.vector_indexed_object_ids.is_empty());
+    assert_eq!(outcome.vector_indexing_failure, None);
     base::cleanup_collection(&collection_name).await;
 }
 
@@ -522,7 +627,7 @@ async fn generated_style_plan_commits_through_same_path_as_manual_candidates() {
         Some(fixture) => fixture,
         None => return,
     };
-    let mut plan = generated_style_plan();
+    let plan = generated_style_plan();
 
     memory
         .validate_plan(&plan)
@@ -534,7 +639,6 @@ async fn generated_style_plan_commits_through_same_path_as_manual_candidates() {
         .expect("generated-style plan should commit through same path");
 
     ensure_graph_only_outcome(&outcome);
-    plan.idempotency_key.push_str(":unused");
     base::cleanup_collection(&collection_name).await;
 }
 

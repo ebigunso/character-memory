@@ -10,9 +10,9 @@ use crate::internal::models::vector::{
     memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
 };
 use crate::internal::repositories::{
-    plan_fingerprint, record_stats_after_write, GraphAuthorityStore, GraphObjectQuery,
-    GraphObjectRef, MemoryEmbedder, RetrievalStatsHealthState, RetrievalStatsStore,
-    VectorCandidateStore, WritePlanCommitValues, WritePlanValidator,
+    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
+    MemoryEmbedder, RetrievalStatsHealthState, RetrievalStatsStore, VectorCandidateStore,
+    WritePlanCommitValues, WritePlanValidator,
 };
 
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ where
         self.persist_graph_then_repairable_parts(
             objects,
             links,
-            Vec::new(),
+            VectorWriteIntent::DeriveFromObjects,
             CommitOptions::default(),
         )
         .await
@@ -134,7 +134,6 @@ where
         plan: RememberWritePlan,
         options: CommitOptions,
     ) -> Result<RememberPipelineOutcome, CustomError> {
-        let _plan_fingerprint = plan_fingerprint(&plan)?;
         let verdict = WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
@@ -151,9 +150,9 @@ where
         );
         let values = WritePlanCommitValues::from_plan(plan)?;
         let vector_targets = if options.update_vectors {
-            values.vector_targets
+            VectorWriteIntent::PlanTargets(values.vector_targets)
         } else {
-            Vec::new()
+            VectorWriteIntent::None
         };
 
         self.reject_divergent_existing_writes(&values.objects, &values.links)
@@ -184,7 +183,7 @@ where
         &self,
         objects: Vec<MemoryObject>,
         links: Vec<MemoryLink>,
-        vector_targets: Vec<MemoryObjectRef>,
+        vector_intent: VectorWriteIntent,
         options: CommitOptions,
     ) -> Result<RememberPipelineOutcome, CustomError> {
         self.graph_store.upsert_objects(&objects).await?;
@@ -192,10 +191,12 @@ where
 
         let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
         if options.update_vectors {
-            let vector_records = if vector_targets.is_empty() {
-                vector_records_for_objects(&objects)
-            } else {
-                vector_records_for_targets(&objects, &vector_targets)
+            let vector_records = match vector_intent {
+                VectorWriteIntent::DeriveFromObjects => vector_records_for_objects(&objects),
+                VectorWriteIntent::PlanTargets(targets) => {
+                    vector_records_for_targets(&objects, &targets)
+                }
+                VectorWriteIntent::None => Vec::new(),
             };
             self.record_vector_outcome(&mut outcome, &vector_records)
                 .await;
@@ -340,6 +341,8 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Result<(), CustomError> {
+        // Known scale consideration: this checks planned IDs against current graph state without
+        // a persisted operation ledger, which is acceptable for current write volumes.
         let refs = objects
             .iter()
             .map(|object| {
@@ -358,7 +361,7 @@ where
                 }) {
                     if planned != &existing {
                         return Err(validation_error(format!(
-                            "write plan idempotency_key was reused with divergent object content: {:?} {}",
+                            "write plan deterministic ID collided with existing divergent object content: {:?} {}",
                             memory_object_type(planned),
                             memory_object_id(planned)
                         )));
@@ -372,7 +375,7 @@ where
                 if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
                     if planned != &existing {
                         return Err(validation_error(format!(
-                            "write plan idempotency_key was reused with divergent link content: {}",
+                            "write plan deterministic ID collided with existing divergent link content: {}",
                             planned.id
                         )));
                     }
@@ -420,6 +423,12 @@ where
             .map(|record| record.object_id)
             .collect())
     }
+}
+
+enum VectorWriteIntent {
+    DeriveFromObjects,
+    PlanTargets(Vec<MemoryObjectRef>),
+    None,
 }
 
 fn validated_domain_values(

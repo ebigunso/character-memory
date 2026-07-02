@@ -473,6 +473,8 @@ v0.1.3 does not add those states.
 - `RememberOutcome` was extended in place for commit diagnostics, vector indexing status, stats update status, and repair markers. No separate commit-outcome type was introduced.
 - Missing `MemoryLink` targets are strictly rejected when the target is absent from both the plan and the graph. Deferring unresolved link candidates remains a future option, not a v0.1.3 behavior.
 - `CandidateProducerKind` and `RationaleOrigin` are plan/diagnostics-time metadata. They do not add a durable metadata plane or require a schema-version bump.
-- Idempotency uses deterministic UUIDv5 object/link IDs plus idempotent graph upsert keyed by the plan idempotency key. Exact retries are idempotent, same-key divergent plans are rejected with diagnostics, and there is no persisted operation ledger in v0.1.3.
+- Idempotency uses deterministic UUIDv5 object/link IDs plus idempotent graph upsert. Exact retries are idempotent, deterministic-ID collisions with existing divergent graph content are rejected with diagnostics, and there is no persisted operation ledger in v0.1.3.
+- Stats update candidates are validation/inspection artifacts. Commit-time stats recording derives from committed graph-authoritative writes so caller-filtered stats candidates cannot under-record selectivity bookkeeping.
+- Plan-path vector indexing uses exactly the plan's declared vector targets; an empty vector candidate list indexes nothing. The legacy `remember(RememberDraft)` convenience path still derives vector records from committed objects.
 - The shipped facade keeps `remember(RememberDraft)` source-compatible. `RememberInput` is used through `prepare(input, options)`; the earlier `remember(input, options)` shape in this draft is a suggested shape, not the implemented signature.
 - "Superseded memories are not current unless explicitly historical" is implemented with `RetentionState::Archived` as the explicit historical state for superseded candidates.

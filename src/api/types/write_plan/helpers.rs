@@ -14,7 +14,7 @@ use super::{
     StatsUpdateCandidate, VectorIndexCandidate,
 };
 use crate::api::types::domain::{
-    graph_uri, MemoryId, ObjectType, RelationType, RetentionState, DEFAULT_SCHEMA_VERSION,
+    graph_uri, MemoryId, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
 };
 use crate::api::types::draft::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
@@ -316,7 +316,6 @@ impl RememberInput {
         draft
             .schema_version
             .get_or_insert_with(|| defaults.schema_version.clone());
-        draft.retention_state = retention_default(draft.retention_state);
         draft
     }
 
@@ -346,7 +345,6 @@ impl RememberInput {
         draft
             .schema_version
             .get_or_insert_with(|| defaults.schema_version.clone());
-        draft.retention_state = retention_default(draft.retention_state);
         draft
     }
 
@@ -466,7 +464,6 @@ fn complete_derived_draft(
     draft
         .schema_version
         .get_or_insert_with(|| defaults.schema_version.clone());
-    draft.retention_state = retention_default(draft.retention_state);
     draft
 }
 
@@ -481,10 +478,6 @@ fn complete_link_draft(
         .schema_version
         .get_or_insert_with(|| defaults.schema_version.clone());
     draft
-}
-
-fn retention_default(retention_state: RetentionState) -> RetentionState {
-    retention_state
 }
 
 fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {

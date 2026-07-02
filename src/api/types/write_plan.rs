@@ -821,6 +821,8 @@ pub struct StatsUpdateFailure {
 pub struct PrepareOptions {
     pub idempotency_key: Option<String>,
     pub include_vector_index_candidates: bool,
+    /// Include stats update candidates for validation and caller inspection.
+    /// Commit-time stats recording derives from committed graph writes, not from this candidate list.
     pub include_stats_update_candidates: bool,
 }
 
@@ -838,6 +840,8 @@ impl Default for PrepareOptions {
 pub struct CommitOptions {
     pub require_valid_plan: bool,
     pub update_vectors: bool,
+    /// Record derived retrieval-stats bookkeeping from committed graph writes.
+    /// Stats update candidates are validation/inspection artifacts and do not constrain recording.
     pub update_stats: bool,
 }
 

@@ -426,10 +426,6 @@ fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<String> {
     errors
 }
 
-pub(crate) fn plan_fingerprint(plan: &RememberWritePlan) -> Result<String, CustomError> {
-    serde_json::to_string(plan).map_err(|error| validation_error(error.to_string()))
-}
-
 pub(crate) struct WritePlanCommitValues {
     pub(crate) objects: Vec<MemoryObject>,
     pub(crate) links: Vec<MemoryLink>,
