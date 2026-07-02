@@ -70,7 +70,7 @@ async fn stats_persist_across_facade_reopen() {
             )
             .await
             .map_err(|error| format!("initial remember should populate graph/vector/stats stores: {error}"))?;
-        ensure_vectors_indexed(
+        ensure_no_vector_indexing_failure(
             &remember_outcome,
             "initial stats persistence remember should index vectors",
         )?;
@@ -184,7 +184,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
             )
             .await
             .map_err(|error| format!("initial lifecycle remember should succeed: {error}"))?;
-        ensure_vectors_indexed(
+        ensure_no_vector_indexing_failure(
             &remember_outcome,
             "initial lifecycle remember should index vectors",
         )?;
@@ -278,7 +278,7 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
             .remember(high_degree_fixture(&ids))
             .await
             .map_err(|error| format!("high-degree fixture remember should succeed: {error}"))?;
-        ensure_vectors_indexed(
+        ensure_no_vector_indexing_failure(
             &remember_outcome,
             "high-degree fixture remember should index vectors",
         )?;
@@ -593,7 +593,7 @@ fn ensure(condition: bool, message: &'static str) -> Result<(), String> {
     }
 }
 
-fn ensure_vectors_indexed(
+fn ensure_no_vector_indexing_failure(
     outcome: &character_memory::RememberOutcome,
     context: &'static str,
 ) -> Result<(), String> {
