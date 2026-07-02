@@ -128,7 +128,6 @@ impl QdrantVectorCandidateStore {
         let points = qdrant_point_structs(records)?;
         let request = UpsertPointsBuilder::new(&self.collection_name, points)
             .wait(true)
-            .timeout(QDRANT_CANDIDATE_TIMEOUT_SECS)
             .build();
         self.client.upsert_points(request).await?;
         Ok(())
@@ -224,8 +223,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             let mut builder = ScrollPointsBuilder::new(&self.collection_name)
                 .limit(256)
                 .with_payload(true)
-                .with_vectors(false)
-                .timeout(QDRANT_CANDIDATE_TIMEOUT_SECS);
+                .with_vectors(false);
             if let Some(next_offset) = offset {
                 builder = builder.offset(next_offset);
             }
@@ -262,7 +260,6 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         let request = DeletePointsBuilder::new(&self.collection_name)
             .points(selector)
             .wait(true)
-            .timeout(QDRANT_CANDIDATE_TIMEOUT_SECS)
             .build();
         self.client.delete_points(request).await?;
         Ok(())
@@ -270,7 +267,13 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
 }
 
 fn qdrant_candidate_config(url: &str) -> QdrantConfig {
-    QdrantConfig::from_url(url).timeout(Duration::from_secs(QDRANT_CANDIDATE_TIMEOUT_SECS))
+    // `keep_alive_while_idle` codifies the crate default rather than changing
+    // behavior: without a transport-level ping interval (not exposed by
+    // qdrant-client) tonic sends no idle keepalive pings either way. Kept
+    // explicit so the intended channel behavior survives crate-default changes.
+    QdrantConfig::from_url(url)
+        .timeout(Duration::from_secs(QDRANT_CANDIDATE_TIMEOUT_SECS))
+        .keep_alive_while_idle()
 }
 
 fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
@@ -685,9 +688,11 @@ mod tests {
     };
     use qdrant_client::qdrant::condition::ConditionOneOf;
     use qdrant_client::qdrant::{
-        point_id::PointIdOptions, value::Kind, vector, vectors, PointId, Value, VectorParamsMap,
+        point_id::PointIdOptions, value::Kind, vector, vectors, DeleteCollectionBuilder, PointId,
+        Value, VectorParamsMap,
     };
     use std::env;
+    use std::time::Instant;
     use uuid::Uuid;
 
     #[test]
@@ -699,6 +704,78 @@ mod tests {
             Duration::from_secs(QDRANT_CANDIDATE_TIMEOUT_SECS)
         );
         assert_eq!(config.uri, "http://localhost:6334");
+        assert!(config.keep_alive_while_idle);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "requires live Qdrant at QDRANT_CONNECTION_STRING or 127.0.0.1:6334"]
+    async fn qdrant_channel_survives_idle_gap_before_mutating_upsert() {
+        let url = env::var("QDRANT_CONNECTION_STRING")
+            .unwrap_or_else(|_| "http://127.0.0.1:6334".to_owned());
+        let collection_name = format!("character_memory_idle_gap_{}", Uuid::new_v4().simple());
+        let store = QdrantVectorCandidateStore::new(&url, &collection_name, 4)
+            .expect("live Qdrant client should build");
+
+        store
+            .init_collection()
+            .await
+            .expect("live Qdrant collection should initialize");
+
+        std::thread::sleep(Duration::from_secs(10));
+
+        let records = [
+            idle_gap_vector_record(ObjectType::Episode),
+            idle_gap_vector_record(ObjectType::Observation),
+            idle_gap_vector_record(ObjectType::Entity),
+        ];
+        let embeddings = [
+            vec![0.1, 0.2, 0.3, 0.4],
+            vec![0.2, 0.3, 0.4, 0.5],
+            vec![0.3, 0.4, 0.5, 0.6],
+        ];
+        let record_embeddings = records
+            .iter()
+            .zip(embeddings.iter())
+            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
+            .collect::<Vec<_>>();
+
+        let started_at = Instant::now();
+        let upsert_result = store.upsert_points(&record_embeddings).await;
+        let elapsed = started_at.elapsed();
+
+        // Best-effort cleanup: on environments where mutations stall after idle
+        // gaps, cleanup can fail for the same reason as the upsert under test.
+        // Never let cleanup mask the primary upsert diagnosis.
+        let cleanup_result = store
+            .client
+            .delete_collection(DeleteCollectionBuilder::new(&collection_name))
+            .await;
+
+        upsert_result.unwrap_or_else(|error| {
+            panic!("upsert after idle gap failed after {elapsed:?}: {error} (cleanup result: {cleanup_result:?})")
+        });
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "upsert after idle gap took {elapsed:?}"
+        );
+        cleanup_result.expect("live Qdrant collection cleanup should succeed");
+    }
+
+    fn idle_gap_vector_record(object_type: ObjectType) -> VectorRecord {
+        let object_id = MemoryId::new_v4();
+        VectorRecord::new(
+            object_id,
+            object_type,
+            graph_uri(object_type, object_id),
+            VectorSurface::Summary,
+            "Idle-gap regression record",
+            "Idle-gap regression record",
+            DEFAULT_SCHEMA_VERSION,
+            Some(RetentionState::Active),
+            Some(true),
+            VectorRelationshipHints::default(),
+            None,
+        )
     }
 
     #[test]
