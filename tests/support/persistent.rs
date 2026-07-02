@@ -14,8 +14,6 @@ pub async fn try_setup_persistent_character_memory(
     stats_path: &Path,
     about_derived_memory_fanout: Option<(usize, usize)>,
 ) -> Result<CharacterMemory, CustomError> {
-    base::initialize();
-
     let base_settings = load_test_settings()?;
     let embedding_model = std::env::var("EMBEDDING_MODEL")
         .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
@@ -66,5 +64,5 @@ fn path_string(path: &Path) -> String {
 }
 
 fn config_error(error: config::ConfigError) -> CustomError {
-    CustomError::ConfigParseError(error.to_string())
+    base::config_error(error)
 }
