@@ -1,6 +1,6 @@
 # Common Repository Rules
 
-last_updated: 2026-04-29
+last_updated: 2026-07-02
 
 ## Repository Reference Documents
 
@@ -10,6 +10,7 @@ last_updated: 2026-04-29
 
 - `cargo fmt --check` validates Rust formatting.
 - `cargo check` validates the crate compiles.
+- `cargo clippy --all-targets -- -D warnings` validates lints with warnings denied, matching CI.
 - `cargo test --no-run` validates test targets compile without requiring services to execute tests.
 
 ## Repo Safety / Boundaries

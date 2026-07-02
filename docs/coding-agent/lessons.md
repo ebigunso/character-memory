@@ -87,6 +87,50 @@ Prevention:
 
 Evidence:
 - Both overwritten Decision Log entries in the stabilization plan were restored in follow-up edits.
+## 2026-07-02 - Use 127.0.0.1 Instead Of localhost For Local Qdrant gRPC  [tags: tooling, validation]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_1 required validation
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- Qdrant-backed integration tests hung to gRPC timeouts ("The operation was cancelled Timeout expired") or intermittent ConnectionRefused, while REST on 6333 responded in <100ms. One run crashed the Qdrant container (exit 255).
+
+Root cause:
+- `QDRANT_CONNECTION_STRING=http://localhost:6334` resolves to IPv6 `::1` inside tonic; the Docker Desktop port proxy accepts the TCP connect on `::1` but does not reliably forward HTTP/2 traffic, so gRPC calls stall until client timeout. `127.0.0.1` works instantly.
+
+Fix applied:
+- Pinned `QDRANT_CONNECTION_STRING=http://127.0.0.1:6334` in the local gitignored .env.
+
+Prevention:
+- Prefer `127.0.0.1` over `localhost` in local service connection strings for gRPC clients targeting Docker Desktop published ports on Windows.
+- When gRPC times out but REST on the sibling port is fast, test IPv4 vs IPv6 connect paths before suspecting the service.
+
+Evidence:
+- initialization_tests: 30s timeout failure with localhost vs 10s pass with 127.0.0.1 override; unit suite unchanged.
+
+## 2026-07-02 - Verify Failures Against Baseline HEAD Before Blaming New Code  [tags: validation, workflow]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_1 required validation
+- Roles involved: Orchestrator
+
+Symptom:
+- Full `cargo test` failed during Task_1 validation in v0.1.2 integration tests, initially indistinguishable from a Task_1 regression.
+
+Root cause:
+- Environmental degradation (see IPv6/localhost entry) unrelated to the change under validation.
+
+Fix applied:
+- Stashed the task's src/ changes, reran the failing target on baseline HEAD, observed identical failures, restored the stash.
+
+Prevention:
+- When required validation fails in tests untouched by the current task, run the same target against baseline HEAD (stash/worktree) to classify the failure as pre-existing vs regression before remediation.
+
+Evidence:
+- Baseline HEAD produced the identical 1-pass/2-fail result on tests/v0_1_2_retrieval_guardrails_tests.rs.
 
 ## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
 
