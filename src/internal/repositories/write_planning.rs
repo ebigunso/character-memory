@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::api::types::{
     CandidateProducerKind, CandidateRationale, CandidateValidation, CandidateValidationStatus,
@@ -24,7 +22,6 @@ impl WritePlanValidationVerdict {
         self.decision == WritePlanValidationDecision::Accepted
     }
 
-    #[allow(dead_code)]
     pub(crate) fn into_result(self) -> Result<Self, CustomError> {
         if self.is_valid() {
             Ok(self)
@@ -52,7 +49,6 @@ where
     G: GraphAuthorityStore + ?Sized,
 {
     graph_store: &'a G,
-    prior_plan_fingerprints: HashMap<String, String>,
 }
 
 impl<'a, G> WritePlanValidator<'a, G>
@@ -60,27 +56,14 @@ where
     G: GraphAuthorityStore + ?Sized,
 {
     pub(crate) fn new(graph_store: &'a G) -> Self {
-        Self {
-            graph_store,
-            prior_plan_fingerprints: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn with_prior_plan_fingerprint(
-        mut self,
-        idempotency_key: impl Into<String>,
-        fingerprint: impl Into<String>,
-    ) -> Self {
-        self.prior_plan_fingerprints
-            .insert(idempotency_key.into(), fingerprint.into());
-        self
+        Self { graph_store }
     }
 
     pub(crate) async fn validate(
         &self,
         plan: &RememberWritePlan,
     ) -> Result<WritePlanValidationVerdict, CustomError> {
-        let mut context = PlanValidationContext::new(plan, &self.prior_plan_fingerprints)?;
+        let mut context = PlanValidationContext::new(plan)?;
         let graph_refs = context.graph_refs_to_check();
         if !graph_refs.is_empty() {
             for object in self
@@ -123,15 +106,12 @@ struct PlanValidationContext {
 }
 
 impl PlanValidationContext {
-    fn new(
-        plan: &RememberWritePlan,
-        prior_plan_fingerprints: &HashMap<String, String>,
-    ) -> Result<Self, CustomError> {
+    fn new(plan: &RememberWritePlan) -> Result<Self, CustomError> {
         let mut context = Self {
             plan_refs: HashSet::new(),
             refs_requiring_graph: HashSet::new(),
             existing_refs: HashSet::new(),
-            plan_errors: validate_plan_identity(plan, prior_plan_fingerprints),
+            plan_errors: validate_plan_identity(plan),
         };
 
         for candidate in &plan.candidates {
@@ -434,10 +414,7 @@ impl PlanValidationContext {
     }
 }
 
-fn validate_plan_identity(
-    plan: &RememberWritePlan,
-    prior_plan_fingerprints: &HashMap<String, String>,
-) -> Vec<String> {
+fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<String> {
     let mut errors = Vec::new();
     if plan.operation_id.is_nil() {
         errors.push("write plan operation_id must be present".to_owned());
@@ -445,20 +422,82 @@ fn validate_plan_identity(
     if plan.idempotency_key.trim().is_empty() {
         errors.push("write plan idempotency_key must be present".to_owned());
     }
-    if let Some(prior_fingerprint) = prior_plan_fingerprints.get(&plan.idempotency_key) {
-        match plan_fingerprint(plan) {
-            Ok(current_fingerprint) if &current_fingerprint != prior_fingerprint => errors
-                .push("write plan idempotency_key was reused with divergent content".to_owned()),
-            Ok(_) => {}
-            Err(error) => errors.push(error.to_string()),
-        }
-    }
 
     errors
 }
 
 pub(crate) fn plan_fingerprint(plan: &RememberWritePlan) -> Result<String, CustomError> {
     serde_json::to_string(plan).map_err(|error| validation_error(error.to_string()))
+}
+
+pub(crate) struct WritePlanCommitValues {
+    pub(crate) objects: Vec<MemoryObject>,
+    pub(crate) links: Vec<MemoryLink>,
+    pub(crate) vector_targets: Vec<MemoryObjectRef>,
+}
+
+impl WritePlanCommitValues {
+    pub(crate) fn from_plan(plan: RememberWritePlan) -> Result<Self, CustomError> {
+        let mut objects = Vec::new();
+        let mut links = Vec::new();
+        let mut vector_targets = Vec::new();
+        let mut defaults = DraftDefaults::generated();
+
+        for candidate in plan.candidates {
+            match candidate {
+                MemoryCandidate::Episode(candidate) => objects.push(MemoryObject::Episode(
+                    candidate
+                        .draft
+                        .into_domain_with_defaults(&mut defaults)
+                        .map_err(validation_error)?,
+                )),
+                MemoryCandidate::Observation(candidate) => objects.push(MemoryObject::Observation(
+                    candidate
+                        .draft
+                        .into_domain_with_defaults(&mut defaults)
+                        .map_err(validation_error)?,
+                )),
+                MemoryCandidate::Entity(candidate) => objects.push(MemoryObject::Entity(
+                    candidate
+                        .draft
+                        .into_domain_with_defaults(&mut defaults)
+                        .map_err(validation_error)?,
+                )),
+                MemoryCandidate::MemoryThread(candidate) => {
+                    objects.push(MemoryObject::MemoryThread(
+                        candidate
+                            .draft
+                            .into_domain_with_defaults(&mut defaults)
+                            .map_err(validation_error)?,
+                    ));
+                }
+                MemoryCandidate::DerivedMemory(candidate) => {
+                    objects.push(MemoryObject::DerivedMemory(
+                        candidate
+                            .draft
+                            .into_domain_with_defaults(&mut defaults)
+                            .map_err(validation_error)?,
+                    ));
+                }
+                MemoryCandidate::MemoryLink(candidate) => {
+                    links.push(
+                        candidate
+                            .draft
+                            .into_domain_with_defaults(&mut defaults)
+                            .map_err(validation_error)?,
+                    );
+                }
+                MemoryCandidate::VectorIndex(candidate) => vector_targets.push(candidate.target),
+                MemoryCandidate::StatsUpdate(_) => {}
+            }
+        }
+
+        Ok(Self {
+            objects,
+            links,
+            vector_targets,
+        })
+    }
 }
 
 fn validate_object(object: &MemoryObject) -> Vec<String> {
@@ -593,9 +632,9 @@ mod tests {
 
     use crate::api::types::write_plan::RememberPlanDefaults;
     use crate::api::types::{
-        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EntityDraft,
-        EntityType, EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan,
-        Stability, StatsUpdateCandidate, VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
+        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EpisodeDraft,
+        MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability, StatsUpdateCandidate,
+        VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
     };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
@@ -634,30 +673,6 @@ mod tests {
             .unwrap();
 
         assert_rejected_with(&verdict, "idempotency_key must be present");
-    }
-
-    #[tokio::test]
-    async fn rejects_same_key_divergent_content_against_prior_fingerprint() {
-        let graph = FakeGraphAuthorityStore::new();
-        let prior = valid_plan();
-        let mut divergent = valid_plan();
-        divergent.candidates.push(MemoryCandidate::Entity(
-            crate::api::types::EntityCandidate::new(
-                EntityDraft::new(EntityType::Concept, "new divergent candidate"),
-                CandidateProvenance::caller("caller supplied entity"),
-            ),
-        ));
-
-        let verdict = WritePlanValidator::new(&graph)
-            .with_prior_plan_fingerprint(
-                divergent.idempotency_key.clone(),
-                plan_fingerprint(&prior).unwrap(),
-            )
-            .validate(&divergent)
-            .await
-            .unwrap();
-
-        assert_rejected_with(&verdict, "divergent content");
     }
 
     #[tokio::test]
