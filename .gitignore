@@ -23,3 +23,6 @@ target/
 # Environment variables
 .env*
 !.env.example
+
+# Local runtime/test artifacts written by default config paths
+/data/
