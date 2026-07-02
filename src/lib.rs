@@ -28,27 +28,35 @@ use crate::internal::repositories::{
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
-    default_retrieval_object_types, graph_uri, ArchivePolicy, ContextPackSection,
-    ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft, CorrectionCascadePolicy,
+    default_retrieval_object_types, graph_uri, ArchivePolicy, CandidateCount,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateValidation,
+    CandidateValidationStatus, CommitOptions, ContextPackSection, ContinuityContextPack,
+    ContinuitySectionLimits, CorrectMemoryDraft, CorrectionCascadePolicy,
     CorrectionLifecyclePolicy, CorrectionTarget, DeferredDestructiveLifecyclePolicy,
-    DeferredLifecycleAction, DerivedMemory, DerivedMemoryDraft, DerivedType, DomainValidationError,
-    DraftDefaults, Entity, EntityDraft, EntityType, Episode, EpisodeDraft, ExternalSourceReference,
+    DeferredLifecycleAction, DerivedMemory, DerivedMemoryCandidate, DerivedMemoryDraft,
+    DerivedType, DiagnosticSeverity, DomainValidationError, DraftDefaults, Entity, EntityCandidate,
+    EntityDraft, EntityType, Episode, EpisodeCandidate, EpisodeDraft, ExternalSourceReference,
     ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
     GraphExpansionBoundedFailureSummary, GraphExpansionBoundedFailureTrace,
     GraphExpansionBoundedReason, GraphExpansionOutcome, GraphExpansionTelemetry,
     GraphExpansionTrace, GraphRelationTrace, IncludedDerivedMemory, LifecycleDtoValidationError,
     LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
     LifecycleMutationOutcome, LifecycleMutationTrace, LifecycleOmissionSummary, LifecycleTargetRef,
-    MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft, MemoryObjectRef,
-    MemoryThread, MemoryThreadDraft, Modality, ObjectType, Observation, ObservationDraft,
-    RelationType, RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
-    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
-    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionPressureSummary, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
-    SelectivityTrace, SourceObjectCorrectionTarget, SourceProvenanceReference, Stability,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    MemoryCandidate, MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkCandidate,
+    MemoryLinkDraft, MemoryObject, MemoryObjectDraft, MemoryObjectRef, MemoryThread,
+    MemoryThreadCandidate, MemoryThreadDraft, Modality, ObjectType, Observation,
+    ObservationCandidate, ObservationDraft, PrepareOptions, RationaleOrigin, RelationType,
+    RememberDiagnostic, RememberDiagnostics, RememberDraft, RememberInput, RememberOptions,
+    RememberOutcome, RememberWritePlan, RepairMarker, ReplacementDerivedMemoryDraft,
+    RetentionState, RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits,
+    RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry, RetrievalTrace,
+    RetrieveOutcome, SectionAssignment, SectionPressureSummary, SelectivityCountScope,
+    SelectivityDecision, SelectivityTelemetry, SelectivityTrace, SourceObjectCorrectionTarget,
+    SourceProvenance, SourceProvenanceReference, SourceSpan, SourceSpanRange,
+    SourceSpanValidationError, Stability, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, StatsUpdateCandidate, StatsUpdateFailure, StatsUpdateStatus,
     SupersededByEvidence, SuppressionPolicy, ThreadStatus, VectorCandidateTrace,
-    VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
+    VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
     DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::{
@@ -359,11 +367,23 @@ fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsSt
 
 impl From<crate::internal::repositories::RememberPipelineOutcome> for RememberOutcome {
     fn from(value: crate::internal::repositories::RememberPipelineOutcome) -> Self {
+        let vector_indexing_failure = value
+            .vector_indexing_failure
+            .map(VectorIndexingFailure::from);
+        let repair_needed = vector_indexing_failure
+            .clone()
+            .map(RepairMarker::from)
+            .into_iter()
+            .collect();
+
         Self {
             persisted_object_ids: value.persisted_object_ids,
             persisted_link_ids: value.persisted_link_ids,
             vector_indexed_object_ids: value.vector_indexed_object_ids,
-            vector_indexing_failure: value.vector_indexing_failure.map(Into::into),
+            vector_indexing_failure,
+            stats_update_status: StatsUpdateStatus::default(),
+            repair_needed,
+            diagnostics: RememberDiagnostics::default(),
         }
     }
 }
