@@ -1,8 +1,8 @@
 # Plan: v0.1.3 Remember Intake Interfaces and Deterministic Write Planning
 
-- status: in_progress
+- status: done
 - generated: 2026-07-02
-- last_updated: 2026-07-02
+- last_updated: 2026-07-03
 - work_type: code
 
 ## Goal
@@ -210,6 +210,8 @@
   - Summary: Task_4 wired prepare/validate_plan/commit through the facade (graph-critical/vector-stats-repairable split, A1 idempotency, remember() parity, dead-code allowance removed; one justified cross-owns barrel re-export in repositories.rs). Task_5 added tests/v0_1_3_write_planning_tests.rs with per-criterion traceability (16→19 tests). Task_6 aligned README, roadmap status cell, and phase-doc implementation notes (Q1–Q3/A1–A2 + Archived interpretation). Task_7 Reviewer (Fable 5) returned CHANGES_REQUESTED (F1 plan-path vector fallback leak [major], F2 stats-candidate semantics [documented per ADR-I-0008 decision], F3 traceability mismatch [major], F4–F7 minors); Task_4b fixed all findings (VectorWriteIntent enum for exact plan-target fidelity; genuine remember() wrapper test; docs alignment; hygiene). Re-review verdict: APPROVED — gate satisfied modulo CI-arbitrated full-suite item.
   - Validation evidence: Worker + independent Reviewer runs — cargo fmt --check, cargo clippy --all-targets -- -D warnings PASS; cargo test --lib 333/333 PASS; cargo test --test v0_1_3_write_planning_tests 19/19 PASS with live Qdrant (Reviewer confirmed targeted full-body execution of the three new tests). Full-suite green delegated to Linux CI per recorded policy (local idle-stall constraint, lessons.md).
   - Notes: Reviewer minors accepted as non-blocking (outcome-field vs direct-store assertions; legacy test name). Reviewer lesson candidate on skip-masking recorded for troubleshooting staging.
+
+- 2026-07-03 Plan closeout: PR #55 created; all CI checks green including Live service integration tests (7m49s, run 28610390365) — the CI-arbitrated full-suite item is satisfied. Definition of Done met in full. Local idle-stall skips in integration runs remain a documented environment constraint (lessons.md); every skipped test body was verified executed either via targeted local reruns or Linux CI.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

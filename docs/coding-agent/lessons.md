@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-07-03 - Skip-On-Stall Integration Tests Can Mask Unexecuted Bodies In Green Runs  [tags: validation, ci]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_7 review / Task_4b re-review
+- Roles involved: Reviewer | Orchestrator
+
+Symptom:
+- Integration tests that self-skip on the documented local Qdrant idle-stall report `ok`, so a green local target run can include tests whose bodies never executed.
+
+Root cause:
+- Skip-on-infra-stall is implemented as an early return inside the test body, invisible to the test harness result.
+
+Fix applied:
+- Reviewer performed targeted reruns of the specific tests under review and confirmed absence of skip messages; Linux CI remains the authoritative full-suite arbiter.
+
+Prevention:
+- When local evidence matters for a specific test, rerun it in a targeted invocation and confirm no skip message was printed for it. Treat aggregate green local runs with skip messages as incomplete evidence.
+
+Evidence:
+- Task_4b re-review confirmed full-body execution of all three new tests via targeted reruns; PR #55 CI green.
+
 ## 2026-07-03 - Qdrant Builder .timeout() Is A Server-Side Operation Parameter, Not A Client Bound  [tags: tooling, validation]
 
 Context:
