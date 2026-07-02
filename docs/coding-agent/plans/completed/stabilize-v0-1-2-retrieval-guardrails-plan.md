@@ -1,8 +1,8 @@
 # Plan: Stabilize v0.1.2 Retrieval Guardrail Tests
 
-- status: in_progress
+- status: done
 - generated: 2026-07-02
-- last_updated: 2026-07-02
+- last_updated: 2026-07-03
 - work_type: code
 - branch: fix/2026-07-02/v0-1-2-test-slowness-flakiness (off main; independent of v0.1.3 feature branch)
 
@@ -159,6 +159,11 @@
   - Summary: Task_1 timing matrix collected (Orchestrator completed after Worker runs were disrupted); instrumentation reverted. Task_2 env hygiene landed (no set_var remains in tests/support/*).
   - Validation evidence: Task_1 — open_1=28.3s, remember=60.1s, open_2=1.1s, retrieve=0.003s, cleanup≈0s (single test, quiet machine; Qdrant 1.16.3). Task_2 — fmt/check/clippy pass; initialization_tests pass (9.74s); v0_1_public_facade_tests fails identically with and without Task_2 changes (stash A/B: 116.7s vs 176.7s, same vector-indexing partial failure) → pre-existing, tracked under Task_3.
   - Notes: Parallel Worker dispatch caused shared-resource interference (one cargo target dir + one live Qdrant): dirty rebuilds and exit-130 interruptions. Remaining waves dispatch sequentially.
+
+- 2026-07-03 Plan closeout: PR #54 created; all CI checks green including Live service integration tests (8m13s) on Linux — confirming the guardrail tests pass with the shipped hardening and that the residual idle-stall is local-environment-specific as classified.
+  - Summary: Shipped Task_2 (env hygiene), Task_3 (timeout API fix + keepalive + canary), Task_4 (outcome assertions + readiness diagnostics), docs/lessons/gitignore. Task_3b/3c/3d closed as diagnosis-complete (falsification chain in Decision Log); Task_5 superseded by CI arbitration; Task_6 review performed pre-PR (Fable 5, CHANGES_REQUESTED → all findings applied) plus green CI as independent evidence.
+  - Validation evidence: local — fmt/check/clippy ✅, cargo test --lib 303/303 ✅, initialization_tests ✅; CI — Compile check, Test target compilation, Clippy, Rust formatting, Live service integration tests, GitGuardian all pass (run 28601708495).
+  - Notes: local <15s guardrail acceptance waived per user decision (documented environment constraint; see lessons.md idle-stall entry). Canary test qdrant_channel_survives_idle_gap_before_mutating_upsert re-checks the machine after environment updates.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
