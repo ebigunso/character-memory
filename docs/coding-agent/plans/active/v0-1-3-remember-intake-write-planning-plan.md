@@ -206,6 +206,11 @@
   - Validation evidence: each task ran cargo fmt --check, cargo check, cargo clippy --all-targets -- -D warnings, cargo test --lib — final state 330 passed / 0 failed / 3 ignored.
   - Notes: Task_3 carries a scoped pre-wiring dead-code allowance for the validator surface; Task_4 must remove it when wiring the commit path. Task_3 interpreted "explicitly historical" as retention_state Archived for superseded candidates — Task_7 review should confirm against the phase doc.
 
+- 2026-07-03 Waves 3–5 completed: [Task_4, Task_5, Task_6, Task_4b (added), Task_7]
+  - Summary: Task_4 wired prepare/validate_plan/commit through the facade (graph-critical/vector-stats-repairable split, A1 idempotency, remember() parity, dead-code allowance removed; one justified cross-owns barrel re-export in repositories.rs). Task_5 added tests/v0_1_3_write_planning_tests.rs with per-criterion traceability (16→19 tests). Task_6 aligned README, roadmap status cell, and phase-doc implementation notes (Q1–Q3/A1–A2 + Archived interpretation). Task_7 Reviewer (Fable 5) returned CHANGES_REQUESTED (F1 plan-path vector fallback leak [major], F2 stats-candidate semantics [documented per ADR-I-0008 decision], F3 traceability mismatch [major], F4–F7 minors); Task_4b fixed all findings (VectorWriteIntent enum for exact plan-target fidelity; genuine remember() wrapper test; docs alignment; hygiene). Re-review verdict: APPROVED — gate satisfied modulo CI-arbitrated full-suite item.
+  - Validation evidence: Worker + independent Reviewer runs — cargo fmt --check, cargo clippy --all-targets -- -D warnings PASS; cargo test --lib 333/333 PASS; cargo test --test v0_1_3_write_planning_tests 19/19 PASS with live Qdrant (Reviewer confirmed targeted full-body execution of the three new tests). Full-suite green delegated to Linux CI per recorded policy (local idle-stall constraint, lessons.md).
+  - Notes: Reviewer minors accepted as non-blocking (outcome-field vs direct-store assertions; legacy test name). Reviewer lesson candidate on skip-masking recorded for troubleshooting staging.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-07-02: Plan drafted from dual Researcher reports (docs + codebase). Defaults chosen for Q1–Q3 pending user confirmation.
