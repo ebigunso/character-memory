@@ -11,6 +11,7 @@ mod source_reference;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod vector_candidate_store;
+mod write_planning;
 
 // Internal contract surface. Pipelines, adapters, and test support consume
 // different subsets, so keep the module boundary stable.
@@ -35,7 +36,9 @@ pub(crate) use graph_authority_store::{
 };
 
 #[allow(unused_imports)]
-pub(crate) use link_pipeline::LinkPipeline;
+pub(crate) use link_pipeline::{
+    admit_link, LinkAdmissionDecision, LinkAdmissionEvidence, LinkPipeline,
+};
 
 // Source-reference contracts remain internal; core stores opaque references,
 // not caller-owned source material.
@@ -81,3 +84,8 @@ pub(crate) use retrieve_pipeline::RetrievePipeline;
 // Vector candidate recall contract surface.
 #[allow(unused_imports)]
 pub(crate) use vector_candidate_store::VectorCandidateStore;
+
+#[allow(unused_imports)]
+pub(crate) use write_planning::{
+    plan_fingerprint, WritePlanValidationDecision, WritePlanValidationVerdict, WritePlanValidator,
+};
