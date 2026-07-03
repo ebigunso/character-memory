@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use crate::api::types::{
     CandidateProducerKind, CandidateRationale, CandidateValidation, CandidateValidationStatus,
-    DraftDefaults, EpisodeDraft, MemoryCandidate, MemoryId, MemoryLink, MemoryLinkDraft,
-    MemoryObject, MemoryObjectRef, MemoryThreadDraft, ObjectType, RememberWritePlan,
-    RetentionState,
+    DraftDefaults, EpisodeDraft, MemoryCandidate, MemoryCandidateKind, MemoryId, MemoryLink,
+    MemoryLinkDraft, MemoryObject, MemoryObjectRef, MemoryThreadDraft, ObjectType,
+    RememberWritePlan, RetentionState,
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
@@ -76,12 +76,19 @@ where
             }
         }
 
-        let validations = plan
+        let mut validations = plan
             .candidates
             .iter()
             .enumerate()
             .map(|(index, candidate)| context.validate_candidate(index, candidate))
             .collect::<Vec<_>>();
+        if validations.is_empty() && !context.plan_errors.is_empty() {
+            validations.push(CandidateValidation::invalid(
+                0,
+                MemoryCandidateKind::Episode,
+                format!("write plan is invalid: {}", context.plan_errors.join("; ")),
+            ));
+        }
         let decision = if validations
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid)
@@ -856,6 +863,23 @@ mod tests {
             .unwrap();
 
         assert_rejected_with(&verdict, "idempotency_key must be present");
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_plan_with_plan_identity_errors() {
+        let graph = FakeGraphAuthorityStore::new();
+        let mut plan = RememberWritePlan::new(id("00000000-0000-0000-0000-000000000000"), "");
+        plan.idempotency_key.clear();
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(!verdict.validations.is_empty());
+        assert_rejected_with(&verdict, "write plan operation_id must be present");
+        assert_rejected_with(&verdict, "idempotency_key must be present");
+        assert!(verdict.into_result().is_err());
     }
 
     #[tokio::test]

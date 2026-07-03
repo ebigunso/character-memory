@@ -267,7 +267,12 @@ impl CharacterMemory {
         Self::new_with_embedding_provider(settings, collection_name, embed_provider).await
     }
 
-    /// Prepares a deterministic remember write plan without persisting graph, vector, or stats data.
+    /// Prepares a remember write plan without persisting graph, vector, or stats data.
+    ///
+    /// The default facade path uses fresh operation defaults, so repeated calls with
+    /// the same input produce distinct plan/object identifiers. Use the lower-level
+    /// write-plan helper APIs with fixed defaults when byte-for-byte deterministic
+    /// planning is required.
     pub async fn prepare(
         &self,
         input: RememberInput,
