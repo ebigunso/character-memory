@@ -6,14 +6,13 @@ use crate::api::types::{
     RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
-    memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
-};
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
     MemoryEmbedder, RetrievalStatsHealthState, RetrievalStatsStore, VectorCandidateStore,
     WritePlanCommitValues, WritePlanValidator,
 };
+use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
+use crate::policy::memory_object_vector_record;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RememberPipelineDraft {
@@ -96,7 +95,7 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
         }
     }
 
@@ -564,9 +563,6 @@ mod tests {
         DerivedMemoryDraft, DerivedType, EntityDraft, EntityType, EpisodeDraft, MemoryThreadDraft,
         ObjectType, ObservationDraft, RelationType, RetentionState,
     };
-    use crate::internal::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
-    };
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore,
     };
@@ -574,6 +570,7 @@ mod tests {
     use crate::internal::repositories::{
         InMemoryRetrievalStatsStore, RetrievalStatsCounterKey, RetrievalStatsStore,
     };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
 
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
@@ -1256,10 +1253,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             Ok(Vec::new())
         }
 

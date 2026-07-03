@@ -526,10 +526,10 @@ mod tests {
     use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad};
 
     use super::*;
-    use crate::api::types::{graph_uri, MemoryObject};
-    use crate::internal::infrastructures::graph::rdf_mapping::{
+    use crate::adapters::oxigraph::rdf_mapping::{
         rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple,
     };
+    use crate::api::types::{graph_uri, MemoryObject};
     use crate::internal::repositories::test_support::representative_fixtures;
 
     #[test]

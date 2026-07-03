@@ -12,14 +12,13 @@ use crate::api::types::{
     SupersededByEvidence, ThreadStatus, VectorMaintenanceFailure, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
-    memory_object_vector_record, VectorRecord, VectorRecordEmbedding,
-};
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
     GraphDerivedMemoryThreadQuery, GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
     MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
 };
+use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
+use crate::policy::memory_object_vector_record;
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
 where
@@ -45,7 +44,7 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
         }
     }
 
@@ -1126,9 +1125,6 @@ mod tests {
         Episode, ExternalSourceReference, Modality, Observation, RetrievalContext,
         StaleCandidateReason, VectorCandidateTrace,
     };
-    use crate::internal::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
-    };
     use crate::internal::repositories::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
@@ -1137,6 +1133,7 @@ mod tests {
         GraphExpansion, GraphExpansionQuery, RetrievalStatsCounter, RetrievalStatsCounterKey,
         RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsObjectState, RetrievePipeline,
     };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
 
     #[tokio::test]
     async fn correction_writes_graph_before_vector_maintenance_in_stable_order() {
@@ -2473,10 +2470,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             Ok(Vec::new())
         }
 
@@ -2609,10 +2604,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             self.inner.list_candidate_diagnostics().await
         }
 

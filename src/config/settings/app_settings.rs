@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::api::types::{ObjectType, RelationType};
 use crate::errors::CustomError;
-use crate::internal::models::vector::EmbeddingModel;
+use crate::models::vector::EmbeddingModel;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {

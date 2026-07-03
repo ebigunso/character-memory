@@ -1,4 +1,4 @@
-use crate::internal::models::vector::EmbeddingModel;
+use crate::models::vector::EmbeddingModel;
 
 /// Settings for configuring the OpenAI embedding provider.
 ///

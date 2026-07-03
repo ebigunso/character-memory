@@ -54,13 +54,16 @@ pub(crate) use crate::usecases::{
 };
 
 #[cfg(test)]
-pub(crate) use crate::ports::retrieval_stats::noop_retrieval_stats_store;
+#[allow(unused_imports)]
+pub(crate) use crate::adapters::stats::noop_retrieval_stats_store;
+#[allow(unused_imports)]
+pub(crate) use crate::adapters::stats::InMemoryRetrievalStatsStore;
 #[allow(unused_imports)]
 pub(crate) use crate::ports::retrieval_stats::{
     object_type_key, record_stats_after_write, relation_type_key, retention_state_key,
-    retrieval_stats_edges, retrieval_stats_object_states, InMemoryRetrievalStatsStore,
-    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-    RetrievalStatsHealthState, RetrievalStatsObjectState, RetrievalStatsStore,
+    retrieval_stats_edges, retrieval_stats_object_states, RetrievalStatsCounter,
+    RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
+    RetrievalStatsObjectState, RetrievalStatsStore,
 };
 
 #[allow(unused_imports)]

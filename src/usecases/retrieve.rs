@@ -14,16 +14,16 @@ use crate::api::types::{
     StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
-    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
-    VectorSurface,
-};
 use crate::internal::repositories::{
     selectivity_plan_for_candidate, GraphAuthorityStore, GraphExpansion,
     GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
     GraphObjectRef, MemoryEmbedder, RetrievalSelectivityPolicy, RetrievalStatsStore,
     SelectivityPlan, SelectivityStatsContext, VectorCandidateStore,
+};
+use crate::models::vector::{
+    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
+    VectorSurface,
 };
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
@@ -51,7 +51,7 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
             selectivity_policy: RetrievalSelectivityPolicy::default(),
         }
     }
@@ -1345,15 +1345,15 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use crate::api::types::{ContinuitySectionLimits, RetrievalCandidateLimits};
-    use crate::internal::models::vector::{
-        VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
-    };
     use crate::internal::repositories::test_support::{
         high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
     };
     use crate::internal::repositories::{
         InMemoryRetrievalStatsStore, RetrievalSelectivityPolicy, RetrievalStatsEdge,
+    };
+    use crate::models::vector::{
+        VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
     };
 
     #[tokio::test]
@@ -2224,7 +2224,7 @@ mod tests {
     impl VectorCandidateStore for RecordingVectorStore {
         async fn upsert_vector_records(
             &self,
-            _records: &[crate::internal::models::vector::VectorRecordEmbedding<'_>],
+            _records: &[crate::models::vector::VectorRecordEmbedding<'_>],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -2241,10 +2241,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             Ok(Vec::new())
         }
 

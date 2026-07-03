@@ -17,16 +17,16 @@ use crate::api::types::{
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
-    EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-    VectorTimeField, VectorTimeRangeFilter,
-};
 use crate::internal::repositories::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
     GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder, ResolvedSourceReference,
     SourceReferenceResolver, VectorCandidateStore,
+};
+use crate::models::vector::{
+    EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
+    VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
+    VectorTimeField, VectorTimeRangeFilter,
 };
 
 #[derive(Debug, Default)]
@@ -1194,11 +1194,11 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::models::vector::{VectorPayloadHints, VectorRelationshipHints};
     use crate::internal::repositories::{
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
     };
+    use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
 
     #[tokio::test]
     async fn vector_fake_upserts_searches_and_deletes_deterministically() {
@@ -1246,7 +1246,7 @@ mod tests {
     async fn vector_fake_upserts_full_records_through_store_contract() {
         let store = FakeVectorCandidateStore::new();
         let fixtures = representative_fixtures();
-        let record = crate::internal::models::vector::episode_vector_record(&fixtures.episode);
+        let record = crate::policy::episode_vector_record(&fixtures.episode);
         let records = vec![VectorRecordEmbedding::new(&record, &[1.0, 0.0])];
 
         store.upsert_vector_records(&records).await.unwrap();
@@ -1266,15 +1266,9 @@ mod tests {
     async fn vector_fake_applies_payload_hint_prefilters_and_preserves_candidate_ordering() {
         let store = FakeVectorCandidateStore::new();
         let fixtures = representative_fixtures();
-        let reflection = crate::internal::models::vector::derived_memory_vector_record(
-            &fixtures.derived_reflection,
-        );
-        let preference = crate::internal::models::vector::derived_memory_vector_record(
-            &fixtures.user_preference,
-        );
-        let suppressed = crate::internal::models::vector::derived_memory_vector_record(
-            &fixtures.suppressed_seed,
-        );
+        let reflection = crate::policy::derived_memory_vector_record(&fixtures.derived_reflection);
+        let preference = crate::policy::derived_memory_vector_record(&fixtures.user_preference);
+        let suppressed = crate::policy::derived_memory_vector_record(&fixtures.suppressed_seed);
 
         store
             .upsert_vector_records(&[

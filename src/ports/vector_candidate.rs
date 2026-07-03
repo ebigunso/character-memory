@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::api::types::MemoryId;
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
+use crate::models::vector::{
     VectorCandidateDiagnosticRecord, VectorCandidateMatch, VectorCandidateSearch,
     VectorRecordEmbedding,
 };

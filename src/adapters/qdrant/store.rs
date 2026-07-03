@@ -17,14 +17,14 @@ use qdrant_client::{config::QdrantConfig, Qdrant};
 
 use crate::api::types::{MemoryId, ObjectType};
 use crate::errors::CustomError;
-use crate::internal::models::vector::{
+use crate::internal::repositories::VectorCandidateStore;
+use crate::models::vector::{
     VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
     VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
     VectorTimeRangeFilter,
 };
-use crate::internal::repositories::VectorCandidateStore;
 
-use super::qdrant_payload::{
+use super::payload::{
     qdrant_payload_index_fields, qdrant_payload_map, CREATED_AT_FIELD, ENDED_AT_FIELD,
     ENTITY_IDS_FIELD, EPISODE_IDS_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD,
     LAST_TOUCHED_AT_FIELD, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, OBSERVED_AT_FIELD,
@@ -526,7 +526,7 @@ fn retrieved_point_to_diagnostic_record(
     })
 }
 
-fn qdrant_point_id(record: &crate::internal::models::vector::VectorRecord) -> uuid::Uuid {
+fn qdrant_point_id(record: &crate::models::vector::VectorRecord) -> uuid::Uuid {
     let mut first = 0xcbf29ce484222325_u64;
     let mut second = 0x9e3779b97f4a7c15_u64;
 
@@ -679,10 +679,10 @@ fn parse_vector_surface(value: String) -> Result<VectorSurface, CustomError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::qdrant_payload::{CONTENT_TEXT_FIELD, GRAPH_URI_FIELD};
+    use super::super::payload::{CONTENT_TEXT_FIELD, GRAPH_URI_FIELD};
     use super::*;
     use crate::api::types::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
-    use crate::internal::models::vector::{
+    use crate::models::vector::{
         VectorCandidateFilters, VectorPayloadHints, VectorRecord, VectorRecordEmbedding,
         VectorRelationshipHints, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
     };

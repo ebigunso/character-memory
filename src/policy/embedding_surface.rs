@@ -6,7 +6,9 @@ use crate::api::types::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
 };
 
-use super::{VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface};
+use crate::models::vector::{
+    VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
+};
 
 pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
     VectorRecord::new(

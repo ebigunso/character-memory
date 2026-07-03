@@ -350,6 +350,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Summary: pipelines → src/usecases/ (remember, link, retrieve, write_planning, reconciliation, correct_forget); retrieval_selectivity → src/policy/; plan-construction logic (RememberInput impls, deterministic UUID, RememberPlanDefaults) moved from api/types/write_plan/helpers.rs into usecases/write_planning.rs with the api helper file now a re-export shim; internal/repositories/ holds only test_support.rs plus a compatibility barrel.
   - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (338 unit + 25 integration passed, 0 failed, 3 ignored — identical baseline). Orchestrator sanity cargo check pass.
   - Notes: Q2 resolved with evidence — correct/forget stay together as correct_forget.rs because shared mutation planning, cascade/provenance discovery, vector maintenance, and fixtures dominate the file; splitting would duplicate internals. Historical completed-plan docs keep old paths (Task_8 owns doc refresh).
+- 2026-07-04 Wave 4 completed: [Task_4] (codex worker via agmsg)
+  - Summary: infrastructures/ → adapters/{oxigraph,qdrant,openai,stats}/ grouped by technology; Oxigraph mega-file split into embedded.rs (397) + http.rs (673) + shared.rs (1039) + tests.rs; Noop/InMemory stats impls moved out of ports into adapters/stats/ beside sqlite.rs; vector value types → src/models/vector/; embedding_surface → src/policy/; internal/infrastructures and internal/models removed.
+  - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (338 unit + 25 integration, 0 failed, 3 ignored — identical baseline). Orchestrator sanity cargo check pass.
+  - Notes: deviations accepted — adapters/oxigraph/tests.rs is 1,795 lines (test-only, mechanically moved as one module to avoid test reshaping); focused clippy::module_inception allow on the nested tests module; some git-status noise is EOL normalization only.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

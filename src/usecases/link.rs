@@ -38,7 +38,7 @@ where
     pub(crate) fn new(graph_store: &'a G) -> Self {
         Self {
             graph_store,
-            stats_store: crate::internal::repositories::noop_retrieval_stats_store(),
+            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
         }
     }
 

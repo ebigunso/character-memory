@@ -5,11 +5,11 @@ use crate::api::types::{
     SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::VectorCandidateMatch;
 use crate::internal::repositories::{
     GraphExpansionFanoutOverride, RetrievalStatsCounter, RetrievalStatsCounterKey,
     RetrievalStatsHealth, RetrievalStatsHealthState, RetrievalStatsStore,
 };
+use crate::models::vector::VectorCandidateMatch;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RetrievalSelectivityPolicy {
@@ -424,8 +424,8 @@ const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::models::vector::VectorSurface;
     use crate::internal::repositories::{InMemoryRetrievalStatsStore, RetrievalStatsEdge};
+    use crate::models::vector::VectorSurface;
     use async_trait::async_trait;
     use std::sync::Mutex;
 

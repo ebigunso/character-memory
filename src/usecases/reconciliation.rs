@@ -7,7 +7,7 @@ use crate::api::types::{
     CURRENT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::internal::models::vector::VectorCandidateDiagnosticRecord;
+use crate::models::vector::VectorCandidateDiagnosticRecord;
 
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectRef};
 use crate::ports::vector_candidate::VectorCandidateStore;
@@ -309,11 +309,11 @@ mod tests {
         DerivedMemory, DerivedType, MemoryObject, MemoryThread, Stability, ThreadStatus,
         DEFAULT_SCHEMA_VERSION,
     };
-    use crate::internal::models::vector::{VectorCandidateDiagnosticRecord, VectorSurface};
     use crate::internal::repositories::test_support::{
         representative_fixtures, FakeGraphAuthorityStore, FakeVectorCandidateStore,
     };
     use crate::internal::repositories::GraphAuthorityStore;
+    use crate::models::vector::{VectorCandidateDiagnosticRecord, VectorSurface};
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 

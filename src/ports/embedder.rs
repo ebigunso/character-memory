@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 
 use crate::errors::CustomError;
-use crate::internal::models::vector::EmbeddingInput;
+use crate::models::vector::EmbeddingInput;
 
 #[async_trait]
 pub(crate) trait MemoryEmbedder: Send + Sync {

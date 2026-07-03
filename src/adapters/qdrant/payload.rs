@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
-use crate::internal::models::vector::{VectorRecord, VectorSurface};
+use crate::models::vector::{VectorRecord, VectorSurface};
 
 pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
     "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";
@@ -295,7 +295,7 @@ mod tests {
     use crate::api::types::{
         graph_uri, DerivedType, ObjectType, RetentionState, Stability, DEFAULT_SCHEMA_VERSION,
     };
-    use crate::internal::models::vector::{
+    use crate::models::vector::{
         VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
     };
     use chrono::TimeZone;

@@ -1,10 +1,7 @@
 use std::collections::HashMap;
-#[cfg(test)]
-use std::sync::OnceLock;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use tokio::sync::Mutex;
 
 use crate::api::types::{
     MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
@@ -102,182 +99,6 @@ impl Default for RetrievalStatsHealth {
             state: RetrievalStatsHealthState::Healthy,
             last_error_message: None,
         }
-    }
-}
-
-#[cfg(test)]
-#[derive(Debug, Default)]
-pub(crate) struct NoopRetrievalStatsStore;
-
-#[cfg(test)]
-#[async_trait]
-impl RetrievalStatsStore for NoopRetrievalStatsStore {
-    async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
-        Ok(())
-    }
-
-    async fn record_object_states(
-        &self,
-        _states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError> {
-        Ok(())
-    }
-
-    async fn counter(
-        &self,
-        _key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(None)
-    }
-
-    async fn global_counter(
-        &self,
-        _relation_kind: RelationType,
-        _object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        Ok(None)
-    }
-
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
-        Ok(RetrievalStatsHealth::default())
-    }
-
-    async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
-        Ok(())
-    }
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        Ok(())
-    }
-
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-        Ok(0)
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn noop_retrieval_stats_store() -> &'static dyn RetrievalStatsStore {
-    static STORE: OnceLock<NoopRetrievalStatsStore> = OnceLock::new();
-    STORE.get_or_init(NoopRetrievalStatsStore::default)
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct InMemoryRetrievalStatsStore {
-    state: Mutex<InMemoryState>,
-}
-
-impl InMemoryRetrievalStatsStore {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn unhealthy(message: String) -> Self {
-        Self {
-            state: Mutex::new(InMemoryState {
-                health: RetrievalStatsHealth {
-                    state: RetrievalStatsHealthState::Unhealthy,
-                    last_error_message: Some(message),
-                },
-                ..InMemoryState::default()
-            }),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct InMemoryState {
-    edges: HashMap<String, RetrievalStatsEdge>,
-    counters: HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter>,
-    global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
-    counters_dirty: bool,
-    health: RetrievalStatsHealth,
-    rejected_low_information_link_count: u64,
-}
-
-#[async_trait]
-impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
-    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
-        let mut state = self.state.lock().await;
-        for edge in edges {
-            insert_edge(&mut state.edges, edge.clone());
-        }
-        state.counters_dirty = true;
-        Ok(())
-    }
-
-    async fn record_object_states(
-        &self,
-        states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError> {
-        let mut state = self.state.lock().await;
-        for object_state in states {
-            for edge in state.edges.values_mut() {
-                if edge.object_id == object_state.object_id
-                    && edge.object_type == object_state.object_type
-                {
-                    edge.retention_state = object_state.retention_state;
-                    edge.is_current = object_state.is_current;
-                    edge.last_seen_at = edge.last_seen_at.max(object_state.observed_at);
-                }
-            }
-        }
-        state.counters_dirty = true;
-        Ok(())
-    }
-
-    async fn counter(
-        &self,
-        key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        let mut state = self.state.lock().await;
-        state.refresh_counters_if_dirty();
-        Ok(state.counters.get(key).copied())
-    }
-
-    async fn global_counter(
-        &self,
-        relation_kind: RelationType,
-        object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-        let mut state = self.state.lock().await;
-        state.refresh_counters_if_dirty();
-        Ok(state
-            .global_counters
-            .get(&(relation_kind, object_type))
-            .copied())
-    }
-
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
-        Ok(self.state.lock().await.health.clone())
-    }
-
-    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
-        let mut state = self.state.lock().await;
-        state.health = RetrievalStatsHealth {
-            state: RetrievalStatsHealthState::Unhealthy,
-            last_error_message: Some(message),
-        };
-        Ok(())
-    }
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        let mut state = self.state.lock().await;
-        state.rejected_low_information_link_count += 1;
-        Ok(())
-    }
-
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-        Ok(self.state.lock().await.rejected_low_information_link_count)
-    }
-}
-
-impl InMemoryState {
-    fn refresh_counters_if_dirty(&mut self) {
-        if !self.counters_dirty {
-            return;
-        }
-
-        self.counters = recomputed_counters(&self.edges);
-        self.global_counters = recomputed_global_counters(&self.edges);
-        self.counters_dirty = false;
     }
 }
 
@@ -472,7 +293,10 @@ fn edge_lifecycle(
         .unwrap_or((RetentionState::Active, true))
 }
 
-fn insert_edge(edges: &mut HashMap<String, RetrievalStatsEdge>, edge: RetrievalStatsEdge) {
+pub(crate) fn insert_edge(
+    edges: &mut HashMap<String, RetrievalStatsEdge>,
+    edge: RetrievalStatsEdge,
+) {
     edges
         .entry(edge.edge_key.clone())
         .and_modify(|existing| merge_edge(existing, &edge))
@@ -561,7 +385,7 @@ fn object_state(object: &MemoryObject) -> Option<RetrievalStatsObjectState> {
     }
 }
 
-fn recomputed_counters(
+pub(crate) fn recomputed_counters(
     edges: &HashMap<String, RetrievalStatsEdge>,
 ) -> HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter> {
     let mut counters = HashMap::new();
@@ -585,7 +409,7 @@ fn recomputed_counters(
     counters
 }
 
-fn recomputed_global_counters(
+pub(crate) fn recomputed_global_counters(
     edges: &HashMap<String, RetrievalStatsEdge>,
 ) -> HashMap<(RelationType, ObjectType), RetrievalStatsCounter> {
     let mut counters = HashMap::new();
@@ -607,6 +431,7 @@ fn recomputed_global_counters(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
         DerivedMemory, DerivedType, Episode, Modality, Stability, DEFAULT_SCHEMA_VERSION,
     };

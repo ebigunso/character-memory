@@ -1,3 +1,4 @@
+pub(crate) mod adapters;
 mod config;
 pub mod domain;
 mod errors;
@@ -5,29 +6,26 @@ mod errors;
 
 pub mod api;
 mod internal;
+pub(crate) mod models;
 pub(crate) mod policy;
 pub(crate) mod ports;
 pub(crate) mod usecases;
 
 use async_trait::async_trait;
 
+use crate::adapters::oxigraph::{OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore};
+use crate::adapters::stats::SqliteRetrievalStatsStore;
+use crate::adapters::{OpenAIEmbeddingProvider, QdrantVectorCandidateStore};
 use crate::config::settings::{
     EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
 };
-use crate::internal::infrastructures::external_services::{
-    OpenAIEmbeddingProvider, QdrantVectorCandidateStore,
-};
-use crate::internal::infrastructures::graph::{
-    OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore,
-};
-use crate::internal::infrastructures::retrieval_stats::SqliteRetrievalStatsStore;
-use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
     CorrectionForgetPipeline, GraphAuthorityStore, InMemoryRetrievalStatsStore, LinkPipeline,
     MemoryEmbedder, RememberPipeline, RememberPipelineDraft, RetrievalSelectivityPolicy,
     RetrievalStatsStore, RetrievePipeline, VectorCandidateStore, WritePlanValidator,
 };
+use crate::models::vector::EmbeddingInput;
 
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
@@ -147,9 +145,7 @@ impl CharacterMemory {
                 graph_store,
                 vector_store,
                 embedder,
-                stats_store: Box::new(
-                    crate::internal::repositories::InMemoryRetrievalStatsStore::new(),
-                ),
+                stats_store: Box::new(crate::adapters::stats::InMemoryRetrievalStatsStore::new()),
                 selectivity_policy: RetrievalSelectivityPolicy::default(),
             },
         }
@@ -461,14 +457,15 @@ mod tests {
     use crate::api::types::{
         EntityDraft, EntityType, MemoryLinkDraft, ObjectType, PrepareOptions, RelationType,
     };
-    use crate::internal::models::vector::{
-        memory_object_vector_record, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
-        VectorRecordEmbedding, VectorSurface,
-    };
     use crate::internal::repositories::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
     };
+    use crate::models::vector::{
+        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+        VectorSurface,
+    };
+    use crate::policy::memory_object_vector_record;
 
     #[tokio::test]
     async fn injected_facade_remembers_backend_free_drafts() {
@@ -1217,10 +1214,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             Ok(Vec::new())
         }
 
@@ -1252,10 +1247,8 @@ mod tests {
 
         async fn list_candidate_diagnostics(
             &self,
-        ) -> Result<
-            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
-            CustomError,
-        > {
+        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
+        {
             Ok(Vec::new())
         }
 

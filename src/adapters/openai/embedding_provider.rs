@@ -270,7 +270,7 @@ fn embedding_generation_error(message: impl Into<String>) -> CustomError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::models::vector::EmbeddingModel;
+    use crate::models::vector::EmbeddingModel;
     use std::sync::Mutex;
 
     fn create_test_settings(api_key: &str) -> EmbeddingProviderSettings {
