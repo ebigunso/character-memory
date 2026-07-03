@@ -1,8 +1,9 @@
 // Remember pipeline used by the public facade and internal tests. Some
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
-    DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft,
-    ObjectType,
+    CommitOptions, DiagnosticSeverity, DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft,
+    MemoryObject, MemoryObjectDraft, MemoryObjectRef, ObjectType, RememberDiagnostic,
+    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
 use crate::errors::CustomError;
 use crate::internal::models::vector::{
@@ -10,7 +11,8 @@ use crate::internal::models::vector::{
 };
 use crate::internal::repositories::{
     record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
-    MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
+    MemoryEmbedder, RetrievalStatsHealthState, RetrievalStatsStore, VectorCandidateStore,
+    WritePlanCommitValues, WritePlanValidator,
 };
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,9 @@ pub(crate) struct RememberPipelineOutcome {
     pub(crate) persisted_link_ids: Vec<MemoryId>,
     pub(crate) vector_indexed_object_ids: Vec<MemoryId>,
     pub(crate) vector_indexing_failure: Option<VectorIndexingFailure>,
+    pub(crate) stats_update_status: StatsUpdateStatus,
+    pub(crate) repair_needed: Vec<RepairMarker>,
+    pub(crate) diagnostics: RememberDiagnostics,
 }
 
 impl RememberPipelineOutcome {
@@ -54,6 +59,9 @@ impl RememberPipelineOutcome {
             persisted_link_ids: links.iter().map(|link| link.id).collect(),
             vector_indexed_object_ids: Vec::new(),
             vector_indexing_failure: None,
+            stats_update_status: StatsUpdateStatus::default(),
+            repair_needed: Vec::new(),
+            diagnostics: RememberDiagnostics::default(),
         }
     }
 }
@@ -111,48 +119,193 @@ where
         draft: RememberPipelineDraft,
     ) -> Result<RememberPipelineOutcome, CustomError> {
         let (objects, links) = validated_domain_values(draft)?;
-        let vector_records = vector_records_for_objects(&objects);
 
+        self.persist_graph_then_repairable_parts(
+            objects,
+            links,
+            VectorWriteIntent::DeriveFromObjects,
+            CommitOptions::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn commit(
+        &self,
+        plan: RememberWritePlan,
+        options: CommitOptions,
+    ) -> Result<RememberPipelineOutcome, CustomError> {
+        WritePlanValidator::new(self.graph_store)
+            .validate(&plan)
+            .await?
+            .into_result()?;
+        let diagnostics = plan.diagnostics.clone();
+        let values = WritePlanCommitValues::from_plan(plan)?;
+        let vector_targets = if options.update_vectors {
+            VectorWriteIntent::PlanTargets(values.vector_targets)
+        } else {
+            VectorWriteIntent::None
+        };
+
+        self.reject_divergent_existing_writes(&values.objects, &values.links)
+            .await?;
+
+        self.persist_graph_then_repairable_parts(
+            values.objects,
+            values.links,
+            vector_targets,
+            options,
+        )
+        .await
+        .map(|mut outcome| {
+            outcome.diagnostics.messages.extend(diagnostics.messages);
+            outcome
+                .diagnostics
+                .repair_needed
+                .extend(diagnostics.repair_needed);
+            outcome
+                .diagnostics
+                .candidate_counts
+                .extend(diagnostics.candidate_counts);
+            outcome
+        })
+    }
+
+    async fn persist_graph_then_repairable_parts(
+        &self,
+        objects: Vec<MemoryObject>,
+        links: Vec<MemoryLink>,
+        vector_intent: VectorWriteIntent,
+        options: CommitOptions,
+    ) -> Result<RememberPipelineOutcome, CustomError> {
         self.graph_store.upsert_objects(&objects).await?;
         self.graph_store.upsert_links(&links).await?;
 
         let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
-        if vector_records.is_empty() {
-            self.record_remember_stats_after_write(&objects, &links)
+        if options.update_vectors {
+            let vector_records = match vector_intent {
+                VectorWriteIntent::DeriveFromObjects => vector_records_for_objects(&objects),
+                VectorWriteIntent::PlanTargets(targets) => {
+                    vector_records_for_targets(&objects, &targets)
+                }
+                VectorWriteIntent::None => Vec::new(),
+            };
+            self.record_vector_outcome(&mut outcome, &vector_records)
                 .await;
-            return Ok(outcome);
         }
 
-        match self.index_vector_records(&vector_records).await {
+        if options.update_stats {
+            self.record_stats_outcome(&mut outcome, &objects, &links)
+                .await;
+        }
+
+        Ok(outcome)
+    }
+
+    async fn record_vector_outcome(
+        &self,
+        outcome: &mut RememberPipelineOutcome,
+        vector_records: &[VectorRecord],
+    ) {
+        if vector_records.is_empty() {
+            return;
+        }
+
+        match self.index_vector_records(vector_records).await {
             Ok(indexed_ids) => {
                 outcome.vector_indexed_object_ids = indexed_ids;
             }
             Err(error_message) => {
-                outcome.vector_indexing_failure = Some(VectorIndexingFailure {
+                let failure = VectorIndexingFailure {
                     unindexed_object_ids: vector_records
                         .iter()
                         .map(|record| record.object_id)
                         .collect(),
                     error_message,
-                });
+                };
+                outcome
+                    .repair_needed
+                    .push(crate::api::types::VectorIndexingFailure::from(failure.clone()).into());
+                outcome.diagnostics =
+                    outcome
+                        .diagnostics
+                        .clone()
+                        .with_message(RememberDiagnostic::new(
+                            DiagnosticSeverity::Warning,
+                            "vector_indexing_failed",
+                            failure.error_message.clone(),
+                        ));
+                outcome.vector_indexing_failure = Some(failure);
             }
         }
+    }
 
-        self.record_remember_stats_after_write(&objects, &links)
-            .await;
-
-        Ok(outcome)
+    async fn record_stats_outcome(
+        &self,
+        outcome: &mut RememberPipelineOutcome,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) {
+        let updated_ids = self.record_remember_stats_after_write(objects, links).await;
+        match self.stats_store.health().await {
+            Ok(health) if health.state == RetrievalStatsHealthState::Unhealthy => {
+                let error_message = health
+                    .last_error_message
+                    .unwrap_or_else(|| "retrieval stats store is unhealthy".to_owned());
+                outcome.stats_update_status = StatsUpdateStatus::failed(
+                    Vec::new(),
+                    updated_ids.clone(),
+                    error_message.clone(),
+                );
+                outcome.repair_needed.push(RepairMarker::StatsUpdate {
+                    object_ids: updated_ids,
+                    error_message: error_message.clone(),
+                });
+                outcome.diagnostics =
+                    outcome
+                        .diagnostics
+                        .clone()
+                        .with_message(RememberDiagnostic::new(
+                            DiagnosticSeverity::Warning,
+                            "stats_update_failed",
+                            error_message,
+                        ));
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                outcome.stats_update_status = StatsUpdateStatus::failed(
+                    Vec::new(),
+                    updated_ids.clone(),
+                    error_message.clone(),
+                );
+                outcome.repair_needed.push(RepairMarker::StatsUpdate {
+                    object_ids: updated_ids,
+                    error_message: error_message.clone(),
+                });
+                outcome.diagnostics =
+                    outcome
+                        .diagnostics
+                        .clone()
+                        .with_message(RememberDiagnostic::new(
+                            DiagnosticSeverity::Warning,
+                            "stats_update_health_check_failed",
+                            error_message,
+                        ));
+            }
+            _ => {
+                outcome.stats_update_status = StatsUpdateStatus::succeeded(updated_ids);
+            }
+        }
     }
 
     async fn record_remember_stats_after_write(
         &self,
         objects: &[MemoryObject],
         links: &[MemoryLink],
-    ) {
+    ) -> Vec<MemoryId> {
         let endpoint_refs = remember_stats_endpoint_refs(objects, links);
         if endpoint_refs.is_empty() {
             record_stats_after_write(self.stats_store, objects, links).await;
-            return;
+            return objects.iter().map(memory_object_id).collect();
         }
 
         match self
@@ -164,13 +317,65 @@ where
                 let stats_objects =
                     stats_objects_with_endpoint_lifecycle(objects, endpoint_objects);
                 record_stats_after_write(self.stats_store, &stats_objects, links).await;
+                stats_objects.iter().map(memory_object_id).collect()
             }
             Err(error) => {
                 let error_message = error.to_string();
                 record_stats_after_write(self.stats_store, objects, links).await;
                 let _ = self.stats_store.mark_unhealthy(error_message).await;
+                objects.iter().map(memory_object_id).collect()
             }
         }
+    }
+
+    async fn reject_divergent_existing_writes(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        // Known scale consideration: this checks planned IDs against current graph state without
+        // a persisted operation ledger, which is acceptable for current write volumes.
+        let refs = objects
+            .iter()
+            .map(|object| {
+                let (id, object_type) = memory_object_identity(object);
+                GraphObjectRef::new(id, object_type)
+            })
+            .collect::<Vec<_>>();
+        if !refs.is_empty() {
+            for existing in self
+                .graph_store
+                .query_objects(&GraphObjectQuery::by_refs(refs))
+                .await?
+            {
+                if let Some(planned) = objects.iter().find(|object| {
+                    memory_object_identity(object) == memory_object_identity(&existing)
+                }) {
+                    if planned != &existing {
+                        return Err(validation_error(format!(
+                            "write plan deterministic ID collided with existing divergent object content: {:?} {}",
+                            memory_object_type(planned),
+                            memory_object_id(planned)
+                        )));
+                    }
+                }
+            }
+        }
+
+        if !links.is_empty() {
+            for existing in self.graph_store.list_diagnostic_links().await? {
+                if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
+                    if planned != &existing {
+                        return Err(validation_error(format!(
+                            "write plan deterministic ID collided with existing divergent link content: {}",
+                            planned.id
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn index_vector_records(
@@ -212,6 +417,12 @@ where
     }
 }
 
+enum VectorWriteIntent {
+    DeriveFromObjects,
+    PlanTargets(Vec<MemoryObjectRef>),
+    None,
+}
+
 fn validated_domain_values(
     draft: RememberPipelineDraft,
 ) -> Result<(Vec<MemoryObject>, Vec<MemoryLink>), CustomError> {
@@ -244,6 +455,23 @@ fn vector_records_for_objects(objects: &[MemoryObject]) -> Vec<VectorRecord> {
     objects
         .iter()
         .filter_map(memory_object_vector_record)
+        .collect()
+}
+
+fn vector_records_for_targets(
+    objects: &[MemoryObject],
+    vector_targets: &[MemoryObjectRef],
+) -> Vec<VectorRecord> {
+    vector_targets
+        .iter()
+        .filter_map(|target| {
+            objects.iter().find_map(|object| {
+                (memory_object_id(object) == target.id
+                    && memory_object_type(object) == target.object_type)
+                    .then(|| memory_object_vector_record(object))
+                    .flatten()
+            })
+        })
         .collect()
 }
 
@@ -307,6 +535,10 @@ fn validation_error(error: impl ToString) -> CustomError {
 
 fn memory_object_id(object: &MemoryObject) -> MemoryId {
     memory_object_identity(object).0
+}
+
+fn memory_object_type(object: &MemoryObject) -> ObjectType {
+    memory_object_identity(object).1
 }
 
 fn memory_object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
@@ -681,7 +913,7 @@ mod tests {
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
-        pipeline
+        let outcome = pipeline
             .remember(RememberPipelineDraft::new(
                 Vec::<MemoryObjectDraft>::new(),
                 [typed_link_draft(
@@ -713,6 +945,49 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
+        assert_eq!(
+            outcome.stats_update_status.updated_object_ids,
+            vec![fixtures.suppressed_seed.id]
+        );
+        let failed_ids = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .map(|failure| failure.failed_object_ids.as_slice())
+            .unwrap_or_default();
+        assert!(failed_ids.is_empty());
+
+        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy("repair required".to_owned());
+        let repair_pipeline =
+            RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
+        let repair_outcome = repair_pipeline
+            .remember(RememberPipelineDraft::new(
+                Vec::<MemoryObjectDraft>::new(),
+                [typed_link_draft(
+                    id("550e8400-e29b-41d4-a716-446655443009"),
+                    ObjectType::Entity,
+                    fixtures.hub_entity.id,
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                    fixtures.suppressed_seed.id,
+                )],
+            ))
+            .await
+            .expect("stats repair outcome should still return graph success");
+
+        let failure = repair_outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("unhealthy stats store should report failed update ids");
+        assert!(failure
+            .failed_object_ids
+            .contains(&fixtures.suppressed_seed.id));
+        assert!(repair_outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { object_ids, .. }
+                if object_ids.contains(&fixtures.suppressed_seed.id)
+        )));
     }
 
     #[derive(Debug, Clone, Copy)]

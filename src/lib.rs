@@ -22,33 +22,41 @@ use crate::internal::models::vector::EmbeddingInput;
 use crate::internal::repositories::{
     CorrectionForgetPipeline, GraphAuthorityStore, InMemoryRetrievalStatsStore, LinkPipeline,
     MemoryEmbedder, RememberPipeline, RememberPipelineDraft, RetrievalSelectivityPolicy,
-    RetrievalStatsStore, RetrievePipeline, VectorCandidateStore,
+    RetrievalStatsStore, RetrievePipeline, VectorCandidateStore, WritePlanValidator,
 };
 
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
-    default_retrieval_object_types, graph_uri, ArchivePolicy, ContextPackSection,
-    ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft, CorrectionCascadePolicy,
+    default_retrieval_object_types, graph_uri, ArchivePolicy, CandidateCount,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateValidation,
+    CandidateValidationStatus, CommitOptions, ContextPackSection, ContinuityContextPack,
+    ContinuitySectionLimits, CorrectMemoryDraft, CorrectionCascadePolicy,
     CorrectionLifecyclePolicy, CorrectionTarget, DeferredDestructiveLifecyclePolicy,
-    DeferredLifecycleAction, DerivedMemory, DerivedMemoryDraft, DerivedType, DomainValidationError,
-    DraftDefaults, Entity, EntityDraft, EntityType, Episode, EpisodeDraft, ExternalSourceReference,
+    DeferredLifecycleAction, DerivedMemory, DerivedMemoryCandidate, DerivedMemoryDraft,
+    DerivedType, DiagnosticSeverity, DomainValidationError, DraftDefaults, Entity, EntityCandidate,
+    EntityDraft, EntityType, Episode, EpisodeCandidate, EpisodeDraft, ExternalSourceReference,
     ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
     GraphExpansionBoundedFailureSummary, GraphExpansionBoundedFailureTrace,
     GraphExpansionBoundedReason, GraphExpansionOutcome, GraphExpansionTelemetry,
     GraphExpansionTrace, GraphRelationTrace, IncludedDerivedMemory, LifecycleDtoValidationError,
     LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
     LifecycleMutationOutcome, LifecycleMutationTrace, LifecycleOmissionSummary, LifecycleTargetRef,
-    MemoryId, MemoryLink, MemoryLinkDraft, MemoryObject, MemoryObjectDraft, MemoryObjectRef,
-    MemoryThread, MemoryThreadDraft, Modality, ObjectType, Observation, ObservationDraft,
-    RelationType, RememberDraft, RememberOutcome, ReplacementDerivedMemoryDraft, RetentionState,
-    RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy,
-    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionPressureSummary, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
-    SelectivityTrace, SourceObjectCorrectionTarget, SourceProvenanceReference, Stability,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    MemoryCandidate, MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkCandidate,
+    MemoryLinkDraft, MemoryObject, MemoryObjectDraft, MemoryObjectRef, MemoryThread,
+    MemoryThreadCandidate, MemoryThreadDraft, Modality, ObjectType, Observation,
+    ObservationCandidate, ObservationDraft, PrepareOptions, RationaleOrigin, RelationType,
+    RememberDiagnostic, RememberDiagnostics, RememberDraft, RememberInput, RememberOptions,
+    RememberOutcome, RememberWritePlan, RepairMarker, ReplacementDerivedMemoryDraft,
+    RetentionState, RetrievalCandidateLimits, RetrievalContext, RetrievalGraphLimits,
+    RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry, RetrievalTrace,
+    RetrieveOutcome, SectionAssignment, SectionPressureSummary, SelectivityCountScope,
+    SelectivityDecision, SelectivityTelemetry, SelectivityTrace, SourceObjectCorrectionTarget,
+    SourceProvenance, SourceProvenanceReference, SourceSpan, SourceSpanRange,
+    SourceSpanValidationError, Stability, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, StatsUpdateCandidate, StatsUpdateFailure, StatsUpdateStatus,
     SupersededByEvidence, SuppressionPolicy, ThreadStatus, VectorCandidateTrace,
-    VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
+    VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure, CURRENT_SCHEMA_VERSION,
     DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::config::settings::{
@@ -259,7 +267,62 @@ impl CharacterMemory {
         Self::new_with_embedding_provider(settings, collection_name, embed_provider).await
     }
 
-    /// Persists a remember draft through the graph-authoritative write pipeline.
+    /// Prepares a remember write plan without persisting graph, vector, or stats data.
+    ///
+    /// The default facade path uses fresh operation defaults, so repeated calls with
+    /// the same input produce distinct plan/object identifiers. Use the lower-level
+    /// write-plan helper APIs with fixed defaults when byte-for-byte deterministic
+    /// planning is required.
+    pub async fn prepare(
+        &self,
+        input: RememberInput,
+        options: PrepareOptions,
+    ) -> Result<RememberWritePlan, CustomError> {
+        let defaults = crate::api::types::write_plan::RememberPlanDefaults::generated();
+        let mut plan = input.prepare_write_plan_with_options(
+            &defaults,
+            options.include_vector_index_candidates,
+            options.include_stats_update_candidates,
+        );
+        if let Some(idempotency_key) = options.idempotency_key {
+            plan.idempotency_key = idempotency_key;
+        }
+        Ok(plan)
+    }
+
+    /// Validates a remember write plan against current graph state without persisting anything.
+    pub async fn validate_plan(
+        &self,
+        plan: &RememberWritePlan,
+    ) -> Result<Vec<CandidateValidation>, CustomError> {
+        let parts = self.memory_composition();
+        Ok(WritePlanValidator::new(parts.graph_store.as_ref())
+            .validate(plan)
+            .await?
+            .validations)
+    }
+
+    /// Commits a remember write plan after revalidating it against current graph state.
+    ///
+    /// Graph-authoritative writes are critical and fail the operation. Vector indexing and
+    /// retrieval-stats updates are repairable and are reported in the returned outcome.
+    pub async fn commit(
+        &self,
+        plan: RememberWritePlan,
+        options: CommitOptions,
+    ) -> Result<RememberOutcome, CustomError> {
+        let parts = self.memory_composition();
+        let pipeline = RememberPipeline::new_with_stats(
+            parts.graph_store.as_ref(),
+            parts.vector_store.as_ref(),
+            parts.embedder.as_ref(),
+            parts.stats_store.as_ref(),
+        );
+        let outcome = pipeline.commit(plan, options).await?;
+        Ok(outcome.into())
+    }
+
+    /// Persists a remember draft through the same graph-authoritative commit pipeline.
     pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
         let parts = self.memory_composition();
         let pipeline = RememberPipeline::new_with_stats(
@@ -359,11 +422,18 @@ fn retrieval_stats_store(settings: &Settings) -> Result<Box<dyn RetrievalStatsSt
 
 impl From<crate::internal::repositories::RememberPipelineOutcome> for RememberOutcome {
     fn from(value: crate::internal::repositories::RememberPipelineOutcome) -> Self {
+        let vector_indexing_failure = value
+            .vector_indexing_failure
+            .map(VectorIndexingFailure::from);
+
         Self {
             persisted_object_ids: value.persisted_object_ids,
             persisted_link_ids: value.persisted_link_ids,
             vector_indexed_object_ids: value.vector_indexed_object_ids,
-            vector_indexing_failure: value.vector_indexing_failure.map(Into::into),
+            vector_indexing_failure,
+            stats_update_status: value.stats_update_status,
+            repair_needed: value.repair_needed,
+            diagnostics: value.diagnostics,
         }
     }
 }
@@ -384,7 +454,9 @@ mod tests {
     use secrecy::SecretString;
     use uuid::Uuid;
 
-    use crate::api::types::{EntityDraft, EntityType, ObjectType, RelationType};
+    use crate::api::types::{
+        EntityDraft, EntityType, MemoryLinkDraft, ObjectType, PrepareOptions, RelationType,
+    };
     use crate::internal::models::vector::{
         memory_object_vector_record, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
         VectorRecordEmbedding, VectorSurface,
@@ -410,6 +482,116 @@ mod tests {
         assert_eq!(outcome.persisted_link_ids, Vec::<MemoryId>::new());
         assert_eq!(outcome.vector_indexed_object_ids, vec![entity_id]);
         assert_eq!(outcome.vector_indexing_failure, None);
+    }
+
+    #[tokio::test]
+    async fn prepare_and_validate_plan_do_not_persist() {
+        let memory = injected_memory();
+
+        let plan = memory
+            .prepare(
+                RememberInput::new("prepare only"),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        let validations = memory.validate_plan(&plan).await.unwrap();
+
+        assert!(validations
+            .iter()
+            .all(|validation| validation.status == CandidateValidationStatus::Valid));
+        let graph = memory.memory_composition.graph_store.as_ref();
+        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 0);
+        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn commit_revalidates_against_current_graph_state() {
+        let memory = injected_memory();
+        let missing_entity_id = id("550e8400-e29b-41d4-a716-446655445021");
+        let plan = memory
+            .prepare(
+                RememberInput::new("commit revalidation").with_entity_id(missing_entity_id),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let error = memory
+            .commit(plan, CommitOptions::default())
+            .await
+            .expect_err("missing link target should reject during commit revalidation");
+
+        assert!(error
+            .to_string()
+            .contains("memory link to target does not exist"));
+    }
+
+    #[tokio::test]
+    async fn commit_retry_is_idempotent_and_rejects_divergent_content() {
+        let memory = injected_memory();
+        let mut plan = memory
+            .prepare(
+                RememberInput::new("same content"),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        memory
+            .commit(plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        memory
+            .commit(plan.clone(), CommitOptions::default())
+            .await
+            .expect("exact retry should be accepted");
+
+        if let MemoryCandidate::Episode(candidate) = &mut plan.candidates[0] {
+            candidate.draft.summary = "divergent content".to_owned();
+        }
+        let error = memory
+            .commit(plan, CommitOptions::default())
+            .await
+            .expect_err("same deterministic IDs with different content should reject");
+
+        assert!(error.to_string().contains("deterministic ID collided"));
+    }
+
+    #[tokio::test]
+    async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
+        let memory = CharacterMemory::from_parts(
+            Box::new(FakeGraphAuthorityStore::new()),
+            Box::new(FailingVectorCandidateStore),
+            Box::new(DeterministicMemoryEmbedder::new(8)),
+        );
+        let plan = memory
+            .prepare(
+                RememberInput::new("repairable vector failure"),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let first = memory
+            .commit(plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        let second = memory.commit(plan, CommitOptions::default()).await.unwrap();
+
+        assert!(first.vector_indexing_failure.is_some());
+        assert!(second.vector_indexing_failure.is_some());
+        assert_eq!(
+            first
+                .repair_needed
+                .iter()
+                .filter(|marker| matches!(marker, RepairMarker::VectorIndex { .. }))
+                .count(),
+            1
+        );
+        let graph = memory.memory_composition.graph_store.as_ref();
+        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 2);
+        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -1027,6 +1209,41 @@ mod tests {
             let mut candidates = self.candidates.clone();
             candidates.truncate(query.limit);
             Ok(candidates)
+        }
+
+        async fn list_candidate_diagnostics(
+            &self,
+        ) -> Result<
+            Vec<crate::internal::models::vector::VectorCandidateDiagnosticRecord>,
+            CustomError,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingVectorCandidateStore;
+
+    #[async_trait]
+    impl VectorCandidateStore for FailingVectorCandidateStore {
+        async fn upsert_vector_records(
+            &self,
+            _records: &[VectorRecordEmbedding<'_>],
+        ) -> Result<(), CustomError> {
+            Err(CustomError::EmbeddingGenerationError(
+                "vector store unavailable".to_owned(),
+            ))
+        }
+
+        async fn search_candidates(
+            &self,
+            _query: &VectorCandidateSearch,
+        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+            Ok(Vec::new())
         }
 
         async fn list_candidate_diagnostics(

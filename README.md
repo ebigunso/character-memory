@@ -128,6 +128,27 @@ This is useful when you want to:
 - make tests deterministic
 - integrate another embedding API
 
+## Write path
+
+Character Memory separates planning from persistence. Use `prepare` to build an inspectable `RememberWritePlan`, `validate_plan` to check it against the current graph, and `commit` to persist it. `prepare` and `validate_plan` do not write graph objects, vector entries, retrieval statistics, or raw source data.
+
+```rust
+let input = RememberInput::new("caller-provided note or transcript reference");
+
+let plan = memory.prepare(input, PrepareOptions::default()).await?;
+let validation = memory.validate_plan(&plan).await?;
+
+if validation.iter().all(|candidate| candidate.status == CandidateValidationStatus::Valid) {
+    let outcome = memory.commit(plan, CommitOptions::default()).await?;
+}
+```
+
+`commit` revalidates the plan before writing. Graph-authoritative objects, links, provenance, lifecycle, and currentness are critical writes; vector indexing and retrieval-stat updates are repairable and are reported in `RememberOutcome`.
+
+For callers that already have structured drafts, `remember(RememberDraft)` remains the convenience wrapper and routes through the same graph-authoritative commit machinery.
+
+The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
+
 ## Backends
 
 The default implementation is backed by Qdrant and an Oxigraph HTTP service.

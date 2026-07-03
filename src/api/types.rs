@@ -1,6 +1,7 @@
 pub mod domain;
 pub mod lifecycle;
 pub mod retrieval;
+pub mod write_plan;
 
 mod draft;
 
@@ -35,4 +36,14 @@ pub use retrieval::{
     SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
     StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
     VectorCandidateTrace,
+};
+pub use write_plan::{
+    CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale,
+    CandidateValidation, CandidateValidationStatus, CommitOptions, DerivedMemoryCandidate,
+    DiagnosticSeverity, EntityCandidate, EpisodeCandidate, MemoryCandidate, MemoryCandidateKind,
+    MemoryLinkCandidate, MemoryThreadCandidate, ObservationCandidate, PrepareOptions,
+    RationaleOrigin, RememberDiagnostic, RememberDiagnostics, RememberInput, RememberOptions,
+    RememberWritePlan, RepairMarker, SourceProvenance, SourceSpan, SourceSpanRange,
+    SourceSpanValidationError, StatsUpdateCandidate, StatsUpdateFailure, StatsUpdateStatus,
+    VectorIndexCandidate,
 };

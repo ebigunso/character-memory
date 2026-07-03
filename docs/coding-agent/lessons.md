@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-07-03 - Skip-On-Stall Integration Tests Can Mask Unexecuted Bodies In Green Runs  [tags: validation, ci]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_7 review / Task_4b re-review
+- Roles involved: Reviewer | Orchestrator
+
+Symptom:
+- Integration tests that self-skip on the documented local Qdrant idle-stall report `ok`, so a green local target run can include tests whose bodies never executed.
+
+Root cause:
+- Skip-on-infra-stall is implemented as an early return inside the test body, invisible to the test harness result.
+
+Fix applied:
+- Reviewer performed targeted reruns of the specific tests under review and confirmed absence of skip messages; Linux CI remains the authoritative full-suite arbiter.
+
+Prevention:
+- When local evidence matters for a specific test, rerun it in a targeted invocation and confirm no skip message was printed for it. Treat aggregate green local runs with skip messages as incomplete evidence.
+
+Evidence:
+- Task_4b re-review confirmed full-body execution of all three new tests via targeted reruns; PR #55 CI green.
+
 ## 2026-07-03 - Qdrant Builder .timeout() Is A Server-Side Operation Parameter, Not A Client Bound  [tags: tooling, validation]
 
 Context:
@@ -63,6 +85,9 @@ Prevention:
 - If guardrail/facade integration tests fail locally at the remember stage with vector_indexing_failure timeouts, run the canary test first; if it fails, treat the machine as affected and rely on CI instead of re-diagnosing.
 - Re-run the canary after Docker Desktop, Windows, or network-stack updates to detect recovery or regression.
 
+Resolution (2026-07-03):
+- A full OS reboot resolved the condition. Immediately after boot the canary showed a transitional mode (post-idle upsert succeeded on retry in ~40s); after the system settled, the canary passes (<1s post-idle upsert) and the full local cargo test suite is green (guardrail tests 4.6s for all three, previously 45–70s each). Root cause remains unpinned but is confirmed to live in transient host networking state that survives Docker restarts and daemon recreation but not a reboot. If symptoms recur: run the canary, and reboot before deeper diagnosis.
+
 Evidence:
 - Full falsification matrix in the stabilization plan Decision Log (entries 2–6).
 
@@ -87,6 +112,50 @@ Prevention:
 
 Evidence:
 - Both overwritten Decision Log entries in the stabilization plan were restored in follow-up edits.
+## 2026-07-02 - Use 127.0.0.1 Instead Of localhost For Local Qdrant gRPC  [tags: tooling, validation]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_1 required validation
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- Qdrant-backed integration tests hung to gRPC timeouts ("The operation was cancelled Timeout expired") or intermittent ConnectionRefused, while REST on 6333 responded in <100ms. One run crashed the Qdrant container (exit 255).
+
+Root cause:
+- `QDRANT_CONNECTION_STRING=http://localhost:6334` resolves to IPv6 `::1` inside tonic; the Docker Desktop port proxy accepts the TCP connect on `::1` but does not reliably forward HTTP/2 traffic, so gRPC calls stall until client timeout. `127.0.0.1` works instantly.
+
+Fix applied:
+- Pinned `QDRANT_CONNECTION_STRING=http://127.0.0.1:6334` in the local gitignored .env.
+
+Prevention:
+- Prefer `127.0.0.1` over `localhost` in local service connection strings for gRPC clients targeting Docker Desktop published ports on Windows.
+- When gRPC times out but REST on the sibling port is fast, test IPv4 vs IPv6 connect paths before suspecting the service.
+
+Evidence:
+- initialization_tests: 30s timeout failure with localhost vs 10s pass with 127.0.0.1 override; unit suite unchanged.
+
+## 2026-07-02 - Verify Failures Against Baseline HEAD Before Blaming New Code  [tags: validation, workflow]
+
+Context:
+- Plan: v0.1.3 remember intake write planning
+- Task/Wave: Task_1 required validation
+- Roles involved: Orchestrator
+
+Symptom:
+- Full `cargo test` failed during Task_1 validation in v0.1.2 integration tests, initially indistinguishable from a Task_1 regression.
+
+Root cause:
+- Environmental degradation (see IPv6/localhost entry) unrelated to the change under validation.
+
+Fix applied:
+- Stashed the task's src/ changes, reran the failing target on baseline HEAD, observed identical failures, restored the stash.
+
+Prevention:
+- When required validation fails in tests untouched by the current task, run the same target against baseline HEAD (stash/worktree) to classify the failure as pre-existing vs regression before remediation.
+
+Evidence:
+- Baseline HEAD produced the identical 1-pass/2-fail result on tests/v0_1_2_retrieval_guardrails_tests.rs.
 
 ## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
 

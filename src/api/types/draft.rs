@@ -8,6 +8,7 @@ use super::domain::{
     MemoryLink, MemoryObject, MemoryThread, Modality, ObjectType, Observation, RelationType,
     RetentionState, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
+use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 
 /// Supplies generated IDs and timestamps for converting draft inputs into canonical objects.
 #[derive(Debug, Clone)]
@@ -548,16 +549,19 @@ impl RememberDraft {
 }
 
 /// Result of a remember write.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberOutcome {
     pub persisted_object_ids: Vec<MemoryId>,
     pub persisted_link_ids: Vec<MemoryId>,
     pub vector_indexed_object_ids: Vec<MemoryId>,
     pub vector_indexing_failure: Option<VectorIndexingFailure>,
+    pub stats_update_status: StatsUpdateStatus,
+    pub repair_needed: Vec<RepairMarker>,
+    pub diagnostics: RememberDiagnostics,
 }
 
 /// Vector indexing failure recorded after graph-authoritative writes have succeeded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorIndexingFailure {
     pub unindexed_object_ids: Vec<MemoryId>,
     pub error_message: String,

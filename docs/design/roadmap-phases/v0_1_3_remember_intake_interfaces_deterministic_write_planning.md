@@ -467,3 +467,15 @@ Invalid
 ```
 
 v0.1.3 does not add those states.
+
+## Implementation notes
+
+- `RememberOutcome` was extended in place for commit diagnostics, vector indexing status, stats update status, and repair markers. No separate commit-outcome type was introduced.
+- Missing `MemoryLink` targets are strictly rejected when the target is absent from both the plan and the graph. Deferring unresolved link candidates remains a future option, not a v0.1.3 behavior.
+- `CandidateProducerKind` and `RationaleOrigin` are plan/diagnostics-time metadata. They do not add a durable metadata plane or require a schema-version bump.
+- Idempotency uses deterministic UUIDv5 object/link IDs plus idempotent graph upsert. Exact retries are idempotent, deterministic-ID collisions with existing divergent graph content are rejected with diagnostics, and there is no persisted operation ledger in v0.1.3. Plans must carry explicit created/updated timestamps needed for stable equality; commit rejects missing required timestamps instead of injecting wall-clock defaults.
+- `CommitOptions` exposes only repairable side-effect toggles (`update_vectors`, `update_stats`); committing invalid plans is always prohibited.
+- Stats update candidates are validation/inspection artifacts. Commit-time stats recording derives from committed graph-authoritative writes so caller-filtered stats candidates cannot under-record selectivity bookkeeping. Stats candidates must still target in-plan object candidates to avoid accepted candidate-only no-ops.
+- Plan-path vector indexing uses exactly the plan's declared vector targets; vector targets must reference in-plan object candidates because plan-path embedding surfaces come from those candidates. An empty vector candidate list indexes nothing. The legacy `remember(RememberDraft)` convenience path still derives vector records from committed objects.
+- The shipped facade keeps `remember(RememberDraft)` source-compatible. `RememberInput` is used through `prepare(input, options)`; the earlier `remember(input, options)` shape in this draft is a suggested shape, not the implemented signature.
+- "Superseded memories are not current unless explicitly historical" is implemented with `RetentionState::Archived` as the explicit historical state for superseded candidates.
