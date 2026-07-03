@@ -1,3 +1,5 @@
+pub(crate) mod schema;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

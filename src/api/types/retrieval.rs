@@ -519,7 +519,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
-    use crate::api::types::domain::{DerivedType, Modality, Stability};
+    use crate::domain::{DerivedType, Modality, Stability};
 
     fn memory_id(value: &str) -> MemoryId {
         Uuid::parse_str(value).unwrap()

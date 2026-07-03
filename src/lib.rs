@@ -1,4 +1,5 @@
 mod config;
+pub mod domain;
 mod errors;
 // NOTE: internal implementation code lives under `crate::internal`.
 

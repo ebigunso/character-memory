@@ -6,9 +6,9 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use qdrant_client::qdrant::FieldType;
 use serde::Serialize;
 
+use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
 use crate::internal::models::vector::{VectorRecord, VectorSurface};
-use crate::internal::schema::require_current_schema_version;
 
 pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
     "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";

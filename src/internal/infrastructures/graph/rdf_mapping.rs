@@ -9,8 +9,8 @@ use crate::api::types::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
     ObjectType, Observation,
 };
+use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
-use crate::internal::schema::require_current_schema_version;
 
 use super::vocabulary as vocab;
 

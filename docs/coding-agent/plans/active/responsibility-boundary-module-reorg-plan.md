@@ -337,6 +337,11 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
 ## Progress Log (append-only)
 
 - 2026-07-04: Plan drafted from Researcher structure analysis. Execution not approved — user requested analysis only.
+- 2026-07-04: Execution approved by user; branch refactor/responsibility-boundary-module-reorg created.
+- 2026-07-04 Wave 1 completed: [Task_1]
+  - Summary: domain model → src/domain.rs (+ domain/tests.rs), schema guard → src/domain/schema.rs; api::types re-exports keep all existing paths; mechanical import fixes in 5 files.
+  - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (363 passed, 0 failed, 3 ignored service-gated).
+  - Notes: schema guard stays pub(crate) inside public domain module.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

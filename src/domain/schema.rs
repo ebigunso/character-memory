@@ -1,4 +1,4 @@
-use crate::api::types::CURRENT_SCHEMA_VERSION;
+use super::CURRENT_SCHEMA_VERSION;
 use crate::errors::CustomError;
 
 pub(crate) fn require_current_schema_version(

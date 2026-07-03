@@ -1,11 +1,11 @@
-pub mod domain;
 pub mod lifecycle;
 pub mod retrieval;
 pub mod write_plan;
 
 mod draft;
 
-pub use domain::{
+pub use crate::domain;
+pub use crate::domain::{
     graph_uri, DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode,
     MemoryId, MemoryLink, MemoryObject, MemoryThread, Modality, ObjectType, Observation,
     RelationType, RetentionState, Stability, ThreadStatus, CURRENT_SCHEMA_VERSION,

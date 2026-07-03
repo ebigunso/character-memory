@@ -13,15 +13,13 @@ use super::{
     ObservationCandidate, RememberDiagnostics, RememberInput, RememberWritePlan, SourceSpan,
     StatsUpdateCandidate, VectorIndexCandidate,
 };
-use crate::api::types::domain::{
-    graph_uri, MemoryId, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
-};
 use crate::api::types::draft::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
     ObservationDraft,
 };
 use crate::api::types::lifecycle::ExternalSourceReference;
 use crate::api::types::retrieval::MemoryObjectRef;
+use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION};
 
 /// Stable UUIDv5 namespace for write-plan IDs. IDs remain stable across releases as long as this
 /// namespace and `deterministic_uuid` label framing stay fixed.
@@ -493,7 +491,7 @@ fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::domain::{DerivedType, EntityType};
+    use crate::domain::{DerivedType, EntityType};
 
     fn timestamp(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value)
