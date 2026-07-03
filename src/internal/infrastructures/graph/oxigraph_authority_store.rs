@@ -19,11 +19,13 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::internal::repositories::{
-    apply_fanout_limits_by_pair, bounded_expansion, bounded_hub_retention_limit,
-    derived_memories_by_provenance, derived_memories_by_thread, GraphAuthorityStore,
-    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionQuery,
-    GraphObjectQuery, GraphObjectRef,
+    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
+    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+};
+use crate::policy::graph_expansion::{
+    bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
@@ -617,21 +619,6 @@ impl OxigraphHttpGraphAuthorityStore {
     }
 }
 
-trait BoundedExpansionLinkRef: Copy {
-    fn link_id(self) -> MemoryId;
-    fn from(self) -> GraphObjectRef;
-    fn to(self) -> GraphObjectRef;
-    fn relation(self) -> RelationType;
-
-    fn other_endpoint(self, object_ref: GraphObjectRef) -> GraphObjectRef {
-        if self.from() == object_ref {
-            self.to()
-        } else {
-            self.from()
-        }
-    }
-}
-
 impl BoundedExpansionLinkRef for SparqlLinkRef {
     fn link_id(self) -> MemoryId {
         self.link_id
@@ -666,72 +653,6 @@ impl BoundedExpansionLinkRef for SparqlHttpLinkRef {
     fn relation(self) -> RelationType {
         self.relation
     }
-}
-
-fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
-    query: &GraphExpansionQuery,
-    root_ref: GraphObjectRef,
-    object_ref: GraphObjectRef,
-    depth: u8,
-    link_refs: &[T],
-    bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
-) -> Result<Vec<T>, CustomError> {
-    let mut incident_links = link_refs
-        .iter()
-        .copied()
-        .filter(|link_ref| relation_allowed(query, link_ref.relation()))
-        .filter(|link_ref| {
-            object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
-        })
-        .collect::<Vec<_>>();
-
-    let apply_selectivity_overrides = depth == 0 && object_ref == root_ref;
-
-    if incident_links.len() > query.max_hub_edges {
-        let failure = GraphExpansionBoundedFailure {
-            reason: GraphExpansionBoundedFailureReason::HubLimit,
-            at: Some(object_ref),
-        };
-        if !query.failure_policy.allow_partial_results {
-            return Err(graph_expansion_bounded_error(failure));
-        }
-        bounded_failure.get_or_insert(failure);
-        incident_links.truncate(bounded_hub_retention_limit(
-            query,
-            apply_selectivity_overrides,
-        ));
-    }
-    Ok(apply_link_ref_fanout_limits(
-        query,
-        object_ref,
-        incident_links,
-        apply_selectivity_overrides,
-    ))
-}
-
-fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
-    query: &GraphExpansionQuery,
-    object_ref: GraphObjectRef,
-    incident_links: Vec<T>,
-    apply_selectivity_overrides: bool,
-) -> Vec<T> {
-    apply_fanout_limits_by_pair(
-        query,
-        incident_links,
-        apply_selectivity_overrides,
-        |link_ref| {
-            let neighbor = link_ref.other_endpoint(object_ref);
-            (link_ref.relation(), neighbor.object_type)
-        },
-    )
-}
-
-fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool {
-    query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
-}
-
-fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> bool {
-    query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
 }
 
 fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
@@ -777,43 +698,6 @@ fn insert_visible_ref(
     graph_refs.insert(object_ref);
     next_frontier.push(object_ref);
     Ok(())
-}
-
-fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    let location = failure
-        .at
-        .map(|object_ref| {
-            format!(
-                " at object_type={} object_id={}",
-                graph_object_type_name(object_ref.object_type),
-                object_ref.object_id
-            )
-        })
-        .unwrap_or_default();
-
-    CustomError::GraphExpansionBounded {
-        reason: bounded_failure_reason_name(failure.reason).to_owned(),
-        location,
-    }
-}
-
-fn bounded_failure_reason_name(reason: GraphExpansionBoundedFailureReason) -> &'static str {
-    match reason {
-        GraphExpansionBoundedFailureReason::NodeLimit => "node_limit",
-        GraphExpansionBoundedFailureReason::Timeout => "timeout",
-        GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
-    }
-}
-
-fn graph_object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::Episode => "episode",
-        ObjectType::Observation => "observation",
-        ObjectType::Entity => "entity",
-        ObjectType::MemoryThread => "memory_thread",
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::MemoryLink => "memory_link",
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

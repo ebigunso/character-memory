@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-07-04 - Bounded Expansion Has Two Semantically Distinct Flavors, Do Not Force-Merge  [tags: planning, architecture]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Task_2 (ports/policy extraction)
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- The plan hoped to unify the bounded-expansion algorithm into one implementation, but inspection showed the adapter-side flavor is semantically distinct, not duplicated.
+
+Root cause:
+- `bounded_expansion` computes a complete plan over fully materialized objects+links (lifecycle filtering, deterministic ordering), while `bounded_incident_link_refs` is a per-node pre-hydration pruning pass over lightweight link refs that runs before objects exist to filter on.
+
+Fix applied:
+- Both flavors colocated in `src/policy/graph_expansion.rs` with a module comment stating the semantic difference; the genuinely duplicated primitives (relation/object-type filters, hub-limit handling, bounded-failure error construction) were unified.
+
+Prevention:
+- True unification would require reshaping the adapter BFS to feed the plan algorithm lazily — a behavior-adjacent redesign, not a mechanical move. Keep it out of refactor waves; treat as residual design debt if it ever matters.
+
+Evidence:
+- Task_2 Worker report deviation record; full validation suite green with unchanged test count (363 passed).
+
 ## 2026-07-03 - Skip-On-Stall Integration Tests Can Mask Unexecuted Bodies In Green Runs  [tags: validation, ci]
 
 Context:

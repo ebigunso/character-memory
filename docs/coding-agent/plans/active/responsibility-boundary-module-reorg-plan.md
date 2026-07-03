@@ -342,6 +342,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Summary: domain model → src/domain.rs (+ domain/tests.rs), schema guard → src/domain/schema.rs; api::types re-exports keep all existing paths; mechanical import fixes in 5 files.
   - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (363 passed, 0 failed, 3 ignored service-gated).
   - Notes: schema guard stays pub(crate) inside public domain module.
+- 2026-07-04 Wave 2 completed: [Task_2]
+  - Summary: port traits → src/ports/ (5 files); bounded-expansion algorithm → src/policy/graph_expansion.rs; Oxigraph adapter's 5 duplicated private helpers deleted, both call sites use the single policy implementations; internal/repositories.rs kept as compatibility barrel for pipelines (migrate in Task_3). Noop/InMemory stats impls parked in ports/retrieval_stats.rs pending Task_4.
+  - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (363 passed, 0 failed, 3 ignored — identical baseline).
+  - Notes: deviation recorded — the two expansion flavors are semantically distinct (materialized-plan vs pre-hydration link-ref pruning) and were colocated, not force-merged, per the plan's fallback; lesson appended to docs/coding-agent/lessons.md. GraphExpansion::from_plan widened to pub(crate).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
