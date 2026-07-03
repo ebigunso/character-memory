@@ -85,6 +85,9 @@ Prevention:
 - If guardrail/facade integration tests fail locally at the remember stage with vector_indexing_failure timeouts, run the canary test first; if it fails, treat the machine as affected and rely on CI instead of re-diagnosing.
 - Re-run the canary after Docker Desktop, Windows, or network-stack updates to detect recovery or regression.
 
+Resolution (2026-07-03):
+- A full OS reboot resolved the condition. Immediately after boot the canary showed a transitional mode (post-idle upsert succeeded on retry in ~40s); after the system settled, the canary passes (<1s post-idle upsert) and the full local cargo test suite is green (guardrail tests 4.6s for all three, previously 45–70s each). Root cause remains unpinned but is confirmed to live in transient host networking state that survives Docker restarts and daemon recreation but not a reboot. If symptoms recur: run the canary, and reboot before deeper diagnosis.
+
 Evidence:
 - Full falsification matrix in the stabilization plan Decision Log (entries 2–6).
 
