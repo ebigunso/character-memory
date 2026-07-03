@@ -7,6 +7,7 @@ pub mod api;
 mod internal;
 pub(crate) mod policy;
 pub(crate) mod ports;
+pub(crate) mod usecases;
 
 use async_trait::async_trait;
 

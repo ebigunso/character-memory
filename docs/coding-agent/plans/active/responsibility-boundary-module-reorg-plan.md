@@ -346,6 +346,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Summary: port traits → src/ports/ (5 files); bounded-expansion algorithm → src/policy/graph_expansion.rs; Oxigraph adapter's 5 duplicated private helpers deleted, both call sites use the single policy implementations; internal/repositories.rs kept as compatibility barrel for pipelines (migrate in Task_3). Noop/InMemory stats impls parked in ports/retrieval_stats.rs pending Task_4.
   - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (363 passed, 0 failed, 3 ignored — identical baseline).
   - Notes: deviation recorded — the two expansion flavors are semantically distinct (materialized-plan vs pre-hydration link-ref pruning) and were colocated, not force-merged, per the plan's fallback; lesson appended to docs/coding-agent/lessons.md. GraphExpansion::from_plan widened to pub(crate).
+- 2026-07-04 Wave 3 completed: [Task_3] (executed by codex worker via agmsg per user's dispatch-routing instruction)
+  - Summary: pipelines → src/usecases/ (remember, link, retrieve, write_planning, reconciliation, correct_forget); retrieval_selectivity → src/policy/; plan-construction logic (RememberInput impls, deterministic UUID, RememberPlanDefaults) moved from api/types/write_plan/helpers.rs into usecases/write_planning.rs with the api helper file now a re-export shim; internal/repositories/ holds only test_support.rs plus a compatibility barrel.
+  - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (338 unit + 25 integration passed, 0 failed, 3 ignored — identical baseline). Orchestrator sanity cargo check pass.
+  - Notes: Q2 resolved with evidence — correct/forget stay together as correct_forget.rs because shared mutation planning, cascade/provenance discovery, vector maintenance, and fixtures dominate the file; splitting would duplicate internals. Historical completed-plan docs keep old paths (Task_8 owns doc refresh).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

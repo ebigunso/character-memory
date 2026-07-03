@@ -1,22 +1,15 @@
-mod correction_forget_pipeline;
-mod link_pipeline;
-mod reconciliation;
-mod remember_pipeline;
-mod retrieval_selectivity;
-mod retrieve_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod write_planning;
 
-// Compatibility re-exports: port traits moved to crate::ports and the
-// bounded-expansion algorithm moved to crate::policy. Pipelines keep
-// importing through this barrel until they move in Task_3.
+// Compatibility re-exports: ports, policies, and use cases have moved to
+// responsibility-named modules. Existing call sites keep importing through
+// this barrel until later waves remove `internal` entirely.
 #[allow(unused_imports)]
 pub(crate) use crate::ports::embedder::MemoryEmbedder;
 
 // Lifecycle pipeline surface.
 #[allow(unused_imports)]
-pub(crate) use correction_forget_pipeline::CorrectionForgetPipeline;
+pub(crate) use crate::usecases::CorrectionForgetPipeline;
 
 // Graph-authority contract surface. Retrieval and lifecycle code use
 // different subsets of the query/expansion helpers.
@@ -35,7 +28,7 @@ pub(crate) use crate::ports::graph_authority::{
 };
 
 #[allow(unused_imports)]
-pub(crate) use link_pipeline::{
+pub(crate) use crate::usecases::{
     admit_link, LinkAdmissionDecision, LinkAdmissionEvidence, LinkPipeline,
 };
 
@@ -47,7 +40,7 @@ pub(crate) use crate::ports::source_reference::{ResolvedSourceReference, SourceR
 // Internal/admin reconciliation diagnostics. These remain out of the public
 // CharacterMemory facade until a governance surface is planned.
 #[allow(unused_imports)]
-pub(crate) use reconciliation::{
+pub(crate) use crate::usecases::{
     reconcile_graph_vector_stores, ReconciliationDiagnostic, ReconciliationDriftKind,
     ReconciliationReport,
 };
@@ -55,7 +48,7 @@ pub(crate) use reconciliation::{
 // Remember pipeline surface; outcome types are converted at the public
 // facade boundary.
 #[allow(unused_imports)]
-pub(crate) use remember_pipeline::{
+pub(crate) use crate::usecases::{
     RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome,
     VectorIndexingFailure as InternalVectorIndexingFailure,
 };
@@ -71,21 +64,21 @@ pub(crate) use crate::ports::retrieval_stats::{
 };
 
 #[allow(unused_imports)]
-pub(crate) use retrieval_selectivity::{
+pub(crate) use crate::policy::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 
 // Continuity retrieval pipeline surface.
 #[allow(unused_imports)]
-pub(crate) use retrieve_pipeline::RetrievePipeline;
+pub(crate) use crate::usecases::RetrievePipeline;
 
 // Vector candidate recall contract surface.
 #[allow(unused_imports)]
 pub(crate) use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[allow(unused_imports)]
-pub(crate) use write_planning::{
+pub(crate) use crate::usecases::{
     WritePlanCommitValues, WritePlanValidationDecision, WritePlanValidationVerdict,
     WritePlanValidator,
 };

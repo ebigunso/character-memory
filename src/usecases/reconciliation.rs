@@ -9,7 +9,8 @@ use crate::api::types::{
 use crate::errors::CustomError;
 use crate::internal::models::vector::VectorCandidateDiagnosticRecord;
 
-use super::{GraphAuthorityStore, GraphObjectRef, VectorCandidateStore};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectRef};
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReconciliationReport {
