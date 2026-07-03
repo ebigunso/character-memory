@@ -819,6 +819,13 @@ pub struct StatsUpdateFailure {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrepareOptions {
+    /// Caller-supplied operation label copied into [`RememberWritePlan::idempotency_key`].
+    ///
+    /// This key is for caller correlation and same-operation retry checks at the plan level. It
+    /// does not seed candidate IDs, object IDs, link IDs, source references, or graph IRIs; those
+    /// are derived deterministically from the remember input and plan defaults. Supplying the same
+    /// key for different content does not make the writes equivalent and will not override
+    /// deterministic content/ID collision checks during commit.
     pub idempotency_key: Option<String>,
     pub include_vector_index_candidates: bool,
     /// Include stats update candidates for validation and caller inspection.

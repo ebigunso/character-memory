@@ -245,8 +245,7 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) {
-        self.record_remember_stats_after_write(objects, links).await;
-        let updated_ids = objects.iter().map(memory_object_id).collect::<Vec<_>>();
+        let updated_ids = self.record_remember_stats_after_write(objects, links).await;
         match self.stats_store.health().await {
             Ok(health) if health.state == RetrievalStatsHealthState::Unhealthy => {
                 let error_message = health
@@ -302,11 +301,11 @@ where
         &self,
         objects: &[MemoryObject],
         links: &[MemoryLink],
-    ) {
+    ) -> Vec<MemoryId> {
         let endpoint_refs = remember_stats_endpoint_refs(objects, links);
         if endpoint_refs.is_empty() {
             record_stats_after_write(self.stats_store, objects, links).await;
-            return;
+            return objects.iter().map(memory_object_id).collect();
         }
 
         match self
@@ -318,11 +317,13 @@ where
                 let stats_objects =
                     stats_objects_with_endpoint_lifecycle(objects, endpoint_objects);
                 record_stats_after_write(self.stats_store, &stats_objects, links).await;
+                stats_objects.iter().map(memory_object_id).collect()
             }
             Err(error) => {
                 let error_message = error.to_string();
                 record_stats_after_write(self.stats_store, objects, links).await;
                 let _ = self.stats_store.mark_unhealthy(error_message).await;
+                objects.iter().map(memory_object_id).collect()
             }
         }
     }
@@ -912,7 +913,7 @@ mod tests {
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
-        pipeline
+        let outcome = pipeline
             .remember(RememberPipelineDraft::new(
                 Vec::<MemoryObjectDraft>::new(),
                 [typed_link_draft(
@@ -944,6 +945,49 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
+        assert_eq!(
+            outcome.stats_update_status.updated_object_ids,
+            vec![fixtures.suppressed_seed.id]
+        );
+        let failed_ids = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .map(|failure| failure.failed_object_ids.as_slice())
+            .unwrap_or_default();
+        assert!(failed_ids.is_empty());
+
+        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy("repair required".to_owned());
+        let repair_pipeline =
+            RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
+        let repair_outcome = repair_pipeline
+            .remember(RememberPipelineDraft::new(
+                Vec::<MemoryObjectDraft>::new(),
+                [typed_link_draft(
+                    id("550e8400-e29b-41d4-a716-446655443009"),
+                    ObjectType::Entity,
+                    fixtures.hub_entity.id,
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                    fixtures.suppressed_seed.id,
+                )],
+            ))
+            .await
+            .expect("stats repair outcome should still return graph success");
+
+        let failure = repair_outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("unhealthy stats store should report failed update ids");
+        assert!(failure
+            .failed_object_ids
+            .contains(&fixtures.suppressed_seed.id));
+        assert!(repair_outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { object_ids, .. }
+                if object_ids.contains(&fixtures.suppressed_seed.id)
+        )));
     }
 
     #[derive(Debug, Clone, Copy)]

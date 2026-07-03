@@ -2,7 +2,8 @@
 //! - "A caller can prepare a RememberWritePlan without committing it." -> prepare_without_persist_leaves_graph_and_vectors_empty
 //! - "A caller can validate a RememberWritePlan without committing it." -> validate_without_persist_leaves_graph_and_vectors_empty
 //! - "A caller can commit a validated RememberWritePlan." -> core_commit_flow_works_in_in_memory_graph_mode; core_commit_flow_works_in_persistent_graph_mode
-//! - "remember() remains available as a convenience wrapper." -> remember_wrapper_matches_prepare_validate_commit_graph_state; remember_wrapper_commits_equivalent_graph_state
+//! - "remember() remains available as a convenience wrapper." -> remember_wrapper_commits_equivalent_graph_state
+//! - "commit() can be called directly or after explicit validate_plan() with equivalent graph-state shape." -> commit_with_and_without_explicit_validation_produce_equivalent_graph_state
 //! - "commit() revalidates before writing." -> commit_revalidates_and_rejects_after_intervening_graph_change
 //! - "Invalid behavior-influencing DerivedMemory without provenance is rejected." -> ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and_commit
 //! - "Missing MemoryLink targets are rejected or deferred according to explicit policy." -> missing_memory_link_target_is_strictly_rejected
@@ -407,44 +408,47 @@ async fn no_inference_helpers_only_plan_caller_supplied_candidates() {
 }
 
 #[tokio::test]
-async fn remember_wrapper_matches_prepare_validate_commit_graph_state() {
+async fn commit_with_and_without_explicit_validation_produce_equivalent_graph_state() {
     let (memory, collection_name) = match setup_basic().await {
         Some(fixture) => fixture,
         None => return,
     };
 
-    let wrapper_outcome = memory
+    let direct_commit_outcome = memory
         .commit(
             memory
-                .prepare(core_input("wrapper-parity"), PrepareOptions::default())
+                .prepare(
+                    core_input("direct-commit-parity"),
+                    PrepareOptions::default(),
+                )
                 .await
-                .expect("wrapper-equivalent prepare should succeed"),
+                .expect("direct-commit prepare should succeed"),
             graph_only_commit_options(),
         )
         .await
-        .expect("remember wrapper should still commit");
-    ensure_graph_only_outcome(&wrapper_outcome);
+        .expect("commit without explicit validate_plan should succeed");
+    ensure_graph_only_outcome(&direct_commit_outcome);
 
     let plan = memory
         .prepare(core_input("plan-parity"), PrepareOptions::default())
         .await
-        .expect("prepare should produce parity plan");
+        .expect("prepare should produce validate-then-commit parity plan");
     memory
         .validate_plan(&plan)
         .await
-        .expect("parity plan should validate");
-    let planned_outcome = memory
+        .expect("validate-then-commit parity plan should validate");
+    let validated_commit_outcome = memory
         .commit(plan, graph_only_commit_options())
         .await
-        .expect("prepared parity plan should commit");
-    ensure_graph_only_outcome(&planned_outcome);
+        .expect("commit after explicit validate_plan should succeed");
+    ensure_graph_only_outcome(&validated_commit_outcome);
     assert_eq!(
-        wrapper_outcome.persisted_object_ids.len(),
-        planned_outcome.persisted_object_ids.len()
+        direct_commit_outcome.persisted_object_ids.len(),
+        validated_commit_outcome.persisted_object_ids.len()
     );
     assert_eq!(
-        wrapper_outcome.persisted_link_ids.len(),
-        planned_outcome.persisted_link_ids.len()
+        direct_commit_outcome.persisted_link_ids.len(),
+        validated_commit_outcome.persisted_link_ids.len()
     );
     base::cleanup_collection(&collection_name).await;
 }
