@@ -1,8 +1,9 @@
 use thiserror::Error;
 
-use crate::api::types::{MemoryId, ObjectType};
+use crate::domain::{MemoryId, ObjectType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VectorDatabaseError {
     pub backend: &'static str,
     pub kind: String,
@@ -63,6 +64,7 @@ impl std::fmt::Display for VectorDatabaseError {
 impl std::error::Error for VectorDatabaseError {}
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum CustomError {
     #[error("Environment file not found: {0}")]
     EnvFileNotFound(String),

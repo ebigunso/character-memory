@@ -51,6 +51,7 @@ pub use crate::config::{
 };
 pub use crate::errors::{CustomError, VectorDatabaseError};
 pub use crate::memory::CharacterMemory;
+pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};
 
 // Re-export for integration tests
 pub mod test_utils {

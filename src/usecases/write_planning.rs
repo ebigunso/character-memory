@@ -1443,7 +1443,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
-    use crate::api::types::write_plan::RememberPlanDefaults;
+    use super::RememberPlanDefaults;
     use crate::api::types::{
         CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EntityDraft,
         EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability,

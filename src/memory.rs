@@ -34,7 +34,7 @@ impl CharacterMemory {
         input: RememberInput,
         options: PrepareOptions,
     ) -> Result<RememberWritePlan, CustomError> {
-        let defaults = crate::api::types::write_plan::RememberPlanDefaults::generated();
+        let defaults = crate::usecases::write_planning::RememberPlanDefaults::generated();
         let mut plan = input.prepare_write_plan_with_options(
             &defaults,
             options.include_vector_index_candidates,

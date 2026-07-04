@@ -20,8 +20,8 @@
 //! - "Missing rationale can be represented explicitly as unavailable." -> candidate_provenance_records_producer_kind_and_rationale_origin
 //! - "No v0.1.3 helper persists raw logs or resolves raw_ref values." -> source_refs_and_source_spans_are_preserved_and_raw_ref_is_opaque
 
-use character_memory::api::types::write_plan::RememberPlanDefaults;
 use character_memory::test_utils::load_test_settings;
+use character_memory::RememberPlanDefaults;
 use character_memory::{
     CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateValidationStatus,
     CharacterMemory, CommitOptions, CustomError, DerivedMemoryCandidate, DerivedMemoryDraft,

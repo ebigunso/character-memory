@@ -393,3 +393,22 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
 
 - Risks: clippy `-D warnings` + `#[allow(unused_imports)]` barrels mean every re-export reshuffle can surface unused-import errors; the `internal::repositories` dissolution touches imports in nearly every file (why waves are sequential); service-gated integration paths stay unexercised locally.
 - Edge cases: `pub mod test_utils` (used by `tests/support/base.rs`) must survive lib.rs decomposition; `tests/v0_1_public_facade_tests.rs` pins crate-root re-export names — keep names stable even where paths move.
+
+## Post-Completion Architecture Audit (2026-07-04)
+
+An independent optimality review (beyond plan conformance) ran after Task_9 approval. Verdict: sound-with-reservations. Three fix-now items were applied on this branch:
+
+1. errors.rs imports domain types from `crate::domain` directly (was via api::types — removed the errors↔api cycle).
+2. api::types::write_plan no longer re-exports usecase types (was the sole api→usecases edge); `RememberPlanDefaults`/`PreparedCandidateRefs` are crate-root re-exports from usecases::write_planning (they carry deterministic-ID construction logic, so moving them INTO api was rejected as re-inverting the plan's Finding 6).
+3. `#[non_exhaustive]` added to `CustomError` and `VectorDatabaseError` (every roadmap version adds variants; cheapest before external consumers exist).
+
+Deferred debt register (fix-at-next-touch unless noted):
+
+- usecases/retrieve.rs monolith (~1,350 impl lines): split into retrieve/{recall,expansion,ranking,pack,telemetry} as the OPENING task of the scoped-continuity phase (v0.2) — every later phase edits this pipeline.
+- Stats-write logic squatting in ports/retrieval_stats.rs (lines ~105-430): move to policy/usecases during retrieval-observability work (v0.4) at the latest.
+- usecases/write_planning.rs concatenates plan-construction and validator/commit concerns (dual use-blocks): split when assisted-remember work (v0.6) reopens it.
+- config/app_settings.rs mixes env parsing with retrieval-policy defaults: move defaults to policy when budgets are retuned (v0.2/v0.4).
+- Module-wide #![allow(dead_code)] in policy/graph_expansion.rs: narrow to specific items at next edit.
+- adapters/oxigraph/tests.rs (1,795 lines, one module for three impl files) and test_support.rs (all-ports fake bundle): split when next grown.
+- Convention going forward: new code imports domain types from `crate::domain`, not via api::types; migrate old imports opportunistically.
+- Accepted as designed: two-flavor graph_expansion colocation; models/vector as top-level; TryFrom draft→domain conversions in api::types; single flat CustomError until the factual subsystem (v0.3) introduces a second error domain.
