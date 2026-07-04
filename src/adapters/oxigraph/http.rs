@@ -1,36 +1,24 @@
-#![allow(unused_imports)]
-
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::collections::HashSet;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+use oxigraph::model::Quad;
 use oxigraph::store::Store;
-use serde::{de::DeserializeOwned, Deserialize};
 
 use crate::api::types::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
 };
-use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
-};
+use crate::policy::graph_expansion::{bounded_incident_link_refs, BoundedExpansionLinkRef};
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 
-use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
+use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object};
 use super::shared::*;
-use super::sparql_selectors::{SparqlGraphSelectors, SparqlLinkRef};
 use super::vocabulary as vocab;
 
 pub(crate) struct OxigraphHttpGraphAuthorityStore {

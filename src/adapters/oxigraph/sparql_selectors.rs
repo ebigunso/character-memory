@@ -1,7 +1,5 @@
 // Internal SPARQL selectors for the embedded Oxigraph authority. These helpers
 // return backend-neutral IDs/refs; canonical object hydration reads RDF state.
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 
 use oxigraph::model::Term;
@@ -32,6 +30,8 @@ pub(crate) struct SparqlLinkRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
+#[allow(dead_code)]
 pub(crate) struct LifecycleCurrentnessPredicates {
     pub(crate) retention_state: &'static str,
     pub(crate) is_current: &'static str,
@@ -160,6 +160,8 @@ impl<'a> SparqlGraphSelectors<'a> {
         )
     }
 
+    // Entity-scoped derived-memory selectors are reserved for governance diagnostics; remove if that surface drops entity filters.
+    #[allow(dead_code)]
     pub(crate) fn select_derived_memories_by_entity(
         &self,
         entity_ids: &[MemoryId],
@@ -181,6 +183,8 @@ impl<'a> SparqlGraphSelectors<'a> {
         )
     }
 
+    // Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
+    #[allow(dead_code)]
     pub(crate) const fn lifecycle_currentness_predicates() -> LifecycleCurrentnessPredicates {
         LifecycleCurrentnessPredicates {
             retention_state: vocab::RETENTION_STATE,
@@ -191,6 +195,8 @@ impl<'a> SparqlGraphSelectors<'a> {
         }
     }
 
+    // Supersession selectors are reserved for governance diagnostics; remove if lifecycle reconciliation stops using SPARQL.
+    #[allow(dead_code)]
     pub(crate) fn select_superseded_derived_memory_ids(
         &self,
     ) -> Result<Vec<MemoryId>, CustomError> {

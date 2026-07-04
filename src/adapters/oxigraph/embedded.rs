@@ -1,37 +1,29 @@
-#![allow(dead_code, unused_imports)]
-
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+use oxigraph::model::{GraphName, NamedNode, Quad};
+#[cfg(test)]
+use oxigraph::model::{Literal, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
-use serde::{de::DeserializeOwned, Deserialize};
 
-use crate::api::types::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    ObjectType, Observation, RelationType,
-};
+use crate::api::types::{graph_uri, DerivedMemory, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
 };
-use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
-};
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 
-use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
+#[cfg(test)]
+use super::rdf_mapping::RdfObject;
+use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfTriple};
 use super::shared::*;
-use super::sparql_selectors::{SparqlGraphSelectors, SparqlLinkRef};
-use super::vocabulary as vocab;
+use super::sparql_selectors::SparqlGraphSelectors;
 
 pub(crate) struct OxigraphGraphAuthorityStore {
     pub(crate) store: Store,
@@ -67,10 +59,14 @@ impl OxigraphGraphAuthorityStore {
         })
     }
 
+    // Embedded adapter tests assert graph mutation counts; remove when tests assert via graph queries only.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn triple_count(&self) -> Result<usize, CustomError> {
         Ok(self.store.iter().count())
     }
 
+    // Embedded adapter tests simulate graph corruption directly; remove when those tests use public writes only.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn replace_triples(
         &self,
         owner_graph_uri: String,
@@ -108,20 +104,6 @@ impl OxigraphGraphAuthorityStore {
         transaction.commit().map_err(oxigraph_error)?;
         for (owner_graph_uri, quads) in replacements {
             inserted_quads.insert(owner_graph_uri, quads);
-        }
-        Ok(())
-    }
-
-    fn insert_quads(&self, quads: &[Quad]) -> Result<(), CustomError> {
-        for quad in quads {
-            self.store.insert(quad).map_err(oxigraph_error)?;
-        }
-        Ok(())
-    }
-
-    fn remove_quads(&self, quads: &[Quad]) -> Result<(), CustomError> {
-        for quad in quads {
-            self.store.remove(quad).map_err(oxigraph_error)?;
         }
         Ok(())
     }

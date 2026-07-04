@@ -1,11 +1,6 @@
-#![allow(dead_code, unused_imports)]
-
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
@@ -17,18 +12,14 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-};
-use crate::policy::graph_expansion::{
     bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
 };
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionQuery,
+    GraphObjectQuery, GraphObjectRef,
 };
 
-use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};
+use super::rdf_mapping::{RdfObject, RdfTriple};
 use super::sparql_selectors::{SparqlGraphSelectors, SparqlLinkRef};
 use super::vocabulary as vocab;
 impl BoundedExpansionLinkRef for SparqlLinkRef {
@@ -412,6 +403,8 @@ pub(super) struct SparqlBinding {
     #[serde(rename = "type")]
     kind: String,
     pub(super) value: String,
+    // SPARQL JSON includes datatype metadata for literals; remove if parsing no longer preserves literal metadata.
+    #[allow(dead_code)]
     datatype: Option<String>,
 }
 
@@ -963,11 +956,6 @@ pub(super) fn bounded_graph_visible_refs(
         lifecycle_link_ids,
         bounded_failure,
     })
-}
-
-pub(super) fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    GraphObjectRef::new(object_id, object_type)
 }
 
 pub(super) fn quad_for_triple(

@@ -54,6 +54,8 @@ pub(crate) const TO: &str = "urn:cmem:vocab:to";
 pub(crate) const TO_TYPE: &str = "urn:cmem:vocab:toType";
 pub(crate) const RELATION: &str = "urn:cmem:vocab:relation";
 pub(crate) const RATIONALE: &str = "urn:cmem:vocab:rationale";
+// Supersession vocabulary is reserved for lifecycle diagnostics; remove if supersedes relations are retired.
+#[allow(dead_code)]
 pub(crate) const RELATION_SUPERSEDES: &str = "urn:cmem:relation:supersedes";
 
 pub(crate) fn relation_predicate(name: &str) -> String {

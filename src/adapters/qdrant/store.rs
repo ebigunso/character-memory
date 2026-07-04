@@ -1,8 +1,6 @@
 // Qdrant candidate-store adapter. Qdrant provides vector recall and
 // payload prefiltering; Oxigraph remains authoritative for graph/lifecycle
 // truth.
-#![allow(dead_code)]
-
 use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
@@ -571,6 +569,8 @@ fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, Cus
     ))
 }
 
+// Vector diagnostics are dormant until reconciliation is wired; remove with list_candidate_diagnostics.
+#[allow(dead_code)]
 fn retrieved_point_to_diagnostic_record(
     point: RetrievedPoint,
 ) -> Result<VectorCandidateDiagnosticRecord, CustomError> {
@@ -637,6 +637,8 @@ fn payload_string(
     }
 }
 
+// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
+#[allow(dead_code)]
 fn optional_payload_string(
     payload: &HashMap<String, qdrant_client::qdrant::Value>,
     field: &str,
@@ -647,6 +649,8 @@ fn optional_payload_string(
     }
 }
 
+// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
+#[allow(dead_code)]
 fn optional_payload_bool(
     payload: &HashMap<String, qdrant_client::qdrant::Value>,
     field: &str,
@@ -671,6 +675,8 @@ fn object_type_name(object_type: ObjectType) -> &'static str {
     }
 }
 
+// Diagnostic sort order is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
+#[allow(dead_code)]
 fn object_type_rank(object_type: ObjectType) -> u8 {
     match object_type {
         ObjectType::Episode => 0,
@@ -726,6 +732,8 @@ fn parse_object_type(value: String) -> Result<ObjectType, CustomError> {
     }
 }
 
+// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
+#[allow(dead_code)]
 fn parse_retention_state(value: String) -> Result<crate::api::types::RetentionState, CustomError> {
     match value.as_str() {
         "active" => Ok(crate::api::types::RetentionState::Active),

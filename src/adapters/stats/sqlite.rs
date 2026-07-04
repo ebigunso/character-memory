@@ -484,7 +484,6 @@ fn set_meta_value(
     Ok(())
 }
 
-#[allow(dead_code)]
 fn meta_value(connection: &Connection, key: &str) -> Result<Option<String>, CustomError> {
     connection
         .query_row(

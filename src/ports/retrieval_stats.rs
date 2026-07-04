@@ -8,7 +8,6 @@ use crate::api::types::{
 };
 use crate::errors::CustomError;
 
-#[allow(dead_code)]
 #[async_trait]
 pub(crate) trait RetrievalStatsStore: Send + Sync {
     async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError>;
@@ -34,6 +33,8 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
     async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
     async fn record_rejected_low_information_link(&self) -> Result<(), CustomError>;
 
+    // Admin diagnostics are dormant until the governance surface lands; remove when a caller reads this count.
+    #[allow(dead_code)]
     async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError>;
 }
 
@@ -65,6 +66,7 @@ pub(crate) struct RetrievalStatsObjectState {
     pub(crate) observed_at: DateTime<Utc>,
 }
 
+// Counter keys are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RetrievalStatsCounterKey {
@@ -73,6 +75,7 @@ pub(crate) struct RetrievalStatsCounterKey {
     pub(crate) object_type: ObjectType,
 }
 
+// Counter snapshots are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
 #[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetrievalStatsCounter {
@@ -123,6 +126,7 @@ pub(crate) async fn record_stats_after_write(
     }
 }
 
+// Reconciliation diagnostics need raw edge derivation; remove once reconciliation is wired to record_stats_after_write only.
 #[allow(dead_code)]
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],

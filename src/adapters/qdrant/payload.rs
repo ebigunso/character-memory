@@ -1,7 +1,5 @@
 // Qdrant payload mapping. These fields are denormalized candidate
 // recall/filter hints, not graph authority.
-#![allow(dead_code)]
-
 use chrono::{DateTime, SecondsFormat, Utc};
 use qdrant_client::qdrant::FieldType;
 use serde::Serialize;
@@ -9,9 +7,6 @@ use serde::Serialize;
 use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorSurface};
-
-pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
-    "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";
 
 pub(crate) const OBJECT_ID_FIELD: &str = "object_id";
 pub(crate) const GRAPH_URI_FIELD: &str = "graph_uri";
@@ -21,8 +16,6 @@ pub(crate) const DERIVED_TYPE_FIELD: &str = "derived_type";
 pub(crate) const ENTITY_TYPE_FIELD: &str = "entity_type";
 pub(crate) const THREAD_STATUS_FIELD: &str = "thread_status";
 pub(crate) const SCHEMA_VERSION_FIELD: &str = "schema_version";
-pub(crate) const EMBEDDING_TEXT_FIELD: &str = "embedding_text";
-pub(crate) const CONTENT_TEXT_FIELD: &str = "content_text";
 pub(crate) const SURFACE_FIELD: &str = "surface";
 pub(crate) const RETENTION_STATE_FIELD: &str = "retention_state";
 pub(crate) const IS_CURRENT_FIELD: &str = "is_current";
@@ -47,6 +40,17 @@ pub(crate) const SALIENCE_SCORE_FIELD: &str = "salience_score";
 pub(crate) const CONFIDENCE_FIELD: &str = "confidence";
 pub(crate) const STABILITY_FIELD: &str = "stability";
 pub(crate) const RAW_REF_FIELD: &str = "raw_ref";
+
+// Graph-authority boundary note is asserted by all-target tests; remove when Qdrant owns graph truth.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
+    "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";
+// Payload text keys are asserted by all-target tests; remove when payload no longer stores embedded/content text.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const EMBEDDING_TEXT_FIELD: &str = "embedding_text";
+// Payload text keys are asserted by all-target tests; remove when payload no longer stores embedded/content text.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const CONTENT_TEXT_FIELD: &str = "content_text";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QdrantPayloadIndexField {

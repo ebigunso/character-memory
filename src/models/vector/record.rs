@@ -1,7 +1,5 @@
 // Provider-neutral vector record surface. Payload hints remain
 // denormalized recall/filter hints; graph state stays authoritative.
-#![allow(dead_code)]
-
 use chrono::{DateTime, Utc};
 
 use crate::api::types::{
@@ -18,6 +16,8 @@ pub(crate) struct VectorRecordEmbedding<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+// Diagnostic records back the vector-store diagnostics port; remove when that port is retired or called in production.
+#[allow(dead_code)]
 pub(crate) struct VectorCandidateDiagnosticRecord {
     pub(crate) object_id: MemoryId,
     pub(crate) object_type: ObjectType,
@@ -30,6 +30,8 @@ pub(crate) struct VectorCandidateDiagnosticRecord {
 }
 
 impl VectorCandidateDiagnosticRecord {
+    // Diagnostic adapters convert full records for tests/admin reads; remove when diagnostics no longer use VectorRecord.
+    #[allow(dead_code)]
     pub(crate) fn from_vector_record(record: &VectorRecord) -> Self {
         Self {
             object_id: record.object_id,
@@ -52,6 +54,8 @@ impl<'a> VectorRecordEmbedding<'a> {
         Self { record, embedding }
     }
 
+    // Deterministic fakes use this conversion path; remove when fakes store VectorRecord directly.
+    #[allow(dead_code)]
     pub(crate) fn to_candidate_record(self) -> VectorCandidateRecord {
         self.record.to_candidate_record(self.embedding.to_vec())
     }
@@ -149,6 +153,8 @@ impl VectorRecord {
         )
     }
 
+    // Diagnostic/fake stores need candidate conversion; remove when vector stores no longer expose candidate diagnostics.
+    #[allow(dead_code)]
     pub(crate) fn to_candidate_record(&self, embedding: Vec<f32>) -> VectorCandidateRecord {
         VectorCandidateRecord::new(self.object_id, self.object_type, self.surface, embedding)
             .with_filter_hints(

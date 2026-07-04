@@ -1,19 +1,21 @@
 // Source-reference boundary. Current graph/vector storage keeps source
 // references as opaque pointers; caller-owned source storage stays outside
 // Character Memory core.
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 
 use crate::errors::CustomError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Source resolution is a future boundary; remove if caller-owned source storage is dropped.
+#[allow(dead_code)]
 pub(crate) struct ResolvedSourceReference {
     pub(crate) reference: String,
     pub(crate) resolved_text: String,
 }
 
 impl ResolvedSourceReference {
+    // Source resolver fixtures use this constructor; remove if source resolution is dropped.
+    #[allow(dead_code)]
     pub(crate) fn new(reference: impl Into<String>, resolved_text: impl Into<String>) -> Self {
         Self {
             reference: reference.into(),
@@ -23,6 +25,8 @@ impl ResolvedSourceReference {
 }
 
 #[async_trait]
+// Source resolution is a future boundary; remove if caller-owned source storage is dropped.
+#[allow(dead_code)]
 pub(crate) trait SourceReferenceResolver: Send + Sync {
     async fn resolve(
         &self,

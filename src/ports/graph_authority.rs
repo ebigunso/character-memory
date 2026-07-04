@@ -2,8 +2,6 @@
 // The bounded-expansion algorithm lives in crate::policy::graph_expansion.
 // Oxigraph service mode is the application default; embedded and fake stores
 // keep tests and explicit fixture runs deterministic.
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 
 use crate::api::types::{
@@ -67,6 +65,8 @@ impl GraphDerivedMemoryProvenanceQuery {
         self
     }
 
+    // Provenance queries reserve limit support for governance diagnostics; remove if that surface drops limits.
+    #[allow(dead_code)]
     pub(crate) fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
@@ -90,6 +90,8 @@ impl GraphDerivedMemoryThreadQuery {
         self
     }
 
+    // Thread queries reserve limit support for governance diagnostics; remove if that surface drops limits.
+    #[allow(dead_code)]
     pub(crate) fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
@@ -97,6 +99,8 @@ impl GraphDerivedMemoryThreadQuery {
 }
 
 impl GraphObjectQuery {
+    // Diagnostics and fakes need ID-only graph lookup; remove when all callers use typed refs.
+    #[allow(dead_code)]
     pub(crate) fn by_ids(object_ids: Vec<MemoryId>) -> Self {
         Self {
             object_refs: Vec::new(),
@@ -285,6 +289,8 @@ pub(crate) struct GraphExpansion {
 }
 
 impl GraphExpansion {
+    // Tests and future diagnostics need a minimal expansion constructor; remove when from_plan covers all callers.
+    #[allow(dead_code)]
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self {
             objects,
@@ -344,6 +350,8 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
 
+    // Governance reconciliation is dormant; remove when diagnostic object listing is no longer part of the port.
+    #[allow(dead_code)]
     async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError>;
 
     async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError>;

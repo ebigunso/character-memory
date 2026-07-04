@@ -87,6 +87,10 @@
 ## Progress Log (append-only)
 
 - 2026-07-04: Plan drafted from suppression inventory (26 sites) + reorg audit debt register.
+- 2026-07-04 Wave 1 completed: [Task_1 + addendum] (codex worker via agmsg)
+  - Summary: all module-wide suppressions removed except the two documented exceptions (test_support.rs shared fakes, reconciliation.rs dormant governance seam, both with rationale + removal conditions); API-shaped dormant seams narrowed to item-level allows with rationale/removal comments; unused imports cleaned; 19 lines of provably dead private helpers deleted (embedded.rs insert_quads/remove_quads, shared.rs graph_object_ref). Inventory gap: two combined-form allows (embedded.rs, shared.rs) were missed by both the plan inventory grep and the worker's done-evidence grep — caught by Orchestrator broad grep, fixed via addendum; lesson recorded.
+  - Validation evidence: fmt --check / check / clippy --all-targets -D warnings / test --no-run / FULL cargo test all pass twice (main pass + addendum): 338 lib + 25 integration passed, 0 failed, 3 ignored live smokes. Orchestrator independent broad grep + clippy pass.
+  - Notes: one attempted Qdrant constant deletion was self-reverted when all-target clippy showed test ownership — deletion-safety rule worked.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

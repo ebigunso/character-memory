@@ -17,8 +17,6 @@
 // (`apply_fanout_limits_by_pair`, `bounded_hub_retention_limit`), filters
 // (`relation_allowed`, `object_type_allowed`), and bounded-failure error
 // construction (`graph_expansion_bounded_error`).
-#![allow(dead_code)]
-
 use std::collections::{HashSet, VecDeque};
 
 use crate::api::types::{
@@ -223,6 +221,8 @@ fn provenance_linked_derived_memory_id(
     }
 }
 
+// Node-set expansion is reserved for diagnostics/tests; remove if callers never need object IDs only.
+#[allow(dead_code)]
 pub(crate) fn bounded_expansion_node_set(
     query: &GraphExpansionQuery,
     root_exists: bool,

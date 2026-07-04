@@ -1,7 +1,5 @@
 // Vector candidate recall contract. Qdrant is the default adapter, while
 // tests use deterministic fake stores.
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 
 use crate::api::types::MemoryId;
@@ -23,6 +21,8 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
         query: &VectorCandidateSearch,
     ) -> Result<Vec<VectorCandidateMatch>, CustomError>;
 
+    // Reconciliation diagnostics are dormant; remove when vector candidate diagnostics are retired.
+    #[allow(dead_code)]
     async fn list_candidate_diagnostics(
         &self,
     ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError>;
