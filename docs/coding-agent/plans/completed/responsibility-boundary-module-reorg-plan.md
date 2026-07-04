@@ -1,6 +1,6 @@
 # Plan: Reorganize crate modules by responsibility boundaries
 
-- status: in_progress (approved by user 2026-07-04)
+- status: done (Reviewer APPROVED 2026-07-04; local full cargo test remains under the environmental Qdrant-stall waiver with Linux CI as arbiter)
 - generated: 2026-07-04
 - last_updated: 2026-07-04
 - work_type: code
@@ -370,6 +370,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Reviewer verdict: CHANGES_REQUESTED with 1 MAJOR — the migrated unavailability helper's gRPC-Unavailable branch was dead code (tonic Code Display is a description sentence, not the enum name), silently changing skip-vs-fail semantics; invisible to all locally runnable checks. 2 MINOR (helpers.rs shim; pre-existing allow-barrels carried forward) — accepted as non-blocking follow-ups.
   - Remediation (Orchestrator, trivial fast-path): tests/support/base.rs predicate changed to case-insensitive substring match. Verified: cargo test --no-run pass; service-down run shows producer output (ResponseError code Internal on hard-down — fails in old semantics too, per 2026-06-12 lesson, so parity holds); healthy-path initialization_tests pass after restart; fmt --check + clippy --all-targets -D warnings pass.
   - Governance: reviewer lesson candidate recorded in lessons.md and promoted to a worker repo rule (skip-gating predicate verification).
+- 2026-07-04 Wave 8 completed: [Task_9]
+  - Summary: Reviewer independently re-verified remediation commit 275ab8a (single-line predicate fix + governance docs), re-ran fmt --check / clippy --all-targets -D warnings / test --no-run / test --lib (all pass, 338/0/3 invariant), confirmed semantics parity with pre-migration skip behavior, and confirmed governance closure.
+  - Reviewer verdict: APPROVED. Accepted non-blocking follow-ups: remove/deprecate the api write_plan helpers.rs re-export shim; barrel allow(unused_imports) cleanup.
+  - Plan complete. Remaining external gate: Linux CI as arbiter for the 3 environmentally waived guardrail integration tests (via PR).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
