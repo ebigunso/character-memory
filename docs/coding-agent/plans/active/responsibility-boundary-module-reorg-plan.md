@@ -354,6 +354,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Summary: infrastructures/ → adapters/{oxigraph,qdrant,openai,stats}/ grouped by technology; Oxigraph mega-file split into embedded.rs (397) + http.rs (673) + shared.rs (1039) + tests.rs; Noop/InMemory stats impls moved out of ports into adapters/stats/ beside sqlite.rs; vector value types → src/models/vector/; embedding_surface → src/policy/; internal/infrastructures and internal/models removed.
   - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run / test all pass (338 unit + 25 integration, 0 failed, 3 ignored — identical baseline). Orchestrator sanity cargo check pass.
   - Notes: deviations accepted — adapters/oxigraph/tests.rs is 1,795 lines (test-only, mechanically moved as one module to avoid test reshaping); focused clippy::module_inception allow on the nested tests module; some git-status noise is EOL normalization only.
+- 2026-07-04 Wave 5 completed: [Task_5] (codex worker via agmsg; delivered after codex-side delivery gap — see Decision Log)
+  - Summary: lib.rs → thin decls/re-exports; facade → src/memory.rs; composition root + backend wiring → src/composition.rs; shared fakes deduped into src/test_support.rs; config flattened to config.rs + config/{app_settings,embedding_provider_settings}.rs; errors flattened to errors.rs; src/internal/ deleted entirely; mockall moved to dev-dependencies.
+  - Validation evidence: fmt --check / check / clippy -D warnings / test --no-run pass; unit suite 338 passed, 0 failed, 3 ignored. cargo test integration portion: 3 guardrail tests fail with the known machine-local post-idle Qdrant gRPC stall — Orchestrator verified via stash/baseline rerun that the previous commit fails identically (same 3 tests, ~85s timeout signature), so classified pre-existing environmental per lessons.md 2026-07-03; Linux CI is the authoritative arbiter for these.
+  - Notes: worker reported blocked solely on the environmental cargo test failure; accepted as done with the environmental waiver evidence above.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -363,6 +367,11 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Plan delta: tests/ filename renames added (new Task_7); CustomError vendor decoupling added as its own task (new Task_6); Q2 default recorded in Task_3 (split correct/forget unless shared internals dominate, worker evidence required); docs/review renumbered to Task_8/Task_9; Wave 6 runs Task_6 ∥ Task_7.
   - Tradeoffs: error decoupling is behavior-adjacent (Display text may shift) — isolated in its own wave-reviewable task; test renames lose git-blame-friendly filename history but align with the version-label rule.
   - User approval: yes (this conversation). Execution of the plan itself remains NOT approved.
+- 2026-07-04 Decision: Task_5 integration-test failure classified environmental, not regression.
+  - Trigger: Worker reported blocked — 3 v0_1_2 guardrail tests failed with Qdrant timeout/cancelled during full cargo test.
+  - Plan delta: none (no task changes); Task_5 accepted as done with waiver evidence.
+  - Tradeoffs: local full-suite green is unavailable until the machine condition clears (reboot per lessons.md 2026-07-03) — accepted because baseline HEAD fails identically (stash/rerun comparison) and Linux CI remains the authoritative arbiter; service-free suite is fully green.
+  - User approval: implicit via recorded lessons procedure; will surface in final report.
 
 ## Notes
 

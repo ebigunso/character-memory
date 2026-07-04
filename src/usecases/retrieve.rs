@@ -14,17 +14,22 @@ use crate::api::types::{
     StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    selectivity_plan_for_candidate, GraphAuthorityStore, GraphExpansion,
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
-    GraphObjectRef, MemoryEmbedder, RetrievalSelectivityPolicy, RetrievalStatsStore,
-    SelectivityPlan, SelectivityStatsContext, VectorCandidateStore,
-};
 use crate::models::vector::{
     EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
     VectorSurface,
 };
+use crate::policy::{
+    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
+    SelectivityStatsContext,
+};
+use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::{
+    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
+    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphObjectRef,
+};
+use crate::ports::retrieval_stats::RetrievalStatsStore;
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
 where
@@ -840,7 +845,7 @@ fn select_candidate_roots(
 fn graph_query_for_candidate(
     candidate: &VectorCandidateMatch,
     context: &RetrievalContext,
-    fanout_overrides: Vec<crate::internal::repositories::GraphExpansionFanoutOverride>,
+    fanout_overrides: Vec<crate::ports::graph_authority::GraphExpansionFanoutOverride>,
 ) -> GraphExpansionQuery {
     GraphExpansionQuery::new(
         candidate.object_id,
@@ -970,14 +975,14 @@ fn public_bounded_failure_reason(
 }
 
 fn bounded_failure_reason_name(
-    reason: crate::internal::repositories::GraphExpansionBoundedFailureReason,
+    reason: crate::ports::graph_authority::GraphExpansionBoundedFailureReason,
 ) -> &'static str {
     match reason {
-        crate::internal::repositories::GraphExpansionBoundedFailureReason::NodeLimit => {
+        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::NodeLimit => {
             "node_limit"
         }
-        crate::internal::repositories::GraphExpansionBoundedFailureReason::Timeout => "timeout",
-        crate::internal::repositories::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
+        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::Timeout => "timeout",
+        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
     }
 }
 
@@ -1344,16 +1349,16 @@ mod tests {
 
     use chrono::{DateTime, Utc};
 
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{ContinuitySectionLimits, RetrievalCandidateLimits};
-    use crate::internal::repositories::test_support::{
-        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
-        FakeVectorCandidateStore,
-    };
-    use crate::internal::repositories::{
-        InMemoryRetrievalStatsStore, RetrievalSelectivityPolicy, RetrievalStatsEdge,
-    };
     use crate::models::vector::{
         VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
+    };
+    use crate::policy::RetrievalSelectivityPolicy;
+    use crate::ports::retrieval_stats::RetrievalStatsEdge;
+    use crate::test_support::{
+        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
+        FakeVectorCandidateStore,
     };
 
     #[tokio::test]
@@ -1684,7 +1689,7 @@ mod tests {
         let mut expansion = GraphExpansion::new(Vec::new(), Vec::new());
         expansion
             .relations
-            .push(crate::internal::repositories::GraphExpansionRelation {
+            .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
                 from: GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
                 to: GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
@@ -1693,7 +1698,7 @@ mod tests {
             });
         expansion
             .filtered_nodes
-            .push(crate::internal::repositories::GraphExpansionFilteredNode {
+            .push(crate::ports::graph_authority::GraphExpansionFilteredNode {
                 object_ref: GraphObjectRef::new(
                     fixtures.suppressed_seed.id,
                     ObjectType::DerivedMemory,
@@ -2287,21 +2292,21 @@ mod tests {
 
         async fn query_objects(
             &self,
-            _query: &crate::internal::repositories::GraphObjectQuery,
+            _query: &crate::ports::graph_authority::GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_provenance(
             &self,
-            _query: &crate::internal::repositories::GraphDerivedMemoryProvenanceQuery,
+            _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
         ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_thread(
             &self,
-            _query: &crate::internal::repositories::GraphDerivedMemoryThreadQuery,
+            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }

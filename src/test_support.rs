@@ -17,17 +17,21 @@ use crate::api::types::{
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, MemoryEmbedder, ResolvedSourceReference,
-    SourceReferenceResolver, VectorCandidateStore,
-};
 use crate::models::vector::{
     EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
     VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
     VectorTimeField, VectorTimeRangeFilter,
 };
+use crate::policy::graph_expansion::{
+    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
+};
+use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::{
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+};
+use crate::ports::source_reference::{ResolvedSourceReference, SourceReferenceResolver};
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Default)]
 pub(crate) struct FakeVectorCandidateStore {
@@ -939,7 +943,7 @@ fn surface_rank(surface: VectorSurface) -> u8 {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
-    use crate::internal::repositories::{
+    use crate::ports::graph_authority::{
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
     };
 
@@ -1194,11 +1198,11 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::repositories::{
+    use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
+    use crate::ports::graph_authority::{
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
     };
-    use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
 
     #[tokio::test]
     async fn vector_fake_upserts_searches_and_deletes_deterministically() {

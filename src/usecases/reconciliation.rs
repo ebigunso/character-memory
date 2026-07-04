@@ -309,11 +309,11 @@ mod tests {
         DerivedMemory, DerivedType, MemoryObject, MemoryThread, Stability, ThreadStatus,
         DEFAULT_SCHEMA_VERSION,
     };
-    use crate::internal::repositories::test_support::{
+    use crate::models::vector::{VectorCandidateDiagnosticRecord, VectorSurface};
+    use crate::ports::graph_authority::GraphAuthorityStore;
+    use crate::test_support::{
         representative_fixtures, FakeGraphAuthorityStore, FakeVectorCandidateStore,
     };
-    use crate::internal::repositories::GraphAuthorityStore;
-    use crate::models::vector::{VectorCandidateDiagnosticRecord, VectorSurface};
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 

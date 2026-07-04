@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::api::types::RetentionState;
 use crate::errors::CustomError;
-use crate::internal::repositories::{
+use crate::ports::retrieval_stats::{
     object_type_key, relation_type_key, retention_state_key, RetrievalStatsCounter,
     RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
     RetrievalStatsObjectState, RetrievalStatsStore,

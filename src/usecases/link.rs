@@ -4,10 +4,8 @@ use crate::api::types::{
     DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType, RelationType,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
-    RetrievalStatsStore,
-};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
@@ -179,18 +177,17 @@ mod tests {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
         DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
-    use crate::internal::repositories::test_support::{
-        representative_fixtures, FakeGraphAuthorityStore,
-    };
-    use crate::internal::repositories::{
+    use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansion, GraphExpansionQuery, InMemoryRetrievalStatsStore, RetrievalStatsCounterKey,
-        RetrievalStatsStore,
+        GraphExpansion, GraphExpansionQuery,
     };
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
@@ -486,7 +483,7 @@ mod tests {
         assert_eq!(counter.current_count, 1);
         assert_eq!(
             stats.health().await.unwrap().state,
-            crate::internal::repositories::RetrievalStatsHealthState::Unhealthy
+            crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
     }
 

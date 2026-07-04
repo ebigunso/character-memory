@@ -411,7 +411,7 @@ fn enum_value(value: impl Serialize) -> String {
 mod tests {
     use super::*;
     use crate::api::types::{graph_uri, ObjectType, DEFAULT_SCHEMA_VERSION};
-    use crate::internal::repositories::test_support::representative_fixtures;
+    use crate::test_support::representative_fixtures;
 
     #[test]
     fn rdf_mapping_uses_canonical_graph_uris_for_all_object_subjects() {

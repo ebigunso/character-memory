@@ -8,7 +8,6 @@ edition = "2021"
 config = "0.15.22"
 dotenvy = "0.15.7"
 thiserror = "2.0.18"
-mockall = "0.14.0"
 reqwest = { version = "0.13.3", features = ["blocking", "json"] }
 
 # Serialization & Security
@@ -30,5 +29,6 @@ uuid = { version = "1.23.1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 
 [dev-dependencies]
+mockall = "0.14.0"
 tonic = "0.12.3"
 tempfile = "3.20.0"

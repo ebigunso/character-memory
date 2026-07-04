@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::api::types::{graph_uri, MemoryId, ObjectType, RelationType};
 use crate::errors::CustomError;
-use crate::internal::repositories::{
+use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
     GraphObjectRef,
 };
@@ -530,7 +530,7 @@ mod tests {
         rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple,
     };
     use crate::api::types::{graph_uri, MemoryObject};
-    use crate::internal::repositories::test_support::representative_fixtures;
+    use crate::test_support::representative_fixtures;
 
     #[test]
     fn sparql_selectors_find_objects_by_id_and_type_across_named_graphs() {

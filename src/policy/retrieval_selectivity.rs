@@ -5,11 +5,12 @@ use crate::api::types::{
     SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    GraphExpansionFanoutOverride, RetrievalStatsCounter, RetrievalStatsCounterKey,
-    RetrievalStatsHealth, RetrievalStatsHealthState, RetrievalStatsStore,
-};
 use crate::models::vector::VectorCandidateMatch;
+use crate::ports::graph_authority::GraphExpansionFanoutOverride;
+use crate::ports::retrieval_stats::{
+    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsHealth,
+    RetrievalStatsHealthState, RetrievalStatsStore,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RetrievalSelectivityPolicy {
@@ -424,8 +425,9 @@ const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::repositories::{InMemoryRetrievalStatsStore, RetrievalStatsEdge};
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::models::vector::VectorSurface;
+    use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use async_trait::async_trait;
     use std::sync::Mutex;
 
@@ -966,7 +968,7 @@ mod tests {
 
         async fn record_object_states(
             &self,
-            _states: &[crate::internal::repositories::RetrievalStatsObjectState],
+            _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -1019,7 +1021,7 @@ mod tests {
 
         async fn record_object_states(
             &self,
-            _states: &[crate::internal::repositories::RetrievalStatsObjectState],
+            _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
         ) -> Result<(), CustomError> {
             Ok(())
         }

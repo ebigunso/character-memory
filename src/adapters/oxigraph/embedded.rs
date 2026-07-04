@@ -16,14 +16,16 @@ use crate::api::types::{
     ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
+use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 use crate::policy::graph_expansion::{
     bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
+};
+use crate::ports::graph_authority::{
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
+    GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple};

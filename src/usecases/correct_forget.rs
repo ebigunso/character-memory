@@ -12,13 +12,15 @@ use crate::api::types::{
     SupersededByEvidence, ThreadStatus, VectorMaintenanceFailure, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    record_stats_after_write, GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery,
-    GraphDerivedMemoryThreadQuery, GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
-    MemoryEmbedder, RetrievalStatsStore, VectorCandidateStore,
-};
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::policy::memory_object_vector_record;
+use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::{
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+    GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
+};
+use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
 where
@@ -1125,15 +1127,17 @@ mod tests {
         Episode, ExternalSourceReference, Modality, Observation, RetrievalContext,
         StaleCandidateReason, VectorCandidateTrace,
     };
-    use crate::internal::repositories::test_support::{
+    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState,
+    };
+    use crate::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
     };
-    use crate::internal::repositories::{
-        GraphExpansion, GraphExpansionQuery, RetrievalStatsCounter, RetrievalStatsCounterKey,
-        RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsObjectState, RetrievePipeline,
-    };
-    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::usecases::RetrievePipeline;
 
     #[tokio::test]
     async fn correction_writes_graph_before_vector_maintenance_in_stable_order() {

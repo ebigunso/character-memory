@@ -17,12 +17,12 @@ use qdrant_client::{config::QdrantConfig, Qdrant};
 
 use crate::api::types::{MemoryId, ObjectType};
 use crate::errors::CustomError;
-use crate::internal::repositories::VectorCandidateStore;
 use crate::models::vector::{
     VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
     VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
     VectorTimeRangeFilter,
 };
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 use super::payload::{
     qdrant_payload_index_fields, qdrant_payload_map, CREATED_AT_FIELD, ENDED_AT_FIELD,

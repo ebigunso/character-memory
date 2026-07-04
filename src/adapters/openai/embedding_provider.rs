@@ -3,8 +3,8 @@ use reqwest::{Client, StatusCode};
 use serde_json::json;
 use std::sync::Arc;
 
+use crate::config::EmbeddingProviderSettings;
 use crate::errors::CustomError;
-use crate::internal::config::settings::EmbeddingProviderSettings;
 use crate::EmbeddingProvider;
 
 const OPENAI_EMBEDDING_ENDPOINT: &str = "https://api.openai.com/v1/embeddings";

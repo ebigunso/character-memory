@@ -632,10 +632,8 @@ use crate::api::types::{
     MemoryObject, RetentionState,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    admit_link, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef, LinkAdmissionDecision,
-    LinkAdmissionEvidence,
-};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WritePlanValidationVerdict {
@@ -1451,9 +1449,7 @@ mod tests {
         EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability,
         StatsUpdateCandidate, VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
     };
-    use crate::internal::repositories::test_support::{
-        representative_fixtures, FakeGraphAuthorityStore,
-    };
+    use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
     async fn accepts_valid_plan_without_writes() {

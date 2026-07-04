@@ -6,13 +6,15 @@ use crate::api::types::{
     RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
 use crate::errors::CustomError;
-use crate::internal::repositories::{
-    record_stats_after_write, GraphAuthorityStore, GraphObjectQuery, GraphObjectRef,
-    MemoryEmbedder, RetrievalStatsHealthState, RetrievalStatsStore, VectorCandidateStore,
-    WritePlanCommitValues, WritePlanValidator,
-};
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::policy::memory_object_vector_record;
+use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::ports::retrieval_stats::{
+    record_stats_after_write, RetrievalStatsHealthState, RetrievalStatsStore,
+};
+use crate::ports::vector_candidate::VectorCandidateStore;
+use crate::usecases::{WritePlanCommitValues, WritePlanValidator};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RememberPipelineDraft {
@@ -559,18 +561,15 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
     use uuid::Uuid;
 
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
         DerivedMemoryDraft, DerivedType, EntityDraft, EntityType, EpisodeDraft, MemoryThreadDraft,
         ObjectType, ObservationDraft, RelationType, RetentionState,
     };
-    use crate::internal::repositories::test_support::{
-        representative_fixtures, FakeGraphAuthorityStore,
-    };
-    use crate::internal::repositories::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
-    use crate::internal::repositories::{
-        InMemoryRetrievalStatsStore, RetrievalStatsCounterKey, RetrievalStatsStore,
-    };
     use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
@@ -1181,14 +1180,14 @@ mod tests {
 
         async fn query_derived_memories_by_provenance(
             &self,
-            _query: &crate::internal::repositories::GraphDerivedMemoryProvenanceQuery,
+            _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
         ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_thread(
             &self,
-            _query: &crate::internal::repositories::GraphDerivedMemoryThreadQuery,
+            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }

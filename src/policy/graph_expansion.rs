@@ -860,9 +860,7 @@ mod tests {
 
     use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 
-    use crate::internal::repositories::test_support::{
-        high_fanout_graph_fixture, representative_fixtures,
-    };
+    use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
 
     #[test]
     fn hub_retention_limit_keeps_large_window_only_for_root_selectivity_overrides() {

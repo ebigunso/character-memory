@@ -16,21 +16,21 @@ mod tests {
         MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState, RetrievalContext,
         ThreadStatus,
     };
-    use crate::internal::repositories::test_support::{
-        high_fanout_graph_fixture, representative_fixtures,
-    };
-    use crate::internal::repositories::{
-        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-        GraphExpansionFanoutOverride, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-        GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
-    };
-    use crate::internal::repositories::{MemoryEmbedder, RetrievePipeline, VectorCandidateStore};
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
         VectorSurface,
     };
     use crate::policy::memory_object_vector_record;
+    use crate::ports::embedder::MemoryEmbedder;
+    use crate::ports::graph_authority::{
+        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
+        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+        GraphExpansionFanoutOverride, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+        GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    };
+    use crate::ports::vector_candidate::VectorCandidateStore;
+    use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
+    use crate::usecases::RetrievePipeline;
     use crate::CustomError;
     use async_trait::async_trait;
     use std::path::{Path, PathBuf};
