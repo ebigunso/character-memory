@@ -649,7 +649,9 @@ async fn generated_style_plan_commits_through_same_path_as_manual_candidates() {
 async fn setup_basic() -> Option<(CharacterMemory, String)> {
     match try_setup_in_memory_character_memory().await {
         Ok(fixture) => Some(fixture),
-        Err(CustomError::QdrantError(error)) if base::is_qdrant_unavailable_error(&error) => {
+        Err(CustomError::VectorDatabaseError(error))
+            if base::is_qdrant_unavailable_error(&error) =>
+        {
             println!("skipping v0.1.3 write-planning test because Qdrant is unavailable: {error}");
             None
         }
@@ -673,7 +675,9 @@ async fn setup_persistent(
     .await
     {
         Ok(memory) => Some(memory),
-        Err(CustomError::QdrantError(error)) if base::is_qdrant_unavailable_error(&error) => {
+        Err(CustomError::VectorDatabaseError(error))
+            if base::is_qdrant_unavailable_error(&error) =>
+        {
             println!("skipping v0.1.3 persistent write-planning test because Qdrant is unavailable: {error}");
             None
         }

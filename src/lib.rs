@@ -49,7 +49,7 @@ pub use crate::api::types::{
 pub use crate::config::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
 };
-pub use crate::errors::CustomError;
+pub use crate::errors::{CustomError, VectorDatabaseError};
 pub use crate::memory::CharacterMemory;
 
 // Re-export for integration tests

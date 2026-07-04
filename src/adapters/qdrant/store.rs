@@ -13,10 +13,10 @@ use qdrant_client::qdrant::{
     Distance, Filter, PointId, PointStruct, RetrievedPoint, ScoredPoint, ScrollPointsBuilder,
     SearchPointsBuilder, Timestamp, UpsertPointsBuilder, VectorParams, VectorsConfig,
 };
-use qdrant_client::{config::QdrantConfig, Qdrant};
+use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
 use crate::api::types::{MemoryId, ObjectType};
-use crate::errors::CustomError;
+use crate::errors::{CustomError, VectorDatabaseError};
 use crate::models::vector::{
     VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
     VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
@@ -46,7 +46,7 @@ impl QdrantVectorCandidateStore {
         collection_name: impl Into<String>,
         vector_size: u64,
     ) -> Result<Self, CustomError> {
-        let client = Qdrant::new(qdrant_candidate_config(url.as_ref()))?;
+        let client = Qdrant::new(qdrant_candidate_config(url.as_ref())).map_err(qdrant_error)?;
         Ok(Self {
             client,
             collection_name: collection_name.into(),
@@ -55,7 +55,7 @@ impl QdrantVectorCandidateStore {
     }
 
     pub(crate) async fn init_collection(&self) -> Result<(), CustomError> {
-        let collections = self.client.list_collections().await?;
+        let collections = self.client.list_collections().await.map_err(qdrant_error)?;
         if !collections
             .collections
             .iter()
@@ -72,14 +72,21 @@ impl QdrantVectorCandidateStore {
             let create_req = CreateCollectionBuilder::new(&self.collection_name)
                 .vectors_config(vectors_config)
                 .build();
-            self.client.create_collection(create_req).await?;
+            self.client
+                .create_collection(create_req)
+                .await
+                .map_err(qdrant_error)?;
         }
 
         self.ensure_payload_indexes().await
     }
 
     pub(crate) async fn ensure_payload_indexes(&self) -> Result<(), CustomError> {
-        let info = self.client.collection_info(&self.collection_name).await?;
+        let info = self
+            .client
+            .collection_info(&self.collection_name)
+            .await
+            .map_err(qdrant_error)?;
         let collection_info = info.result.as_ref().ok_or_else(|| {
             CustomError::DatabaseError(format!(
                 "Qdrant collection info response was missing result for collection '{}'",
@@ -115,7 +122,8 @@ impl QdrantVectorCandidateStore {
                     field.name,
                     field.field_type,
                 ))
-                .await?;
+                .await
+                .map_err(qdrant_error)?;
         }
 
         Ok(())
@@ -129,7 +137,10 @@ impl QdrantVectorCandidateStore {
         let request = UpsertPointsBuilder::new(&self.collection_name, points)
             .wait(true)
             .build();
-        self.client.upsert_points(request).await?;
+        self.client
+            .upsert_points(request)
+            .await
+            .map_err(qdrant_error)?;
         Ok(())
     }
 }
@@ -205,7 +216,11 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             builder = builder.filter(filter);
         }
 
-        let response = self.client.search_points(builder.build()).await?;
+        let response = self
+            .client
+            .search_points(builder.build())
+            .await
+            .map_err(qdrant_error)?;
         response
             .result
             .into_iter()
@@ -228,7 +243,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
                 builder = builder.offset(next_offset);
             }
 
-            let response = self.client.scroll(builder).await?;
+            let response = self.client.scroll(builder).await.map_err(qdrant_error)?;
             records.extend(
                 response
                     .result
@@ -261,9 +276,68 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             .points(selector)
             .wait(true)
             .build();
-        self.client.delete_points(request).await?;
+        self.client
+            .delete_points(request)
+            .await
+            .map_err(qdrant_error)?;
         Ok(())
     }
+}
+
+fn qdrant_error(error: QdrantError) -> CustomError {
+    let vector_error = match error {
+        QdrantError::ResponseError { status } => VectorDatabaseError::new(
+            "qdrant",
+            "response",
+            Some(status.code().to_string()),
+            status.message().to_owned(),
+        ),
+        QdrantError::ResourceExhaustedError {
+            status,
+            retry_after_seconds,
+        } => VectorDatabaseError::new(
+            "qdrant",
+            "resource_exhausted",
+            Some(status.code().to_string()),
+            status.message().to_owned(),
+        )
+        .with_retry_after_seconds(retry_after_seconds),
+        QdrantError::ConversionError(message) => {
+            VectorDatabaseError::new("qdrant", "conversion", None, message)
+        }
+        QdrantError::InvalidUri(error) => {
+            VectorDatabaseError::new("qdrant", "invalid_uri", None, error.to_string())
+        }
+        QdrantError::NoSnapshotFound(collection) => {
+            VectorDatabaseError::new("qdrant", "no_snapshot_found", None, collection)
+        }
+        QdrantError::Io(error) => VectorDatabaseError::new(
+            "qdrant",
+            format!("io::{:?}", error.kind()),
+            None,
+            error.to_string(),
+        ),
+        QdrantError::Reqwest(error) => {
+            let kind = if error.is_timeout() {
+                "reqwest::timeout"
+            } else if error.is_connect() {
+                "reqwest::connect"
+            } else if error.is_status() {
+                "reqwest::status"
+            } else {
+                "reqwest"
+            };
+            VectorDatabaseError::new("qdrant", kind, None, error.to_string())
+        }
+        QdrantError::JsonToPayload(value) => {
+            VectorDatabaseError::new("qdrant", "json_to_payload", None, value.to_string())
+        }
+        QdrantError::PayloadDeserialization(error) => {
+            VectorDatabaseError::new("qdrant", "payload_deserialization", None, error.to_string())
+        }
+    };
+
+    CustomError::VectorDatabaseError(vector_error)
 }
 
 fn qdrant_candidate_config(url: &str) -> QdrantConfig {
