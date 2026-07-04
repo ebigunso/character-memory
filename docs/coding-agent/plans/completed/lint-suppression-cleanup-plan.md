@@ -1,6 +1,6 @@
 # Plan: Remove or justify blanket lint suppressions
 
-- status: in_progress (scope pre-agreed as the deferred reorg follow-up; user directed execution 2026-07-04)
+- status: done (Reviewer APPROVED 2026-07-04, zero findings)
 - generated: 2026-07-04
 - last_updated: 2026-07-04
 - work_type: code
@@ -91,6 +91,9 @@
   - Summary: all module-wide suppressions removed except the two documented exceptions (test_support.rs shared fakes, reconciliation.rs dormant governance seam, both with rationale + removal conditions); API-shaped dormant seams narrowed to item-level allows with rationale/removal comments; unused imports cleaned; 19 lines of provably dead private helpers deleted (embedded.rs insert_quads/remove_quads, shared.rs graph_object_ref). Inventory gap: two combined-form allows (embedded.rs, shared.rs) were missed by both the plan inventory grep and the worker's done-evidence grep — caught by Orchestrator broad grep, fixed via addendum; lesson recorded.
   - Validation evidence: fmt --check / check / clippy --all-targets -D warnings / test --no-run / FULL cargo test all pass twice (main pass + addendum): 338 lib + 25 integration passed, 0 failed, 3 ignored live smokes. Orchestrator independent broad grep + clippy pass.
   - Notes: one attempted Qdrant constant deletion was self-reverted when all-target clippy showed test ownership — deletion-safety rule worked.
+- 2026-07-04 Wave 2 completed: [Task_2]
+  - Reviewer verdict: APPROVED, zero findings. Independently confirmed: the three deleted helpers have zero callers on main (including tests) and no roadmap/doc references; only the two sanctioned module-wide allows remain (tests/ also clean); cfg_attr(not(test), allow(dead_code)) correctly applied to test-asserted items; diff contains no logic changes; fmt/clippy/test --no-run/test --lib pass independently.
+  - Non-blocking next-touch note: candidate_record.rs "test fixtures use selectively" allows could adopt the self-policing cfg_attr(not(test)) form.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
