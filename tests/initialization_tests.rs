@@ -9,7 +9,7 @@ async fn test_character_memory_initialization() {
     // Setup
     let (_character_memory, collection_name) = match try_setup_character_memory().await {
         Ok(setup) => setup,
-        Err(CustomError::QdrantError(error)) if is_qdrant_unavailable_error(&error) => {
+        Err(CustomError::VectorDatabaseError(error)) if is_qdrant_unavailable_error(&error) => {
             println!("skipping live initialization test because Qdrant is unavailable: {error}");
             return;
         }

@@ -296,66 +296,87 @@ Phase 0 does not implement raw-log storage, raw-log search, public raw-reference
 
 ```text
 src/
-  lib.rs
+  adapters.rs
+  adapters/
+    openai.rs
+    openai/
+      embedding_provider.rs
+    oxigraph.rs
+    oxigraph/
+      embedded.rs
+      http.rs
+      rdf_mapping.rs
+      shared.rs
+      sparql_selectors.rs
+      tests.rs
+      vocabulary.rs
+    qdrant.rs
+    qdrant/
+      payload.rs
+      store.rs
+    stats.rs
+    stats/
+      in_memory.rs
+      noop.rs
+      sqlite.rs
   api.rs
   api/
     embedding.rs
     types.rs
     types/
-      domain.rs
       draft.rs
       lifecycle.rs
       retrieval.rs
+      write_plan.rs
+  composition.rs
   config.rs
   config/
-    settings.rs
-    settings/
-      app_settings.rs
-  errors.rs
-  errors/
-    custom.rs
-  internal.rs
-  internal/
-    config.rs
-    config/
-      settings.rs
-      settings/
-        embedding_provider_settings.rs
-    infrastructures.rs
-    infrastructures/
-      external_services.rs
-      external_services/
-        openai_embedding_provider.rs
-        qdrant_payload.rs
-        qdrant_vector_candidate_store.rs
-      graph.rs
-      graph/
-        oxigraph_authority_store.rs
-        rdf_mapping.rs
-        sparql_selectors.rs
-        vocabulary.rs
-    models.rs
-    models/
-      vector.rs
-      vector/
-        candidate_record.rs
-        embedding_model.rs
-        embedding_surface.rs
-        record.rs
-    repositories.rs
-    repositories/
-      correction_forget_pipeline.rs
-      embedder.rs
-      graph_authority_store.rs
-      link_pipeline.rs
-      source_reference.rs
-      reconciliation.rs
-      remember_pipeline.rs
-      retrieve_pipeline.rs
-      test_support.rs
-      vector_candidate_store.rs
+    app_settings.rs
+    embedding_provider_settings.rs
+  domain.rs
+  domain/
     schema.rs
+    tests.rs
+  errors.rs
+  lib.rs
+  memory.rs
+  models.rs
+  models/
+    vector.rs
+    vector/
+      candidate_record.rs
+      embedding_model.rs
+      record.rs
+  policy.rs
+  policy/
+    embedding_surface.rs
+    graph_expansion.rs
+    retrieval_selectivity.rs
+  ports.rs
+  ports/
+    embedder.rs
+    graph_authority.rs
+    retrieval_stats.rs
+    source_reference.rs
+    vector_candidate.rs
+  test_support.rs
+  usecases.rs
+  usecases/
+    correct_forget.rs
+    link.rs
+    reconciliation.rs
+    remember.rs
+    retrieve.rs
+    write_planning.rs
 tests/
+  initialization_tests.rs
+  public_facade_tests.rs
+  retrieval_guardrails_tests.rs
+  support/
+    base.rs
+    basic.rs
+    persistent.rs
+  write_planning_tests.rs
 ```
 
 ## Design boundary

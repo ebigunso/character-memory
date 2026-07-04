@@ -21,6 +21,95 @@ Purpose:
 
 ## Entries
 
+## 2026-07-04 - Verify Skip-Gating Predicate Branches Against What The Producer Actually Emits  [tags: validation, review]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Wave 6 Task_7 addendum / Task_9 review remediation
+- Roles involved: Reviewer | Orchestrator | Worker
+
+Symptom:
+- The migrated Qdrant-unavailability test helper compared the neutral error payload's status to "unavailable", but the producer stores tonic's Code Display, which for Code::Unavailable is the sentence "The service is currently unavailable" — the branch was dead code, silently changing skip-vs-fail semantics while every locally runnable check stayed green.
+
+Root cause:
+- The only code path exercising the predicate (integration tests with the service in specific failure states) was under an environmental waiver, and the branch assumed Code::to_string() yields the enum name rather than the description sentence.
+
+Fix applied:
+- Predicate changed to a case-insensitive substring match (catches both the sentence and the bare enum name); verified end-to-end by stopping Qdrant and observing producer output, and by rerunning the healthy path after restart.
+
+Prevention:
+- When changing test skip-gating predicates, statically trace each compared value from the emitting site to the matcher, or run once with the service deliberately down; waived/skipped suites do not exercise these branches. Promoted to a worker repo rule.
+
+Evidence:
+- Task_9 Reviewer MAJOR finding (source-level confirmation via tonic 0.12.3 status.rs); Orchestrator service-down run showing producer output; healthy-path rerun green.
+
+## 2026-07-04 - Verify Codex Delivery Path And Worker Capacity Before agmsg Dispatch  [tags: delegation, tooling, workflow]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Wave 5 dispatch
+- Roles involved: Orchestrator | Worker (codex)
+
+Symptom:
+- Task dispatches sent via agmsg to the codex worker sat unnoticed in its inbox; earlier waves only worked because the user manually prompted the codex terminal. Separately, the plan's parallel wave (Task_6 ∥ Task_7) had only one worker available.
+
+Root cause:
+- Codex has no Monitor; automatic delivery needs the agmsg codex bridge or codex-side monitor mode. The bridge was dead: it resolves identities using the Windows-form project path while registrations store the MSYS form, so it found no identity (also, two codex-type roles were registered). The spawned worker's boot prompt (`/agmsg actas worker`) had additionally been mangled by MSYS path conversion into a filesystem path.
+
+Fix applied:
+- User activates monitor mode from inside the codex terminal (identity resolves correctly from that side). Orchestrator dispatches remain via agmsg; a pending dispatch is picked up once delivery is live or after one manual nudge.
+
+Prevention:
+- Before dispatching work to a codex agmsg member, confirm its delivery path is live (codex-side monitor mode / bridge running), or explicitly ask the user to nudge the terminal; never assume a send equals delivery.
+- Before dispatching a parallel wave, count live workers and spawn the additional ones first (spawn.sh with explicit --team; beware MSYS mangling of slash-prefixed boot prompts on Windows).
+
+Evidence:
+- codex-bridge log: repeated "no matching codex identity"; identities.sh returns rows for `/c/Users/...` but none for `C:\Users\...`; codex process cmdline shows the mangled boot prompt.
+
+## 2026-07-04 - Route Worker Dispatches Through The agmsg Codex Worker  [tags: delegation, workflow, tooling]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Wave 2→3 transition
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- Orchestrator dispatched Wave 1 and Wave 2 Worker tasks as directly spawned harness-worker subagents; user redirected mid-execution: Worker tasks should go to the spawned codex `worker` agent via agmsg instead.
+
+Root cause:
+- A codex worker agent had been spawned into the CharacterMemory agmsg team earlier in the session, but the Orchestrator defaulted to the harness's built-in subagent spawn path without considering the user's standing multi-agent setup.
+
+Fix applied:
+- Sent the codex worker a standing role instruction (assume harness-worker behavior: one Task_X per dispatch, owns-scope only, required validation with evidence, no git mutations, strict YAML report back via agmsg) and dispatched Task_3 through agmsg.
+
+Prevention:
+- In this workspace, when an agmsg team has a live `worker` agent, dispatch Worker-role tasks to it via agmsg (dispatch message names the plan file, Task_X, owns scope, validation commands, and the YAML report contract). Researcher/Reviewer/other subagents may still be spawned directly unless the user says otherwise.
+
+Evidence:
+- User instruction on 2026-07-04 during Wave 2; role instruction + Task_3 dispatch sent to `worker` in team CharacterMemory.
+
+## 2026-07-04 - Bounded Expansion Has Two Semantically Distinct Flavors, Do Not Force-Merge  [tags: planning, architecture]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Task_2 (ports/policy extraction)
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- The plan hoped to unify the bounded-expansion algorithm into one implementation, but inspection showed the adapter-side flavor is semantically distinct, not duplicated.
+
+Root cause:
+- `bounded_expansion` computes a complete plan over fully materialized objects+links (lifecycle filtering, deterministic ordering), while `bounded_incident_link_refs` is a per-node pre-hydration pruning pass over lightweight link refs that runs before objects exist to filter on.
+
+Fix applied:
+- Both flavors colocated in `src/policy/graph_expansion.rs` with a module comment stating the semantic difference; the genuinely duplicated primitives (relation/object-type filters, hub-limit handling, bounded-failure error construction) were unified.
+
+Prevention:
+- True unification would require reshaping the adapter BFS to feed the plan algorithm lazily — a behavior-adjacent redesign, not a mechanical move. Keep it out of refactor waves; treat as residual design debt if it ever matters.
+
+Evidence:
+- Task_2 Worker report deviation record; full validation suite green with unchanged test count (363 passed).
+
 ## 2026-07-03 - Skip-On-Stall Integration Tests Can Mask Unexecuted Bodies In Green Runs  [tags: validation, ci]
 
 Context:
@@ -155,7 +244,7 @@ Prevention:
 - When required validation fails in tests untouched by the current task, run the same target against baseline HEAD (stash/worktree) to classify the failure as pre-existing vs regression before remediation.
 
 Evidence:
-- Baseline HEAD produced the identical 1-pass/2-fail result on tests/v0_1_2_retrieval_guardrails_tests.rs.
+- Baseline HEAD produced the identical 1-pass/2-fail result on tests/retrieval_guardrails_tests.rs.
 
 ## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
 
@@ -244,7 +333,7 @@ Prevention:
 - Facade tests for entity-root-only selectivity should constrain graph root selection enough to isolate the entity root under test.
 
 Evidence:
-- tests/v0_1_2_retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
+- tests/retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
 
 ## 2026-06-12 - Start Qdrant Before Full cargo test Validation  [tags: validation, tooling]
 
@@ -841,14 +930,14 @@ Context:
 - Roles involved: Orchestrator
 
 Symptom:
-- Newly added domain code used `src/api/types/domain/mod.rs`, and pure domain tests were added under `tests/` as integration-test targets.
+- Newly added domain code used the then-current domain module path, and pure domain tests were added under `tests/` as integration-test targets.
 - User clarified the repo should use direct Rust module filenames and reserve `tests/` for integration tests.
 
 Root cause:
 - Followed the existing mixed module layout and placed pure domain tests in integration-test files instead of applying the desired Rust 2018-style module and unit-test convention.
 
 Fix applied:
-- Migrated source modules away from `mod.rs` files and moved pure domain tests into `src/api/types/domain/tests.rs`.
+- Migrated source modules away from `mod.rs` files and moved pure domain tests into the source-tree domain test module.
 
 Prevention:
 - Prefer direct module files such as `foo.rs` over `foo/mod.rs` for Rust modules.

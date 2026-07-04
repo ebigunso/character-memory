@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
-use character_memory::{CustomError, EmbeddingProvider};
-use qdrant_client::{Qdrant, QdrantError};
-use std::io::ErrorKind;
-use tonic::Code;
+use character_memory::{CustomError, EmbeddingProvider, VectorDatabaseError};
+use qdrant_client::Qdrant;
 use uuid::Uuid;
 
 pub fn unique_collection_name() -> String {
@@ -66,20 +64,22 @@ fn stable_hash(text: &str) -> usize {
     })
 }
 
-pub fn is_qdrant_unavailable_error(error: &QdrantError) -> bool {
-    match error {
-        QdrantError::ResponseError { status } => status.code() == Code::Unavailable,
-        QdrantError::Reqwest(error) => error.is_connect() || error.is_timeout(),
-        QdrantError::Io(error) => matches!(
-            error.kind(),
-            ErrorKind::ConnectionRefused
-                | ErrorKind::ConnectionReset
-                | ErrorKind::ConnectionAborted
-                | ErrorKind::NotConnected
-                | ErrorKind::TimedOut
-        ),
-        _ => false,
-    }
+pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
+    error.backend == "qdrant"
+        && (error
+            .status
+            .as_deref()
+            .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
+            || matches!(
+                error.kind.as_str(),
+                "reqwest::connect"
+                    | "reqwest::timeout"
+                    | "io::ConnectionRefused"
+                    | "io::ConnectionReset"
+                    | "io::ConnectionAborted"
+                    | "io::NotConnected"
+                    | "io::TimedOut"
+            ))
 }
 
 pub async fn cleanup_collection(collection_name: &str) {
