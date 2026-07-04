@@ -57,8 +57,9 @@ Visibility is expressed with `pub`/`pub(crate)` on these modules directly; there
 
 Dependency direction is part of the contract:
 
-- `domain` and `errors` are the bottom; they import no other crate layer (errors imports domain types from `domain`, never via `api`).
-- `ports`, `policy`, and `models` never import `api` or `usecases`.
+- `domain` is the bottom layer; it imports no other crate layer.
+- `errors` imports only `domain` (never domain types via `api`).
+- `ports`, `policy`, and `models` never import `usecases`, and import `api` only for one named exception: the public retrieval trace/telemetry vocabulary (`api::types::retrieval` trace types) that is part of their result contracts. Domain types always come from `crate::domain`. Any new exception must be added to this ADR explicitly, not adopted silently.
 - `api` never imports `usecases` or `adapters`; business logic (for example deterministic write-plan construction) lives in `usecases`, with public access provided by crate-root re-exports rather than by placing the logic in the DTO layer (consistent with the prepare/validate/commit workflow and deterministic-helper decisions).
 - `adapters` import inward (ports, policy, models, domain, errors) and never each other.
 - Only `composition` imports `adapters`; use cases receive implementations through port traits.
@@ -96,7 +97,7 @@ Option 2 had already failed: the catch-all names required annotated re-export ba
 
 - Direction rules are convention plus audit, not compiler-enforced; drift is possible between audits.
 - Re-export indexes at the crate root and in `api::types` grow with each domain family and need curation.
-- Some shared vocabulary (public trace/telemetry types) legitimately flows from `api` into lower layers' signatures, which requires judgment rather than a mechanical rule.
+- The named trace/telemetry exception means the `ports`/`policy`/`models` direction rule is "never, except the listed vocabulary" rather than a mechanically pure "never"; keeping the exception list in this ADR current requires discipline.
 
 ## Validation
 
