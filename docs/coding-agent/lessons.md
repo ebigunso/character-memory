@@ -21,6 +21,29 @@ Purpose:
 
 ## Entries
 
+## 2026-07-04 - Verify Codex Delivery Path And Worker Capacity Before agmsg Dispatch  [tags: delegation, tooling, workflow]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Wave 5 dispatch
+- Roles involved: Orchestrator | Worker (codex)
+
+Symptom:
+- Task dispatches sent via agmsg to the codex worker sat unnoticed in its inbox; earlier waves only worked because the user manually prompted the codex terminal. Separately, the plan's parallel wave (Task_6 ∥ Task_7) had only one worker available.
+
+Root cause:
+- Codex has no Monitor; automatic delivery needs the agmsg codex bridge or codex-side monitor mode. The bridge was dead: it resolves identities using the Windows-form project path while registrations store the MSYS form, so it found no identity (also, two codex-type roles were registered). The spawned worker's boot prompt (`/agmsg actas worker`) had additionally been mangled by MSYS path conversion into a filesystem path.
+
+Fix applied:
+- User activates monitor mode from inside the codex terminal (identity resolves correctly from that side). Orchestrator dispatches remain via agmsg; a pending dispatch is picked up once delivery is live or after one manual nudge.
+
+Prevention:
+- Before dispatching work to a codex agmsg member, confirm its delivery path is live (codex-side monitor mode / bridge running), or explicitly ask the user to nudge the terminal; never assume a send equals delivery.
+- Before dispatching a parallel wave, count live workers and spawn the additional ones first (spawn.sh with explicit --team; beware MSYS mangling of slash-prefixed boot prompts on Windows).
+
+Evidence:
+- codex-bridge log: repeated "no matching codex identity"; identities.sh returns rows for `/c/Users/...` but none for `C:\Users\...`; codex process cmdline shows the mangled boot prompt.
+
 ## 2026-07-04 - Route Worker Dispatches Through The agmsg Codex Worker  [tags: delegation, workflow, tooling]
 
 Context:
