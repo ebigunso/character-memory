@@ -328,8 +328,6 @@ src/
       lifecycle.rs
       retrieval.rs
       write_plan.rs
-      write_plan/
-        helpers.rs
   composition.rs
   config.rs
   config/

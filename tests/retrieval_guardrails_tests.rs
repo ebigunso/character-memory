@@ -25,12 +25,10 @@ async fn stats_persist_across_facade_reopen() {
         Err(CustomError::VectorDatabaseError(error))
             if test_utils::is_qdrant_unavailable_error(&error) =>
         {
-            println!(
-                "skipping v0.1.2 stats persistence test because Qdrant is unavailable: {error}"
-            );
+            println!("skipping stats persistence test because Qdrant is unavailable: {error}");
             return;
         }
-        Err(error) => panic!("unexpected v0.1.2 stats persistence setup failure: {error}"),
+        Err(error) => panic!("unexpected stats persistence setup failure: {error}"),
     };
 
     let test_result = async {
@@ -114,7 +112,7 @@ async fn stats_persist_across_facade_reopen() {
     .await;
 
     test_utils::cleanup_collection(&collection_name).await;
-    test_result.expect("v0.1.2 stats persistence test should pass");
+    test_result.expect("stats persistence test should pass");
 }
 
 #[tokio::test]
@@ -132,10 +130,10 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
         Err(CustomError::VectorDatabaseError(error))
             if test_utils::is_qdrant_unavailable_error(&error) =>
         {
-            println!("skipping v0.1.2 restart-safe retrieval test because Qdrant is unavailable: {error}");
+            println!("skipping restart-safe retrieval test because Qdrant is unavailable: {error}");
             return;
         }
-        Err(error) => panic!("unexpected v0.1.2 restart-safe setup failure: {error}"),
+        Err(error) => panic!("unexpected restart-safe setup failure: {error}"),
     };
 
     let test_result = async {
@@ -257,7 +255,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     .await;
 
     test_utils::cleanup_collection(&collection_name).await;
-    test_result.expect("v0.1.2 restart-safe retrieval test should pass");
+    test_result.expect("restart-safe retrieval test should pass");
 }
 
 #[tokio::test]
@@ -271,12 +269,10 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
         Err(CustomError::VectorDatabaseError(error))
             if test_utils::is_qdrant_unavailable_error(&error) =>
         {
-            println!(
-                "skipping v0.1.2 selectivity fanout test because Qdrant is unavailable: {error}"
-            );
+            println!("skipping selectivity fanout test because Qdrant is unavailable: {error}");
             return;
         }
-        Err(error) => panic!("unexpected v0.1.2 selectivity setup failure: {error}"),
+        Err(error) => panic!("unexpected selectivity setup failure: {error}"),
     };
 
     let test_result = async {
@@ -343,7 +339,7 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
     .await;
 
     test_utils::cleanup_collection(&collection_name).await;
-    test_result.expect("v0.1.2 selectivity fanout test should pass");
+    test_result.expect("selectivity fanout test should pass");
 }
 
 struct StoreFixture {

@@ -652,14 +652,16 @@ async fn setup_basic() -> Option<(CharacterMemory, String)> {
         Err(CustomError::VectorDatabaseError(error))
             if base::is_qdrant_unavailable_error(&error) =>
         {
-            println!("skipping v0.1.3 write-planning test because Qdrant is unavailable: {error}");
+            println!("skipping write-planning test because Qdrant is unavailable: {error}");
             None
         }
         Err(error) if is_qdrant_timeout_signature(&error) => {
-            println!("skipping v0.1.3 write-planning test because local Qdrant gRPC mutation stalled: {error}");
+            println!(
+                "skipping write-planning test because local Qdrant gRPC mutation stalled: {error}"
+            );
             None
         }
-        Err(error) => panic!("unexpected v0.1.3 basic setup failure: {error}"),
+        Err(error) => panic!("unexpected basic setup failure: {error}"),
     }
 }
 
@@ -678,14 +680,16 @@ async fn setup_persistent(
         Err(CustomError::VectorDatabaseError(error))
             if base::is_qdrant_unavailable_error(&error) =>
         {
-            println!("skipping v0.1.3 persistent write-planning test because Qdrant is unavailable: {error}");
+            println!(
+                "skipping persistent write-planning test because Qdrant is unavailable: {error}"
+            );
             None
         }
         Err(error) if is_qdrant_timeout_signature(&error) => {
-            println!("skipping v0.1.3 persistent write-planning test because local Qdrant gRPC mutation stalled: {error}");
+            println!("skipping persistent write-planning test because local Qdrant gRPC mutation stalled: {error}");
             None
         }
-        Err(error) => panic!("unexpected v0.1.3 persistent setup failure: {error}"),
+        Err(error) => panic!("unexpected persistent setup failure: {error}"),
     }
 }
 
@@ -1059,7 +1063,7 @@ fn assert_invalid_validation_contains(
 fn stable_id(label: &str, index: u8) -> MemoryId {
     Uuid::new_v5(
         &Uuid::NAMESPACE_OID,
-        format!("character-memory:v0.1.3-test:{label}:{index}").as_bytes(),
+        format!("character-memory:write-planning-test:{label}:{index}").as_bytes(),
     )
 }
 
