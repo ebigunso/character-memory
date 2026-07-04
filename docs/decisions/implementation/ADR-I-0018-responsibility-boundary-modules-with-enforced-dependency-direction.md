@@ -2,8 +2,8 @@
 status: accepted
 adr_type: implementation
 date: 2026-07-04
-deciders: []
-consulted: []
+deciders: ["ebigunso"]
+consulted: ["Claude Fable 5"]
 informed: []
 supersedes: []
 superseded_by: null
