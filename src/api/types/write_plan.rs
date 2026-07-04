@@ -10,8 +10,7 @@ use super::draft::{
 use super::lifecycle::ExternalSourceReference;
 use super::retrieval::MemoryObjectRef;
 
-pub mod helpers;
-pub use helpers::{PreparedCandidateRefs, RememberPlanDefaults};
+pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {
