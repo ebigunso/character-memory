@@ -82,3 +82,4 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0015: Record producer and rationale origin in candidate provenance](implementation/ADR-I-0015-record-producer-and-rationale-origin-in-candidate-provenance.md)
 - [ADR-I-0016: Use retrieval intent as query-time policy](implementation/ADR-I-0016-use-retrieval-intent-as-query-time-policy.md)
 - [ADR-I-0017: Persist association support, not derived association scores](implementation/ADR-I-0017-persist-association-support-not-derived-association-scores.md)
+- [ADR-I-0018: Organize the crate into responsibility-boundary modules with enforced dependency direction](implementation/ADR-I-0018-responsibility-boundary-modules-with-enforced-dependency-direction.md)
