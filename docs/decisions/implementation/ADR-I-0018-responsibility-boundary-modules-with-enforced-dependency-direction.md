@@ -51,7 +51,11 @@ composition  the composition root: settings-driven backend selection, factories,
              provider-to-port glue
 errors       the crate error surface
 config       settings loading
+test_support shared test fakes and fixtures; compiled only under cfg(test)
 ```
+
+`test_support` is test-only tooling: it may import any layer to build fakes and is
+exempt from the dependency-direction rules below.
 
 Visibility is expressed with `pub`/`pub(crate)` on these modules directly; there is no `internal/` directory.
 
