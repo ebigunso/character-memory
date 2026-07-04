@@ -1,3 +1,5 @@
+// Reconciliation is an admin/governance seam that is intentionally dormant in the
+// public facade; remove this module-level allow once a governance surface calls it.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};

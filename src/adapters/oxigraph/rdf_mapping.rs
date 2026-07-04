@@ -1,7 +1,5 @@
 // RDF mapping surface. Public domain objects stay independent from
 // Oxigraph types.
-#![allow(dead_code)]
-
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 

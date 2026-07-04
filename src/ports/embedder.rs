@@ -1,7 +1,5 @@
 // Provider-neutral embedding boundary used by remember, retrieve, and
 // lifecycle vector maintenance.
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 
 use crate::errors::CustomError;

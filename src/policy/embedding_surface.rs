@@ -1,7 +1,5 @@
 // Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
-#![allow(dead_code)]
-
 use crate::api::types::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
 };

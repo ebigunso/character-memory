@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-07-04 - Evidence Greps Must Match The Syntactic Class Being Ruled Out  [tags: validation, grep-evidence]
+
+Context:
+- Plan: lint-suppression cleanup
+- Task/Wave: Task_1 acceptance check
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- Both the Orchestrator's inventory grep and the Worker's done-evidence grep for module-wide allows matched only single-lint forms (`allow(dead_code)`), missing two combined-form sites (`#![allow(dead_code, unused_imports)]`) — the task was reported done with its acceptance criterion unmet.
+
+Root cause:
+- The regex encoded the expected spelling of the attribute, not the syntactic class being ruled out.
+
+Fix applied:
+- Addendum cleaned the two missed files; completion evidence switched to `rg '^#!\[allow' src -n`, which matches every module-wide allow regardless of lint list.
+
+Prevention:
+- When acceptance is "no X remains", the evidence grep must match the broadest syntactic form of X (then narrower greps may summarize permitted exceptions). Encode the class, not the expected spelling.
+
+Evidence:
+- Task_1 report grep showed clean; Orchestrator's independent broad grep found embedded.rs/shared.rs; addendum report + corrected grep confirm only the two permitted files remain.
+
 ## 2026-07-04 - Verify Skip-Gating Predicate Branches Against What The Producer Actually Emits  [tags: validation, review]
 
 Context:

@@ -4,17 +4,13 @@ mod tests {
 
     use super::super::embedded::*;
     use super::super::http::*;
-    use super::super::rdf_mapping::{
-        rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple,
-    };
+    use super::super::rdf_mapping::{rdf_triples_for_object, RdfObject, RdfTriple};
     use super::super::shared::*;
     use super::super::sparql_selectors::SparqlGraphSelectors;
     use super::super::vocabulary as vocab;
-    use super::super::*;
     use crate::api::types::{
         graph_uri, ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, MemoryId,
-        MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState, RetrievalContext,
-        ThreadStatus,
+        MemoryObject, ObjectType, RelationType, RetentionState, RetrievalContext, ThreadStatus,
     };
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,

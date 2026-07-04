@@ -1,5 +1,7 @@
 // Deterministic test harness shared by pipeline, adapter, and facade
 // tests.
+// Shared fakes and fixtures are intentionally broader than any single test module;
+// remove this module-level allow once the harness is split by fixture family.
 #![allow(dead_code)]
 
 use std::collections::HashSet;
