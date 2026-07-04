@@ -66,6 +66,8 @@ Prevention:
 Evidence:
 - User instruction on 2026-07-04 during Wave 2; role instruction + Task_3 dispatch sent to `worker` in team CharacterMemory.
 
+## 2026-07-04 - Bounded Expansion Has Two Semantically Distinct Flavors, Do Not Force-Merge  [tags: planning, architecture]
+
 Context:
 - Plan: responsibility-boundary module reorg
 - Task/Wave: Task_2 (ports/policy extraction)
@@ -220,7 +222,7 @@ Prevention:
 - When required validation fails in tests untouched by the current task, run the same target against baseline HEAD (stash/worktree) to classify the failure as pre-existing vs regression before remediation.
 
 Evidence:
-- Baseline HEAD produced the identical 1-pass/2-fail result on tests/v0_1_2_retrieval_guardrails_tests.rs.
+- Baseline HEAD produced the identical 1-pass/2-fail result on tests/retrieval_guardrails_tests.rs.
 
 ## 2026-06-14 - Prefer Root-Cause Fixes Over Symptom Patches  [tags: maintainability, review, validation]
 
@@ -309,7 +311,7 @@ Prevention:
 - Facade tests for entity-root-only selectivity should constrain graph root selection enough to isolate the entity root under test.
 
 Evidence:
-- tests/v0_1_2_retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
+- tests/retrieval_guardrails_tests.rs fanout scenario passes with traced fanout and result-count assertions.
 
 ## 2026-06-12 - Start Qdrant Before Full cargo test Validation  [tags: validation, tooling]
 
@@ -906,14 +908,14 @@ Context:
 - Roles involved: Orchestrator
 
 Symptom:
-- Newly added domain code used `src/api/types/domain/mod.rs`, and pure domain tests were added under `tests/` as integration-test targets.
+- Newly added domain code used the then-current domain module path, and pure domain tests were added under `tests/` as integration-test targets.
 - User clarified the repo should use direct Rust module filenames and reserve `tests/` for integration tests.
 
 Root cause:
 - Followed the existing mixed module layout and placed pure domain tests in integration-test files instead of applying the desired Rust 2018-style module and unit-test convention.
 
 Fix applied:
-- Migrated source modules away from `mod.rs` files and moved pure domain tests into `src/api/types/domain/tests.rs`.
+- Migrated source modules away from `mod.rs` files and moved pure domain tests into the source-tree domain test module.
 
 Prevention:
 - Prefer direct module files such as `foo.rs` over `foo/mod.rs` for Rust modules.
