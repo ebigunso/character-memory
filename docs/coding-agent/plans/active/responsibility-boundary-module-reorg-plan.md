@@ -366,6 +366,10 @@ Waves are sequential; the heavy import churn of each restructuring step makes di
   - Summary: roadmap 'Implemented module layout' rewritten to the actual final src/ + tests/ tree (Compare-Object vs filesystem: no diff); stale path references updated in lessons.md and two roadmap-phase docs; completed plans and the active plan excluded per dispatch.
   - Validation evidence: worker's tree-diff pass + stale-reference greps (internal::, internal/, external_services, repositories/, tests/v0_1) all clean with exclusions; Orchestrator spot-check of the roadmap block matches filesystem.
   - Notes: Orchestrator repaired one integration defect from the lessons.md edit — the 'Bounded Expansion' entry heading was accidentally deleted, orphaning its body; heading restored, worker's path updates kept.
+- 2026-07-04 Wave 8 in progress: [Task_9] review + remediation
+  - Reviewer verdict: CHANGES_REQUESTED with 1 MAJOR — the migrated unavailability helper's gRPC-Unavailable branch was dead code (tonic Code Display is a description sentence, not the enum name), silently changing skip-vs-fail semantics; invisible to all locally runnable checks. 2 MINOR (helpers.rs shim; pre-existing allow-barrels carried forward) — accepted as non-blocking follow-ups.
+  - Remediation (Orchestrator, trivial fast-path): tests/support/base.rs predicate changed to case-insensitive substring match. Verified: cargo test --no-run pass; service-down run shows producer output (ResponseError code Internal on hard-down — fails in old semantics too, per 2026-06-12 lesson, so parity holds); healthy-path initialization_tests pass after restart; fmt --check + clippy --all-targets -D warnings pass.
+  - Governance: reviewer lesson candidate recorded in lessons.md and promoted to a worker repo rule (skip-gating predicate verification).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

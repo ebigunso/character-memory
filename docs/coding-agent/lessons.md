@@ -21,6 +21,28 @@ Purpose:
 
 ## Entries
 
+## 2026-07-04 - Verify Skip-Gating Predicate Branches Against What The Producer Actually Emits  [tags: validation, review]
+
+Context:
+- Plan: responsibility-boundary module reorg
+- Task/Wave: Wave 6 Task_7 addendum / Task_9 review remediation
+- Roles involved: Reviewer | Orchestrator | Worker
+
+Symptom:
+- The migrated Qdrant-unavailability test helper compared the neutral error payload's status to "unavailable", but the producer stores tonic's Code Display, which for Code::Unavailable is the sentence "The service is currently unavailable" — the branch was dead code, silently changing skip-vs-fail semantics while every locally runnable check stayed green.
+
+Root cause:
+- The only code path exercising the predicate (integration tests with the service in specific failure states) was under an environmental waiver, and the branch assumed Code::to_string() yields the enum name rather than the description sentence.
+
+Fix applied:
+- Predicate changed to a case-insensitive substring match (catches both the sentence and the bare enum name); verified end-to-end by stopping Qdrant and observing producer output, and by rerunning the healthy path after restart.
+
+Prevention:
+- When changing test skip-gating predicates, statically trace each compared value from the emitting site to the matcher, or run once with the service deliberately down; waived/skipped suites do not exercise these branches. Promoted to a worker repo rule.
+
+Evidence:
+- Task_9 Reviewer MAJOR finding (source-level confirmation via tonic 0.12.3 status.rs); Orchestrator service-down run showing producer output; healthy-path rerun green.
+
 ## 2026-07-04 - Verify Codex Delivery Path And Worker Capacity Before agmsg Dispatch  [tags: delegation, tooling, workflow]
 
 Context:

@@ -69,7 +69,7 @@ pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
         && (error
             .status
             .as_deref()
-            .is_some_and(|status| status.eq_ignore_ascii_case("unavailable"))
+            .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
             || matches!(
                 error.kind.as_str(),
                 "reqwest::connect"
