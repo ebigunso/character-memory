@@ -324,6 +324,8 @@ pub struct RetrievalTrace {
     #[serde(default)]
     pub graph_expansions: Vec<GraphExpansionTrace>,
     #[serde(default)]
+    pub fanout_utilization: Vec<FanoutUtilizationTrace>,
+    #[serde(default)]
     pub selectivity_decisions: Vec<SelectivityTrace>,
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
@@ -336,6 +338,7 @@ impl RetrievalTrace {
             vector_candidates: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
+            fanout_utilization: Vec::new(),
             selectivity_decisions: Vec::new(),
             lifecycle_filter_decisions: Vec::new(),
             stale_candidate_omissions: Vec::new(),
@@ -385,6 +388,17 @@ pub struct GraphExpansionTrace {
     pub filtered_node_count: usize,
     pub bounded_failure: Option<GraphExpansionBoundedFailureTrace>,
     pub outcome: GraphExpansionOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FanoutUtilizationTrace {
+    pub root: MemoryObjectRef,
+    pub relation: RelationType,
+    pub object_type: ObjectType,
+    pub configured_cap: usize,
+    pub selected_cap: usize,
+    pub retained_count: usize,
+    pub omitted_by_fanout_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -476,6 +490,8 @@ pub struct StaleCandidateOmission {
     pub candidate: MemoryObjectRef,
     pub vector_score: Option<f32>,
     pub reason: StaleCandidateReason,
+    #[serde(default)]
+    pub rationale_categories: Vec<RationaleCategory>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -495,6 +511,21 @@ pub struct SectionAssignment {
     pub section: ContextPackSection,
     pub rank: Option<usize>,
     pub reason: Option<String>,
+    #[serde(default)]
+    pub rationale_categories: Vec<RationaleCategory>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RationaleCategory {
+    Semantic,
+    Entity,
+    Thread,
+    Temporal,
+    Salience,
+    Scope,
+    Lifecycle,
+    GraphBound,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -697,12 +728,14 @@ mod tests {
             section: ContextPackSection::Preferences,
             rank: Some(2),
             reason: Some("derived type maps to preference section".to_owned()),
+            rationale_categories: vec![RationaleCategory::Scope],
         };
 
         let encoded = serde_json::to_value(&assignment).unwrap();
 
         assert_eq!(encoded["section"], "preferences");
         assert_eq!(encoded["rank"], 2);
+        assert_eq!(encoded["rationale_categories"][0], "scope");
     }
 
     #[test]
@@ -791,6 +824,15 @@ mod tests {
                 }),
                 outcome: GraphExpansionOutcome::Bounded,
             }],
+            fanout_utilization: vec![FanoutUtilizationTrace {
+                root: candidate,
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                configured_cap: 16,
+                selected_cap: 4,
+                retained_count: 4,
+                omitted_by_fanout_count: 3,
+            }],
             selectivity_decisions: Vec::new(),
             lifecycle_filter_decisions: vec![LifecycleFilterDecision {
                 object: candidate,
@@ -804,12 +846,14 @@ mod tests {
                 candidate: MemoryObjectRef::new(ObjectType::Observation, episode_id),
                 vector_score: Some(0.44),
                 reason: StaleCandidateReason::GraphObjectMissing,
+                rationale_categories: vec![RationaleCategory::Semantic],
             }],
             section_assignments: vec![SectionAssignment {
                 object: candidate,
                 section: ContextPackSection::Preferences,
                 rank: Some(1),
                 reason: None,
+                rationale_categories: vec![RationaleCategory::Scope, RationaleCategory::Semantic],
             }],
         };
 
@@ -838,9 +882,18 @@ mod tests {
             StaleCandidateReason::GraphObjectMissing
         );
         assert_eq!(
+            decoded.stale_candidate_omissions[0].rationale_categories,
+            vec![RationaleCategory::Semantic]
+        );
+        assert_eq!(
             decoded.section_assignments[0].section,
             ContextPackSection::Preferences
         );
+        assert_eq!(
+            decoded.section_assignments[0].rationale_categories,
+            vec![RationaleCategory::Scope, RationaleCategory::Semantic]
+        );
+        assert_eq!(decoded.fanout_utilization[0].omitted_by_fanout_count, 3);
     }
 
     #[test]
@@ -856,7 +909,34 @@ mod tests {
         let decoded: RetrievalTrace = serde_json::from_str(encoded).unwrap();
 
         assert!(decoded.graph_expansions.is_empty());
+        assert!(decoded.fanout_utilization.is_empty());
         assert!(decoded.selectivity_decisions.is_empty());
+    }
+
+    #[test]
+    fn new_trace_fields_are_serde_defaulted_for_older_payloads() {
+        let encoded_omission = r#"{
+            "candidate": {
+                "object_type": "derived_memory",
+                "id": "550e8400-e29b-41d4-a716-446655442090"
+            },
+            "vector_score": 0.5,
+            "reason": "section_limit"
+        }"#;
+        let omission: StaleCandidateOmission = serde_json::from_str(encoded_omission).unwrap();
+        assert!(omission.rationale_categories.is_empty());
+
+        let encoded_assignment = r#"{
+            "object": {
+                "object_type": "derived_memory",
+                "id": "550e8400-e29b-41d4-a716-446655442091"
+            },
+            "section": "preferences",
+            "rank": 1,
+            "reason": "legacy trace"
+        }"#;
+        let assignment: SectionAssignment = serde_json::from_str(encoded_assignment).unwrap();
+        assert!(assignment.rationale_categories.is_empty());
     }
 
     #[test]

@@ -27,8 +27,8 @@ use crate::errors::CustomError;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
     GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-    GraphExpansionFilteredNode, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-    GraphExpansionQuery, GraphExpansionRelation, GraphObjectRef,
+    GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation, GraphObjectRef,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +36,7 @@ pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<GraphObjectRef>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
+    pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
@@ -78,6 +79,7 @@ pub(crate) fn bounded_expansion(
         expanded_links,
         plan.relations,
         plan.filtered_nodes,
+        plan.fanout_utilization,
         plan.bounded_failure,
     ))
 }
@@ -336,6 +338,7 @@ fn bounded_expansion_plan<'a>(
                 visited: HashSet::new(),
                 relations: Vec::new(),
                 filtered_nodes: Vec::new(),
+                fanout_utilization: Vec::new(),
                 bounded_failure: Some(bounded_failure),
             });
         }
@@ -354,6 +357,7 @@ fn bounded_expansion_plan<'a>(
             visited: HashSet::new(),
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
+            fanout_utilization: Vec::new(),
             bounded_failure: Some(bounded_failure),
         });
     }
@@ -372,6 +376,7 @@ fn bounded_expansion_plan<'a>(
     let mut visited = HashSet::new();
     let mut filtered_nodes = Vec::new();
     let mut relations = Vec::new();
+    let mut fanout_utilization = Vec::new();
     let mut bounded_failure = None;
     let mut relation_link_ids = HashSet::new();
     let mut queued = HashSet::from([root]);
@@ -440,7 +445,14 @@ fn bounded_expansion_plan<'a>(
                 apply_selectivity_overrides,
             ));
         }
-        incident_links = apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
+        let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
+            query,
+            root,
+            incident_links,
+            apply_selectivity_overrides,
+        );
+        incident_links = limited_incident_links;
+        fanout_utilization.extend(utilization);
 
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -497,6 +509,7 @@ fn bounded_expansion_plan<'a>(
         visited,
         relations,
         filtered_nodes,
+        fanout_utilization,
         bounded_failure,
     })
 }
@@ -512,6 +525,63 @@ fn apply_fanout_limits<'a>(
         apply_selectivity_overrides,
         |(link, neighbor)| (link.relation, neighbor.object_type),
     )
+}
+
+fn apply_fanout_limits_with_utilization<'a>(
+    query: &GraphExpansionQuery,
+    root: GraphObjectRef,
+    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    apply_selectivity_overrides: bool,
+) -> (
+    Vec<(&'a MemoryLink, GraphObjectRef)>,
+    Vec<GraphExpansionFanoutUtilization>,
+) {
+    let before_counts = fanout_counts_by_pair(&incident_links);
+    let retained = apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
+    let retained_counts = fanout_counts_by_pair(&retained);
+    let mut utilization = before_counts
+        .into_iter()
+        .map(|((relation, object_type), before_count)| {
+            let retained_count = retained_counts
+                .get(&(relation, object_type))
+                .copied()
+                .unwrap_or_default();
+            GraphExpansionFanoutUtilization {
+                root,
+                relation,
+                object_type,
+                configured_cap: query.max_fanout_per_node,
+                selected_cap: fanout_limit_for_pair_with_override_mode(
+                    query,
+                    relation,
+                    object_type,
+                    apply_selectivity_overrides,
+                ),
+                retained_count,
+                omitted_by_fanout_count: before_count.saturating_sub(retained_count),
+            }
+        })
+        .collect::<Vec<_>>();
+    utilization.sort_by_key(|entry| {
+        (
+            relation_type_rank(entry.relation),
+            object_type_rank(entry.object_type),
+        )
+    });
+    utilization.retain(|entry| entry.retained_count > 0 || entry.omitted_by_fanout_count > 0);
+    (retained, utilization)
+}
+
+fn fanout_counts_by_pair(
+    incident_links: &[(&MemoryLink, GraphObjectRef)],
+) -> std::collections::HashMap<(RelationType, ObjectType), usize> {
+    let mut counts = std::collections::HashMap::new();
+    for (link, neighbor) in incident_links {
+        *counts
+            .entry((link.relation, neighbor.object_type))
+            .or_default() += 1;
+    }
+    counts
 }
 
 pub(crate) fn apply_fanout_limits_by_pair<T>(
@@ -559,6 +629,18 @@ fn fanout_limit_for_pair(
     relation: RelationType,
     object_type: ObjectType,
 ) -> usize {
+    fanout_limit_for_pair_with_override_mode(query, relation, object_type, true)
+}
+
+fn fanout_limit_for_pair_with_override_mode(
+    query: &GraphExpansionQuery,
+    relation: RelationType,
+    object_type: ObjectType,
+    apply_selectivity_overrides: bool,
+) -> usize {
+    if !apply_selectivity_overrides {
+        return query.max_fanout_per_node;
+    }
     query
         .fanout_overrides
         .iter()

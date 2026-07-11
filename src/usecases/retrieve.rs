@@ -3,13 +3,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType,
+    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType, FanoutUtilizationTrace,
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
     LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryId,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState,
-    RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
-    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
+    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RationaleCategory, RelationType,
+    RetentionState, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
+    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
     StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
@@ -99,6 +99,7 @@ where
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = include_trace.then(Vec::new);
+        let mut fanout_utilization_traces = include_trace.then(Vec::new);
         let mut selectivity_traces = include_trace.then(Vec::new);
         let selectivity_stats_context = if candidate_roots
             .iter()
@@ -144,6 +145,9 @@ where
                     record_expansion_telemetry(&mut graph_expansion_telemetry, &expansion);
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(graph_expansion_trace(candidate, &expansion));
+                    }
+                    if let Some(traces) = &mut fanout_utilization_traces {
+                        traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
                         if !context.graph_limits.allow_degraded_results {
@@ -227,6 +231,7 @@ where
                 .collect(),
             graph_relations: assembly.graph_relations.unwrap_or_default(),
             graph_expansions: graph_expansion_traces.unwrap_or_default(),
+            fanout_utilization: fanout_utilization_traces.unwrap_or_default(),
             selectivity_decisions: selectivity_traces.unwrap_or_default(),
             lifecycle_filter_decisions: details.lifecycle_filter_decisions,
             stale_candidate_omissions: details.stale_candidate_omissions,
@@ -374,6 +379,9 @@ impl RetrieveAssembly {
                     candidate: memory_object_ref(candidate.object_type, candidate.object_id),
                     vector_score: Some(candidate.score),
                     reason: stale_reason_from_filtered(filtered.reason),
+                    rationale_categories: rationale_categories_for_stale_reason(
+                        stale_reason_from_filtered(filtered.reason),
+                    ),
                 });
             }
             self.lifecycle_decisions.push(decision);
@@ -393,6 +401,9 @@ impl RetrieveAssembly {
             candidate: memory_object_ref(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphExpansionBounded,
+            rationale_categories: rationale_categories_for_stale_reason(
+                StaleCandidateReason::GraphExpansionBounded,
+            ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -409,6 +420,9 @@ impl RetrieveAssembly {
             candidate: memory_object_ref(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphObjectMissing,
+            rationale_categories: rationale_categories_for_stale_reason(
+                StaleCandidateReason::GraphObjectMissing,
+            ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -442,6 +456,9 @@ impl RetrieveAssembly {
                     candidate: memory_object_ref(object_ref.object_type, object_ref.object_id),
                     vector_score: self.candidate_scores.get(&object_ref).copied(),
                     reason: stale_reason_from_decision(decision.reason),
+                    rationale_categories: rationale_categories_for_stale_reason(
+                        stale_reason_from_decision(decision.reason),
+                    ),
                 });
             }
             self.lifecycle_decisions.push(decision);
@@ -551,6 +568,20 @@ impl RankedObject {
             self.salience_component
         )
     }
+
+    fn rationale_categories(&self, section: ContextPackSection) -> Vec<RationaleCategory> {
+        let mut categories = rationale_categories_for_section(section);
+        if self.vector_candidate_score.is_some() {
+            push_unique_category(&mut categories, RationaleCategory::Semantic);
+        }
+        if self.graph_component > 0.0 {
+            push_unique_category(&mut categories, RationaleCategory::Entity);
+        }
+        if self.salience_component > 0.0 {
+            push_unique_category(&mut categories, RationaleCategory::Salience);
+        }
+        categories
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -599,6 +630,7 @@ fn build_pack(
                 section: ContextPackSection::Omitted,
                 rank: None,
                 reason: Some(section_omission_reason(&ranked.object)),
+                rationale_categories: rationale_categories_for_section_omission(&ranked.object),
             });
             continue;
         };
@@ -612,6 +644,9 @@ fn build_pack(
                     candidate: memory_object_ref_from_object(&ranked.object),
                     vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
+                    rationale_categories: rationale_categories_for_stale_reason(
+                        StaleCandidateReason::SectionLimit,
+                    ),
                 });
             details.section_assignments.push(SectionAssignment {
                 object: memory_object_ref_from_object(&ranked.object),
@@ -621,6 +656,7 @@ fn build_pack(
                     "section limit reached for {}",
                     context_pack_section_name(section)
                 )),
+                rationale_categories: rationale_categories_for_section_limit(section),
             });
             continue;
         }
@@ -633,6 +669,7 @@ fn build_pack(
             section,
             rank: Some(rank),
             reason: Some(ranked.assignment_reason()),
+            rationale_categories: ranked.rationale_categories(section),
         });
 
         match ranked.object {
@@ -942,6 +979,24 @@ fn graph_expansion_trace(
     }
 }
 
+fn fanout_utilization_traces_for_expansion(
+    expansion: &GraphExpansion,
+) -> Vec<FanoutUtilizationTrace> {
+    expansion
+        .fanout_utilization
+        .iter()
+        .map(|entry| FanoutUtilizationTrace {
+            root: memory_object_ref(entry.root.object_type, entry.root.object_id),
+            relation: entry.relation,
+            object_type: entry.object_type,
+            configured_cap: entry.configured_cap,
+            selected_cap: entry.selected_cap,
+            retained_count: entry.retained_count,
+            omitted_by_fanout_count: entry.omitted_by_fanout_count,
+        })
+        .collect()
+}
+
 fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpansionTrace {
     GraphExpansionTrace {
         root: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -1129,6 +1184,55 @@ fn stale_reason_from_decision(reason: LifecycleFilterReason) -> StaleCandidateRe
         LifecycleFilterReason::GraphObjectMissing => StaleCandidateReason::GraphObjectMissing,
         LifecycleFilterReason::GraphExpansionBounded => StaleCandidateReason::GraphExpansionBounded,
         _ => StaleCandidateReason::LifecycleMismatch,
+    }
+}
+
+fn rationale_categories_for_stale_reason(reason: StaleCandidateReason) -> Vec<RationaleCategory> {
+    match reason {
+        StaleCandidateReason::GraphObjectMissing => vec![RationaleCategory::Semantic],
+        StaleCandidateReason::LifecycleMismatch
+        | StaleCandidateReason::CurrentnessMismatch
+        | StaleCandidateReason::Superseded => vec![RationaleCategory::Lifecycle],
+        StaleCandidateReason::SectionLimit => vec![RationaleCategory::Scope],
+        StaleCandidateReason::GraphExpansionBounded => vec![RationaleCategory::GraphBound],
+    }
+}
+
+fn rationale_categories_for_section_omission(object: &MemoryObject) -> Vec<RationaleCategory> {
+    match object {
+        MemoryObject::Entity(_) => vec![RationaleCategory::Entity],
+        MemoryObject::MemoryThread(_) => vec![RationaleCategory::Thread],
+        MemoryObject::MemoryLink(_) => vec![RationaleCategory::GraphBound],
+        MemoryObject::Episode(_) => vec![RationaleCategory::Temporal],
+        MemoryObject::Observation(_) => vec![RationaleCategory::Salience],
+        MemoryObject::DerivedMemory(_) => vec![RationaleCategory::Scope],
+    }
+}
+
+fn rationale_categories_for_section_limit(section: ContextPackSection) -> Vec<RationaleCategory> {
+    let mut categories = rationale_categories_for_section(section);
+    push_unique_category(&mut categories, RationaleCategory::Scope);
+    categories
+}
+
+fn rationale_categories_for_section(section: ContextPackSection) -> Vec<RationaleCategory> {
+    match section {
+        ContextPackSection::ActiveThreads => vec![RationaleCategory::Thread],
+        ContextPackSection::RelevantEpisodes => vec![RationaleCategory::Temporal],
+        ContextPackSection::SalientObservations => vec![RationaleCategory::Salience],
+        ContextPackSection::DerivedMemories
+        | ContextPackSection::Preferences
+        | ContextPackSection::RelationshipNotes
+        | ContextPackSection::OpenLoops
+        | ContextPackSection::Commitments
+        | ContextPackSection::CharacterSignals => vec![RationaleCategory::Scope],
+        ContextPackSection::Omitted => Vec::new(),
+    }
+}
+
+fn push_unique_category(categories: &mut Vec<RationaleCategory>, category: RationaleCategory) {
+    if !categories.contains(&category) {
+        categories.push(category);
     }
 }
 
@@ -1431,6 +1535,21 @@ mod tests {
             .section_assignments
             .iter()
             .all(|assignment| assignment.reason.is_some()));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Temporal)
+        }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.user_preference.id
+                && assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Semantic)
+                && assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Scope)
+        }));
         assert_eq!(trace.vector_candidates.len(), 4);
         assert_eq!(trace.graph_expansions.len(), 4);
     }
@@ -1483,6 +1602,15 @@ mod tests {
                     && decision.decision
                         == crate::api::types::SelectivityDecision::LowSelectivityRejected
             }));
+        let fanout_utilization = &outcome.trace.as_ref().unwrap().fanout_utilization;
+        assert!(fanout_utilization.iter().any(|entry| {
+            entry.root.id == fixture.hub_entity.id
+                && entry.relation == RelationType::About
+                && entry.object_type == ObjectType::DerivedMemory
+                && entry.selected_cap == 0
+                && entry.retained_count == 0
+                && entry.omitted_by_fanout_count > 0
+        }));
     }
 
     #[tokio::test]
@@ -1525,6 +1653,14 @@ mod tests {
                 .high_selectivity_count
                 > 0
         );
+        let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace.fanout_utilization.iter().any(|entry| {
+            entry.root.id == fixture.hub_entity.id
+                && entry.relation == RelationType::About
+                && entry.object_type == ObjectType::DerivedMemory
+                && entry.selected_cap <= entry.configured_cap
+                && entry.retained_count > 0
+        }));
     }
 
     #[tokio::test]
@@ -1568,7 +1704,10 @@ mod tests {
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == missing_id
-                && omission.reason == StaleCandidateReason::GraphObjectMissing));
+                && omission.reason == StaleCandidateReason::GraphObjectMissing
+                && omission
+                    .rationale_categories
+                    .contains(&RationaleCategory::Semantic)));
         assert!(!trace
             .stale_candidate_omissions
             .iter()
@@ -1582,6 +1721,9 @@ mod tests {
             .any(
                 |omission| omission.candidate.id == fixtures.suppressed_seed.id
                     && omission.reason == StaleCandidateReason::LifecycleMismatch
+                    && omission
+                        .rationale_categories
+                        .contains(&RationaleCategory::Lifecycle)
             ));
         assert!(trace
             .lifecycle_filter_decisions
