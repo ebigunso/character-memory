@@ -378,6 +378,7 @@ impl OxigraphHttpGraphAuthorityStore {
     ) -> Result<BoundedGraphVisibility, CustomError> {
         let mut graph_refs = HashSet::from([root_ref]);
         let mut graph_link_ids = HashSet::new();
+        let mut fanout_utilization = Vec::new();
         let mut bounded_failure = None;
         let mut frontier = vec![root_ref];
 
@@ -390,14 +391,16 @@ impl OxigraphHttpGraphAuthorityStore {
                     .get(object_ref)
                     .map(Vec::as_slice)
                     .unwrap_or_default();
-                for link_ref in bounded_incident_link_refs(
+                let (bounded_link_refs, utilization) = bounded_incident_link_refs(
                     query,
                     root_ref,
                     *object_ref,
                     depth,
                     incident_link_refs,
                     &mut bounded_failure,
-                )? {
+                )?;
+                fanout_utilization.extend(utilization);
+                for link_ref in bounded_link_refs {
                     let neighbor = link_ref.other_endpoint(*object_ref);
                     insert_visible_ref(
                         query,
@@ -435,6 +438,7 @@ impl OxigraphHttpGraphAuthorityStore {
             object_refs: graph_refs,
             traversal_link_ids: graph_link_ids,
             lifecycle_link_ids,
+            fanout_utilization,
             bounded_failure,
         })
     }
@@ -635,7 +639,10 @@ impl GraphAuthorityStore for OxigraphHttpGraphAuthorityStore {
             })
             .collect::<Vec<_>>();
 
-        let mut expansion = bounded_expansion(query, objects, links)?;
+        let mut hydrated_query = query.clone();
+        hydrated_query.record_fanout_utilization = false;
+        let mut expansion = bounded_expansion(&hydrated_query, objects, links)?;
+        expansion.fanout_utilization = visibility.fanout_utilization;
         if expansion.bounded_failure.is_none() {
             expansion.bounded_failure = visibility.bounded_failure;
         }

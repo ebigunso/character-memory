@@ -379,6 +379,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oxigraph_expansion_reports_pre_hydration_fanout_omissions() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixture = high_fanout_graph_fixture();
+
+        store.upsert_objects(&fixture.objects()).await.unwrap();
+        store.upsert_links(&fixture.links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(2);
+        let without_utilization = store.expand_bounded(&query).await.unwrap();
+        let expansion = store
+            .expand_bounded(&query.with_fanout_utilization_recording(true))
+            .await
+            .unwrap();
+
+        assert_eq!(expansion.links.len(), 2);
+        assert_eq!(without_utilization.objects, expansion.objects);
+        assert_eq!(without_utilization.links, expansion.links);
+        assert_eq!(without_utilization.relations, expansion.relations);
+        assert_eq!(without_utilization.filtered_nodes, expansion.filtered_nodes);
+        assert_eq!(
+            without_utilization.bounded_failure,
+            expansion.bounded_failure
+        );
+        assert!(expansion.fanout_utilization.iter().any(|entry| {
+            entry.root.object_id == fixture.hub_entity.id
+                && entry.relation == RelationType::About
+                && entry.object_type == ObjectType::DerivedMemory
+                && entry.selected_cap == 2
+                && entry.retained_count == 2
+                && entry.omitted_by_fanout_count > 0
+        }));
+    }
+
+    #[tokio::test]
     async fn oxigraph_expansion_preserves_depth_node_cap_and_allowed_types() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixture = high_fanout_graph_fixture();
