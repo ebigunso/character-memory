@@ -65,11 +65,15 @@ fn stable_hash(text: &str) -> usize {
 }
 
 pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
+    let message = error.message.to_ascii_lowercase();
     error.backend == "qdrant"
         && (error
             .status
             .as_deref()
             .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
+            || (error.kind == "response"
+                && message.contains("failed to connect")
+                && message.contains("tcp connect error"))
             || matches!(
                 error.kind.as_str(),
                 "reqwest::connect"
