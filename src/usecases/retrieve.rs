@@ -2346,6 +2346,28 @@ mod tests {
             .all(|categories| !categories.contains(&RationaleCategory::Temporal)));
     }
 
+    #[test]
+    fn salience_rationale_tracks_positive_salience_component() {
+        let fixtures = representative_fixtures();
+        let mut positive_salience = fixtures.user_preference.clone();
+        positive_salience.salience_score = 0.8;
+        let mut zero_salience = positive_salience.clone();
+        zero_salience.salience_score = 0.0;
+
+        for (object, expected) in [(positive_salience, true), (zero_salience, false)] {
+            let categories = RankedObject::new(
+                MemoryObject::DerivedMemory(object),
+                0.0,
+                0.0,
+                None,
+                GraphRationaleSignals::default(),
+            )
+            .rationale_categories();
+
+            assert_eq!(categories.contains(&RationaleCategory::Salience), expected);
+        }
+    }
+
     #[tokio::test]
     async fn omits_unresolved_and_lifecycle_stale_candidates() {
         let fixtures = representative_fixtures();
