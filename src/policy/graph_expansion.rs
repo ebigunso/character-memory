@@ -445,14 +445,19 @@ fn bounded_expansion_plan<'a>(
                 apply_selectivity_overrides,
             ));
         }
-        let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
-            query,
-            root,
-            incident_links,
-            apply_selectivity_overrides,
-        );
-        incident_links = limited_incident_links;
-        fanout_utilization.extend(utilization);
+        if query.record_fanout_utilization {
+            let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
+                query,
+                root,
+                incident_links,
+                apply_selectivity_overrides,
+            );
+            incident_links = limited_incident_links;
+            fanout_utilization.extend(utilization);
+        } else {
+            incident_links =
+                apply_fanout_limits(query, incident_links, apply_selectivity_overrides);
+        }
 
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -1148,6 +1153,36 @@ mod tests {
         assert!(expansion.objects.iter().any(|object| {
             matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == downstream_b.id)
         }));
+    }
+
+    #[test]
+    fn fanout_utilization_recording_does_not_change_pruned_expansion() {
+        let fixture = high_fanout_graph_fixture();
+        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 10)
+            .with_max_fanout_per_node(2);
+
+        let without_utilization =
+            bounded_expansion(&query, fixture.objects(), fixture.links.clone()).unwrap();
+        let with_utilization = bounded_expansion(
+            &query.with_fanout_utilization_recording(true),
+            fixture.objects(),
+            fixture.links,
+        )
+        .unwrap();
+
+        assert_eq!(without_utilization.objects, with_utilization.objects);
+        assert_eq!(without_utilization.links, with_utilization.links);
+        assert_eq!(without_utilization.relations, with_utilization.relations);
+        assert_eq!(
+            without_utilization.filtered_nodes,
+            with_utilization.filtered_nodes
+        );
+        assert_eq!(
+            without_utilization.bounded_failure,
+            with_utilization.bounded_failure
+        );
+        assert!(without_utilization.fanout_utilization.is_empty());
+        assert!(!with_utilization.fanout_utilization.is_empty());
     }
 
     fn test_link(

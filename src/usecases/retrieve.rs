@@ -137,7 +137,8 @@ where
                 traces.extend(selectivity_plan.traces);
             }
             let query =
-                graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides);
+                graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides)
+                    .with_fanout_utilization_recording(include_trace);
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
@@ -375,13 +376,12 @@ impl RetrieveAssembly {
                 filtered_lifecycle_decision(filtered.object_ref, filtered.reason, &superseded_by);
             if filtered.object_ref == candidate_ref {
                 root_filtered = true;
+                let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
                     candidate: memory_object_ref(candidate.object_type, candidate.object_id),
                     vector_score: Some(candidate.score),
-                    reason: stale_reason_from_filtered(filtered.reason),
-                    rationale_categories: rationale_categories_for_stale_reason(
-                        stale_reason_from_filtered(filtered.reason),
-                    ),
+                    reason: stale_reason,
+                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
                 });
             }
             self.lifecycle_decisions.push(decision);
@@ -452,13 +452,12 @@ impl RetrieveAssembly {
                 ranked.superseded_by = superseded_by;
                 ranked_objects.push(ranked);
             } else if self.candidate_refs.contains(&object_ref) {
+                let stale_reason = stale_reason_from_decision(decision.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
                     candidate: memory_object_ref(object_ref.object_type, object_ref.object_id),
                     vector_score: self.candidate_scores.get(&object_ref).copied(),
-                    reason: stale_reason_from_decision(decision.reason),
-                    rationale_categories: rationale_categories_for_stale_reason(
-                        stale_reason_from_decision(decision.reason),
-                    ),
+                    reason: stale_reason,
+                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
                 });
             }
             self.lifecycle_decisions.push(decision);

@@ -164,6 +164,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
+    pub(crate) record_fanout_utilization: bool,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
 }
@@ -192,6 +193,7 @@ impl GraphExpansionQuery {
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
+            record_fanout_utilization: false,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -212,6 +214,11 @@ impl GraphExpansionQuery {
         fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     ) -> Self {
         self.fanout_overrides = fanout_overrides;
+        self
+    }
+
+    pub(crate) fn with_fanout_utilization_recording(mut self, record: bool) -> Self {
+        self.record_fanout_utilization = record;
         self
     }
 
@@ -459,6 +466,7 @@ mod tests {
         assert_eq!(query.max_nodes, 25);
         assert_eq!(query.max_fanout_per_node, usize::MAX);
         assert_eq!(query.max_hub_edges, usize::MAX);
+        assert!(!query.record_fanout_utilization);
         assert_eq!(
             query.allowed_object_types,
             vec![ObjectType::Observation, ObjectType::DerivedMemory]
