@@ -1,6 +1,6 @@
 # Common Repository Rules
 
-last_updated: 2026-07-05
+last_updated: 2026-07-11
 
 ## Repository Reference Documents
 
