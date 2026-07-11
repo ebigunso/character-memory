@@ -1040,3 +1040,24 @@ Prevention:
 
 Evidence:
 - Reflow commits on `v0-1-4-cm-groundwork` (CM) and `eval-harness-architecture-revision` (CME).
+
+## 2026-07-11 — Freeze The Target List Before Destructive Ops On Shared Resources  [tags: operations, shared-state, qdrant]
+
+Context:
+- Task: user-directed cleanup of ephemeral Qdrant collections while reviewer test runs were active
+- Roles involved: Orchestrator
+
+Symptom:
+- The deletion script re-enumerated collections at execution time instead of using the announced snapshot, so 14 collections created by a reviewer's in-flight test run were also deleted, contaminating its green result and forcing a full uncontaminated rerun.
+
+Root cause:
+- The coordination message promised a fixed-snapshot deletion, but the implementation piped a fresh listing into the delete loop — the announced safety property was never actually implemented.
+
+Fix applied:
+- Reviewer reran the full suite post-all-clear and reconfirmed; no lasting damage.
+
+Prevention:
+- For destructive operations on shared mutable resources: enumerate once, freeze the list, act only on the frozen list — and verify the implementation actually matches any safety property announced to peers before running it.
+
+Evidence:
+- cm-reviewer coordination messages (provisional APPROVED, then reconfirmed post-rerun) on 2026-07-11.
