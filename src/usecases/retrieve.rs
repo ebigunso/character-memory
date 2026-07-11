@@ -671,6 +671,25 @@ fn relation_rationale(relation: RelationType) -> RelationRationale {
     }
 }
 
+/// Rationale-category provenance semantics (the complete contract; tests derive from it):
+///
+/// - An object's admitting paths are the discovery paths from the vector-candidate root
+///   (`candidate_ref`) to the object as walked by graph expansion; categories are the union
+///   over all admitting paths, and each path contributes only signals actually ON that path —
+///   side branches off a path contribute nothing to its endpoint.
+/// - `Semantic` is assigned elsewhere, iff the object is itself a vector-candidate root.
+/// - `Entity` requires an entity node or entity-mediated relation on an admitting path.
+/// - `Thread` requires a thread-mediated relation (`PartOfThread`) on an admitting path.
+/// - `GraphBound` is the explicit fallback for graph admission whose relations map to no more
+///   specific category (see `relation_rationale`, which must stay exhaustive with no wildcard
+///   so new relation types force a conscious classification).
+/// - `Temporal` is never produced by retrieval today (no temporal admission signal exists);
+///   a regression asserts this.
+/// - The candidate root is excluded from its own expansion's graph provenance.
+/// - Results are independent of same-depth relation iteration order: each BFS depth is built
+///   from the prior depth's snapshot, and same-depth path states union without mutating
+///   parent state.
+/// - Across multiple candidates admitting the same object, signals OR-merge.
 fn graph_provenance(
     candidate_ref: GraphObjectRef,
     relations: &[crate::ports::graph_authority::GraphExpansionRelation],
