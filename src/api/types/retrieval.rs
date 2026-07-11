@@ -390,6 +390,7 @@ pub struct GraphExpansionTrace {
     pub outcome: GraphExpansionOutcome,
 }
 
+/// Reports pre-limit counts only for nodes the bounded expansion actually expanded.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FanoutUtilizationTrace {
     pub root: MemoryObjectRef,

@@ -15,7 +15,7 @@ use crate::policy::graph_expansion::{
     bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
 };
 use crate::ports::graph_authority::{
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
+    GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
     GraphExpansionFanoutUtilization, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
 };
 
@@ -890,6 +890,24 @@ pub(super) struct BoundedGraphVisibility {
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
     pub(super) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(super) bounded_failure: Option<GraphExpansionBoundedFailure>,
+}
+
+pub(super) fn assign_expanded_fanout_utilization(
+    expansion: &mut GraphExpansion,
+    fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
+) {
+    let expanded_refs = expansion
+        .objects
+        .iter()
+        .map(|object| {
+            let (object_id, object_type) = object_identity(object);
+            GraphObjectRef::new(object_id, object_type)
+        })
+        .collect::<HashSet<_>>();
+    expansion.fanout_utilization = fanout_utilization
+        .into_iter()
+        .filter(|entry| expanded_refs.contains(&entry.root))
+        .collect();
 }
 
 pub(super) fn bounded_graph_visible_refs(

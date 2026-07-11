@@ -25,7 +25,9 @@ mod tests {
         GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
     };
     use crate::ports::vector_candidate::VectorCandidateStore;
-    use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
+    use crate::test_support::{
+        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
+    };
     use crate::usecases::RetrievePipeline;
     use crate::CustomError;
     use async_trait::async_trait;
@@ -412,6 +414,84 @@ mod tests {
                 && entry.retained_count == 2
                 && entry.omitted_by_fanout_count > 0
         }));
+    }
+
+    #[tokio::test]
+    async fn oxigraph_utilization_excludes_suppressed_intermediate_and_matches_in_memory() {
+        let embedded = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let in_memory = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let objects = vec![
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+            MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+        ];
+        let make_link = |id, from_id, from_type, to_id, to_type, relation| {
+            let mut link = fixtures.hub_links[0].clone();
+            link.id = MemoryId::from_u128(id);
+            link.from_id = from_id;
+            link.from_type = from_type;
+            link.to_id = to_id;
+            link.to_type = to_type;
+            link.relation = relation;
+            link
+        };
+        let links = vec![
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0700,
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                fixtures.suppressed_seed.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0701,
+                fixtures.suppressed_seed.id,
+                ObjectType::DerivedMemory,
+                fixtures.derived_reflection.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0702,
+                fixtures.suppressed_seed.id,
+                ObjectType::DerivedMemory,
+                fixtures.user_preference.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+        ];
+        embedded.upsert_objects(&objects).await.unwrap();
+        embedded.upsert_links(&links).await.unwrap();
+        in_memory.upsert_objects(&objects).await.unwrap();
+        in_memory.upsert_links(&links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 10)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_fanout_per_node(1)
+            .with_fanout_utilization_recording(true);
+        let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
+        let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
+
+        assert!(embedded_expansion.filtered_nodes.iter().any(|filtered| {
+            filtered.object_ref.object_id == fixtures.suppressed_seed.id
+                && filtered.reason == GraphExpansionFilteredReason::Suppressed
+        }));
+        assert!(!embedded_expansion
+            .fanout_utilization
+            .iter()
+            .any(|entry| { entry.root.object_id == fixtures.suppressed_seed.id }));
+        assert!(embedded_expansion
+            .fanout_utilization
+            .iter()
+            .all(|entry| entry.root.object_id == fixtures.hub_entity.id));
+        assert!(!embedded_expansion.fanout_utilization.is_empty());
+        assert_eq!(
+            embedded_expansion.fanout_utilization,
+            in_memory_expansion.fanout_utilization
+        );
     }
 
     #[tokio::test]
