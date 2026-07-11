@@ -1,10 +1,15 @@
 # Common Repository Rules
 
-last_updated: 2026-07-02
+last_updated: 2026-07-05
 
 ## Repository Reference Documents
 
-- None yet.
+- Evaluation harnesses live in a separate private companion repository, `CharacterMemoryEvals` (checked out as a sibling directory of this repo; note the directory name is `CharacterMemoryEvals`, not `character-memory-evals`). It is a Rust workspace consuming this crate via a path dependency. Evaluation tooling exists there — do not assume it is unimplemented — but it is not part of this library's core functionality and the repo is not publicly accessible.
+
+## Repo Documentation Wording
+
+- Committed artifacts in this repository must not contain machine-local absolute paths (for example user-profile paths); refer to sibling repositories by name and relative relationship instead.
+- When mentioning the private `CharacterMemoryEvals` repository in committed docs, word it so public readers are not confused by being unable to access it: state that it is private and that evaluation tooling is a development aid, not core library functionality.
 
 ## Repository-Specific Validation Commands
 
