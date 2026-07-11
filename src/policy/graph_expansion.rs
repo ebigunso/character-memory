@@ -34,6 +34,7 @@ use crate::ports::graph_authority::{
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<GraphObjectRef>,
+    pub(crate) expanded_nodes: HashSet<GraphObjectRef>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
@@ -79,6 +80,7 @@ pub(crate) fn bounded_expansion(
         expanded_links,
         plan.relations,
         plan.filtered_nodes,
+        plan.expanded_nodes,
         plan.fanout_utilization,
         plan.bounded_failure,
     ))
@@ -336,6 +338,7 @@ fn bounded_expansion_plan<'a>(
         if query.failure_policy.allow_partial_results {
             return Ok(BoundedExpansionPlan {
                 visited: HashSet::new(),
+                expanded_nodes: HashSet::new(),
                 relations: Vec::new(),
                 filtered_nodes: Vec::new(),
                 fanout_utilization: Vec::new(),
@@ -355,6 +358,7 @@ fn bounded_expansion_plan<'a>(
         }
         return Ok(BoundedExpansionPlan {
             visited: HashSet::new(),
+            expanded_nodes: HashSet::new(),
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
             fanout_utilization: Vec::new(),
@@ -374,6 +378,7 @@ fn bounded_expansion_plan<'a>(
         })
         .collect::<std::collections::HashMap<_, _>>();
     let mut visited = HashSet::new();
+    let mut expanded_nodes = HashSet::new();
     let mut filtered_nodes = Vec::new();
     let mut relations = Vec::new();
     let mut fanout_utilization = Vec::new();
@@ -409,6 +414,8 @@ fn bounded_expansion_plan<'a>(
         if depth >= query.max_depth {
             continue;
         }
+
+        expanded_nodes.insert(object_ref);
 
         let mut incident_links = links
             .iter()
@@ -518,6 +525,7 @@ fn bounded_expansion_plan<'a>(
 
     Ok(BoundedExpansionPlan {
         visited,
+        expanded_nodes,
         relations,
         filtered_nodes,
         fanout_utilization,

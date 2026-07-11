@@ -292,6 +292,7 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
+    pub(crate) expanded_nodes: std::collections::HashSet<GraphObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
@@ -316,6 +317,7 @@ impl GraphExpansion {
             links,
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
+            expanded_nodes: std::collections::HashSet::new(),
             fanout_utilization: Vec::new(),
             bounded_failure: None,
         }
@@ -326,6 +328,7 @@ impl GraphExpansion {
         links: Vec<MemoryLink>,
         relations: Vec<GraphExpansionRelation>,
         filtered_nodes: Vec<GraphExpansionFilteredNode>,
+        expanded_nodes: std::collections::HashSet<GraphObjectRef>,
         fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
         bounded_failure: Option<GraphExpansionBoundedFailure>,
     ) -> Self {
@@ -334,6 +337,7 @@ impl GraphExpansion {
             links,
             relations,
             filtered_nodes,
+            expanded_nodes,
             fanout_utilization,
             bounded_failure,
         }

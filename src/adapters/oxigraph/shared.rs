@@ -896,17 +896,9 @@ pub(super) fn assign_expanded_fanout_utilization(
     expansion: &mut GraphExpansion,
     fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
 ) {
-    let expanded_refs = expansion
-        .objects
-        .iter()
-        .map(|object| {
-            let (object_id, object_type) = object_identity(object);
-            GraphObjectRef::new(object_id, object_type)
-        })
-        .collect::<HashSet<_>>();
     expansion.fanout_utilization = fanout_utilization
         .into_iter()
-        .filter(|entry| expanded_refs.contains(&entry.root))
+        .filter(|entry| expansion.expanded_nodes.contains(&entry.root))
         .collect();
 }
 

@@ -496,6 +496,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oxigraph_utilization_excludes_nodes_returned_only_at_max_depth() {
+        let embedded = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let in_memory = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let objects = vec![
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+            MemoryObject::Episode(fixtures.episode.clone()),
+            MemoryObject::Observation(fixtures.salient_observation.clone()),
+            MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+        ];
+        let make_link = |id, from_id, from_type, to_id, to_type, relation| {
+            let mut link = fixtures.hub_links[0].clone();
+            link.id = MemoryId::from_u128(id);
+            link.from_id = from_id;
+            link.from_type = from_type;
+            link.to_id = to_id;
+            link.to_type = to_type;
+            link.relation = relation;
+            link
+        };
+        let links = vec![
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0710,
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                fixtures.suppressed_seed.id,
+                ObjectType::DerivedMemory,
+                RelationType::About,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0711,
+                fixtures.suppressed_seed.id,
+                ObjectType::DerivedMemory,
+                fixtures.user_preference.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0712,
+                fixtures.hub_entity.id,
+                ObjectType::Entity,
+                fixtures.episode.id,
+                ObjectType::Episode,
+                RelationType::About,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0713,
+                fixtures.episode.id,
+                ObjectType::Episode,
+                fixtures.salient_observation.id,
+                ObjectType::Observation,
+                RelationType::DerivedFrom,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0714,
+                fixtures.salient_observation.id,
+                ObjectType::Observation,
+                fixtures.user_preference.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+            make_link(
+                0x550e_8400_e29b_41d4_a716_4466_5544_0715,
+                fixtures.user_preference.id,
+                ObjectType::DerivedMemory,
+                fixtures.derived_reflection.id,
+                ObjectType::DerivedMemory,
+                RelationType::DerivedFrom,
+            ),
+        ];
+        embedded.upsert_objects(&objects).await.unwrap();
+        embedded.upsert_links(&links).await.unwrap();
+        in_memory.upsert_objects(&objects).await.unwrap();
+        in_memory.upsert_links(&links).await.unwrap();
+
+        let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 3, 20)
+            .with_fanout_utilization_recording(true);
+        let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
+        let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
+
+        assert!(embedded_expansion.objects.iter().any(|object| {
+            matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == fixtures.user_preference.id)
+        }));
+        assert!(!embedded_expansion
+            .fanout_utilization
+            .iter()
+            .any(|entry| entry.root.object_id == fixtures.user_preference.id));
+        assert!(embedded_expansion
+            .fanout_utilization
+            .iter()
+            .any(|entry| entry.root.object_id == fixtures.salient_observation.id));
+        assert_eq!(
+            embedded_expansion.fanout_utilization,
+            in_memory_expansion.fanout_utilization
+        );
+    }
+
+    #[tokio::test]
     async fn oxigraph_expansion_preserves_depth_node_cap_and_allowed_types() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixture = high_fanout_graph_fixture();
