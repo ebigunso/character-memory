@@ -1017,3 +1017,26 @@ Prevention:
 
 Evidence:
 - `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
+
+## 2026-07-11 — No Hard-Wrapped Prose In Committed Docs  [tags: formatting, docs, plans]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-4-continuity-evaluation-harness-plan.md`
+- Task/Wave: plan/rule bookkeeping across CM and CME
+- Roles involved: Orchestrator
+
+Symptom:
+- Plan files and log entries were written with hard line breaks mid-sentence to fit a column width; user corrected that prose must not contain arbitrary newlines inside sentences.
+
+Root cause:
+- Habitual fixed-column wrapping applied to markdown prose where soft-wrap is expected; the wrapping conveys nothing and pollutes diffs.
+
+Fix applied:
+- Reflowed both active plan files (CM and CME) so every sentence/paragraph/list item is a single line; YAML keys and structural lines untouched.
+
+Prevention:
+- Repo rule added to `docs/coding-agent/rules/common.md` in both repositories: never hard-wrap prose mid-sentence in committed documents.
+- Repo-wide cleanup of pre-existing files is deferred by user decision until after the current feature PR merges.
+
+Evidence:
+- Reflow commits on `v0-1-4-cm-groundwork` (CM) and `eval-harness-architecture-revision` (CME).
