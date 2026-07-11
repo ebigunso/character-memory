@@ -28,3 +28,10 @@ Repo-local staging for cross-repo harness improvements, per the improvement-loop
 - Root cause: review verified value semantics of enabled output and final row filtering/parity, but built neither an execution-cost gate table for the disabled path nor an ordered cardinality table across the chained limiters (eligible -> hub cap -> fanout cap).
 - Candidate guidance (harness review references): for every optional diagnostic, review BOTH value semantics and disabled-path work (prove the computation itself is gated, not merely its output). For every chained limiter, enumerate producer cardinality at each stage and bind every emitted metric to exactly one named stage before approval, with boundary tests where stages interact.
 - Provenance: character-memory PR #59 round 7; cm-reviewer self-triage.
+
+## 2026-07-11 — Labels are not invariants: prove endpoint-type guarantees before semantic classification [reviewer-miss triage, PR #59 round 8]
+
+- Symptom: review approved a relation-label => Entity mapping although the domain permits Mentions/Involves/About between non-Entity endpoints; entity-less paths were classified Entity.
+- Root cause: review validated mapping exhaustiveness and propagation mechanics but accepted relation-name intuition without proving endpoint-type invariants from domain validation and production constructors.
+- Candidate guidance (harness review references): whenever a semantic category is inferred from an enum label, require a truth table against all domain-permitted endpoint/state combinations, and cite the specific validation invariant that makes any label shortcut sound; if no invariant exists, classify from the actual node/state types instead.
+- Provenance: character-memory PR #59 round 8; cm-reviewer self-triage after a Copilot catch.
