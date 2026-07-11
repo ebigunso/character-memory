@@ -42,3 +42,10 @@ Repo-local staging for cross-repo harness improvements, per the improvement-loop
 - Root cause: review required forbidden/spurious-category rows and broad truth tables, but not at least one production-reachable positive row for every category the classifier can emit, asserted at the final consumer boundary (not helper-level values).
 - Candidate guidance (harness validation references): for every enum variant/category a classifier can emit, require one positive row (fixture strictly beyond the production threshold) and one zero/boundary row through the same path, both asserted on the final consumed output. Absence-only coverage is insufficient.
 - Provenance: character-memory PR #59 round 9; cm-reviewer self-triage after a Copilot catch.
+
+## 2026-07-11 — Reconcile against the semantic ACTION set, never the returned set; depth is phase-dependent [reviewer-miss triage, PR #59 round 10]
+
+- Symptom: post-hydration utilization filtering used returned-object membership, keeping rows for a node returned at max_depth but measured pre-hydration at a shallower depth through a path later suppressed.
+- Root cause: the review proved "visibility never measures its own max-depth frontier" but implicitly assumed producer and consumer phases assign the same depth to a shared object; lifecycle filtering of alternate paths can change an object's minimum reachable depth between phases.
+- Candidate guidance (harness review references): when reconciling diagnostics across filtering/hydration phases, compare against the exact semantic action set (expanded/executed/persisted), never a broader returned/admitted set — and explicitly test phase-dependent path-rank/depth changes caused by rejected alternate paths.
+- Provenance: character-memory PR #59 round 10; cm-reviewer self-triage after a Copilot catch.
