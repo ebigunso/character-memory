@@ -318,7 +318,10 @@ impl RetrieveAssembly {
 
         let mut proximity_by_ref = HashMap::new();
         proximity_by_ref.insert(candidate_ref, 0_u8);
-        let graph_rationale_by_ref = graph_provenance(candidate_ref, &expansion.relations);
+        let graph_rationale_by_ref = self
+            .graph_relations
+            .as_ref()
+            .map(|_| graph_provenance(candidate_ref, &expansion.relations));
         for relation in &expansion.relations {
             proximity_by_ref
                 .entry(relation.from)
@@ -348,7 +351,8 @@ impl RetrieveAssembly {
             };
             let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
             let graph_rationale = graph_rationale_by_ref
-                .get(&object_ref)
+                .as_ref()
+                .and_then(|rationale_by_ref| rationale_by_ref.get(&object_ref))
                 .copied()
                 .unwrap_or_default();
             self.objects
@@ -1701,6 +1705,33 @@ mod tests {
         }));
         assert_eq!(trace.vector_candidates.len(), 4);
         assert_eq!(trace.graph_expansions.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn trace_collection_does_not_change_retrieval_results() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![
+            candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.93),
+            candidate(fixtures.episode.id, ObjectType::Episode, 0.92),
+            candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.91),
+        ]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let without_trace = pipeline
+            .retrieve(RetrievalContext::new("trace parity"))
+            .await
+            .unwrap();
+        let with_trace = pipeline
+            .retrieve(RetrievalContext::new("trace parity").with_trace())
+            .await
+            .unwrap();
+
+        assert_eq!(without_trace.pack, with_trace.pack);
+        assert_eq!(without_trace.rationale, with_trace.rationale);
+        assert!(without_trace.trace.is_none());
+        assert!(with_trace.trace.is_some());
     }
 
     #[tokio::test]

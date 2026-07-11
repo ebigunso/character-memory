@@ -393,6 +393,7 @@ pub struct GraphExpansionTrace {
 /// Reports pre-limit counts only for nodes the bounded expansion actually expanded.
 ///
 /// Trace roots are a subset of returned expansion objects: nodes admitted at max depth are returned but are not expanded and therefore emit no utilization rows.
+/// Omission counts include links dropped by the global hub cap and relation/object fanout caps.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FanoutUtilizationTrace {
     pub root: MemoryObjectRef,

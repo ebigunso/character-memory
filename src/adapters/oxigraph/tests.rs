@@ -390,6 +390,7 @@ mod tests {
 
         let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
             .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+            .with_max_hub_edges(8)
             .with_max_fanout_per_node(2);
         let without_utilization = store.expand_bounded(&query).await.unwrap();
         let expansion = store
@@ -412,7 +413,7 @@ mod tests {
                 && entry.object_type == ObjectType::DerivedMemory
                 && entry.selected_cap == 2
                 && entry.retained_count == 2
-                && entry.omitted_by_fanout_count > 0
+                && entry.omitted_by_fanout_count == 10
         }));
     }
 
