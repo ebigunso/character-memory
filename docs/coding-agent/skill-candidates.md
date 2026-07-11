@@ -35,3 +35,10 @@ Repo-local staging for cross-repo harness improvements, per the improvement-loop
 - Root cause: review validated mapping exhaustiveness and propagation mechanics but accepted relation-name intuition without proving endpoint-type invariants from domain validation and production constructors.
 - Candidate guidance (harness review references): whenever a semantic category is inferred from an enum label, require a truth table against all domain-permitted endpoint/state combinations, and cite the specific validation invariant that makes any label shortcut sound; if no invariant exists, classify from the actual node/state types instead.
 - Provenance: character-memory PR #59 round 8; cm-reviewer self-triage after a Copilot catch.
+
+## 2026-07-11 — Every emittable category needs a paired positive and zero/negative row at the consumer boundary [reviewer-miss triage, PR #59 round 9]
+
+- Symptom: Salience attribution had absence-style coverage only; a threshold or producer regression could silently remove the category with tests staying green.
+- Root cause: review required forbidden/spurious-category rows and broad truth tables, but not at least one production-reachable positive row for every category the classifier can emit, asserted at the final consumer boundary (not helper-level values).
+- Candidate guidance (harness validation references): for every enum variant/category a classifier can emit, require one positive row (fixture strictly beyond the production threshold) and one zero/boundary row through the same path, both asserted on the final consumed output. Absence-only coverage is insufficient.
+- Provenance: character-memory PR #59 round 9; cm-reviewer self-triage after a Copilot catch.
