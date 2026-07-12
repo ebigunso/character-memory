@@ -2,7 +2,7 @@
 
 - status: in_progress
 - generated: 2026-07-05
-- last_updated: 2026-07-11
+- last_updated: 2026-07-12
 - work_type: code
 
 Repo references: [CM] = this repository (character-memory, public). [CME] = the private companion repository `CharacterMemoryEvals`, checked out as a sibling directory of this repo. CME hosts all evaluation harnesses (LongMemEval-S, LoCoMo, and the new continuity harness) and consumes this crate via a path dependency. Evaluation tooling is a development aid, not core library functionality; CME is not publicly accessible.
@@ -399,6 +399,11 @@ Note: Task_4's research can start immediately (Wave 1), but Wave 2's [CME] tasks
 - 2026-07-11 19:10 Task_4 gate CLOSED: the [CME] architecture-revision plan is completed (its Task_8 independent review APPROVED; plan moved to its plans/completed/). The revised state lives on the CME feature branch eval-harness-architecture-revision, green under the full pinned gate; merge to CME main is pending the user's PR decision. Post-revision layout facts for Tasks 5-12 owns: live adapter crate crates/cmem-eval-adapter-cmem; adapter contract in crates/cmem-eval-core/src/memory_adapter.rs (Character-Memory-shaped main trait); DatasetSpec seam in crates/cmem-eval-runner/src/pipeline.rs; continuity crate home documented as crates/cmem-eval-continuity; reports schema_version 1.0.0 with segregated latency; restart identity via BTreeMap ExternalIdRegistry + deterministic (prefix, run_id, namespace) collection naming with open/reattach lifecycle.
 
 - 2026-07-11 20:10 PR #59 review-fix cycle complete. Copilot raised six findings: two (new public fields on trace structs technically breaking exhaustive construction) resolved by policy reply on the PR (accepted per user-approved A2, pre-1.0 crate, consumers compile green, serde-compat tested; non_exhaustive rejected because the evals repo constructs trace fixtures); four fixed in commit e58434c by the CM codex worker — fanout-utilization computation now gated behind a crate-private default-false query flag (untraced retrievals take the original fast path; closes the Task_3 review backlog item), stale-reason mapping computed once per site, skip-predicate early return. Independent Tier D review (cm-reviewer, per the new delegation routing) APPROVED with zero findings: flag surface pub(crate)-only, call-site census proves no include_trace path omits utilization, parity regression compares full expansion content on a pruning-active fixture, predicate boolean-equivalent, diff-scoped ADR-I-0018 audit clean; full validation green with live Qdrant integration tests (340 unit + 25 integration, no skips). Worker push was blocked by codex approval layer — orchestrator pushes by default for CM tasks now.
+
+- 2026-07-12 01:20 Task_4 merge precondition CLOSED; Task_5 CLOSED as satisfied-by-CME-revision.
+  - Summary: CM PR #59 and CME PR #8 both merged by the user; CME main green at e53fc76 (hosted pinned CI passed pre-merge, including the post-review hardening deltas through dd668ef). The [CME] feature-dispatch precondition from the 2026-07-11 gate decision is now met. Task_5 dispatch-time acceptance cross-check performed: the adapter contract and its mock both implement link/correct/forget/prepare/validate_plan/commit (crates/cmem-eval-core/src/memory_adapter.rs — trait at lines 504–512, mock impls at 612–896); LongMemEval/LoCoMo compile unchanged on merged main.
+  - Validation evidence: CME hosted CI green on the merged PR; local CME main fast-forwarded to e53fc76.
+  - Notes: Wave 2 remaining item Task_7 (controllable-similarity deterministic embedding provider) dispatched to evals-worker on a new CME feature branch. Wave 3 (Task_6 residual, Task_8) queues behind it.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
