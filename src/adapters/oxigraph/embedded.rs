@@ -351,7 +351,10 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &visibility.object_refs,
         )?;
 
-        let mut expansion = bounded_expansion(query, objects, links)?;
+        let mut hydrated_query = query.clone();
+        hydrated_query.record_fanout_utilization = false;
+        let mut expansion = bounded_expansion(&hydrated_query, objects, links)?;
+        assign_expanded_fanout_utilization(&mut expansion, visibility.fanout_utilization);
         if expansion.bounded_failure.is_none() {
             expansion.bounded_failure = visibility.bounded_failure;
         }

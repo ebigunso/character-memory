@@ -1017,3 +1017,47 @@ Prevention:
 
 Evidence:
 - `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
+
+## 2026-07-11 — No Hard-Wrapped Prose In Committed Docs  [tags: formatting, docs, plans]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-4-continuity-evaluation-harness-plan.md`
+- Task/Wave: plan/rule bookkeeping across CM and CME
+- Roles involved: Orchestrator
+
+Symptom:
+- Plan files and log entries were written with hard line breaks mid-sentence to fit a column width; user corrected that prose must not contain arbitrary newlines inside sentences.
+
+Root cause:
+- Habitual fixed-column wrapping applied to markdown prose where soft-wrap is expected; the wrapping conveys nothing and pollutes diffs.
+
+Fix applied:
+- Reflowed both active plan files (CM and CME) so every sentence/paragraph/list item is a single line; YAML keys and structural lines untouched.
+
+Prevention:
+- Repo rule added to `docs/coding-agent/rules/common.md` in both repositories: never hard-wrap prose mid-sentence in committed documents.
+- Repo-wide cleanup of pre-existing files is deferred by user decision until after the current feature PR merges.
+
+Evidence:
+- Reflow commits on `v0-1-4-cm-groundwork` (CM) and `eval-harness-architecture-revision` (CME).
+
+## 2026-07-11 — Freeze The Target List Before Destructive Ops On Shared Resources  [tags: operations, shared-state, qdrant]
+
+Context:
+- Task: user-directed cleanup of ephemeral Qdrant collections while reviewer test runs were active
+- Roles involved: Orchestrator
+
+Symptom:
+- The deletion script re-enumerated collections at execution time instead of using the announced snapshot, so 14 collections created by a reviewer's in-flight test run were also deleted, contaminating its green result and forcing a full uncontaminated rerun.
+
+Root cause:
+- The coordination message promised a fixed-snapshot deletion, but the implementation piped a fresh listing into the delete loop — the announced safety property was never actually implemented.
+
+Fix applied:
+- Reviewer reran the full suite post-all-clear and reconfirmed; no lasting damage.
+
+Prevention:
+- For destructive operations on shared mutable resources: enumerate once, freeze the list, act only on the frozen list — and verify the implementation actually matches any safety property announced to peers before running it.
+
+Evidence:
+- cm-reviewer coordination messages (provisional APPROVED, then reconfirmed post-rerun) on 2026-07-11.

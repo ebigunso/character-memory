@@ -164,6 +164,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
+    pub(crate) record_fanout_utilization: bool,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
 }
@@ -192,6 +193,7 @@ impl GraphExpansionQuery {
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
+            record_fanout_utilization: false,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -212,6 +214,11 @@ impl GraphExpansionQuery {
         fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     ) -> Self {
         self.fanout_overrides = fanout_overrides;
+        self
+    }
+
+    pub(crate) fn with_fanout_utilization_recording(mut self, record: bool) -> Self {
+        self.record_fanout_utilization = record;
         self
     }
 
@@ -285,7 +292,20 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
+    pub(crate) expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+    pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GraphExpansionFanoutUtilization {
+    pub(crate) root: GraphObjectRef,
+    pub(crate) relation: RelationType,
+    pub(crate) object_type: ObjectType,
+    pub(crate) configured_cap: usize,
+    pub(crate) selected_cap: usize,
+    pub(crate) retained_count: usize,
+    pub(crate) omitted_by_fanout_count: usize,
 }
 
 impl GraphExpansion {
@@ -297,6 +317,8 @@ impl GraphExpansion {
             links,
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
+            expanded_nodes: std::collections::HashSet::new(),
+            fanout_utilization: Vec::new(),
             bounded_failure: None,
         }
     }
@@ -306,6 +328,8 @@ impl GraphExpansion {
         links: Vec<MemoryLink>,
         relations: Vec<GraphExpansionRelation>,
         filtered_nodes: Vec<GraphExpansionFilteredNode>,
+        expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+        fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
         bounded_failure: Option<GraphExpansionBoundedFailure>,
     ) -> Self {
         Self {
@@ -313,6 +337,8 @@ impl GraphExpansion {
             links,
             relations,
             filtered_nodes,
+            expanded_nodes,
+            fanout_utilization,
             bounded_failure,
         }
     }
@@ -444,6 +470,7 @@ mod tests {
         assert_eq!(query.max_nodes, 25);
         assert_eq!(query.max_fanout_per_node, usize::MAX);
         assert_eq!(query.max_hub_edges, usize::MAX);
+        assert!(!query.record_fanout_utilization);
         assert_eq!(
             query.allowed_object_types,
             vec![ObjectType::Observation, ObjectType::DerivedMemory]

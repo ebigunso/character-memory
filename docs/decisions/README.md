@@ -83,3 +83,4 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0016: Use retrieval intent as query-time policy](implementation/ADR-I-0016-use-retrieval-intent-as-query-time-policy.md)
 - [ADR-I-0017: Persist association support, not derived association scores](implementation/ADR-I-0017-persist-association-support-not-derived-association-scores.md)
 - [ADR-I-0018: Organize the crate into responsibility-boundary modules with enforced dependency direction](implementation/ADR-I-0018-responsibility-boundary-modules-with-enforced-dependency-direction.md)
+- [ADR-I-0019: Place the continuity evaluation harness in the private evals repository](implementation/ADR-I-0019-continuity-eval-harness-placement.md)

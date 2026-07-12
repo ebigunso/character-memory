@@ -3,13 +3,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType,
+    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType, FanoutUtilizationTrace,
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
     LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryId,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState,
-    RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
-    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
+    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RationaleCategory, RelationType,
+    RetentionState, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
+    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
     StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
 };
@@ -99,6 +99,7 @@ where
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = include_trace.then(Vec::new);
+        let mut fanout_utilization_traces = include_trace.then(Vec::new);
         let mut selectivity_traces = include_trace.then(Vec::new);
         let selectivity_stats_context = if candidate_roots
             .iter()
@@ -136,7 +137,8 @@ where
                 traces.extend(selectivity_plan.traces);
             }
             let query =
-                graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides);
+                graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides)
+                    .with_fanout_utilization_recording(include_trace);
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
@@ -144,6 +146,9 @@ where
                     record_expansion_telemetry(&mut graph_expansion_telemetry, &expansion);
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(graph_expansion_trace(candidate, &expansion));
+                    }
+                    if let Some(traces) = &mut fanout_utilization_traces {
+                        traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
                         if !context.graph_limits.allow_degraded_results {
@@ -227,6 +232,7 @@ where
                 .collect(),
             graph_relations: assembly.graph_relations.unwrap_or_default(),
             graph_expansions: graph_expansion_traces.unwrap_or_default(),
+            fanout_utilization: fanout_utilization_traces.unwrap_or_default(),
             selectivity_decisions: selectivity_traces.unwrap_or_default(),
             lifecycle_filter_decisions: details.lifecycle_filter_decisions,
             stale_candidate_omissions: details.stale_candidate_omissions,
@@ -312,6 +318,10 @@ impl RetrieveAssembly {
 
         let mut proximity_by_ref = HashMap::new();
         proximity_by_ref.insert(candidate_ref, 0_u8);
+        let graph_rationale_by_ref = self
+            .graph_relations
+            .as_ref()
+            .map(|_| graph_provenance(candidate_ref, &expansion.relations));
         for relation in &expansion.relations {
             proximity_by_ref
                 .entry(relation.from)
@@ -340,11 +350,17 @@ impl RetrieveAssembly {
                 candidate.score * 0.75
             };
             let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
+            let graph_rationale = graph_rationale_by_ref
+                .as_ref()
+                .and_then(|rationale_by_ref| rationale_by_ref.get(&object_ref))
+                .copied()
+                .unwrap_or_default();
             self.objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.vector_component = ranked.vector_component.max(inherited_vector);
                     ranked.graph_component = ranked.graph_component.max(graph_component);
+                    ranked.graph_rationale.merge(graph_rationale);
                     if let Some(candidate_score) = candidate_score {
                         ranked.vector_candidate_score = Some(
                             ranked
@@ -355,7 +371,13 @@ impl RetrieveAssembly {
                     }
                 })
                 .or_insert_with(|| {
-                    RankedObject::new(object, inherited_vector, graph_component, candidate_score)
+                    RankedObject::new(
+                        object,
+                        inherited_vector,
+                        graph_component,
+                        candidate_score,
+                        graph_rationale,
+                    )
                 });
         }
 
@@ -370,10 +392,12 @@ impl RetrieveAssembly {
                 filtered_lifecycle_decision(filtered.object_ref, filtered.reason, &superseded_by);
             if filtered.object_ref == candidate_ref {
                 root_filtered = true;
+                let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
                     candidate: memory_object_ref(candidate.object_type, candidate.object_id),
                     vector_score: Some(candidate.score),
-                    reason: stale_reason_from_filtered(filtered.reason),
+                    reason: stale_reason,
+                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
                 });
             }
             self.lifecycle_decisions.push(decision);
@@ -393,6 +417,9 @@ impl RetrieveAssembly {
             candidate: memory_object_ref(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphExpansionBounded,
+            rationale_categories: rationale_categories_for_stale_reason(
+                StaleCandidateReason::GraphExpansionBounded,
+            ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -409,6 +436,9 @@ impl RetrieveAssembly {
             candidate: memory_object_ref(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphObjectMissing,
+            rationale_categories: rationale_categories_for_stale_reason(
+                StaleCandidateReason::GraphObjectMissing,
+            ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -438,10 +468,12 @@ impl RetrieveAssembly {
                 ranked.superseded_by = superseded_by;
                 ranked_objects.push(ranked);
             } else if self.candidate_refs.contains(&object_ref) {
+                let stale_reason = stale_reason_from_decision(decision.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
                     candidate: memory_object_ref(object_ref.object_type, object_ref.object_id),
                     vector_score: self.candidate_scores.get(&object_ref).copied(),
-                    reason: stale_reason_from_decision(decision.reason),
+                    reason: stale_reason,
+                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
                 });
             }
             self.lifecycle_decisions.push(decision);
@@ -505,6 +537,7 @@ struct RankedObject {
     vector_component: f32,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
+    graph_rationale: GraphRationaleSignals,
     salience_component: f32,
     superseded_by: Vec<MemoryId>,
 }
@@ -515,6 +548,7 @@ impl RankedObject {
         vector_component: f32,
         graph_component: f32,
         vector_candidate_score: Option<f32>,
+        graph_rationale: GraphRationaleSignals,
     ) -> Self {
         let salience_component = salience_component(&object);
         Self {
@@ -522,6 +556,7 @@ impl RankedObject {
             vector_component,
             vector_candidate_score,
             graph_component,
+            graph_rationale,
             salience_component,
             superseded_by: Vec::new(),
         }
@@ -551,6 +586,182 @@ impl RankedObject {
             self.salience_component
         )
     }
+
+    fn rationale_categories(&self) -> Vec<RationaleCategory> {
+        let mut categories = Vec::new();
+        if self.vector_candidate_score.is_some() {
+            push_unique_category(&mut categories, RationaleCategory::Semantic);
+        }
+        if self.graph_rationale.entity {
+            push_unique_category(&mut categories, RationaleCategory::Entity);
+        }
+        if self.graph_rationale.thread {
+            push_unique_category(&mut categories, RationaleCategory::Thread);
+        }
+        if self.graph_rationale.graph_bound {
+            push_unique_category(&mut categories, RationaleCategory::GraphBound);
+        }
+        if self.salience_component > 0.0 {
+            push_unique_category(&mut categories, RationaleCategory::Salience);
+        }
+        categories
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct GraphRationaleSignals {
+    entity: bool,
+    thread: bool,
+    graph_bound: bool,
+}
+
+impl GraphRationaleSignals {
+    fn merge(&mut self, other: Self) {
+        self.entity |= other.entity;
+        self.thread |= other.thread;
+        self.graph_bound |= other.graph_bound;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GraphPathSignals {
+    entity: bool,
+    thread: bool,
+}
+
+impl GraphPathSignals {
+    fn root(candidate_ref: GraphObjectRef) -> Self {
+        Self {
+            entity: candidate_ref.object_type == ObjectType::Entity,
+            thread: false,
+        }
+    }
+
+    fn through(
+        self,
+        relation: RelationType,
+        source: GraphObjectRef,
+        target: GraphObjectRef,
+    ) -> Self {
+        let mut signals = self;
+        match relation_rationale(relation, source, target) {
+            RelationRationale::Thread => signals.thread = true,
+            RelationRationale::Generic => {}
+        }
+        signals.entity |=
+            source.object_type == ObjectType::Entity || target.object_type == ObjectType::Entity;
+        signals
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RelationRationale {
+    Thread,
+    Generic,
+}
+
+fn relation_rationale(
+    relation: RelationType,
+    source: GraphObjectRef,
+    target: GraphObjectRef,
+) -> RelationRationale {
+    match relation {
+        RelationType::PartOfThread
+            if source.object_type == ObjectType::MemoryThread
+                || target.object_type == ObjectType::MemoryThread =>
+        {
+            RelationRationale::Thread
+        }
+        RelationType::PartOfThread => RelationRationale::Generic,
+        RelationType::HasObservation
+        | RelationType::ObservedIn
+        | RelationType::Mentions
+        | RelationType::Involves
+        | RelationType::About
+        | RelationType::DerivedFrom
+        | RelationType::Supports
+        | RelationType::Contradicts
+        | RelationType::Supersedes
+        | RelationType::Resolves
+        | RelationType::CreatesOpenLoop
+        | RelationType::FulfillsCommitment
+        | RelationType::AssociatedWith => RelationRationale::Generic,
+    }
+}
+
+/// Rationale-category provenance semantics (the complete contract; tests derive from it):
+///
+/// - An object's admitting paths are the discovery paths from the vector-candidate root (`candidate_ref`) to the object as walked by graph expansion; categories are the union over all admitting paths, and each path contributes only signals actually ON that path — side branches off a path contribute nothing to its endpoint.
+/// - `Semantic` is assigned elsewhere, iff the object is itself a vector-candidate root.
+/// - `Entity` requires an `Entity`-typed node on an admitting path; relation names alone do not imply endpoint types.
+/// - `Thread` requires `PartOfThread` with a `MemoryThread` endpoint on an admitting path because domain validation does not otherwise constrain relation endpoint types.
+/// - `GraphBound` is the explicit fallback for graph admission whose relations map to no more specific category (see `relation_rationale`, which must stay exhaustive with no wildcard so new relation types force a conscious classification).
+/// - `Temporal` is never produced by retrieval today (no temporal admission signal exists); a regression asserts this.
+/// - The candidate root is excluded from its own expansion's graph provenance.
+/// - Results are independent of same-depth relation iteration order: each BFS depth is built from the prior depth's snapshot, and same-depth path states union without mutating parent state.
+/// - Across multiple candidates admitting the same object, signals OR-merge.
+fn graph_provenance(
+    candidate_ref: GraphObjectRef,
+    relations: &[crate::ports::graph_authority::GraphExpansionRelation],
+) -> HashMap<GraphObjectRef, GraphRationaleSignals> {
+    let mut depth_by_ref = HashMap::from([(candidate_ref, 0_u8)]);
+    let mut paths_by_ref = HashMap::from([(
+        candidate_ref,
+        HashSet::from([GraphPathSignals::root(candidate_ref)]),
+    )]);
+    let max_proximity = relations
+        .iter()
+        .map(|relation| relation.proximity)
+        .max()
+        .unwrap_or(0);
+
+    // Build each BFS depth from the prior depth's snapshot so sibling branches
+    // cannot leak signals into one another through relation iteration order.
+    for proximity in 1..=max_proximity {
+        let parent_depth = proximity - 1;
+        let mut next_paths: HashMap<GraphObjectRef, HashSet<GraphPathSignals>> = HashMap::new();
+        for relation in relations
+            .iter()
+            .filter(|relation| relation.proximity == proximity)
+        {
+            for (source, target) in [(relation.from, relation.to), (relation.to, relation.from)] {
+                if depth_by_ref.get(&source) != Some(&parent_depth)
+                    || depth_by_ref
+                        .get(&target)
+                        .is_some_and(|depth| *depth < proximity)
+                {
+                    continue;
+                }
+                let Some(source_paths) = paths_by_ref.get(&source) else {
+                    continue;
+                };
+                next_paths.entry(target).or_default().extend(
+                    source_paths
+                        .iter()
+                        .map(|signals| signals.through(relation.relation, source, target)),
+                );
+            }
+        }
+
+        for (object_ref, paths) in next_paths {
+            depth_by_ref.entry(object_ref).or_insert(proximity);
+            paths_by_ref.entry(object_ref).or_default().extend(paths);
+        }
+    }
+
+    paths_by_ref
+        .into_iter()
+        .filter(|(object_ref, _)| *object_ref != candidate_ref)
+        .map(|(object_ref, paths)| {
+            let mut rationale = GraphRationaleSignals::default();
+            for path in paths {
+                rationale.entity |= path.entity;
+                rationale.thread |= path.thread;
+                rationale.graph_bound |= !path.entity && !path.thread;
+            }
+            (object_ref, rationale)
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -599,6 +810,7 @@ fn build_pack(
                 section: ContextPackSection::Omitted,
                 rank: None,
                 reason: Some(section_omission_reason(&ranked.object)),
+                rationale_categories: rationale_categories_for_section_omission(),
             });
             continue;
         };
@@ -612,6 +824,9 @@ fn build_pack(
                     candidate: memory_object_ref_from_object(&ranked.object),
                     vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
+                    rationale_categories: rationale_categories_for_stale_reason(
+                        StaleCandidateReason::SectionLimit,
+                    ),
                 });
             details.section_assignments.push(SectionAssignment {
                 object: memory_object_ref_from_object(&ranked.object),
@@ -621,6 +836,7 @@ fn build_pack(
                     "section limit reached for {}",
                     context_pack_section_name(section)
                 )),
+                rationale_categories: rationale_categories_for_section_limit(),
             });
             continue;
         }
@@ -633,6 +849,7 @@ fn build_pack(
             section,
             rank: Some(rank),
             reason: Some(ranked.assignment_reason()),
+            rationale_categories: ranked.rationale_categories(),
         });
 
         match ranked.object {
@@ -942,6 +1159,24 @@ fn graph_expansion_trace(
     }
 }
 
+fn fanout_utilization_traces_for_expansion(
+    expansion: &GraphExpansion,
+) -> Vec<FanoutUtilizationTrace> {
+    expansion
+        .fanout_utilization
+        .iter()
+        .map(|entry| FanoutUtilizationTrace {
+            root: memory_object_ref(entry.root.object_type, entry.root.object_id),
+            relation: entry.relation,
+            object_type: entry.object_type,
+            configured_cap: entry.configured_cap,
+            selected_cap: entry.selected_cap,
+            retained_count: entry.retained_count,
+            omitted_by_fanout_count: entry.omitted_by_fanout_count,
+        })
+        .collect()
+}
+
 fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpansionTrace {
     GraphExpansionTrace {
         root: memory_object_ref(candidate.object_type, candidate.object_id),
@@ -1129,6 +1364,31 @@ fn stale_reason_from_decision(reason: LifecycleFilterReason) -> StaleCandidateRe
         LifecycleFilterReason::GraphObjectMissing => StaleCandidateReason::GraphObjectMissing,
         LifecycleFilterReason::GraphExpansionBounded => StaleCandidateReason::GraphExpansionBounded,
         _ => StaleCandidateReason::LifecycleMismatch,
+    }
+}
+
+fn rationale_categories_for_stale_reason(reason: StaleCandidateReason) -> Vec<RationaleCategory> {
+    match reason {
+        StaleCandidateReason::GraphObjectMissing => vec![RationaleCategory::Semantic],
+        StaleCandidateReason::LifecycleMismatch
+        | StaleCandidateReason::CurrentnessMismatch
+        | StaleCandidateReason::Superseded => vec![RationaleCategory::Lifecycle],
+        StaleCandidateReason::SectionLimit => vec![RationaleCategory::Scope],
+        StaleCandidateReason::GraphExpansionBounded => vec![RationaleCategory::GraphBound],
+    }
+}
+
+fn rationale_categories_for_section_omission() -> Vec<RationaleCategory> {
+    vec![RationaleCategory::Scope]
+}
+
+fn rationale_categories_for_section_limit() -> Vec<RationaleCategory> {
+    vec![RationaleCategory::Scope]
+}
+
+fn push_unique_category(categories: &mut Vec<RationaleCategory>, category: RationaleCategory) {
+    if !categories.contains(&category) {
+        categories.push(category);
     }
 }
 
@@ -1431,8 +1691,53 @@ mod tests {
             .section_assignments
             .iter()
             .all(|assignment| assignment.reason.is_some()));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Semantic)
+                && !assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Temporal)
+        }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.user_preference.id
+                && assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Semantic)
+                && !assignment
+                    .rationale_categories
+                    .contains(&RationaleCategory::Scope)
+        }));
         assert_eq!(trace.vector_candidates.len(), 4);
         assert_eq!(trace.graph_expansions.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn trace_collection_does_not_change_retrieval_results() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = RecordingVectorStore::new(vec![
+            candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.93),
+            candidate(fixtures.episode.id, ObjectType::Episode, 0.92),
+            candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.91),
+        ]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let without_trace = pipeline
+            .retrieve(RetrievalContext::new("trace parity"))
+            .await
+            .unwrap();
+        let with_trace = pipeline
+            .retrieve(RetrievalContext::new("trace parity").with_trace())
+            .await
+            .unwrap();
+
+        assert_eq!(without_trace.pack, with_trace.pack);
+        assert_eq!(without_trace.rationale, with_trace.rationale);
+        assert!(without_trace.trace.is_none());
+        assert!(with_trace.trace.is_some());
     }
 
     #[tokio::test]
@@ -1483,6 +1788,15 @@ mod tests {
                     && decision.decision
                         == crate::api::types::SelectivityDecision::LowSelectivityRejected
             }));
+        let fanout_utilization = &outcome.trace.as_ref().unwrap().fanout_utilization;
+        assert!(fanout_utilization.iter().any(|entry| {
+            entry.root.id == fixture.hub_entity.id
+                && entry.relation == RelationType::About
+                && entry.object_type == ObjectType::DerivedMemory
+                && entry.selected_cap == 0
+                && entry.retained_count == 0
+                && entry.omitted_by_fanout_count > 0
+        }));
     }
 
     #[tokio::test]
@@ -1525,6 +1839,14 @@ mod tests {
                 .high_selectivity_count
                 > 0
         );
+        let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace.fanout_utilization.iter().any(|entry| {
+            entry.root.id == fixture.hub_entity.id
+                && entry.relation == RelationType::About
+                && entry.object_type == ObjectType::DerivedMemory
+                && entry.selected_cap <= entry.configured_cap
+                && entry.retained_count > 0
+        }));
     }
 
     #[tokio::test]
@@ -1543,6 +1865,507 @@ mod tests {
         let mut with_trace = RetrieveAssembly::new(true);
         with_trace.absorb_expansion(&candidate, expansion);
         assert!(!with_trace.graph_relations.unwrap().is_empty());
+    }
+
+    #[test]
+    fn rationale_categories_follow_vector_and_graph_provenance() {
+        let fixtures = representative_fixtures();
+        let mut preference = fixtures.user_preference.clone();
+        preference.salience_score = 0.0;
+        let preference_ref = GraphObjectRef::new(preference.id, ObjectType::DerivedMemory);
+        let preference_candidate = candidate(preference.id, ObjectType::DerivedMemory, 0.95);
+        let hub_candidate = candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.90);
+        let episode_candidate = candidate(fixtures.episode.id, ObjectType::Episode, 0.89);
+        let entity_linked_expansion = || {
+            let mut expansion = GraphExpansion::new(
+                vec![
+                    MemoryObject::Entity(fixtures.hub_entity.clone()),
+                    MemoryObject::DerivedMemory(preference.clone()),
+                ],
+                Vec::new(),
+            );
+            expansion
+                .relations
+                .push(crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0210),
+                    from: GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+                    to: preference_ref,
+                    relation: RelationType::About,
+                    proximity: 1,
+                });
+            expansion
+        };
+        let non_entity_linked_expansion = || {
+            let mut expansion = GraphExpansion::new(
+                vec![
+                    MemoryObject::Episode(fixtures.episode.clone()),
+                    MemoryObject::DerivedMemory(preference.clone()),
+                ],
+                Vec::new(),
+            );
+            expansion
+                .relations
+                .push(crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0211),
+                    from: preference_ref,
+                    to: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                    relation: RelationType::DerivedFrom,
+                    proximity: 1,
+                });
+            expansion
+        };
+
+        let mut pure_vector = RetrieveAssembly::new(true);
+        pure_vector.absorb_expansion(&preference_candidate, non_entity_linked_expansion());
+        let pure_vector_ranked = pure_vector
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .unwrap();
+        let pure_vector_categories = pure_vector_ranked.rationale_categories();
+        assert_eq!(pure_vector_categories, vec![RationaleCategory::Semantic]);
+
+        let mut episode = fixtures.episode.clone();
+        episode.salience_score = 0.0;
+        let episode_ref = GraphObjectRef::new(episode.id, ObjectType::Episode);
+        let mut semantic_episode = RetrieveAssembly::new(true);
+        semantic_episode.absorb_expansion(
+            &candidate(episode.id, ObjectType::Episode, 0.94),
+            GraphExpansion::new(vec![MemoryObject::Episode(episode)], Vec::new()),
+        );
+        let episode_categories = semantic_episode
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == episode_ref)
+            .unwrap()
+            .rationale_categories();
+        assert_eq!(episode_categories, vec![RationaleCategory::Semantic]);
+        assert!(!episode_categories.contains(&RationaleCategory::Temporal));
+
+        let mut thread = fixtures.soft_thread.clone();
+        thread.salience_score = 0.0;
+        let thread_ref = GraphObjectRef::new(thread.id, ObjectType::MemoryThread);
+        let mut semantic_thread = RetrieveAssembly::new(true);
+        semantic_thread.absorb_expansion(
+            &candidate(thread.id, ObjectType::MemoryThread, 0.93),
+            GraphExpansion::new(vec![MemoryObject::MemoryThread(thread)], Vec::new()),
+        );
+        let thread_categories = semantic_thread
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == thread_ref)
+            .unwrap()
+            .rationale_categories();
+        assert_eq!(thread_categories, vec![RationaleCategory::Semantic]);
+        assert!(!thread_categories.contains(&RationaleCategory::Thread));
+
+        let mut non_entity_graph_expanded = RetrieveAssembly::new(true);
+        non_entity_graph_expanded
+            .absorb_expansion(&episode_candidate, non_entity_linked_expansion());
+        let non_entity_graph_expanded_ranked = non_entity_graph_expanded
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .unwrap();
+        let non_entity_graph_categories = non_entity_graph_expanded_ranked.rationale_categories();
+        assert!(!non_entity_graph_categories.contains(&RationaleCategory::Semantic));
+        assert!(!non_entity_graph_categories.contains(&RationaleCategory::Entity));
+        assert!(non_entity_graph_categories.contains(&RationaleCategory::GraphBound));
+
+        let mut entity_graph_expanded = RetrieveAssembly::new(true);
+        entity_graph_expanded.absorb_expansion(&hub_candidate, entity_linked_expansion());
+        let entity_graph_expanded_ranked = entity_graph_expanded
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .unwrap();
+        let entity_graph_categories = entity_graph_expanded_ranked.rationale_categories();
+        assert!(!entity_graph_categories.contains(&RationaleCategory::Semantic));
+        assert!(entity_graph_categories.contains(&RationaleCategory::Entity));
+        assert!(!entity_graph_categories.contains(&RationaleCategory::GraphBound));
+
+        let mut both = RetrieveAssembly::new(true);
+        both.absorb_expansion(&hub_candidate, entity_linked_expansion());
+        both.absorb_expansion(
+            &preference_candidate,
+            GraphExpansion::new(vec![MemoryObject::DerivedMemory(preference)], Vec::new()),
+        );
+        let both_ranked = both
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .unwrap();
+        let both_categories = both_ranked.rationale_categories();
+        assert!(both_categories.contains(&RationaleCategory::Semantic));
+        assert!(both_categories.contains(&RationaleCategory::Entity));
+    }
+
+    #[test]
+    fn entity_side_branch_does_not_affect_target_and_is_order_independent() {
+        let fixtures = representative_fixtures();
+        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
+        let bridge_ref =
+            GraphObjectRef::new(fixtures.derived_reflection.id, ObjectType::DerivedMemory);
+        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let target_ref =
+            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+        let categories_with_ids = |entity_link_id: u128, target_link_id: u128| {
+            let mut expansion = GraphExpansion::new(
+                vec![
+                    MemoryObject::Episode(fixtures.episode.clone()),
+                    MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+                    MemoryObject::Entity(fixtures.hub_entity.clone()),
+                    MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+                ],
+                Vec::new(),
+            );
+            expansion.relations = vec![
+                crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0220),
+                    from: root_ref,
+                    to: bridge_ref,
+                    relation: RelationType::DerivedFrom,
+                    proximity: 1,
+                },
+                crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(entity_link_id),
+                    from: bridge_ref,
+                    to: entity_ref,
+                    relation: RelationType::About,
+                    proximity: 2,
+                },
+                crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(target_link_id),
+                    from: bridge_ref,
+                    to: target_ref,
+                    relation: RelationType::DerivedFrom,
+                    proximity: 2,
+                },
+            ];
+            expansion
+                .relations
+                .sort_by_key(|relation| (relation.proximity, relation.link_id));
+
+            let mut assembly = RetrieveAssembly::new(true);
+            assembly.absorb_expansion(
+                &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
+                expansion,
+            );
+            assembly
+                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .into_iter()
+                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .unwrap()
+                .rationale_categories()
+        };
+
+        let entity_first = categories_with_ids(
+            0x550e_8400_e29b_41d4_a716_4466_5544_0221,
+            0x550e_8400_e29b_41d4_a716_4466_5544_0222,
+        );
+        let target_first = categories_with_ids(
+            0x550e_8400_e29b_41d4_a716_4466_5544_0222,
+            0x550e_8400_e29b_41d4_a716_4466_5544_0221,
+        );
+
+        assert_eq!(entity_first, target_first);
+        assert!(!entity_first.contains(&RationaleCategory::Entity));
+        assert!(entity_first.contains(&RationaleCategory::GraphBound));
+    }
+
+    #[test]
+    fn mentions_path_uses_entity_nodes_not_relation_name_for_entity_rationale() {
+        let fixtures = representative_fixtures();
+        let target_ref =
+            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
+        let categories_for_root = |root_ref: GraphObjectRef, root: MemoryObject| {
+            let mut expansion = GraphExpansion::new(
+                vec![
+                    root,
+                    MemoryObject::Observation(fixtures.salient_observation.clone()),
+                ],
+                Vec::new(),
+            );
+            expansion
+                .relations
+                .push(crate::ports::graph_authority::GraphExpansionRelation {
+                    link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0223),
+                    from: root_ref,
+                    to: target_ref,
+                    relation: RelationType::Mentions,
+                    proximity: 1,
+                });
+            let mut assembly = RetrieveAssembly::new(true);
+            assembly.absorb_expansion(
+                &candidate(root_ref.object_id, root_ref.object_type, 0.90),
+                expansion,
+            );
+            assembly
+                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .into_iter()
+                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .unwrap()
+                .rationale_categories()
+        };
+
+        let entityless = categories_for_root(
+            GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+            MemoryObject::Episode(fixtures.episode.clone()),
+        );
+        let entity_backed = categories_for_root(
+            GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+        );
+
+        assert!(!entityless.contains(&RationaleCategory::Entity));
+        assert!(entityless.contains(&RationaleCategory::GraphBound));
+        assert!(entity_backed.contains(&RationaleCategory::Entity));
+        assert!(!entity_backed.contains(&RationaleCategory::GraphBound));
+    }
+
+    #[test]
+    fn part_of_thread_path_emits_thread_without_graph_bound() {
+        let fixtures = representative_fixtures();
+        let root_ref = GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread);
+        let target_ref =
+            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+        let mut expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
+                MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+            ],
+            Vec::new(),
+        );
+        expansion
+            .relations
+            .push(crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0230),
+                from: target_ref,
+                to: root_ref,
+                relation: RelationType::PartOfThread,
+                proximity: 1,
+            });
+
+        let mut assembly = RetrieveAssembly::new(true);
+        assembly.absorb_expansion(
+            &candidate(fixtures.soft_thread.id, ObjectType::MemoryThread, 0.90),
+            expansion,
+        );
+        let categories = assembly
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .unwrap()
+            .rationale_categories();
+
+        assert!(categories.contains(&RationaleCategory::Thread));
+        assert!(!categories.contains(&RationaleCategory::GraphBound));
+        assert!(!categories.contains(&RationaleCategory::Entity));
+    }
+
+    #[test]
+    fn part_of_thread_without_thread_endpoint_falls_back_to_graph_bound() {
+        let fixtures = representative_fixtures();
+        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
+        let target_ref =
+            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
+        let mut expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(fixtures.salient_observation.clone()),
+            ],
+            Vec::new(),
+        );
+        expansion
+            .relations
+            .push(crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0233),
+                from: root_ref,
+                to: target_ref,
+                relation: RelationType::PartOfThread,
+                proximity: 1,
+            });
+
+        let mut assembly = RetrieveAssembly::new(true);
+        assembly.absorb_expansion(
+            &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
+            expansion,
+        );
+        let categories = assembly
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .unwrap()
+            .rationale_categories();
+
+        assert!(!categories.contains(&RationaleCategory::Thread));
+        assert!(categories.contains(&RationaleCategory::GraphBound));
+        assert!(!categories.contains(&RationaleCategory::Entity));
+    }
+
+    #[test]
+    fn graph_categories_union_across_distinct_candidate_paths() {
+        let fixtures = representative_fixtures();
+        let target_ref =
+            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+        let mut generic_expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+            ],
+            Vec::new(),
+        );
+        generic_expansion
+            .relations
+            .push(crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0231),
+                from: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                to: target_ref,
+                relation: RelationType::DerivedFrom,
+                proximity: 1,
+            });
+        let mut thread_expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
+                MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+            ],
+            Vec::new(),
+        );
+        thread_expansion
+            .relations
+            .push(crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0232),
+                from: target_ref,
+                to: GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread),
+                relation: RelationType::PartOfThread,
+                proximity: 1,
+            });
+
+        let mut assembly = RetrieveAssembly::new(true);
+        assembly.absorb_expansion(
+            &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
+            generic_expansion,
+        );
+        assembly.absorb_expansion(
+            &candidate(fixtures.soft_thread.id, ObjectType::MemoryThread, 0.89),
+            thread_expansion,
+        );
+        let categories = assembly
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .unwrap()
+            .rationale_categories();
+
+        assert!(categories.contains(&RationaleCategory::Thread));
+        assert!(categories.contains(&RationaleCategory::GraphBound));
+        assert!(!categories.contains(&RationaleCategory::Entity));
+    }
+
+    #[test]
+    fn entity_on_admitting_path_emits_entity_for_target() {
+        let fixtures = representative_fixtures();
+        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
+        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let target_ref =
+            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+        let mut expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
+            ],
+            Vec::new(),
+        );
+        expansion.relations = vec![
+            crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0240),
+                from: root_ref,
+                to: entity_ref,
+                relation: RelationType::AssociatedWith,
+                proximity: 1,
+            },
+            crate::ports::graph_authority::GraphExpansionRelation {
+                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0241),
+                from: entity_ref,
+                to: target_ref,
+                relation: RelationType::DerivedFrom,
+                proximity: 2,
+            },
+        ];
+
+        let mut assembly = RetrieveAssembly::new(true);
+        assembly.absorb_expansion(
+            &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
+            expansion,
+        );
+        let categories = assembly
+            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .into_iter()
+            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .unwrap()
+            .rationale_categories();
+
+        assert!(categories.contains(&RationaleCategory::Entity));
+        assert!(!categories.contains(&RationaleCategory::GraphBound));
+    }
+
+    #[test]
+    fn temporal_rationale_is_not_emitted_by_current_retrieval_signals() {
+        let fixtures = representative_fixtures();
+        let ranked = RankedObject::new(
+            MemoryObject::DerivedMemory(fixtures.user_preference),
+            0.9,
+            0.8,
+            Some(0.9),
+            GraphRationaleSignals {
+                entity: true,
+                thread: true,
+                graph_bound: true,
+            },
+        );
+        let mut category_sets = vec![
+            ranked.rationale_categories(),
+            rationale_categories_for_section_omission(),
+            rationale_categories_for_section_limit(),
+        ];
+        category_sets.extend(
+            [
+                StaleCandidateReason::GraphObjectMissing,
+                StaleCandidateReason::LifecycleMismatch,
+                StaleCandidateReason::CurrentnessMismatch,
+                StaleCandidateReason::Superseded,
+                StaleCandidateReason::SectionLimit,
+                StaleCandidateReason::GraphExpansionBounded,
+            ]
+            .map(rationale_categories_for_stale_reason),
+        );
+
+        assert!(category_sets
+            .iter()
+            .all(|categories| !categories.contains(&RationaleCategory::Temporal)));
+    }
+
+    #[test]
+    fn salience_rationale_tracks_positive_salience_component() {
+        let fixtures = representative_fixtures();
+        let mut positive_salience = fixtures.user_preference.clone();
+        positive_salience.salience_score = 0.8;
+        let mut zero_salience = positive_salience.clone();
+        zero_salience.salience_score = 0.0;
+
+        for (object, expected) in [(positive_salience, true), (zero_salience, false)] {
+            let categories = RankedObject::new(
+                MemoryObject::DerivedMemory(object),
+                0.0,
+                0.0,
+                None,
+                GraphRationaleSignals::default(),
+            )
+            .rationale_categories();
+
+            assert_eq!(categories.contains(&RationaleCategory::Salience), expected);
+        }
     }
 
     #[tokio::test]
@@ -1568,7 +2391,10 @@ mod tests {
             .stale_candidate_omissions
             .iter()
             .any(|omission| omission.candidate.id == missing_id
-                && omission.reason == StaleCandidateReason::GraphObjectMissing));
+                && omission.reason == StaleCandidateReason::GraphObjectMissing
+                && omission
+                    .rationale_categories
+                    .contains(&RationaleCategory::Semantic)));
         assert!(!trace
             .stale_candidate_omissions
             .iter()
@@ -1582,6 +2408,9 @@ mod tests {
             .any(
                 |omission| omission.candidate.id == fixtures.suppressed_seed.id
                     && omission.reason == StaleCandidateReason::LifecycleMismatch
+                    && omission
+                        .rationale_categories
+                        .contains(&RationaleCategory::Lifecycle)
             ));
         assert!(trace
             .lifecycle_filter_decisions
@@ -1956,13 +2785,15 @@ mod tests {
             .iter()
             .any(|omission| omission.candidate.id == second_preference.id
                 && omission.vector_score == Some(0.90)
-                && omission.reason == StaleCandidateReason::SectionLimit));
+                && omission.reason == StaleCandidateReason::SectionLimit
+                && omission.rationale_categories == vec![RationaleCategory::Scope]));
         assert!(trace
             .section_assignments
             .iter()
             .any(|assignment| assignment.object.id == second_preference.id
                 && assignment.section == ContextPackSection::Omitted
-                && assignment.reason.as_deref() == Some("section limit reached for preferences")));
+                && assignment.reason.as_deref() == Some("section limit reached for preferences")
+                && assignment.rationale_categories == vec![RationaleCategory::Scope]));
         let preference_pressure = first
             .rationale
             .telemetry

@@ -65,21 +65,28 @@ fn stable_hash(text: &str) -> usize {
 }
 
 pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
-    error.backend == "qdrant"
-        && (error
-            .status
-            .as_deref()
-            .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
-            || matches!(
-                error.kind.as_str(),
-                "reqwest::connect"
-                    | "reqwest::timeout"
-                    | "io::ConnectionRefused"
-                    | "io::ConnectionReset"
-                    | "io::ConnectionAborted"
-                    | "io::NotConnected"
-                    | "io::TimedOut"
-            ))
+    if error.backend != "qdrant" {
+        return false;
+    }
+
+    let message = error.message.to_ascii_lowercase();
+    error
+        .status
+        .as_deref()
+        .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
+        || (error.kind == "response"
+            && message.contains("failed to connect")
+            && message.contains("tcp connect error"))
+        || matches!(
+            error.kind.as_str(),
+            "reqwest::connect"
+                | "reqwest::timeout"
+                | "io::ConnectionRefused"
+                | "io::ConnectionReset"
+                | "io::ConnectionAborted"
+                | "io::NotConnected"
+                | "io::TimedOut"
+        )
 }
 
 pub async fn cleanup_collection(collection_name: &str) {
