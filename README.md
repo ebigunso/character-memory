@@ -151,11 +151,11 @@ The write path is deliberately not an extraction system. Character Memory core d
 
 ## Memory identity across restarts
 
-Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`, and ids are obtained at exactly two points: `RememberOutcome` returns the persisted object and link ids at write time, and retrieval packs carry the ids of returned objects.
+Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`. Every operation that creates memory reports the resulting ids: `RememberOutcome` carries persisted object and link ids, `link` returns the created `MemoryLink`, and `correct` reports generated replacement ids through `LifecycleMutationOutcome`. Retrieval packs also carry the ids of returned objects, and drafts (including replacement drafts in corrections) accept caller-supplied ids.
 
-The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist the ids returned from write outcomes, keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
+The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist every id the API returns — including replacement ids from corrections — keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
 
-Supplying deterministic ids also gives you idempotent ingest: replaying the same input yields the same ids.
+Supplying deterministic ids gives you stable identity across retries: a replayed write reuses the same ids instead of minting new ones. This is identity stability, not full ingest idempotency — a replayed draft still regenerates defaulted timestamps and reapplies derived-store writes; exact retry semantics come from replaying the same prepared plan through the staged write path.
 
 ## Backends
 

@@ -21,7 +21,7 @@ The facade exposes exactly eight methods (`remember`, `retrieve`, `correct`, `fo
 There is no lookup by external id, no enumeration, and no query by source reference; diagnostic listing exists only behind crate-internal ports.
 Retrieval can opportunistically resurface some identities, but it is relevance-dependent by design and cannot guarantee complete re-association.
 
-The same audit found the enabler that resolves the problem without any API change: public draft types accept caller-supplied `MemoryId`s, and `RememberOutcome` returns the persisted object and link ids.
+The same audit found the enabler that resolves the problem without any API change: public draft types accept caller-supplied `MemoryId`s, `RememberOutcome` returns the persisted object and link ids, `link` returns the created link, and `correct` reports generated replacement ids through `LifecycleMutationOutcome`.
 A caller can therefore know every identity it owns at write time, either by supplying deterministic ids or by persisting the ids the library returns.
 
 This ADR records the resulting contract, because the absence of a lookup surface is otherwise invisible to readers of the code and could be mistaken for an oversight.
@@ -38,7 +38,7 @@ This ADR records the resulting contract, because the absence of a lookup surface
 
 Identity across restart is the caller's responsibility, discharged at write time rather than by post-restart discovery.
 
-- Callers that need to reference memories across process or instance restarts either supply deterministic `MemoryId`s in drafts, or durably persist the ids returned in `RememberOutcome` (and link ids from `link`), keyed by their own external identifiers.
+- Callers that need to reference memories across process or instance restarts either supply deterministic `MemoryId`s in drafts (including replacement drafts in corrections), or durably persist every id the API returns — persisted object and link ids in `RememberOutcome`, the created link id from `link`, and generated replacement ids reported through `LifecycleMutationOutcome` from `correct` — keyed by their own external identifiers.
 - The public facade deliberately provides no lookup-by-external-id, enumeration, or query-by-source-reference surface; this absence is intentional, not a gap.
 - Retrieval is the verification mechanism for persistence, not the identity-recovery mechanism: after reconstruction over the same stores, a caller confirms survival by retrieving scripted or known content and checking the returned ids against its own mapping.
 
@@ -52,7 +52,7 @@ Keeping identity bookkeeping with the caller preserves the library's stance that
 - No library change: the contract is satisfied by existing draft fields and `RememberOutcome`.
 - Integration documentation must state the caller obligation explicitly, so consumers do not discover it only when a restart loses their mapping.
 - The private evaluation harness implements this contract as a durable external-id registry persisted alongside its stores, with an open/reattach lifecycle that requires every configured durable store to be present before reporting restored identities.
-- Caller-supplied deterministic ids additionally give consumers idempotent ingest for free: replaying the same input yields the same ids.
+- Caller-supplied deterministic ids additionally give consumers stable identity under replay: a repeated write reuses the same ids rather than minting new ones. This is identity stability, not full ingest idempotency — direct draft replay can regenerate defaulted timestamps and repeat derived-store side effects; exact retry semantics belong to replaying the same prepared plan through the staged write path.
 
 ## Considered Options
 
@@ -74,7 +74,7 @@ Option 1 requires no library change, keeps the facade minimal, and turns identit
 
 - The facade stays at eight methods; evaluation needs added zero public surface.
 - The contract is deterministic and auditable: the harness proved exact-mapping restoration across restart for every identity category using only the public API.
-- Idempotent ingest falls out of deterministic caller-supplied ids.
+- Identity stability under replay falls out of deterministic caller-supplied ids.
 
 ### Negative / Tradeoffs
 
