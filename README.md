@@ -155,7 +155,7 @@ Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId
 
 The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist the ids returned from write outcomes, keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
 
-Supplying deterministic ids also gives you idempotent ingest: replaying the same input yields the same ids. See [ADR-I-0020](docs/decisions/implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md) for the full decision and its revisit conditions.
+Supplying deterministic ids also gives you idempotent ingest: replaying the same input yields the same ids.
 
 ## Backends
 
