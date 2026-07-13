@@ -1,6 +1,6 @@
 # Plan: v0.1.4 Continuity Evaluation Harness (hosted in CharacterMemoryEvals)
 
-- status: in_progress
+- status: completed
 - generated: 2026-07-05
 - last_updated: 2026-07-12
 - work_type: code
@@ -441,6 +441,11 @@ Note: Task_4's research can start immediately (Wave 1), but Wave 2's [CME] tasks
   - Summary: Task_12 (docs/configs) landed on feature/continuity-driver (7c378ea docs + 2f9a7ae CME lock resolution against 0.1.4; e4a7336 LOW-finding wording fix) — README continuity section with prerequisites, all commands, report-reading guidance (metadata-vs-content, metric_support null semantics, sampled negatives, non-gating tone), and scenario/metric extension guides; configs/continuity_retrieval.toml confirmed as the single mock+live config. Reviewer APPROVED after one LOW docs-accuracy bounce (README claimed fixture snapshots in report metadata; metadata stores fixture provenance only — wording now matches ContinuityReportMetadata field-for-field). Task_13 (CM version bump + roadmap) completed by CM worker as commit 2fe59dc on v0-1-4-continuity-wave2: character_memory 0.1.2 -> 0.1.4, authorized one-line Cargo.lock re-resolution, roadmap v0.1.4 row Finished with A8 wording; CM cargo check/--locked green; CME-side path-dep cargo check/--locked green against 2fe59dc.
   - Validation evidence: reviewer independently executed every documented command class (all-8 mock, summarize parity, generator SHA match to checked fixture, scoped live vs CM 0.1.4) and reran both CME cargo checks; all pinned gates green.
   - Notes: Task_12 LOW-fix edits were authored by evals-worker but their session ended pre-commit; orchestrator verified the two-file diff and committed/pushed on their behalf (e4a7336). Task_14 dispatched: evals-reviewer owns phase-doc acceptance verification + independent two-run reproducibility + CME public-API/entity-neutrality checks; cm-reviewer owns the CM-side ADR-I-0018 dependency-direction audit, unmodified-test-suite confirmation, and A8 path/wording scan.
+
+- 2026-07-13 05:10 Task_14 completed and CLOSED (both portions APPROVED, no findings) — PLAN COMPLETE.
+  - Summary: cm-reviewer (CM portion) — main..ae297c4 src/tests diff empty, PR #59 ADR-I-0018 audit conclusion stands; full CM gates green with all four integration binaries independently rerun --nocapture against live Qdrant (355 unit + 25 integration, zero silent skips); A8 scan over the full attributable range 4aa10bc..ae297c4 clean (one pre-plan lessons.md hit recorded as pre-existing debt); 0.1.4 coherent across Cargo.toml/Cargo.lock/cargo metadata/roadmap. evals-reviewer (CME portion) — all ten phase-doc acceptance criteria (lines 307-316) verified with per-criterion evidence at e4a7336, incl. the Definition-of-Done independent two-run full-suite reproducibility check (byte-identical artifacts; report metadata differs only in generated_at), no-external-provider proof with OPENAI_API_KEY/Qdrant env removed on mock, public-API-only character_memory usage, entity-neutrality sweep, and full pinned gates with live adapter tests.
+  - Remaining user-controlled closeout (outside plan DoD per the Task_4-gate precedent): merge CME feature/continuity-driver to main (PR), merge/PR CM branch v0-1-4-continuity-wave2, tagging policy.
+  - Final branch states: CME feature/continuity-driver e4a7336 (Tasks 5-12 + lessons; Wave 3 branches feature/continuity-config-persistence aec3483 and feature/continuity-fixtures fc0ef90 merged in via 3ccdb64); CM v0-1-4-continuity-wave2 ae297c4 + this closeout commit (2fe59dc carries the 0.1.4 bump).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
