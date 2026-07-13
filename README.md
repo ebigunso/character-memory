@@ -66,7 +66,7 @@ It is a memory layer for persistent AI assistants and companions.
 
 Character Memory treats the memory record as append-only. Forgetting works through suppression, archival, supersession, and decay — it removes influence, not history. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
 
-Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action against the backing stores, not a memory operation exposed by the API.
+Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action against the backing stores, not a memory operation exposed by the API, and no purge tooling ships with the library today. If you implement one, it must cover every store your deployment uses — the graph authority, the vector index, and retrieval statistics — and must tombstone or repair provenance references that would otherwise dangle, or the remaining record becomes inconsistent.
 
 ## Typical usage
 
