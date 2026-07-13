@@ -149,6 +149,14 @@ For callers that already have structured drafts, `remember(RememberDraft)` remai
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 
+## Memory identity across restarts
+
+Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`, and ids are obtained at exactly two points: `RememberOutcome` returns the persisted object and link ids at write time, and retrieval packs carry the ids of returned objects.
+
+The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist the ids returned from write outcomes, keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
+
+Supplying deterministic ids also gives you idempotent ingest: replaying the same input yields the same ids. See [ADR-I-0020](docs/decisions/implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md) for the full decision and its revisit conditions.
+
 ## Backends
 
 The default implementation is backed by Qdrant and an Oxigraph HTTP service.
