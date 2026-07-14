@@ -79,7 +79,7 @@ A secondary benefit: selectivity smoothing (`alpha`) and fanout shaping (`gamma`
 ## 3.1 What the harness is
 
 ```text
-a development and measurement tool inside the repository
+a development and measurement tool in the private companion evals repository (ADR-I-0019; early drafts placed it in-repo)
 deterministic synthetic long-horizon interaction fixtures
 a minimal example assistant loop exercising the public facade
 continuity-oriented retrieval-quality metrics

@@ -66,7 +66,7 @@ It is a memory layer for persistent AI assistants and companions.
 
 Character Memory treats the memory record as append-only. Forgetting works through suppression, archival, supersession, and decay — it removes influence, not history. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
 
-Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action, not a memory operation; see [ADR-D-0017](docs/decisions/design/ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md) for the full decision and its boundaries.
+Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action against the backing stores, not a memory operation exposed by the API, and no purge tooling ships with the library today. If you implement one, it must cover every store your deployment uses — the graph authority, the vector index, and retrieval statistics — and must tombstone or repair provenance references that would otherwise dangle, or the remaining record becomes inconsistent.
 
 ## Typical usage
 
@@ -148,6 +148,14 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 For callers that already have structured drafts, `remember(RememberDraft)` remains the convenience wrapper and routes through the same graph-authoritative commit machinery.
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
+
+## Memory identity across restarts
+
+Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`. Every operation that creates memory reports the resulting ids: `RememberOutcome` carries persisted object and link ids, `link` returns the created `MemoryLink`, and `correct` reports generated replacement ids through `LifecycleMutationOutcome`. Retrieval packs also carry the ids of returned objects, and drafts (including replacement drafts in corrections) accept caller-supplied ids.
+
+The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist every id the API returns — including replacement ids from corrections — keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
+
+Supplying deterministic ids gives you stable identity across retries: a replayed write reuses the same ids instead of minting new ones. This is identity stability, not full ingest idempotency — a replayed draft still regenerates defaulted timestamps and reapplies derived-store writes; exact retry semantics come from replaying the same prepared plan through the staged write path.
 
 ## Backends
 
