@@ -734,7 +734,6 @@ struct PlanValidationContext {
     refs_requiring_graph: HashSet<GraphObjectRef>,
     existing_refs: HashSet<GraphObjectRef>,
     episode_content_by_id: HashMap<MemoryId, String>,
-    vector_embedding_texts_by_target: HashMap<GraphObjectRef, Vec<String>>,
     plan_errors: Vec<String>,
 }
 
@@ -745,7 +744,6 @@ impl PlanValidationContext {
             refs_requiring_graph: HashSet::new(),
             existing_refs: HashSet::new(),
             episode_content_by_id: HashMap::new(),
-            vector_embedding_texts_by_target: HashMap::new(),
             plan_errors: validate_plan_identity(plan),
         };
 
@@ -837,21 +835,12 @@ impl PlanValidationContext {
     }
 
     fn collect_echo_surface_data(&mut self, candidate: &MemoryCandidate) {
-        match candidate {
-            MemoryCandidate::Episode(candidate) => {
-                if let Some(id) = candidate.draft.id {
-                    self.episode_content_by_id
-                        .entry(id)
-                        .or_insert_with(|| candidate.draft.summary.clone());
-                }
+        if let MemoryCandidate::Episode(candidate) = candidate {
+            if let Some(id) = candidate.draft.id {
+                self.episode_content_by_id
+                    .entry(id)
+                    .or_insert_with(|| candidate.draft.summary.clone());
             }
-            MemoryCandidate::VectorIndex(candidate) => {
-                self.vector_embedding_texts_by_target
-                    .entry(candidate.target.into())
-                    .or_default()
-                    .push(candidate.embedding_text.clone());
-            }
-            _ => {}
         }
     }
 
@@ -1056,21 +1045,13 @@ impl PlanValidationContext {
     }
 
     fn echo_surface_warning(&self, candidate: &MemoryCandidate) -> Option<String> {
-        let (candidate_content, candidate_ref, source_episode_ids) = match candidate {
+        let (candidate_content, source_episode_ids) = match candidate {
             MemoryCandidate::Observation(candidate) => (
                 candidate.draft.text.as_str(),
-                candidate
-                    .draft
-                    .id
-                    .map(|id| GraphObjectRef::new(id, ObjectType::Observation)),
                 std::slice::from_ref(&candidate.draft.episode_id),
             ),
             MemoryCandidate::DerivedMemory(candidate) => (
                 candidate.draft.text.as_str(),
-                candidate
-                    .draft
-                    .id
-                    .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory)),
                 candidate.draft.derived_from_episode_ids.as_slice(),
             ),
             _ => return None,
@@ -1083,15 +1064,6 @@ impl PlanValidationContext {
                     return false;
                 };
                 candidate_content == episode_content
-                    || candidate_ref.is_some_and(|candidate_ref| {
-                        self.vector_embedding_texts_by_target
-                            .get(&candidate_ref)
-                            .is_some_and(|embedding_texts| {
-                                embedding_texts
-                                    .iter()
-                                    .any(|embedding_text| embedding_text == episode_content)
-                            })
-                    })
             })
             .copied()
             .collect::<Vec<_>>();
@@ -1102,7 +1074,7 @@ impl PlanValidationContext {
         }
 
         Some(format!(
-            "echo-surface: candidate content or embedding text is byte-identical to source episode candidate(s): {}",
+            "echo-surface: candidate content is byte-identical to source episode candidate(s): {}",
             matching_episode_ids
                 .iter()
                 .map(MemoryId::to_string)
@@ -1578,7 +1550,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warns_when_derived_embedding_echoes_source_episode_candidate() {
+    async fn does_not_warn_for_distinct_surfaces_with_vector_candidates_enabled() {
         let graph = FakeGraphAuthorityStore::new();
         let plan = RememberInput::new("source episode content")
             .with_observation(ObservationDraft::new(
@@ -1597,14 +1569,16 @@ mod tests {
             .unwrap();
 
         assert!(verdict.is_valid());
-        let validation = verdict
+        assert!(verdict
             .validations
             .iter()
-            .find(|validation| validation.candidate_kind == MemoryCandidateKind::DerivedMemory)
-            .unwrap();
-        assert_eq!(validation.status, CandidateValidationStatus::Valid);
-        assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].starts_with("echo-surface:"));
+            .filter(|validation| {
+                matches!(
+                    validation.candidate_kind,
+                    MemoryCandidateKind::Observation | MemoryCandidateKind::DerivedMemory
+                )
+            })
+            .all(|validation| validation.warnings.is_empty()));
     }
 
     #[tokio::test]
