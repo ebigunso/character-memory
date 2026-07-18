@@ -3,7 +3,7 @@ status: accepted
 adr_type: implementation
 date: 2026-07-05
 deciders: ["ebigunso"]
-consulted: ["GPT-5 Codex"]
+consulted: ["GPT-5.5"]
 informed: []
 supersedes: []
 superseded_by: null
