@@ -16,9 +16,9 @@ use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 use crate::api::types::{MemoryId, ObjectType};
 use crate::errors::{CustomError, VectorDatabaseError};
 use crate::models::vector::{
-    VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface, VectorTimeField,
-    VectorTimeRangeFilter,
+    canonicalize_vector_candidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
+    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
+    VectorTimeField, VectorTimeRangeFilter,
 };
 use crate::ports::vector_candidate::VectorCandidateStore;
 
@@ -31,6 +31,8 @@ use super::payload::{
 };
 
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
+const QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES: usize = 4_096;
+const QDRANT_TIE_COHORT_LIMIT_MULTIPLIER: usize = 16;
 
 pub(crate) struct QdrantVectorCandidateStore {
     client: Qdrant,
@@ -141,6 +143,77 @@ impl QdrantVectorCandidateStore {
             .map_err(qdrant_error)?;
         Ok(())
     }
+
+    async fn search_candidate_batch(
+        &self,
+        query: &VectorCandidateSearch,
+        fetch_limit: usize,
+    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        let mut builder = SearchPointsBuilder::new(
+            &self.collection_name,
+            query.query_embedding.clone(),
+            fetch_limit as u64,
+        )
+        .with_payload(true)
+        .with_vectors(false);
+
+        if let Some(filter) = qdrant_candidate_filter(query) {
+            builder = builder.filter(filter);
+        }
+
+        let response = self
+            .client
+            .search_points(builder.build())
+            .await
+            .map_err(qdrant_error)?;
+        response
+            .result
+            .into_iter()
+            .map(scored_point_to_match)
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TieCohortFetchDecision {
+    Return,
+    ReturnAtBound,
+    Grow(usize),
+}
+
+fn tie_cohort_fetch_bound(limit: usize) -> usize {
+    limit
+        .saturating_mul(QDRANT_TIE_COHORT_LIMIT_MULTIPLIER)
+        .max(limit.saturating_add(QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES))
+}
+
+fn tie_cohort_fetch_decision(
+    admitted_limit: usize,
+    fetch_limit: usize,
+    fetch_bound: usize,
+    fetched_count: usize,
+    candidates: &[VectorCandidateMatch],
+) -> TieCohortFetchDecision {
+    if fetched_count < fetch_limit || tie_cohort_is_closed(candidates, admitted_limit) {
+        return TieCohortFetchDecision::Return;
+    }
+    if fetch_limit >= fetch_bound {
+        return TieCohortFetchDecision::ReturnAtBound;
+    }
+
+    TieCohortFetchDecision::Grow(fetch_limit.saturating_mul(2).min(fetch_bound))
+}
+
+fn tie_cohort_is_closed(candidates: &[VectorCandidateMatch], admitted_limit: usize) -> bool {
+    if admitted_limit == 0 || candidates.len() <= admitted_limit {
+        return false;
+    }
+
+    candidates.last().is_some_and(|tail| {
+        tail.score
+            .total_cmp(&candidates[admitted_limit - 1].score)
+            .is_lt()
+    })
 }
 
 fn validate_collection_vector_config(
@@ -202,28 +275,37 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-        let mut builder = SearchPointsBuilder::new(
-            &self.collection_name,
-            query.query_embedding.clone(),
-            query.limit as u64,
-        )
-        .with_payload(true)
-        .with_vectors(false);
-
-        if let Some(filter) = qdrant_candidate_filter(query) {
-            builder = builder.filter(filter);
+        if query.limit == 0 {
+            return Ok(Vec::new());
         }
 
-        let response = self
-            .client
-            .search_points(builder.build())
-            .await
-            .map_err(qdrant_error)?;
-        response
-            .result
-            .into_iter()
-            .map(scored_point_to_match)
-            .collect()
+        // Fetch past K until the boundary tie is closed. Growth is bounded by
+        // max(K * 16, K + 4096), which avoids unbounded reads when an entire
+        // collection ties. At the bound, results are canonical and deterministic
+        // for the fetched set, but membership can still vary if the equal-score
+        // cohort itself exceeds the bound. A future adapter-observability channel
+        // in the RetrievalTrace family should surface that degradation.
+        let fetch_bound = tie_cohort_fetch_bound(query.limit);
+        let mut fetch_limit = query.limit.saturating_add(1).min(fetch_bound);
+        loop {
+            let fetched = self.search_candidate_batch(query, fetch_limit).await?;
+            let fetched_count = fetched.len();
+            let mut candidates = canonicalize_vector_candidates(fetched);
+
+            match tie_cohort_fetch_decision(
+                query.limit,
+                fetch_limit,
+                fetch_bound,
+                fetched_count,
+                &candidates,
+            ) {
+                TieCohortFetchDecision::Grow(next_limit) => fetch_limit = next_limit,
+                TieCohortFetchDecision::Return | TieCohortFetchDecision::ReturnAtBound => {
+                    candidates.truncate(query.limit);
+                    return Ok(candidates);
+                }
+            }
+        }
     }
 
     async fn list_candidate_diagnostics(
@@ -1163,24 +1245,59 @@ mod tests {
     }
 
     #[test]
-    fn candidate_mapping_preserves_qdrant_result_order_and_scores() {
-        let higher_score_id = Uuid::new_v4();
-        let lower_score_id = Uuid::new_v4();
+    fn candidate_mapping_can_be_canonicalized_independently_of_qdrant_order() {
+        let higher_score_id = Uuid::from_u128(3);
+        let first_tied_id = Uuid::from_u128(1);
+        let second_tied_id = Uuid::from_u128(2);
         let points = vec![
+            scored_point(second_tied_id, ObjectType::DerivedMemory, 0.42),
             scored_point(higher_score_id, ObjectType::DerivedMemory, 0.91),
-            scored_point(lower_score_id, ObjectType::Observation, 0.42),
+            scored_point(first_tied_id, ObjectType::DerivedMemory, 0.42),
         ];
 
-        let matches = points
-            .into_iter()
-            .map(scored_point_to_match)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("points map");
+        let matches = canonicalize_vector_candidates(
+            points
+                .into_iter()
+                .map(scored_point_to_match)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("points map"),
+        );
 
         assert_eq!(matches[0].object_id, higher_score_id);
         assert_eq!(matches[0].score, 0.91);
-        assert_eq!(matches[1].object_id, lower_score_id);
+        assert_eq!(matches[1].object_id, first_tied_id);
         assert_eq!(matches[1].score, 0.42);
+        assert_eq!(matches[2].object_id, second_tied_id);
+    }
+
+    #[test]
+    fn all_tied_cohort_at_fetch_bound_degrades_to_canonical_fetched_membership() {
+        let fetched = (1..=6)
+            .rev()
+            .map(|value| {
+                VectorCandidateMatch::new(
+                    Uuid::from_u128(value),
+                    ObjectType::Episode,
+                    VectorSurface::Summary,
+                    1.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut candidates = canonicalize_vector_candidates(fetched);
+
+        assert_eq!(
+            tie_cohort_fetch_decision(2, 6, 6, 6, &candidates),
+            TieCohortFetchDecision::ReturnAtBound
+        );
+
+        candidates.truncate(2);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![Uuid::from_u128(1), Uuid::from_u128(2)]
+        );
     }
 
     #[test]
@@ -1273,6 +1390,67 @@ mod tests {
             .delete_candidates(&[object_id])
             .await
             .expect("delete succeeds");
+        let _ = store.client.delete_collection(&collection_name).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
+    async fn qdrant_candidate_store_live_closes_equal_score_boundary_deterministically() {
+        let url = env::var("QDRANT_CONNECTION_STRING")
+            .expect("QDRANT_CONNECTION_STRING is required for live Qdrant regression");
+        let collection_name = format!("cmem_candidate_ties_{}", Uuid::new_v4());
+        let store =
+            QdrantVectorCandidateStore::new(url, &collection_name, 2).expect("store builds");
+        let object_ids = (1..=12).map(Uuid::from_u128).collect::<Vec<_>>();
+        let records = object_ids
+            .iter()
+            .rev()
+            .map(|object_id| {
+                VectorRecord::new(
+                    *object_id,
+                    ObjectType::Episode,
+                    graph_uri(ObjectType::Episode, *object_id),
+                    VectorSurface::Summary,
+                    format!("Equal-score episode {object_id}"),
+                    format!("Equal-score episode {object_id}"),
+                    DEFAULT_SCHEMA_VERSION,
+                    Some(RetentionState::Active),
+                    Some(true),
+                    VectorRelationshipHints::default(),
+                    None,
+                )
+            })
+            .collect::<Vec<_>>();
+        let embeddings = vec![vec![1.0, 0.0]; records.len()];
+        let record_embeddings = records
+            .iter()
+            .zip(&embeddings)
+            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
+            .collect::<Vec<_>>();
+
+        store.init_collection().await.expect("collection init");
+        store
+            .upsert_vector_records(&record_embeddings)
+            .await
+            .expect("upsert succeeds");
+
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 5)
+            .with_object_types(vec![ObjectType::Episode]);
+        let expected = object_ids[..5].to_vec();
+        for _ in 0..8 {
+            let matches = store
+                .search_candidates(&query)
+                .await
+                .expect("equal-score search succeeds");
+            assert_eq!(
+                matches
+                    .iter()
+                    .map(|candidate| candidate.object_id)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+
         let _ = store.client.delete_collection(&collection_name).await;
     }
 

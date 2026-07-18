@@ -16,6 +16,10 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
         records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError>;
 
+    /// Returns at most `query.limit` unique object/surface matches in canonical
+    /// score-descending, object-type, object-id, surface order. Adapters close
+    /// equal-score cutoff cohorts before canonical truncation, subject to their
+    /// documented bounded-overfetch degradation policy.
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,

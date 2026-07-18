@@ -7,9 +7,9 @@ mod record;
 // Candidate query builders are used by adapter/test subsets; remove when all callers import concrete modules.
 #[allow(unused_imports)]
 pub(crate) use candidate_record::{
-    default_vector_candidate_object_types, EmbeddingInput, VectorCandidateFilters,
-    VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch, VectorSurface,
-    VectorTimeField, VectorTimeRangeFilter,
+    canonicalize_vector_candidates, default_vector_candidate_object_types, EmbeddingInput,
+    VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
+    VectorSurface, VectorTimeField, VectorTimeRangeFilter,
 };
 pub(crate) use embedding_model::EmbeddingModel;
 // Diagnostic/vector-record helpers are used by adapter/test subsets; remove when all callers import concrete modules.
