@@ -1,7 +1,11 @@
+---
+rule_schema_version: 2
+suite_id: "rules-cm-20260719"
+rule_file: "orchestrator"
+last_updated: "2026-07-11"
+---
+
 # Orchestrator Repository Rules
-
-last_updated: 2026-07-11
-
 ## Repo-Specific Orchestrator Policies
 
 - When creating or updating a PR, follow the format specified in `.github/pull_request_template.md`.

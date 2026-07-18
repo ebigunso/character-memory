@@ -1,0 +1,54 @@
+{
+  "rule_schema_version": 2,
+  "suite_id": "rules-cm-20260719",
+  "bootstrapped_at": "2026-07-19T00:00:00Z",
+  "baseline": {
+    "kind": "worktree",
+    "description": "Schema v1 to v2 migration of the existing repository rule suite; rule content preserved, reviewer.md and lifecycle sidecar added."
+  },
+  "required_files": {
+    "index": "docs/coding-agent/rules/index.md",
+    "common": "docs/coding-agent/rules/common.md",
+    "worker": "docs/coding-agent/rules/worker.md",
+    "orchestrator": "docs/coding-agent/rules/orchestrator.md",
+    "reviewer": "docs/coding-agent/rules/reviewer.md"
+  },
+  "refresh_groups": {
+    "validation": {
+      "patterns": [
+        ".github/workflows/**",
+        "Cargo.toml",
+        "rust-toolchain.toml"
+      ],
+      "affects": [
+        "common.validation_commands",
+        "worker.check_mapping",
+        "reviewer.required_evidence"
+      ]
+    },
+    "agent_instructions": {
+      "patterns": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".github/copilot-instructions.md"
+      ],
+      "affects": [
+        "common.reference_documents",
+        "orchestrator.repo_policies"
+      ]
+    },
+    "review_policy": {
+      "patterns": [
+        "CONTRIBUTING.md",
+        "docs/coding-agent/lessons.md",
+        "docs/decisions/**"
+      ],
+      "affects": [
+        "reviewer.review_risk_hotspots",
+        "reviewer.review_heuristics",
+        "reviewer.recurring_misses_prevention"
+      ]
+    }
+  },
+  "source_evidence": []
+}
