@@ -30,7 +30,8 @@
       "patterns": [
         "AGENTS.md",
         "CLAUDE.md",
-        ".github/copilot-instructions.md"
+        ".github/copilot-instructions.md",
+        ".github/pull_request_template.md"
       ],
       "affects": [
         "common.reference_documents",
@@ -41,12 +42,15 @@
       "patterns": [
         "CONTRIBUTING.md",
         "docs/coding-agent/lessons.md",
-        "docs/decisions/**"
+        "docs/decisions/**",
+        "docs/roadmap/development_roadmap.md"
       ],
       "affects": [
         "reviewer.review_risk_hotspots",
         "reviewer.review_heuristics",
-        "reviewer.recurring_misses_prevention"
+        "reviewer.recurring_misses_prevention",
+        "reviewer.required_evidence",
+        "orchestrator.repo_policies"
       ]
     }
   },
