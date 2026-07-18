@@ -88,8 +88,7 @@ The authority split is unaffected: Qdrant suggests vector candidates, stats guid
 
 ## Revisit When
 
-- A concrete multi-replica deployment need materializes — multiple application processes serving the same character's memory concurrently.
-  Revisit as a designed remote graph-authority phase covering shared retrieval stats, shared identity mapping, write concurrency, authentication, and tenancy; the retired adapter's targeted SPARQL query design (see the completed service-remote-SPARQL plan) is the starting reference.
+- A concrete multi-replica deployment need materializes — multiple application processes serving the same character's memory concurrently. Revisit as a designed remote graph-authority phase covering shared retrieval stats, shared identity mapping, write concurrency, authentication, and tenancy; the retired adapter's targeted SPARQL query design (see the completed service-remote-SPARQL plan) is the starting reference.
 - An embedded vector-recall option is pursued to make fully self-contained local deployment possible; that work is independent of this decision but shares its motivation.
 
 ## More Information
