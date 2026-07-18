@@ -103,7 +103,7 @@ By default, this uses:
 
 - OpenAI for embeddings
 - Qdrant for vector candidate recall and payload filtering
-- Oxigraph service mode for graph-authoritative memory objects, relationships, provenance, and lifecycle state
+- Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
 let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned()).await?;
@@ -159,9 +159,9 @@ Supplying deterministic ids gives you stable identity across retries: a replayed
 
 ## Backends
 
-The default implementation is backed by Qdrant and an Oxigraph HTTP service.
+The default implementation is backed by Qdrant and embedded persistent Oxigraph.
 
-Qdrant is used for vector candidate recall. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=service` with `OXIGRAPH_CONNECTION_STRING=http://localhost:7878`. Embedded filesystem persistence remains available with `GRAPH_STORE_MODE=persistent`; deterministic tests and fixtures use `GRAPH_STORE_MODE=in_memory`.
+Qdrant is used for vector candidate recall. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=persistent` with `OXIGRAPH_CONNECTION_STRING` set to a local filesystem path such as `./data/oxigraph`; deterministic tests and fixtures can use `GRAPH_STORE_MODE=in_memory`.
 
 Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
 
@@ -184,22 +184,6 @@ Or using Docker Compose:
 ```sh
 docker compose -f docker-compose.qdrant.yml up -d
 ```
-
-### Start Oxigraph with Docker
-
-```sh
-docker compose -f docker-compose.oxigraph.yml up -d
-```
-
-The default Oxigraph HTTP endpoint is `http://localhost:7878`.
-
-Live Oxigraph smoke tests use a separate container, port, and volume:
-
-```sh
-docker compose -f docker-compose.oxigraph.test.yml up -d
-```
-
-The default live-test Oxigraph endpoint is `http://localhost:7879`. The smoke test cleans up the named graphs it creates.
 
 ## Running tests
 

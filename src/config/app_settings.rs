@@ -1,6 +1,6 @@
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -72,11 +72,9 @@ impl FanoutBudgetSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GraphStoreMode {
     #[default]
-    Service,
     Persistent,
     InMemory,
 }
@@ -84,13 +82,26 @@ pub enum GraphStoreMode {
 impl GraphStoreMode {
     fn parse(value: &str) -> Result<Self, CustomError> {
         match value {
-            "service" => Ok(Self::Service),
+            "service" => Err(CustomError::ConfigParseError(
+                "GRAPH_STORE_MODE=service was removed; set GRAPH_STORE_MODE=persistent and replace the Oxigraph endpoint URL in OXIGRAPH_CONNECTION_STRING with a local store path"
+                    .to_owned(),
+            )),
             "persistent" => Ok(Self::Persistent),
             "in_memory" => Ok(Self::InMemory),
             other => Err(CustomError::ConfigParseError(format!(
-                "GRAPH_STORE_MODE must be service, persistent, or in_memory, got {other}"
+                "GRAPH_STORE_MODE must be persistent or in_memory, got {other}"
             ))),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for GraphStoreMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -198,7 +209,7 @@ impl Settings {
             .map_err(|e| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {e}")))?;
         let graph_store_mode = env::var("GRAPH_STORE_MODE")
             .map(|value| GraphStoreMode::parse(&value))
-            .unwrap_or(Ok(GraphStoreMode::Service))?;
+            .unwrap_or(Ok(GraphStoreMode::Persistent))?;
         let retrieval_stats_store_mode = env::var("RETRIEVAL_STATS_STORE_MODE")
             .map(|value| RetrievalStatsStoreMode::parse(&value))
             .unwrap_or(Ok(RetrievalStatsStoreMode::Sqlite))?;
@@ -278,8 +289,7 @@ impl Settings {
         let configured_path = self.get_oxigraph_connection();
         if configured_path.contains("://") {
             return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_CONNECTION_STRING must be a filesystem path for embedded persistent graph mode"
-                    .to_owned(),
+                "OXIGRAPH_CONNECTION_STRING is an endpoint URL, but Oxigraph service mode was removed; set it to a local filesystem path for persistent graph mode".to_owned(),
             ));
         }
 
@@ -291,17 +301,6 @@ impl Settings {
             ));
         }
         Ok(path.to_path_buf())
-    }
-
-    pub fn get_oxigraph_endpoint(&self) -> Result<String, CustomError> {
-        let endpoint = self.get_oxigraph_connection().trim().trim_end_matches('/');
-        if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_CONNECTION_STRING must be an HTTP(S) endpoint for service graph mode"
-                    .to_owned(),
-            ));
-        }
-        Ok(endpoint.to_owned())
     }
 
     pub fn get_openai_api_key(&self) -> &str {
@@ -609,7 +608,7 @@ mod tests {
         let settings = result.unwrap();
         assert_eq!(settings.get_qdrant_connection(), "external_qdrant");
         assert_eq!(settings.get_oxigraph_connection(), "external_oxigraph");
-        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Service);
+        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
         assert_eq!(
             settings.get_retrieval_stats_store_mode(),
             RetrievalStatsStoreMode::Sqlite
@@ -674,6 +673,54 @@ mod tests {
             settings.get_oxigraph_path().unwrap(),
             PathBuf::from("./data/oxigraph")
         );
+    }
+
+    #[test]
+    fn test_settings_new_rejects_removed_service_graph_mode_with_migration_hint() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "http://localhost:7878")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("graph_store_mode", "service")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let error = Settings::new(external_config).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("GRAPH_STORE_MODE=service was removed"));
+        assert!(message.contains("GRAPH_STORE_MODE=persistent"));
+        assert!(message.contains("local store path"));
+    }
+
+    #[test]
+    fn persistent_default_rejects_endpoint_url_with_mode_removal_hint() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_connection_string", "http://localhost:7878")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let settings = Settings::new(external_config).unwrap();
+        let error = settings.get_oxigraph_path().unwrap_err();
+        let message = error.to_string();
+
+        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
+        assert!(message.contains("endpoint URL"));
+        assert!(message.contains("service mode was removed"));
+        assert!(message.contains("local filesystem path"));
     }
 
     #[test]

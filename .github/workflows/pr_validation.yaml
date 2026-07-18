@@ -70,10 +70,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
   integration_tests:
-    name: Live service integration tests
+    name: Live Qdrant integration tests
     runs-on: ubuntu-latest
-    # Live service-backed tests need repository-controlled configuration and secrets.
-    # Fork and Dependabot PRs still run the service-free checks above, but skip this job.
+    # Live Qdrant-backed tests need repository-controlled configuration and secrets.
+    # Fork and Dependabot PRs still run the external-service-free checks above, but skip this job.
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
 
     services:
@@ -84,7 +84,6 @@ jobs:
           - 6334:6334
     env:
       QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
-      OXIGRAPH_CONNECTION_STRING: ${{ vars.OXIGRAPH_CONNECTION_STRING }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
 
@@ -101,7 +100,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for name in QDRANT_CONNECTION_STRING OXIGRAPH_CONNECTION_STRING OPENAI_API_KEY EMBEDDING_MODEL; do
+          for name in QDRANT_CONNECTION_STRING OPENAI_API_KEY EMBEDDING_MODEL; do
             if [[ -z "${!name}" ]]; then
               echo "$name is required for live Qdrant-backed integration tests" >&2
               missing=1

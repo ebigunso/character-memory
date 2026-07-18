@@ -480,7 +480,7 @@ This phase closes the gap where Qdrant candidates may survive restart while the 
 ## Goals
 
 ```text
-support Docker-backed Oxigraph service configuration and embedded persistent storage configuration
+support embedded persistent Oxigraph storage configuration
 preserve graph-authoritative state across process restarts
 keep in-memory graph mode available for deterministic tests
 validate restart-safe retrieval
@@ -489,9 +489,9 @@ prevent vector-only candidates from becoming behavior-influencing memory
 document persistence configuration and operational expectations
 ```
 
-Oxigraph service mode is the application default.
+Embedded persistent Oxigraph is the application default.
 
-Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
+Persistent graph mode is selected through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
 
 ## Non-goals
 
@@ -510,7 +510,7 @@ distributed transactions across Qdrant and Oxigraph
 
 ```text
 configurable Oxigraph graph store mode
-service-backed and embedded persistent Oxigraph graph authority implementation
+embedded persistent Oxigraph graph authority implementation
 restart-safe graph authority tests
 retrieval behavior tests after graph restart
 Qdrant/Oxigraph reconciliation diagnostics

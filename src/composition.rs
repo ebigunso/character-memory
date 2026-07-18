@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::adapters::oxigraph::{OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore};
+use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
 use crate::adapters::{OpenAIEmbeddingProvider, QdrantVectorCandidateStore};
 use crate::api::embedding::EmbeddingProvider;
@@ -136,12 +136,9 @@ impl CharacterMemory {
         )?;
         vector_store.init_collection().await?;
         let graph_store = match settings.get_graph_store_mode() {
-            ConfigGraphStoreMode::Service => Box::new(OxigraphHttpGraphAuthorityStore::new(
-                settings.get_oxigraph_endpoint()?,
-            )?) as Box<dyn GraphAuthorityStore>,
             ConfigGraphStoreMode::Persistent => Box::new(
                 OxigraphGraphAuthorityStore::new_persistent(settings.get_oxigraph_path()?)?,
-            ),
+            ) as Box<dyn GraphAuthorityStore>,
             ConfigGraphStoreMode::InMemory => {
                 Box::new(OxigraphGraphAuthorityStore::new_in_memory()?)
             }
