@@ -85,3 +85,4 @@ Records in this repository are expected to capture decisions, not undecided prop
 - [ADR-I-0018: Organize the crate into responsibility-boundary modules with enforced dependency direction](implementation/ADR-I-0018-responsibility-boundary-modules-with-enforced-dependency-direction.md)
 - [ADR-I-0019: Place the continuity evaluation harness in the private evals repository](implementation/ADR-I-0019-continuity-eval-harness-placement.md)
 - [ADR-I-0020: Restart identity via caller-supplied MemoryIds, not a public lookup surface](implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md)
+- [ADR-I-0021: Embedded persistent Oxigraph is the validated default graph store; the HTTP service mode is removed](implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md)
