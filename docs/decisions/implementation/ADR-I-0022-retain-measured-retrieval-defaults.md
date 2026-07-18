@@ -17,7 +17,7 @@ The v0.1.2 selectivity and fanout defaults were set without workload data: selec
 The v0.1.5 closeout phase owned measuring them and either tuning them or confirming them with evidence.
 The same phase owned revisiting the v0.1.2 decision to apply selectivity only when the vector root candidate is an entity.
 
-Two generations of parameter sweeps were run in the private companion evaluation repository (a development aid, not core library functionality) against the deterministic continuity scenario library.
+Two generations of parameter sweeps were run in the public companion evaluation repository (a development aid, not core library functionality) against the deterministic continuity scenario library.
 The first generation ran on the original nine-scenario fixture and found every swept parameter inert, but conservative-fallback dominance and structurally redundant fixture roots made that inertness unmeasurable in principle.
 A binding-scale fixture generation followed: a hub entity with 48 incidents across four salience levels and multiple embedding clusters, sufficient write volume for selectivity statistics to score rather than fall back, and a relevance-labeled probe memory reachable only through graph structure.
 
@@ -75,7 +75,7 @@ Option 3 is contradicted by the measurements: larger root limits bought context-
 
 ## Validation
 
-- The findings register in the private companion evaluation repository records both sweep generations, per-configuration artifact hashes, and the preservation audits.
+- The findings register in the public companion evaluation repository records both sweep generations, per-configuration artifact hashes, and the preservation audits.
 - Library tests continue to pin the default values; no default-value source changed in this phase.
 
 ## Revisit When

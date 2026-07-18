@@ -11,6 +11,8 @@ superseded_by: null
 
 # ADR-I-0019: Place the continuity evaluation harness in the private evals repository
 
+> Update (2026-07-19): the `CharacterMemoryEvals` repository has since been made public. The placement decision and delegation boundary below are unchanged; the privacy rationale and wording constraints in this record describe the situation at decision time and are retained as history. Current wording guidance lives in the repository documentation rules.
+
 ## Context and Problem Statement
 
 The v0.1.4 continuity evaluation harness measures whether the v0.1 substrate supports character continuity before scoped continuity features are built on top of it. The phase plan defines the harness as deterministic evaluation tooling that exercises the public library surface, observes retrieval and lifecycle behavior, and reports measurements without changing library behavior or defaults.

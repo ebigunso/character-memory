@@ -257,7 +257,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
 | v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Finished. Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, prepare/validate/commit flow, and shared manual/future-generated commit machinery. |
-| v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the private companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
+| v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
 | v0.1.5 | Eval-driven v0.1 family closeout | New. Run the evaluation harness, record findings, tune selectivity/fanout defaults from measured data, fix revealed retrieval/guardrail/write-path/persistence issues, and close out the v0.1 family before v0.2. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
@@ -1613,7 +1613,7 @@ let outcome = memory.commit(approved_plan, commit_options).await?;
 
 ## v0.1.4 / v0.1.5 API surface
 
-The continuity evaluation harness is implemented in the private companion `CharacterMemoryEvals` repository as a development and measurement aid, not core library functionality. It adds no public memory facade APIs.
+The continuity evaluation harness is implemented in the public companion `CharacterMemoryEvals` repository as a development and measurement aid, not core library functionality. It adds no public memory facade APIs.
 
 v0.1.5 may adjust configuration defaults (selectivity smoothing, fanout budgets) based on measured data, but it does not change the public API shape.
 

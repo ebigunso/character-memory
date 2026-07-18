@@ -19,6 +19,7 @@ last_updated: "2026-07-19"
 - Research: prefer Claude for exploratory research (design-space surveys, alternatives with tradeoffs, cross-repo implications); prefer Codex for forensic research (exhaustive inventories with file:line evidence, call-site censuses, computability tables).
 - Review tiers: Tier D defect/compliance review (post-implementation diff correctness, dependency-direction and entity-neutrality audits, serde/schema verification, determinism sweeps, acceptance-evidence checking) prefers a Codex reviewer — never the same agent identity that authored the diff, on any platform. Tier A altitude review (design/plan soundness, goal-achievement and what-will-bite-later review) prefers a Claude reviewer. Routine impl diffs get Tier D only; design docs get Tier A only; milestone gates get both tiers in parallel.
 - Implementation prefers Codex workers; give creative-design subtasks a Claude design pass first and hand the implementing worker a spec.
+- ADRs and other design-decision records are drafted by the Orchestrator (or a Claude design agent) that holds the decision context; implementation workers may be asked to fact-check file:line claims in a draft, never to author the decision record (user-directed 2026-07-18).
 
 ## Repo-Specific Integration / Git Policy
 
