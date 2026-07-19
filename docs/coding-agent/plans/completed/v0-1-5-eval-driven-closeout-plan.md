@@ -398,6 +398,27 @@ Repo references: [CM] = this repository (character-memory, public). [CME] = the 
 - depends_on: [Task_22, Task_23, consolidation merge 98b818e; Task_24 for the benchmark half]
 - description: Both fixtures live twice each at shipped defaults; benchmark values recorded as first-live baselines; findings only for invariant violations; prior-scenario metric drift = finding.
 
+### Task_25a: [CM] Over-engineering sweep (report-only)
+
+- type: review
+- status: CLOSED 2026-07-19 — NO CHANGES. One 2-line proposal (redundant currentness guard in cascade-warning accumulation) declined at the orchestrator altitude filter as defense-in-depth worth keeping; all other examined seams were live, pre-existing, roadmap-backed, or protected machinery.
+- owns: none (report-only)
+- depends_on: [user sweep directive 2026-07-19]
+
+### Task_25b: [CME] Over-engineering sweep (report-only)
+
+- type: review
+- status: CLOSED 2026-07-19 — four proposals (P1-P4) with no-change conclusions; orchestrator filter approved P2 (folding P1), P3, P4; declined-by-design items recorded (preflight-provider sharing rejected as a provenance-boundary risk).
+- owns: none (report-only)
+- depends_on: [user sweep directive 2026-07-19]
+
+### Task_25c: [CME] Approved simplifications
+
+- type: impl
+- status: CLOSED — APPROVED 2026-07-19 (evals-reviewer, combined range ba1ebe5..1c3aa4b after one LOW README bounce, final gate under the standing environmental teardown waiver). Schema v3 sole fixture contract with v2 rejected actionably (Task_21 v2-acceptance mandate superseded); converter clone elimination; frozen-store deep-clone elimination; all committed artifacts byte-identical (fixture/manifest/store hashes unchanged).
+- owns: (CME) fixture.rs, generator.rs, metrics.rs, benchmark-convert lib.rs, frozen_embeddings.rs, README
+- depends_on: [Task_25b filter verdict]
+
 ### Task_9: [CME] Confirmation re-run
 
 - type: research
@@ -480,6 +501,7 @@ Interpretation: tasks in the same wave dispatch in parallel by default when owns
 - Wave 6 (sequential): [Task_9 original confirmation] then consolidation merge (98b818e) then [Task_9b expanded confirmation, with Task_24 as its in-flight blocker fix]
 - Wave 7 (parallel): [Task_10]
 - Wave 8 (parallel): [Task_11]
+- Wave 9 (post-acceptance sweep, user-directed): [Task_25a, Task_25b] parallel report-only, then [Task_25c]
 
 Executed-wave note: Waves 5b–5f and Task_9b/Task_24 were added during execution by recorded user rulings and replan triggers (see Decision Log); the task records above carry their closure evidence. Task_9's original run completed before the suite expansion; Task_9b re-confirms over the expanded 33-scenario suite.
 
