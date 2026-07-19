@@ -37,7 +37,7 @@ Suggested durable review categories:
 
 | Trigger | Evidence Required | Source |
 |---|---|---|
-| Layer-boundary or module reorganization diffs | Diff-scoped dependency-direction audit result | orchestrator.md audit policy |
+| Layer-boundary or module reorganization diffs | Diff-scoped dependency-direction audit result | ADR-I-0018 (canonical rule incl. the retrieval-telemetry exception) |
 | Retrieval or entity-policy changes | Entity-neutrality check (no name/role special-casing) | roadmap invariant 2.7 |
 | Live integration evidence | Endpoint + pass/skip census; no silent skips | worker.md skip-gating notes |
 
