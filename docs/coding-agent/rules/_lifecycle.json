@@ -4,7 +4,7 @@
   "bootstrapped_at": "2026-07-19T00:00:00Z",
   "baseline": {
     "kind": "worktree",
-    "description": "Schema v1 to v2 migration of the existing repository rule suite; rule content preserved, reviewer.md and lifecycle sidecar added."
+    "description": "Schema v1 to v2 migration of the existing repository rule suite: reviewer.md and lifecycle sidecar added; rule content preserved except one recorded policy correction — the dependency-direction audit wording in orchestrator.md (and its reviewer.md restatement) was aligned to the canonical ADR-I-0018 rule, adding models to the clause and the named api::types::retrieval exception."
   },
   "required_files": {
     "index": "docs/coding-agent/rules/index.md",
