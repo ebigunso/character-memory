@@ -9,7 +9,7 @@ last_updated: "2026-07-19"
 
 ## Repo-Specific Reviewer Notes
 
-- Layer-boundary changes require a `use crate::` dependency-direction audit per ADR-I-0018: `ports`/`policy`/`models` never import `usecases`, and import `api` only for the one named exception (the `api::types::retrieval` trace/telemetry vocabulary in their result contracts — a valid edge, not a violation); domain types must come from `crate::domain`. Scope the audit to the diff under review for incremental changes; pre-existing ports/policy imports of DOMAIN types via `crate::api::types` are grandfathered debt awaiting a one-time sweep.
+- Layer-boundary changes require a `use crate::` dependency-direction audit per ADR-I-0018: `ports`/`policy`/`models` never import `usecases`, and import `api` only for the one named exception (the `api::types::retrieval` trace/telemetry vocabulary in their result contracts — a valid edge, not a violation); domain types must come from `crate::domain`. Scope the audit to the diff under review for incremental changes; pre-existing ports/policy/models imports of DOMAIN types via `crate::api::types` are grandfathered debt awaiting a one-time sweep.
 - Review in an isolated pinned worktree at the exact commit under review, never in a shared working checkout; state the pinned commit and any sibling-repo provenance in the verdict.
 - Live-service evidence must state the endpoint used and a pass/skip census; zero-executed targeted test runs are invalid evidence.
 
