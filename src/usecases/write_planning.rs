@@ -1550,6 +1550,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn warns_when_derived_memory_content_echoes_source_episode_candidate() {
+        let graph = FakeGraphAuthorityStore::new();
+        let plan = RememberInput::new("source episode content")
+            .with_observation(ObservationDraft::new(
+                MemoryId::nil(),
+                "distinct observation content",
+            ))
+            .with_derived_memory(DerivedMemoryDraft::new(
+                DerivedType::Reflection,
+                "source episode content",
+            ))
+            .prepare_write_plan_with_options(&defaults(), false, false);
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(verdict.is_valid());
+        let validation = verdict
+            .validations
+            .iter()
+            .find(|validation| validation.candidate_kind == MemoryCandidateKind::DerivedMemory)
+            .unwrap();
+        assert_eq!(validation.status, CandidateValidationStatus::Valid);
+        assert_eq!(validation.warnings.len(), 1);
+        assert!(validation.warnings[0].starts_with("echo-surface:"));
+    }
+
+    #[tokio::test]
     async fn does_not_warn_for_distinct_surfaces_with_vector_candidates_enabled() {
         let graph = FakeGraphAuthorityStore::new();
         let plan = RememberInput::new("source episode content")

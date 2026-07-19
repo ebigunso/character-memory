@@ -20,7 +20,8 @@ pub use lifecycle::{
     ArchivePolicy, CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy,
     CorrectionTarget, DeferredDestructiveLifecyclePolicy, DeferredLifecycleAction,
     ExternalSourceReference, ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
-    LifecycleDtoValidationError, LifecycleMutationOutcome, LifecycleMutationTrace,
+    LifecycleDtoValidationError, LifecycleMutationDiagnostics, LifecycleMutationOutcome,
+    LifecycleMutationTrace, LifecycleMutationWarning, LifecycleMutationWarningReason,
     LifecycleTargetRef, ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget,
     SourceProvenanceReference, SupersededByEvidence, SuppressionPolicy, VectorMaintenanceFailure,
 };
