@@ -29,7 +29,7 @@ Eleven findings were recorded; none remain open and none are critical.
 
 ## Library changes shipped by this phase
 
-- Deterministic vector admission: equal-score cohorts at the vector-store cutoff are closed, canonically ordered, and truncated deterministically (fixes F-SEED-2; regression: repeated live all-tied searches and full-pack permutation equality).
+- Deterministic vector admission: equal-score cohorts at the vector-store cutoff are closed via bounded overfetch, canonically ordered, and truncated deterministically (fixes F-SEED-2; regression: repeated live all-tied searches and full-pack permutation equality). One documented residual: a pathological cohort larger than the overfetch bound can still vary in membership; realistic cohorts close well inside it.
 - Write-path warning diagnostics: a lifecycle-mutation warning when a correction/forget cascade would suppress a currently-current supersession replacement, and a write-plan validation warning for echo surfaces (observation/derived content byte-identical to its source episode). Warn-only; no write behavior changed. These implement the principle that memory-quality enforcement belongs at the write path, never in post-hoc retrieval manipulation.
 - Embedded persistent Oxigraph is the validated default graph store; the unvalidated HTTP service mode was removed (ADR-I-0021). Configuration rejects the removed mode with a migration hint.
 - Retrieval defaults retained with a recorded measurement basis (ADR-I-0022): alpha 1.0, gamma 1.0, fanout budgets 0/20, 0/5, 0/15, candidate limits 48/12. Two sweep generations showed every swept parameter inert or harmful to change on the measured corpora; the basis and its conditionality are part of the decision record.
