@@ -551,3 +551,155 @@ Prevention:
 
 Evidence:
 - `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
+
+## 2026-07-17 - Assess Memory-Type Contribution Before Tuning Away "Pollution"  [tags: planning, assumptions, validation]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Task_4 disposition gate (F-BASE-2)
+- Roles involved: Orchestrator
+
+Symptom:
+- Proposed disposition "fix pollution via parameter tuning" treated the eval pollution metric's relevance labels as ground truth and multiple same-event surfaces (episode + observation + derived memory) as duplicate noise to cut.
+
+Root cause:
+- Conflated metric-labeled noise with actual continuity noise. The product goal is character continuity — an observation surface can carry the character's inner reading of an event while the episode carries facts; dropping surfaces by knob-tuning before understanding per-type behavioral contribution optimizes the metric, not the product.
+
+Fix:
+- User redirected: before any pollution-targeted tuning, analyze which memory object types/surfaces genuinely shape current character behavior from past memories and which are noise; re-examine fixture relevance labels in the same light.
+
+Prevention:
+- Plan guardrail: retrieval-quality findings get a memory-type contribution analysis task (philosophy-grounded, trace-based) BEFORE any tuning task consumes them; tuning targets derive from that analysis, not raw metric deltas.
+- When a metric disagrees with the product goal's framing, treat the metric's labels as a finding candidate too (fixture semantics), not only the system under test.
+
+## 2026-07-17 - Route Memory-Quality Fixes To The Write Path, Not Retrieval  [tags: planning, assumptions]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Task_12 review (F-BASE-2 fix shape)
+- Roles involved: Orchestrator
+
+Symptom:
+- Recommended same-event echo dedup in pack assembly (retrieval-time collapsing of identical-text sibling surfaces) as the F-BASE-2 fix.
+
+Root cause:
+- Treated the symptom location (bloated packs) as the fix location. The project's append-only stance extends to retrieval fidelity: packs reflect what was committed; silently manipulating them post-write hides data problems from the caller who owns them.
+
+Fix:
+- User ruling: enforce at the write path — validation warns on known recall-harming failure modes (echo-duplicate surfaces; cascade-would-suppress-current-replacement), refusal reserved for very critical cases.
+
+Prevention:
+- Durable project principle recorded (auto-memory + this entry): retrieval-quality fix proposals route to write-plan validation diagnostics or lifecycle-mutation warnings, never to retrieval/pack post-processing.
+
+## 2026-07-18 - Sequence Shared Review-Sibling Provenance Flips With Active Reviews  [tags: review, tooling, workflow]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Wave 4 Task_6/Task_13 reviews
+- Roles involved: Orchestrator | Reviewer
+
+Symptom:
+- Orchestrator re-pinned the shared .review-worktrees/CharacterMemory sibling clone to Task_13 provenance while the Task_6 review (pinned to different CM provenance) was still active; reviewer's pre-gate provenance check caught the mismatch.
+
+Root cause:
+- All CME review worktrees resolve the path dependency to ONE shared sibling clone; provisioning a queued review's provenance eagerly invalidated the active review's environment.
+
+Fix:
+- Restored the active review's pin; established a sequencing rule: the sibling clone serves one review at a time, flipped only between reviews on reviewer handshake.
+
+Prevention:
+- Provision the sibling-clone pin only when dispatching the review that will use it, never when queueing; reviewers confirm provenance before Cargo gates (already their rule — keep it).
+
+## 2026-07-18 - Trace Compared Fields Through Default Constructors For Plan Diagnostics  [tags: validation, review]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Task_5 phase 2 (F-BASE-5 echo warning) bounce
+- Roles involved: Worker | Reviewer (lesson recorded by Orchestrator on Worker's behalf; lessons file was orchestrator-dirty at the time)
+
+Symptom:
+- Echo-surface warning compared VectorIndexCandidate.embedding_text, which on the default prepare path inherits RememberInput.content for every candidate — so normal plans with distinct surfaces warned falsely; the negative test masked it by disabling vector candidates.
+
+Root cause:
+- Ambiguous "content/embedding text" dispatch wording resolved without tracing each compared field through the default plan constructor; negative regression did not run on production-default candidate options.
+
+Fix:
+- Comparison scoped to draft content texts only; negative regression now runs with vector candidates enabled and distinct content.
+
+Prevention:
+- For diagnostics over generated plans: trace every compared field through the default constructor before choosing it, and keep at least one negative regression on production-default options.
+
+## 2026-07-18 - Verify Supplied Evidence Claims Against The Canonical Artifact Before Committing  [tags: docs, validation]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Task_13 bounce (F-FIXTURE-1 wording)
+- Roles involved: Orchestrator | Worker | Reviewer
+
+Symptom:
+- A Task_12 analysis overclaim ("byte-identical" hub texts; actually ordinal-differing template instances) flowed through the orchestrator-supplied draft into the committed findings register; reviewer caught it.
+
+Root cause:
+- Supplied draft wording was treated as verified evidence; neither drafter nor committer re-checked each claimed equality/difference against the canonical fixture bytes.
+
+Fix:
+- Register wording corrected (template-aligned recurrence, ordinal+timestamp differences); finding conclusion unchanged.
+
+Prevention:
+- Before committing artifact-specific claims (equalities, counts, hashes), inspect the canonical artifact and verify every claimed equality and difference — regardless of who supplied the wording.
+
+## 2026-07-18 - ADRs Are Orchestrator/Claude-Authored, Not Worker Tasks  [tags: delegation]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Task_17 (ADR-I-0021) dispatch
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- ADR-I-0021 authoring was bundled into a Codex worker dispatch alongside the code removal task; user corrected: the orchestrator holds the decision context and runs on the model suited to high-level decision records.
+
+Root cause:
+- Treated the ADR as a docs deliverable co-located with the code change instead of applying the existing model-strength routing (design/altitude work routes to Claude; the decision context lives with the orchestrator who ran the decision process).
+
+Fix:
+- Task_17 withdrawn from the worker; orchestrator drafted the ADR directly from the decision packet.
+
+Prevention:
+- Repo rule added (orchestrator.md Delegation Routing): ADRs and design-decision records are drafted by the Orchestrator or a Claude design agent; implementation workers may be asked to fact-check file:line claims, never to author the decision record.
+
+## 2026-07-19 - Mid-Plan Task Additions Get Formal Task Records At Creation Time  [tags: planning, workflow]
+
+Context:
+- Plan: v0.1.5 eval-driven closeout
+- Task/Wave: Tasks 14-24 and Task_9b (added across the measurement-hardening and scope-addition gates)
+- Roles involved: Orchestrator
+
+Symptom:
+- Eleven tasks added during execution existed only as Decision Log narrative; the Tasks section and Task Waves stopped at the originally drafted set, so per-task acceptance/validation evidence was not trackable in the plan's structured form. User correction.
+
+Root cause:
+- Decision Log entries felt sufficient in the moment because they carried the ruling context; the plan-format requirement that every Task_X have type/owns/acceptance/validation was applied only at initial drafting, not treated as a standing invariant.
+
+Fix:
+- Retrospective Task_14..Task_24 + Task_9b records written with status and closure evidence; Task Waves extended with an executed-wave note.
+
+Prevention:
+- New default: any mid-plan task creation writes the formal Task_X record (type/owns/depends_on/acceptance/validation) into the Tasks section and updates Task Waves in the same edit as the Decision Log entry that creates it — the Decision Log records WHY, the task record tracks WHAT/EVIDENCE.
+
+## 2026-07-19 - Arm A Review-Comment Monitor When Opening A PR  [tags: workflow, review]
+
+Context:
+- Plan: v0.1.5 closeout (schema-migration PR #62)
+- Roles involved: Orchestrator
+
+Symptom:
+- PR #62 was opened without arming the review-comment/merge-state monitor; the user had to request it separately.
+
+Root cause:
+- PR creation was treated as complete at URL creation; the feedback channel (reviews, comments, merge state) was not treated as part of the same action even though acting on those events is the orchestrator's job.
+
+Fix:
+- Monitor armed retroactively (reviews, inline comments, issue comments, merged/closed terminal states).
+
+Prevention:
+- New default: opening or being handed a PR immediately arms a monitor covering new reviews, review comments, issue comments, and terminal merge/close state, in the same action as PR creation.
