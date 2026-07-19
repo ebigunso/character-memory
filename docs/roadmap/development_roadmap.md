@@ -1219,6 +1219,15 @@ separate current continuity context from raw historical memories
 avoid assuming continuity is centered on one user-assistant relationship
 ```
 
+## Inherited obligations from the v0.1.5 closeout
+
+```text
+own the deferred admission/ranking design item (ranking credit for graph-only evidence)
+own the deferred selectivity-widening item (non-entity-keyed statistics or explicit declination)
+build scoped/person-keyed evaluation scenarios before implementing ContinuityScope
+answer the intra-process concurrency question ReflectionJob introduces
+```
+
 ## Acceptance criteria additions
 
 ```text
