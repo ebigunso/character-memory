@@ -1,7 +1,11 @@
+---
+rule_schema_version: 2
+suite_id: "rules-cm-20260719"
+rule_file: "worker"
+last_updated: "2026-07-04"
+---
+
 # Worker Repository Rules
-
-last_updated: 2026-07-04
-
 ## Repo-Specific Worker Notes
 
 - When adding or extending a public options type, include at least one test per option toggled independently of its commonly paired option (cross-product spot checks on defaults), not only matched-pair combinations.
