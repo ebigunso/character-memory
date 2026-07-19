@@ -25,7 +25,7 @@ Eleven findings were recorded; none remain open and none are critical.
 | F-HARNESS-1: root-selection counters not projected into reports | major | harness | Fixed: counters projected; the tuning observation is now derived from measured telemetry. |
 | F-HARNESS-2: reproducibility hash recipe under-specified | minor | harness | Fixed: canonicalization recipe fully pinned. |
 | F-FIXTURE-1: pollution labels penalized behavior-shaping temporal and recurrence context; echo surfaces masked per-surface value | major (metric validity) | fixture | Fixed: labels corrected, a distinct-surface scenario added, event-level pollution introduced. |
-| Benchmark frozen-store runtime-surface mismatch | major | harness | Fixed: embedding manifests enumerate runtime-normalized lookup surfaces in strict bijection with the store, guarded by a live cross-repository drift regression. |
+| F-HARNESS-3: benchmark frozen-store runtime-surface mismatch | major | harness | Fixed: embedding manifests enumerate runtime-normalized lookup surfaces in strict bijection with the store, guarded by a live cross-repository drift regression. |
 
 ## Library changes shipped by this phase
 
