@@ -385,7 +385,7 @@ Repo references: [CM] = this repository (character-memory, public). [CME] = the 
 ### Task_24: [CME] Benchmark frozen-store runtime-surface fix (Task_9b blocker)
 
 - type: impl
-- status: worker DONE (commit b0a79ea: strict 635-way bijection — 468 reused / 167 regenerated for CM-normalized surfaces / 167 dropped; fixture bytes unchanged 46B99812…14A6; bijection preflight regression added; register finding recorded); reviewer dispatched on 98b818e..b0a79ea with the normalization-mirror coupling seam flagged for scrutiny
+- status: CLOSED — APPROVED 2026-07-19 (evals-reviewer, combined range 98b818e..a2d137a after one MAJOR bounce adding the live cross-repository normalization drift regression and one LOW dimension-preflight fix). Strict 635-way bijection (468 reused / 167 regenerated / 167 dropped), fixture bytes unchanged, finding recorded as F-HARNESS-3 in the final register.
 - owns: converter/manifest/runtime helper/preflight, regenerated store
 - depends_on: [Task_9b stop finding]
 - description: CM's clean_text whitespace collapse makes runtime lookup text differ from source-exact text on real chat data; manifest now enumerates normalized runtime surfaces; store = exactly the runtime set (strict-bijection redirect, Decision Log).
@@ -393,7 +393,7 @@ Repo references: [CM] = this repository (character-memory, public). [CME] = the 
 ### Task_9b: [CME] Expanded confirmation (33-scenario suite, repeated-run)
 
 - type: research
-- status: IN PROGRESS (canonical half COMPLETE: byte-identical pair at shipped defaults 48/12, all ten prior Task_9 scenario metrics reproduced exactly, zero invariant issues, register subsection pre-written; benchmark half HELD on Task_24; mocks pending)
+- status: CLOSED — completed 2026-07-19 and APPROVED (evals-reviewer, range 8087879..8b14d71, independent live reproduction). Canonical half: byte-identical pair at shipped defaults, all ten prior Task_9 scenario metrics reproduced exactly. Benchmark half (post-Task_24 fix): 18/18 twice, byte-identical pairs (traces E19036EE…), zero invariant violations, first-live baselines recorded as measurements; mocks 23/23 and 18/18.
 - owns: task9b configs, register expanded-confirmation section
 - depends_on: [Task_22, Task_23, consolidation merge 98b818e; Task_24 for the benchmark half]
 - description: Both fixtures live twice each at shipped defaults; benchmark values recorded as first-live baselines; findings only for invariant violations; prior-scenario metric drift = finding.
