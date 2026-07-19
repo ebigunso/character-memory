@@ -1624,7 +1624,7 @@ let outcome = memory.commit(approved_plan, commit_options).await?;
 
 The continuity evaluation harness is implemented in the public companion `CharacterMemoryEvals` repository as a development and measurement aid, not core library functionality. It adds no public memory facade APIs.
 
-v0.1.5 may adjust configuration defaults (selectivity smoothing, fanout budgets) based on measured data, but it does not change the public API shape.
+v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no new facade methods; it did add additive, serde-defaulted public diagnostics — warning fields on lifecycle mutation outcomes and validation warnings on write plans, with their types re-exported from the crate root — and removed the Oxigraph service mode from the configuration surface (ADR-I-0021).
 
 ## v0.2 API additions
 
