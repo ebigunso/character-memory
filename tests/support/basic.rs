@@ -41,8 +41,11 @@ fn load_in_memory_settings() -> Result<Settings, CustomError> {
         )
         .map_err(base::config_error)?
         .set_override(
-            "oxigraph_connection_string",
-            base_settings.get_oxigraph_connection(),
+            "oxigraph_path",
+            base_settings
+                .get_oxigraph_path()?
+                .to_string_lossy()
+                .into_owned(),
         )
         .map_err(base::config_error)?
         .set_override("openai_api_key", base_settings.get_openai_api_key())

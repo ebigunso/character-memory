@@ -2,13 +2,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::domain::{MemoryId, RelationType};
 use super::draft::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
     ObservationDraft, VectorIndexingFailure,
 };
 use super::lifecycle::ExternalSourceReference;
 use super::retrieval::MemoryObjectRef;
+use crate::domain::{MemoryId, RelationType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {
@@ -682,7 +682,7 @@ fn validate_range<T: Ord>(
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberDiagnostics {
     pub candidate_counts: Vec<CandidateCount>,
-    pub validation_failures: Vec<CandidateValidation>,
+    pub validations: Vec<CandidateValidation>,
     pub messages: Vec<RememberDiagnostic>,
     pub repair_needed: Vec<RepairMarker>,
 }
@@ -700,8 +700,18 @@ impl RememberDiagnostics {
         self
     }
 
-    pub fn with_validation_failure(mut self, failure: CandidateValidation) -> Self {
-        self.validation_failures.push(failure);
+    pub fn with_validation(mut self, validation: CandidateValidation) -> Self {
+        self.validations.push(validation);
+        self.refresh_validation_warning_messages();
+        self
+    }
+
+    pub(crate) fn with_validations(
+        mut self,
+        validations: impl IntoIterator<Item = CandidateValidation>,
+    ) -> Self {
+        self.validations.extend(validations);
+        self.refresh_validation_warning_messages();
         self
     }
 
@@ -713,6 +723,26 @@ impl RememberDiagnostics {
     pub fn with_repair_needed(mut self, repair_needed: RepairMarker) -> Self {
         self.repair_needed.push(repair_needed);
         self
+    }
+
+    fn refresh_validation_warning_messages(&mut self) {
+        const VALIDATION_WARNING_CODE: &str = "write_plan_validation_warning";
+
+        let warning_messages = self
+            .validations
+            .iter()
+            .flat_map(|validation| validation.warnings.iter())
+            .map(|warning| {
+                RememberDiagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    VALIDATION_WARNING_CODE,
+                    warning.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        self.messages
+            .retain(|message| message.code != VALIDATION_WARNING_CODE);
+        self.messages.extend(warning_messages);
     }
 }
 
@@ -927,6 +957,28 @@ mod tests {
 
         assert_eq!(provenance.rationale_origin(), RationaleOrigin::Unavailable);
         assert_eq!(provenance.rationale.text(), None);
+    }
+
+    #[test]
+    fn remember_diagnostics_preserves_structured_validation_and_projects_warnings() {
+        let validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation)
+            .with_warning("echo-surface: source episode 550e8400-e29b-41d4-a716-446655442009");
+        let diagnostics = RememberDiagnostics::default().with_validation(validation.clone());
+
+        assert_eq!(diagnostics.validations, vec![validation]);
+        assert_eq!(diagnostics.messages.len(), 1);
+        assert_eq!(
+            diagnostics.messages[0].severity,
+            DiagnosticSeverity::Warning
+        );
+        assert_eq!(
+            diagnostics.messages[0].code,
+            "write_plan_validation_warning"
+        );
+
+        let serialized = serde_json::to_value(&diagnostics).unwrap();
+        assert!(serialized.get("validations").is_some());
+        assert!(serialized.get("validation_failures").is_none());
     }
 
     #[test]

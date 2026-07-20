@@ -3,14 +3,15 @@ mod tests {
     use std::collections::HashSet;
 
     use super::super::embedded::*;
-    use super::super::http::*;
     use super::super::rdf_mapping::{rdf_triples_for_object, RdfObject, RdfTriple};
     use super::super::shared::*;
     use super::super::sparql_selectors::SparqlGraphSelectors;
     use super::super::vocabulary as vocab;
     use crate::api::types::{
-        graph_uri, ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, MemoryId,
-        MemoryObject, ObjectType, RelationType, RetentionState, RetrievalContext, ThreadStatus,
+        ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, RetrievalContext,
+    };
+    use crate::domain::{
+        graph_uri, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, ThreadStatus,
     };
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
@@ -850,7 +851,7 @@ mod tests {
         let fixtures = representative_fixtures();
         let superseded_memory = fixtures.user_preference.clone();
         let replacement = fixtures.correction.clone();
-        let hub_link = crate::api::types::MemoryLink {
+        let hub_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0002),
             object_type: ObjectType::MemoryLink,
             from_id: fixtures.hub_entity.id,
@@ -863,7 +864,7 @@ mod tests {
             created_at: superseded_memory.created_at,
             schema_version: superseded_memory.schema_version.clone(),
         };
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0003),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,
@@ -1017,7 +1018,7 @@ mod tests {
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         archived_thread.status = ThreadStatus::Archived;
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0001),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,
@@ -1174,7 +1175,7 @@ mod tests {
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         archived_thread.status = ThreadStatus::Archived;
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0002),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,
@@ -1473,192 +1474,6 @@ mod tests {
         assert!(expansion
             .objects
             .contains(&MemoryObject::Observation(fixtures.salient_observation)));
-    }
-
-    #[test]
-    fn http_service_queries_do_not_use_whole_dataset_snapshot_shape() {
-        let fixtures = representative_fixtures();
-        let object_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
-        let source = graph_uri(ObjectType::Episode, fixtures.episode.id);
-        let graph = graph_uri(ObjectType::Episode, fixtures.episode.id);
-        let queries = vec![
-            object_refs_query(&GraphObjectQuery::by_refs(vec![object_ref])),
-            derived_memory_ids_by_provenance_query(std::slice::from_ref(&source)),
-            derived_memory_ids_by_resource_predicate_query(
-                vocab::PART_OF_THREAD,
-                &[graph_uri(ObjectType::MemoryThread, fixtures.soft_thread.id)],
-            ),
-            links_touching_query(&[object_ref]),
-            link_ids_query(),
-            named_graph_quads_query(&[graph]),
-        ];
-
-        let forbidden_snapshot_query =
-            ["SELECT ?g ?s ?p ?o WHERE", "{ GRAPH ?g", "{ ?s ?p ?o } }"].join(" ");
-        for query in queries {
-            assert!(
-                !query.contains(&forbidden_snapshot_query),
-                "query unexpectedly used the full snapshot shape: {query}"
-            );
-        }
-    }
-
-    #[test]
-    fn http_service_named_graph_hydration_is_scoped_by_values() {
-        let fixtures = representative_fixtures();
-        let graph = graph_uri(ObjectType::DerivedMemory, fixtures.derived_reflection.id);
-        let query = named_graph_quads_query(std::slice::from_ref(&graph));
-
-        assert!(query.contains("VALUES ?g"));
-        assert!(query.contains(&format!("<{graph}>")));
-        assert!(query.contains("GRAPH ?g"));
-    }
-
-    #[test]
-    fn http_service_object_ref_query_is_scoped_by_requested_refs() {
-        let fixtures = representative_fixtures();
-        let query = object_refs_query(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-            fixtures.episode.id,
-            ObjectType::Episode,
-        )]));
-
-        assert!(query.contains("VALUES (?id ?objectType)"));
-        assert!(query.contains(&fixtures.episode.id.to_string()));
-        assert!(query.contains("episode"));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires local test Oxigraph: docker compose -f docker-compose.oxigraph.test.yml up -d and OXIGRAPH_TEST_CONNECTION_STRING"]
-    async fn oxigraph_http_service_live_smoke_upserts_queries_and_filters(
-    ) -> Result<(), CustomError> {
-        let endpoint = std::env::var("OXIGRAPH_TEST_CONNECTION_STRING")
-            .unwrap_or_else(|_| "http://localhost:7879".to_owned());
-        ensure_live_smoke_test_endpoint(&endpoint)?;
-        let store = OxigraphHttpGraphAuthorityStore::new(endpoint)?;
-        let fixtures = representative_fixtures();
-        let smoke_graph_uris = fixtures
-            .objects()
-            .into_iter()
-            .map(|object| {
-                let (id, object_type) = object_identity(&object);
-                graph_uri(object_type, id)
-            })
-            .chain(
-                fixtures
-                    .links()
-                    .into_iter()
-                    .map(|link| graph_uri(ObjectType::MemoryLink, link.id)),
-            )
-            .collect::<Vec<_>>();
-
-        let test_result: Result<(), CustomError> = async {
-            store.upsert_objects(&fixtures.objects()).await?;
-            store.upsert_links(&fixtures.links()).await?;
-
-            let queried = store
-                .query_objects(&GraphObjectQuery::by_refs(vec![
-                    GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                    GraphObjectRef::new(fixtures.derived_reflection.id, ObjectType::DerivedMemory),
-                ]))
-                .await?;
-            if !queried.contains(&MemoryObject::Episode(fixtures.episode.clone())) {
-                return Err(CustomError::DatabaseError(
-                    "Oxigraph smoke did not return the stored episode".to_owned(),
-                ));
-            }
-            if !queried.contains(&MemoryObject::DerivedMemory(
-                fixtures.derived_reflection.clone(),
-            )) {
-                return Err(CustomError::DatabaseError(
-                    "Oxigraph smoke did not return the stored derived memory".to_owned(),
-                ));
-            }
-
-            let vector = FixedVectorStore::new(vec![
-                VectorCandidateMatch::new(
-                    fixtures.derived_reflection.id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::Summary,
-                    0.99,
-                ),
-                VectorCandidateMatch::new(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::Summary,
-                    0.98,
-                ),
-            ]);
-            let embedder = FixedEmbedder::new(vec![1.0, 0.0]);
-            let pipeline = RetrievePipeline::new(&store, &vector, &embedder);
-
-            let outcome = pipeline
-                .retrieve(RetrievalContext::new("service graph authority"))
-                .await?;
-            if !outcome
-                .pack
-                .derived_memories
-                .iter()
-                .any(|included| included.memory.id == fixtures.derived_reflection.id)
-            {
-                return Err(CustomError::DatabaseError(
-                    "Oxigraph smoke retrieval did not include the current derived memory"
-                        .to_owned(),
-                ));
-            }
-            if outcome
-                .pack
-                .derived_memories
-                .iter()
-                .chain(outcome.pack.preferences.iter())
-                .any(|included| included.memory.id == fixtures.suppressed_seed.id)
-            {
-                return Err(CustomError::DatabaseError(
-                    "Oxigraph smoke retrieval included a suppressed derived memory".to_owned(),
-                ));
-            }
-            Ok(())
-        }
-        .await;
-
-        let cleanup_result = store.delete_named_graphs(&smoke_graph_uris).await;
-        let remaining_result = store.named_graph_quad_count(&smoke_graph_uris).await;
-        cleanup_result?;
-        let remaining = remaining_result?;
-        if remaining != 0 {
-            return Err(CustomError::DatabaseError(format!(
-                "Oxigraph smoke cleanup left {remaining} quads in smoke graphs"
-            )));
-        }
-        test_result
-    }
-
-    fn ensure_live_smoke_test_endpoint(endpoint: &str) -> Result<(), CustomError> {
-        let parsed = reqwest::Url::parse(endpoint).map_err(|error| {
-            CustomError::ConfigParseError(format!(
-                "OXIGRAPH_TEST_CONNECTION_STRING must be a valid test endpoint URL: {error}"
-            ))
-        })?;
-        let host = parsed.host_str().unwrap_or_default();
-        let is_local_test_endpoint = parsed.scheme() == "http"
-            && matches!(host, "localhost" | "127.0.0.1" | "::1")
-            && parsed.port_or_known_default() == Some(7879);
-        if is_local_test_endpoint {
-            return Ok(());
-        }
-
-        Err(CustomError::ConfigParseError(
-            "Refusing live Oxigraph smoke cleanup outside the local test endpoint http://localhost:7879"
-            .to_owned(),
-        ))
-    }
-
-    #[test]
-    fn live_smoke_endpoint_guard_allows_only_local_test_service() {
-        assert!(ensure_live_smoke_test_endpoint("http://localhost:7879").is_ok());
-        assert!(ensure_live_smoke_test_endpoint("http://127.0.0.1:7879").is_ok());
-        assert!(ensure_live_smoke_test_endpoint("http://localhost:7878").is_err());
-        assert!(ensure_live_smoke_test_endpoint("https://localhost:7879").is_err());
-        assert!(ensure_live_smoke_test_endpoint("http://example.com:7879").is_err());
     }
 
     #[tokio::test]

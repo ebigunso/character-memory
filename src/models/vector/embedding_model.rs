@@ -27,13 +27,6 @@ pub(crate) enum EmbeddingModel {
     ///
     /// A larger model with 3072-dimensional embeddings for higher accuracy
     TextEmbedding3Large,
-
-    /// OpenAI text-embedding-ada-002 model.
-    ///
-    /// # Description
-    ///
-    /// Legacy model with 1536-dimensional embeddings
-    TextEmbeddingAda002,
 }
 
 impl EmbeddingModel {
@@ -46,7 +39,6 @@ impl EmbeddingModel {
         match self {
             Self::TextEmbedding3Small => 1536,
             Self::TextEmbedding3Large => 3072,
-            Self::TextEmbeddingAda002 => 1536,
         }
     }
 
@@ -59,7 +51,6 @@ impl EmbeddingModel {
         match self {
             Self::TextEmbedding3Small => "text-embedding-3-small",
             Self::TextEmbedding3Large => "text-embedding-3-large",
-            Self::TextEmbeddingAda002 => "text-embedding-ada-002",
         }
     }
 }
@@ -71,7 +62,6 @@ impl FromStr for EmbeddingModel {
         match s.trim() {
             "text-embedding-3-small" => Ok(Self::TextEmbedding3Small),
             "text-embedding-3-large" => Ok(Self::TextEmbedding3Large),
-            "text-embedding-ada-002" => Ok(Self::TextEmbeddingAda002),
             _ => Err(CustomError::ConfigParseError(format!(
                 "Invalid embedding model: {s}",
             ))),
@@ -93,10 +83,6 @@ mod tests {
             "text-embedding-3-large".parse::<EmbeddingModel>(),
             Ok(EmbeddingModel::TextEmbedding3Large)
         ));
-        assert!(matches!(
-            "text-embedding-ada-002".parse::<EmbeddingModel>(),
-            Ok(EmbeddingModel::TextEmbeddingAda002)
-        ));
     }
 
     #[test]
@@ -111,7 +97,6 @@ mod tests {
     fn test_vector_size() {
         assert_eq!(EmbeddingModel::TextEmbedding3Small.vector_size(), 1536);
         assert_eq!(EmbeddingModel::TextEmbedding3Large.vector_size(), 3072);
-        assert_eq!(EmbeddingModel::TextEmbeddingAda002.vector_size(), 1536);
     }
 
     #[test]
@@ -123,10 +108,6 @@ mod tests {
         assert_eq!(
             EmbeddingModel::TextEmbedding3Large.as_str(),
             "text-embedding-3-large"
-        );
-        assert_eq!(
-            EmbeddingModel::TextEmbeddingAda002.as_str(),
-            "text-embedding-ada-002"
         );
     }
 }

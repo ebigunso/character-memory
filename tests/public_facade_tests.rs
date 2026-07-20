@@ -1,8 +1,7 @@
 use character_memory::{
     CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, MemoryObjectDraft,
-    ObservationDraft, RememberDraft, ReplacementDerivedMemoryDraft, RetrievalContext,
-    SourceProvenanceReference,
+    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObservationDraft, RememberInput,
+    RememberOptions, ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
 };
 use uuid::Uuid;
 
@@ -47,11 +46,13 @@ async fn public_remember_and_retrieve_use_graph_authoritative_path() {
         preference.id = Some(derived_id);
 
         let outcome = memory
-            .remember(RememberDraft::new([
-                MemoryObjectDraft::Episode(episode),
-                MemoryObjectDraft::Observation(observation),
-                MemoryObjectDraft::DerivedMemory(preference),
-            ]))
+            .remember(
+                RememberInput::new("The user prefers deterministic public facade tests.")
+                    .with_episode(episode)
+                    .with_observation(observation)
+                    .with_derived_memory(preference),
+                RememberOptions::default(),
+            )
             .await
             .map_err(|error| format!("remember should use public graph/vector facade: {error}"))?;
 
@@ -131,10 +132,12 @@ async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
         old_preference.id = Some(old_id);
 
         memory
-            .remember(RememberDraft::new([
-                MemoryObjectDraft::Episode(episode),
-                MemoryObjectDraft::DerivedMemory(old_preference),
-            ]))
+            .remember(
+                RememberInput::new("The user corrected a public facade preference.")
+                    .with_episode(episode)
+                    .with_derived_memory(old_preference),
+                RememberOptions::default(),
+            )
             .await
             .map_err(|error| format!("initial remember should succeed: {error}"))?;
 

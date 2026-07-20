@@ -2,7 +2,7 @@
 // denormalized recall/filter hints; graph state stays authoritative.
 use chrono::{DateTime, Utc};
 
-use crate::api::types::{
+use crate::domain::{
     DerivedType, EntityType, MemoryId, Modality, ObjectType, RetentionState, Stability,
     ThreadStatus,
 };
@@ -175,7 +175,7 @@ impl From<&VectorRecord> for EmbeddingInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{graph_uri, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::{graph_uri, DEFAULT_SCHEMA_VERSION};
 
     #[test]
     fn vector_record_converts_to_embedding_input_without_payload_metadata() {

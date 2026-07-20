@@ -13,16 +13,16 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::api::types::{
+use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Stability,
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-    VectorTimeField, VectorTimeRangeFilter,
+    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateDiagnosticRecord,
+    VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
+    VectorRecordEmbedding, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -134,16 +134,7 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             })
             .collect();
 
-        matches.sort_by(|left, right| {
-            right
-                .score
-                .total_cmp(&left.score)
-                .then_with(|| left.object_id.cmp(&right.object_id))
-                .then_with(|| {
-                    object_type_rank(left.object_type).cmp(&object_type_rank(right.object_type))
-                })
-                .then_with(|| surface_rank(left.surface).cmp(&surface_rank(right.surface)))
-        });
+        matches = canonicalize_vector_candidates(matches);
         matches.truncate(query.limit);
 
         Ok(matches)
@@ -169,7 +160,7 @@ fn default_diagnostic_record(record: &VectorCandidateRecord) -> VectorCandidateD
     VectorCandidateDiagnosticRecord {
         object_id: record.object_id,
         object_type: record.object_type,
-        graph_uri: crate::api::types::graph_uri(record.object_type, record.object_id),
+        graph_uri: crate::domain::graph_uri(record.object_type, record.object_id),
         surface: record.surface,
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         retention_state: record.retention_state,
@@ -932,16 +923,6 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
     }
 }
 
-fn surface_rank(surface: VectorSurface) -> u8 {
-    match surface {
-        VectorSurface::Summary => 0,
-        VectorSurface::Text => 1,
-        VectorSurface::Name => 2,
-        VectorSurface::DerivedText => 3,
-        VectorSurface::Query => 4,
-    }
-}
-
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
@@ -1246,6 +1227,53 @@ mod tests {
 
         assert_eq!(after_delete.len(), 1);
         assert_eq!(after_delete[0].object_id, fixtures.salient_observation.id);
+    }
+
+    #[tokio::test]
+    async fn vector_fake_canonicalizes_equal_scores_before_limit_across_insertion_orders() {
+        let first_store = FakeVectorCandidateStore::new();
+        let second_store = FakeVectorCandidateStore::new();
+        let first_episode_id = Uuid::from_u128(2);
+        let second_episode_id = Uuid::from_u128(3);
+        let observation_id = Uuid::from_u128(1);
+        let candidates = vec![
+            VectorCandidateRecord::new(
+                observation_id,
+                ObjectType::Observation,
+                VectorSurface::Text,
+                vec![1.0, 0.0],
+            ),
+            VectorCandidateRecord::new(
+                second_episode_id,
+                ObjectType::Episode,
+                VectorSurface::Summary,
+                vec![1.0, 0.0],
+            ),
+            VectorCandidateRecord::new(
+                first_episode_id,
+                ObjectType::Episode,
+                VectorSurface::Summary,
+                vec![1.0, 0.0],
+            ),
+        ];
+        let mut reversed = candidates.clone();
+        reversed.reverse();
+
+        first_store.upsert_candidates(&candidates).await.unwrap();
+        second_store.upsert_candidates(&reversed).await.unwrap();
+
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 2);
+        let first = first_store.search_candidates(&query).await.unwrap();
+        let second = second_store.search_candidates(&query).await.unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![first_episode_id, second_episode_id]
+        );
     }
 
     #[tokio::test]

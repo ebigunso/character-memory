@@ -3,13 +3,15 @@ status: accepted
 adr_type: implementation
 date: 2026-07-05
 deciders: ["ebigunso"]
-consulted: ["GPT-5 Codex"]
+consulted: ["GPT-5.5"]
 informed: []
 supersedes: []
 superseded_by: null
 ---
 
 # ADR-I-0019: Place the continuity evaluation harness in the private evals repository
+
+> Update (2026-07-19): the `CharacterMemoryEvals` repository has since been made public. The placement decision and delegation boundary below are unchanged; the privacy rationale and wording constraints in this record describe the situation at decision time and are retained as history. Current wording guidance lives in the repository documentation rules.
 
 ## Context and Problem Statement
 

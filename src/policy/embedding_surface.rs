@@ -1,6 +1,6 @@
 // Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
-use crate::api::types::{
+use crate::domain::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
 };
 
@@ -167,16 +167,16 @@ pub(crate) fn memory_object_vector_record(object: &MemoryObject) -> Option<Vecto
 
 fn derived_label(memory: &DerivedMemory) -> &'static str {
     match memory.derived_type {
-        crate::api::types::DerivedType::Reflection => "Reflection",
-        crate::api::types::DerivedType::UserPreference => "User preference",
-        crate::api::types::DerivedType::AssistantPreference => "Assistant preference",
-        crate::api::types::DerivedType::Commitment => "Commitment",
-        crate::api::types::DerivedType::OpenLoop => "Open loop",
-        crate::api::types::DerivedType::CharacterSignal => "Character signal",
-        crate::api::types::DerivedType::RelationshipNote => "Relationship note",
-        crate::api::types::DerivedType::ProjectNote => "Project note",
-        crate::api::types::DerivedType::Claim => "Claim",
-        crate::api::types::DerivedType::Correction => "Correction",
+        crate::domain::DerivedType::Reflection => "Reflection",
+        crate::domain::DerivedType::UserPreference => "User preference",
+        crate::domain::DerivedType::AssistantPreference => "Assistant preference",
+        crate::domain::DerivedType::Commitment => "Commitment",
+        crate::domain::DerivedType::OpenLoop => "Open loop",
+        crate::domain::DerivedType::CharacterSignal => "Character signal",
+        crate::domain::DerivedType::RelationshipNote => "Relationship note",
+        crate::domain::DerivedType::ProjectNote => "Project note",
+        crate::domain::DerivedType::Claim => "Claim",
+        crate::domain::DerivedType::Correction => "Correction",
     }
 }
 
@@ -205,7 +205,7 @@ fn clean_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{
+    use crate::domain::{
         DerivedType, EntityType, MemoryLink, Modality, RelationType, RetentionState, Stability,
         ThreadStatus, DEFAULT_SCHEMA_VERSION,
     };

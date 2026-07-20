@@ -4,6 +4,17 @@
 
 v0.1 stores episodes and simple derived memories. v0.1.2 hardens retrieval so broad entities do not flood context. v0.1.3 prepares the shared write-plan path those richer continuity structures can use. v0.2 then makes memories actively support continuity through explicit scopes, reflections, relationship states, character signals, open loops, and commitments.
 
+## Inherited from the v0.1.5 closeout
+
+The v0.1.5 closeout (see the closeout report in `docs/roadmap/`) hands this phase four explicit obligations:
+
+- Own the joined admission/ranking design item deferred from v0.1.5: admission gating and ranking credit for graph-only evidence, so relevant memories reachable only through graph structure are not starved by vector-scored items at pack admission. Planning baseline: the graph-only probe scenario and the recorded benchmark baselines; pack-admission changes invalidate the pollution and context-size baselines recorded in ADR-I-0022 and must re-measure.
+- Own the selectivity-widening item deferred from v0.1.5: applying selectivity beyond entity roots requires retrieval statistics keyed by something other than entities, which is this phase's signal design to make or explicitly decline.
+- Build scoped and person-keyed evaluation scenarios (continuity situation catalog items B1-B3: person-keyed separation, group versus one-on-one frames, differential relationship states) BEFORE implementing ContinuityScope, so scope-leakage is measurable from the first implementation — preserving the eval-first pattern v0.1.5 established.
+- Answer the intra-process concurrency question ReflectionJob introduces: background derivation inside one process creates write/read interleaving the v0.1 family never had to answer; the single-writer assumptions in the current stores must be examined against reflection scheduling.
+
+Caveat on inherited baselines: the benchmark gap-bucket recall baselines rest on small per-bucket sample counts (medium n=3, long n=4); treat them as directional planning input, not stable regression thresholds, until the benchmark roster widens.
+
 The key refinement in this version is scope:
 
 ```text

@@ -1,5 +1,4 @@
 mod embedded;
-mod http;
 mod rdf_mapping;
 mod shared;
 mod sparql_selectors;
@@ -8,4 +7,3 @@ mod tests;
 mod vocabulary;
 
 pub(crate) use embedded::OxigraphGraphAuthorityStore;
-pub(crate) use http::OxigraphHttpGraphAuthorityStore;

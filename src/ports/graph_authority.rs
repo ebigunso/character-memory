@@ -1,12 +1,10 @@
 // Graph authority contract: port trait plus its query/result value types.
 // The bounded-expansion algorithm lives in crate::policy::graph_expansion.
-// Oxigraph service mode is the application default; embedded and fake stores
-// keep tests and explicit fixture runs deterministic.
+// Embedded persistent Oxigraph is the application default; in-memory and fake
+// stores keep tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
 
-use crate::api::types::{
-    DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType,
-};
+use crate::domain::{DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType};
 use crate::errors::CustomError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

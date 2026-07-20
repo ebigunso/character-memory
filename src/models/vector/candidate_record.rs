@@ -1,8 +1,11 @@
 // Vector candidate query surface. Some filters are exercised by live
 // adapters while deterministic tests use narrower subsets.
+use std::collections::{hash_map::Entry, HashMap};
+
 use chrono::{DateTime, Utc};
 
-use crate::api::types::{default_retrieval_object_types, MemoryId, ObjectType, RetentionState};
+use crate::api::types::default_retrieval_object_types;
+use crate::domain::{MemoryId, ObjectType, RetentionState};
 
 use super::{VectorPayloadHints, VectorRelationshipHints};
 
@@ -256,6 +259,65 @@ impl VectorCandidateMatch {
     }
 }
 
+pub(crate) fn canonicalize_vector_candidates(
+    candidates: impl IntoIterator<Item = VectorCandidateMatch>,
+) -> Vec<VectorCandidateMatch> {
+    let mut by_identity = HashMap::new();
+    for candidate in candidates {
+        let identity = (
+            candidate.object_id,
+            object_type_rank(candidate.object_type),
+            vector_surface_rank(candidate.surface),
+        );
+        match by_identity.entry(identity) {
+            Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+            Entry::Occupied(mut entry) if candidate.score.total_cmp(&entry.get().score).is_gt() => {
+                entry.insert(candidate);
+            }
+            Entry::Occupied(_) => {}
+        }
+    }
+
+    let mut candidates = by_identity.into_values().collect::<Vec<_>>();
+    candidates.sort_by(compare_vector_candidates);
+    candidates
+}
+
+fn compare_vector_candidates(
+    left: &VectorCandidateMatch,
+    right: &VectorCandidateMatch,
+) -> std::cmp::Ordering {
+    right
+        .score
+        .total_cmp(&left.score)
+        .then_with(|| object_type_rank(left.object_type).cmp(&object_type_rank(right.object_type)))
+        .then_with(|| left.object_id.cmp(&right.object_id))
+        .then_with(|| vector_surface_rank(left.surface).cmp(&vector_surface_rank(right.surface)))
+}
+
+fn object_type_rank(object_type: ObjectType) -> u8 {
+    match object_type {
+        ObjectType::Episode => 0,
+        ObjectType::Observation => 1,
+        ObjectType::Entity => 2,
+        ObjectType::MemoryThread => 3,
+        ObjectType::DerivedMemory => 4,
+        ObjectType::MemoryLink => 5,
+    }
+}
+
+fn vector_surface_rank(surface: VectorSurface) -> u8 {
+    match surface {
+        VectorSurface::Summary => 0,
+        VectorSurface::Text => 1,
+        VectorSurface::Name => 2,
+        VectorSurface::DerivedText => 3,
+        VectorSurface::Query => 4,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +349,29 @@ mod tests {
             search.object_types,
             vec![ObjectType::Episode, ObjectType::DerivedMemory]
         );
+    }
+
+    #[test]
+    fn canonical_candidates_dedupe_identity_at_highest_score_and_totally_order_ties() {
+        let episode_id = MemoryId::from_u128(2);
+        let observation_id = MemoryId::from_u128(1);
+        let candidates = vec![
+            VectorCandidateMatch::new(episode_id, ObjectType::Episode, VectorSurface::Summary, 0.4),
+            VectorCandidateMatch::new(
+                observation_id,
+                ObjectType::Observation,
+                VectorSurface::Text,
+                0.9,
+            ),
+            VectorCandidateMatch::new(episode_id, ObjectType::Episode, VectorSurface::Summary, 0.9),
+        ];
+
+        let canonical = canonicalize_vector_candidates(candidates);
+
+        assert_eq!(canonical.len(), 2);
+        assert_eq!(canonical[0].object_id, episode_id);
+        assert_eq!(canonical[0].score, 0.9);
+        assert_eq!(canonical[1].object_id, observation_id);
     }
 
     #[test]

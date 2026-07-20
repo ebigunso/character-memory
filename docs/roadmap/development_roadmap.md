@@ -257,8 +257,8 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.1 | Persistent graph authority | Finished. Durable Oxigraph-backed graph authority, restart-safe retrieval, Qdrant/Oxigraph reconciliation, and persistence validation. |
 | v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Finished. Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, prepare/validate/commit flow, and shared manual/future-generated commit machinery. |
-| v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the private companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
-| v0.1.5 | Eval-driven v0.1 family closeout | New. Run the evaluation harness, record findings, tune selectivity/fanout defaults from measured data, fix revealed retrieval/guardrail/write-path/persistence issues, and close out the v0.1 family before v0.2. |
+| v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
+| v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](v0_1_5_closeout_report.md). |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
@@ -480,7 +480,7 @@ This phase closes the gap where Qdrant candidates may survive restart while the 
 ## Goals
 
 ```text
-support Docker-backed Oxigraph service configuration and embedded persistent storage configuration
+support embedded persistent Oxigraph storage configuration
 preserve graph-authoritative state across process restarts
 keep in-memory graph mode available for deterministic tests
 validate restart-safe retrieval
@@ -489,9 +489,9 @@ prevent vector-only candidates from becoming behavior-influencing memory
 document persistence configuration and operational expectations
 ```
 
-Oxigraph service mode is the application default.
+Embedded persistent Oxigraph is the application default.
 
-Embedded persistent graph mode is explicit through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
+Persistent graph mode is selected through `GRAPH_STORE_MODE=persistent`; in-memory graph mode is reserved for tests and explicit fixture runs through `GRAPH_STORE_MODE=in_memory`.
 
 ## Non-goals
 
@@ -510,7 +510,7 @@ distributed transactions across Qdrant and Oxigraph
 
 ```text
 configurable Oxigraph graph store mode
-service-backed and embedded persistent Oxigraph graph authority implementation
+embedded persistent Oxigraph graph authority implementation
 restart-safe graph authority tests
 retrieval behavior tests after graph restart
 Qdrant/Oxigraph reconciliation diagnostics
@@ -845,7 +845,7 @@ prepare
 `remember()` should remain available as a convenience wrapper around those steps.
 
 ```text
-remember(input)
+remember(input, options)
   = prepare(input)
   + validate_plan(plan)
   + commit(plan)
@@ -1219,6 +1219,15 @@ separate current continuity context from raw historical memories
 avoid assuming continuity is centered on one user-assistant relationship
 ```
 
+## Inherited obligations from the v0.1.5 closeout
+
+```text
+own the deferred admission/ranking design item (ranking credit for graph-only evidence)
+own the deferred selectivity-widening item (non-entity-keyed statistics or explicit declination)
+build scoped/person-keyed evaluation scenarios before implementing ContinuityScope
+answer the intra-process concurrency question ReflectionJob introduces
+```
+
 ## Acceptance criteria additions
 
 ```text
@@ -1535,7 +1544,7 @@ This is a future path, not starter scope.
 
 ```rust
 let memory = CharacterMemory::new(settings, collection_name).await?;
-let stored = memory.remember(remember_draft).await?;
+let stored = memory.remember(remember_input, remember_options).await?;
 let context = memory.retrieve(retrieval_context).await?;
 let correction = memory.correct(correct_memory_draft).await?;
 let forget = memory.forget(forget_memory_draft).await?;
@@ -1590,7 +1599,7 @@ let outcome = memory.remember(input, remember_options).await?;
 Conceptually:
 
 ```text
-remember(input)
+remember(input, options)
   = prepare(input)
   + validate_plan(plan)
   + commit(plan)
@@ -1613,9 +1622,9 @@ let outcome = memory.commit(approved_plan, commit_options).await?;
 
 ## v0.1.4 / v0.1.5 API surface
 
-The continuity evaluation harness is implemented in the private companion `CharacterMemoryEvals` repository as a development and measurement aid, not core library functionality. It adds no public memory facade APIs.
+The continuity evaluation harness is implemented in the public companion `CharacterMemoryEvals` repository as a development and measurement aid, not core library functionality. It adds no public memory facade APIs.
 
-v0.1.5 may adjust configuration defaults (selectivity smoothing, fanout budgets) based on measured data, but it does not change the public API shape.
+v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no new facade methods; it did add public diagnostics — warning fields on lifecycle mutation outcomes and validation warnings on write plans, with their types re-exported from the crate root — and removed the Oxigraph service mode from the configuration surface (ADR-I-0021).
 
 ## v0.2 API additions
 

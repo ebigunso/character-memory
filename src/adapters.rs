@@ -4,9 +4,6 @@ pub(crate) mod qdrant;
 pub(crate) mod stats;
 
 pub(crate) use openai::OpenAIEmbeddingProvider;
-// Composition modes may select either graph adapter; remove when both are referenced in every target.
-#[allow(unused_imports)]
-pub(crate) use oxigraph::{OxigraphGraphAuthorityStore, OxigraphHttpGraphAuthorityStore};
 pub(crate) use qdrant::QdrantVectorCandidateStore;
 // Stats adapters are selected by composition/tests in different target sets; remove when target use converges.
 #[allow(unused_imports)]

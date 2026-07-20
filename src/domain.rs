@@ -61,7 +61,6 @@ pub enum EntityType {
 pub enum DerivedType {
     Reflection,
     UserPreference,
-    #[serde(alias = "assistant_behavior_note")]
     AssistantPreference,
     Commitment,
     OpenLoop,
@@ -70,13 +69,6 @@ pub enum DerivedType {
     ProjectNote,
     Claim,
     Correction,
-}
-
-impl DerivedType {
-    /// Compatibility name for callers still migrating to the ADR vocabulary.
-    /// Remove this alias when pre-ADR `assistant_behavior_note` imports are no longer supported.
-    #[allow(non_upper_case_globals)]
-    pub const AssistantBehaviorNote: Self = Self::AssistantPreference;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

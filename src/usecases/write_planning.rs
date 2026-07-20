@@ -625,12 +625,12 @@ mod construction_tests {
     }
 }
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    CandidateRationale, CandidateValidation, CandidateValidationStatus, DraftDefaults, MemoryLink,
-    MemoryObject, RetentionState,
+    CandidateRationale, CandidateValidation, CandidateValidationStatus, DraftDefaults,
 };
+use crate::domain::{MemoryLink, MemoryObject, RetentionState};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
 use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
@@ -733,6 +733,7 @@ struct PlanValidationContext {
     plan_refs: HashSet<GraphObjectRef>,
     refs_requiring_graph: HashSet<GraphObjectRef>,
     existing_refs: HashSet<GraphObjectRef>,
+    episode_content_by_id: HashMap<MemoryId, String>,
     plan_errors: Vec<String>,
 }
 
@@ -742,12 +743,14 @@ impl PlanValidationContext {
             plan_refs: HashSet::new(),
             refs_requiring_graph: HashSet::new(),
             existing_refs: HashSet::new(),
+            episode_content_by_id: HashMap::new(),
             plan_errors: validate_plan_identity(plan),
         };
 
         for candidate in &plan.candidates {
             context.collect_plan_ref(candidate);
             context.collect_referenced_refs(candidate);
+            context.collect_echo_surface_data(candidate);
         }
 
         Ok(context)
@@ -828,6 +831,16 @@ impl PlanValidationContext {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn collect_echo_surface_data(&mut self, candidate: &MemoryCandidate) {
+        if let MemoryCandidate::Episode(candidate) = candidate {
+            if let Some(id) = candidate.draft.id {
+                self.episode_content_by_id
+                    .entry(id)
+                    .or_insert_with(|| candidate.draft.summary.clone());
+            }
         }
     }
 
@@ -1017,17 +1030,60 @@ impl PlanValidationContext {
             }
         }
 
-        if errors.is_empty() {
+        let mut validation = if errors.is_empty() {
             CandidateValidation::valid(index, candidate.kind())
         } else {
             let mut validation =
                 CandidateValidation::invalid(index, candidate.kind(), errors[0].clone());
             validation.errors.extend(errors.into_iter().skip(1));
             validation
+        };
+        if let Some(warning) = self.echo_surface_warning(candidate) {
+            validation.warnings.push(warning);
         }
+        validation
     }
 
-    fn validate_derived_sources(&self, object: &crate::api::types::DerivedMemory) -> Vec<String> {
+    fn echo_surface_warning(&self, candidate: &MemoryCandidate) -> Option<String> {
+        let (candidate_content, source_episode_ids) = match candidate {
+            MemoryCandidate::Observation(candidate) => (
+                candidate.draft.text.as_str(),
+                std::slice::from_ref(&candidate.draft.episode_id),
+            ),
+            MemoryCandidate::DerivedMemory(candidate) => (
+                candidate.draft.text.as_str(),
+                candidate.draft.derived_from_episode_ids.as_slice(),
+            ),
+            _ => return None,
+        };
+
+        let mut matching_episode_ids = source_episode_ids
+            .iter()
+            .filter(|episode_id| {
+                let Some(episode_content) = self.episode_content_by_id.get(episode_id) else {
+                    return false;
+                };
+                candidate_content == episode_content
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        matching_episode_ids.sort();
+        matching_episode_ids.dedup();
+        if matching_episode_ids.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "echo-surface: candidate content is byte-identical to source episode candidate(s): {}",
+            matching_episode_ids
+                .iter()
+                .map(MemoryId::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ))
+    }
+
+    fn validate_derived_sources(&self, object: &crate::domain::DerivedMemory) -> Vec<String> {
         let mut errors = Vec::new();
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
@@ -1355,7 +1411,7 @@ fn validate_link(link: &MemoryLink) -> Vec<String> {
     errors
 }
 
-fn validate_derived_memory_lifecycle(object: &crate::api::types::DerivedMemory) -> Vec<String> {
+fn validate_derived_memory_lifecycle(object: &crate::domain::DerivedMemory) -> Vec<String> {
     let mut errors = Vec::new();
     if object.retention_state == RetentionState::Suppressed && object.is_current {
         errors.push("suppressed memories are not current".to_owned());
@@ -1445,10 +1501,10 @@ mod tests {
 
     use super::RememberPlanDefaults;
     use crate::api::types::{
-        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EntityDraft,
-        EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability,
-        StatsUpdateCandidate, VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
+        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, EntityDraft, EpisodeDraft,
+        MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate, VectorIndexCandidate,
     };
+    use crate::domain::{DerivedType, RelationType, Stability, DEFAULT_SCHEMA_VERSION};
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
@@ -1470,6 +1526,141 @@ mod tests {
         assert!(verdict.is_valid());
         assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 13);
         assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn warns_when_observation_content_echoes_source_episode_candidate() {
+        let graph = FakeGraphAuthorityStore::new();
+        let plan = valid_plan();
+        let source_episode_id = plan
+            .candidates
+            .iter()
+            .find_map(|candidate| match candidate {
+                MemoryCandidate::Observation(candidate) => Some(candidate.draft.episode_id),
+                _ => None,
+            })
+            .unwrap();
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(verdict.is_valid());
+        let validation = verdict
+            .validations
+            .iter()
+            .find(|validation| validation.candidate_kind == MemoryCandidateKind::Observation)
+            .unwrap();
+        assert_eq!(validation.status, CandidateValidationStatus::Valid);
+        assert_eq!(validation.warnings.len(), 1);
+        assert!(validation.warnings[0].contains("echo-surface"));
+        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn warns_when_derived_memory_content_echoes_source_episode_candidate() {
+        let graph = FakeGraphAuthorityStore::new();
+        let plan = RememberInput::new("source episode content")
+            .with_observation(ObservationDraft::new(
+                MemoryId::nil(),
+                "distinct observation content",
+            ))
+            .with_derived_memory(DerivedMemoryDraft::new(
+                DerivedType::Reflection,
+                "source episode content",
+            ))
+            .prepare_write_plan_with_options(&defaults(), false, false);
+        let source_episode_id = plan
+            .candidates
+            .iter()
+            .find_map(|candidate| match candidate {
+                MemoryCandidate::DerivedMemory(candidate) => {
+                    candidate.draft.derived_from_episode_ids.first().copied()
+                }
+                _ => None,
+            })
+            .unwrap();
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(verdict.is_valid());
+        let validation = verdict
+            .validations
+            .iter()
+            .find(|validation| validation.candidate_kind == MemoryCandidateKind::DerivedMemory)
+            .unwrap();
+        assert_eq!(validation.status, CandidateValidationStatus::Valid);
+        assert_eq!(validation.warnings.len(), 1);
+        assert!(validation.warnings[0].contains("echo-surface"));
+        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn does_not_warn_for_distinct_surfaces_with_vector_candidates_enabled() {
+        let graph = FakeGraphAuthorityStore::new();
+        let plan = RememberInput::new("source episode content")
+            .with_observation(ObservationDraft::new(
+                MemoryId::nil(),
+                "distinct observation content",
+            ))
+            .with_derived_memory(DerivedMemoryDraft::new(
+                DerivedType::Reflection,
+                "distinct derived content",
+            ))
+            .prepare_write_plan_with_options(&defaults(), true, false);
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(verdict.is_valid());
+        assert!(verdict
+            .validations
+            .iter()
+            .filter(|validation| {
+                matches!(
+                    validation.candidate_kind,
+                    MemoryCandidateKind::Observation | MemoryCandidateKind::DerivedMemory
+                )
+            })
+            .all(|validation| validation.warnings.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn does_not_warn_for_distinct_observation_and_derived_surfaces() {
+        let graph = FakeGraphAuthorityStore::new();
+        let plan = RememberInput::new("source episode content")
+            .with_observation(ObservationDraft::new(
+                MemoryId::nil(),
+                "distinct observation content",
+            ))
+            .with_derived_memory(DerivedMemoryDraft::new(
+                DerivedType::Reflection,
+                "distinct derived content",
+            ))
+            .prepare_write_plan_with_options(&defaults(), false, false);
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert!(verdict.is_valid());
+        assert!(verdict
+            .validations
+            .iter()
+            .filter(|validation| {
+                matches!(
+                    validation.candidate_kind,
+                    MemoryCandidateKind::Observation | MemoryCandidateKind::DerivedMemory
+                )
+            })
+            .all(|validation| validation.warnings.is_empty()));
     }
 
     #[tokio::test]
@@ -1783,7 +1974,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_missing_candidate_timestamps() {
         let graph = FakeGraphAuthorityStore::new();
-        let mut draft = EntityDraft::new(crate::api::types::EntityType::Project, "no timestamps");
+        let mut draft = EntityDraft::new(crate::domain::EntityType::Project, "no timestamps");
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445055"));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let plan = valid_plan().with_candidate(MemoryCandidate::Entity(

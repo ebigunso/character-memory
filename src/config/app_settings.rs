@@ -1,17 +1,17 @@
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::api::types::{ObjectType, RelationType};
+use crate::domain::{ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::models::vector::EmbeddingModel;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
-    oxigraph_connection_string: SecretString,
+    oxigraph_path: SecretString,
     openai_api_key: SecretString,
     embedding_model: SecretString,
     #[serde(default)]
@@ -72,11 +72,9 @@ impl FanoutBudgetSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GraphStoreMode {
     #[default]
-    Service,
     Persistent,
     InMemory,
 }
@@ -84,13 +82,22 @@ pub enum GraphStoreMode {
 impl GraphStoreMode {
     fn parse(value: &str) -> Result<Self, CustomError> {
         match value {
-            "service" => Ok(Self::Service),
             "persistent" => Ok(Self::Persistent),
             "in_memory" => Ok(Self::InMemory),
             other => Err(CustomError::ConfigParseError(format!(
-                "GRAPH_STORE_MODE must be service, persistent, or in_memory, got {other}"
+                "GRAPH_STORE_MODE must be persistent or in_memory, got {other}"
             ))),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for GraphStoreMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -144,7 +151,7 @@ impl Settings {
     ///
     /// - `config`: A `config::Config` instance containing all required settings:
     ///     - `qdrant_connection_string`: Connection string for Qdrant database
-    ///     - `oxigraph_connection_string`: Connection string for Oxigraph database
+    ///     - `oxigraph_path`: Local filesystem path for the Oxigraph database
     ///     - `openai_api_key`: API key for OpenAI services
     ///
     /// # Returns
@@ -189,16 +196,15 @@ impl Settings {
 
         let qdrant_connection_string = env::var("QDRANT_CONNECTION_STRING")
             .map_err(|e| CustomError::ConfigParseError(format!("QDRANT_CONNECTION_STRING: {e}")))?;
-        let oxigraph_connection_string = env::var("OXIGRAPH_CONNECTION_STRING").map_err(|e| {
-            CustomError::ConfigParseError(format!("OXIGRAPH_CONNECTION_STRING: {e}"))
-        })?;
+        let oxigraph_path = env::var("OXIGRAPH_PATH")
+            .map_err(|e| CustomError::ConfigParseError(format!("OXIGRAPH_PATH: {e}")))?;
         let openai_api_key = env::var("OPENAI_API_KEY")
             .map_err(|e| CustomError::ConfigParseError(format!("OPENAI_API_KEY: {e}")))?;
         let embedding_model = env::var("EMBEDDING_MODEL")
             .map_err(|e| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {e}")))?;
         let graph_store_mode = env::var("GRAPH_STORE_MODE")
             .map(|value| GraphStoreMode::parse(&value))
-            .unwrap_or(Ok(GraphStoreMode::Service))?;
+            .unwrap_or(Ok(GraphStoreMode::Persistent))?;
         let retrieval_stats_store_mode = env::var("RETRIEVAL_STATS_STORE_MODE")
             .map(|value| RetrievalStatsStoreMode::parse(&value))
             .unwrap_or(Ok(RetrievalStatsStoreMode::Sqlite))?;
@@ -220,7 +226,7 @@ impl Settings {
 
         let settings = Self {
             qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
-            oxigraph_connection_string: SecretString::new(oxigraph_connection_string.into()),
+            oxigraph_path: SecretString::new(oxigraph_path.into()),
             openai_api_key: SecretString::new(openai_api_key.into()),
             embedding_model: SecretString::new(embedding_model.into()),
             graph_store_mode,
@@ -238,10 +244,6 @@ impl Settings {
 
     pub fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
-    }
-
-    pub fn get_oxigraph_connection(&self) -> &str {
-        self.oxigraph_connection_string.expose_secret()
     }
 
     pub fn get_graph_store_mode(&self) -> GraphStoreMode {
@@ -275,10 +277,10 @@ impl Settings {
     }
 
     pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
-        let configured_path = self.get_oxigraph_connection();
+        let configured_path = self.oxigraph_path.expose_secret();
         if configured_path.contains("://") {
             return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_CONNECTION_STRING must be a filesystem path for embedded persistent graph mode"
+                "OXIGRAPH_PATH must be a local filesystem path for persistent graph mode"
                     .to_owned(),
             ));
         }
@@ -286,22 +288,10 @@ impl Settings {
         let path = Path::new(configured_path);
         if path.as_os_str().is_empty() {
             return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_CONNECTION_STRING must be a filesystem path for persistent graph mode"
-                    .to_owned(),
+                "OXIGRAPH_PATH must be a filesystem path for persistent graph mode".to_owned(),
             ));
         }
         Ok(path.to_path_buf())
-    }
-
-    pub fn get_oxigraph_endpoint(&self) -> Result<String, CustomError> {
-        let endpoint = self.get_oxigraph_connection().trim().trim_end_matches('/');
-        if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_CONNECTION_STRING must be an HTTP(S) endpoint for service graph mode"
-                    .to_owned(),
-            ));
-        }
-        Ok(endpoint.to_owned())
     }
 
     pub fn get_openai_api_key(&self) -> &str {
@@ -403,13 +393,13 @@ fn reject_unsupported_fanout_target(
 impl Settings {
     pub fn new_for_tests(
         qdrant_connection_string: SecretString,
-        oxigraph_connection_string: SecretString,
+        oxigraph_path: SecretString,
         openai_api_key: SecretString,
         embedding_model: SecretString,
     ) -> Self {
         Settings {
             qdrant_connection_string,
-            oxigraph_connection_string,
+            oxigraph_path,
             openai_api_key,
             embedding_model,
             graph_store_mode: GraphStoreMode::InMemory,
@@ -594,7 +584,7 @@ mod tests {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .set_override("oxigraph_path", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -608,8 +598,11 @@ mod tests {
 
         let settings = result.unwrap();
         assert_eq!(settings.get_qdrant_connection(), "external_qdrant");
-        assert_eq!(settings.get_oxigraph_connection(), "external_oxigraph");
-        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Service);
+        assert_eq!(
+            settings.get_oxigraph_path().unwrap(),
+            PathBuf::from("external_oxigraph")
+        );
+        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
         assert_eq!(
             settings.get_retrieval_stats_store_mode(),
             RetrievalStatsStoreMode::Sqlite
@@ -635,7 +628,7 @@ mod tests {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .set_override("oxigraph_path", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -656,7 +649,7 @@ mod tests {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "./data/oxigraph")
+            .set_override("oxigraph_path", "./data/oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -677,11 +670,62 @@ mod tests {
     }
 
     #[test]
+    fn test_settings_new_rejects_unknown_graph_mode() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_path", "./data/oxigraph")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("graph_store_mode", "service")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let error = Settings::new(external_config).unwrap_err();
+        let CustomError::ConfigParseError(message) = error else {
+            panic!("expected configuration parse error");
+        };
+
+        assert!(message.contains("GRAPH_STORE_MODE"));
+        assert!(message.contains("persistent"));
+        assert!(message.contains("in_memory"));
+    }
+
+    #[test]
+    fn persistent_default_rejects_endpoint_url() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_path", "http://localhost:7878")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let settings = Settings::new(external_config).unwrap();
+        let error = settings.get_oxigraph_path().unwrap_err();
+        let CustomError::ConfigParseError(message) = error else {
+            panic!("expected configuration parse error");
+        };
+
+        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
+        assert!(message.contains("OXIGRAPH_PATH"));
+        assert!(message.contains("local filesystem path"));
+    }
+
+    #[test]
     fn test_settings_new_accepts_retrieval_stats_overrides() {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .set_override("oxigraph_path", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -719,7 +763,7 @@ mod tests {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .set_override("oxigraph_path", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -765,7 +809,7 @@ mod tests {
         let external_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
-            .set_override("oxigraph_connection_string", "external_oxigraph")
+            .set_override("oxigraph_path", "external_oxigraph")
             .unwrap()
             .set_override("openai_api_key", "external_openai")
             .unwrap()
@@ -797,7 +841,7 @@ mod tests {
             let external_config = Config::builder()
                 .set_override("qdrant_connection_string", "external_qdrant")
                 .unwrap()
-                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .set_override("oxigraph_path", "external_oxigraph")
                 .unwrap()
                 .set_override("openai_api_key", "external_openai")
                 .unwrap()
@@ -855,7 +899,7 @@ mod tests {
             let external_config = Config::builder()
                 .set_override("qdrant_connection_string", "external_qdrant")
                 .unwrap()
-                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .set_override("oxigraph_path", "external_oxigraph")
                 .unwrap()
                 .set_override("openai_api_key", "external_openai")
                 .unwrap()

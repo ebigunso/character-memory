@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use async_trait::async_trait;
 
 #[cfg(test)]
-use crate::api::types::{ObjectType, RelationType};
+use crate::domain::{ObjectType, RelationType};
 #[cfg(test)]
 use crate::errors::CustomError;
 #[cfg(test)]

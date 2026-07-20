@@ -3,20 +3,23 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType, FanoutUtilizationTrace,
+    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace,
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryId,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RationaleCategory, RelationType,
-    RetentionState, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
+    RationaleCategory, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
     RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
+    StaleCandidateReason, VectorCandidateTrace,
+};
+use crate::domain::{
+    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryThread, ObjectType, RelationType,
+    RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
-    VectorSurface,
+    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
+    VectorCandidateSearch, VectorSurface,
 };
 use crate::policy::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
@@ -89,7 +92,9 @@ where
         )
         .with_object_types(context.object_type_defaults.clone())
         .with_filters(VectorCandidateFilters::new());
-        let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
+        let vector_candidates = canonicalize_vector_candidates(
+            self.vector_store.search_candidates(&vector_search).await?,
+        );
         let include_trace = context.include_trace;
 
         let root_selection =
@@ -2758,12 +2763,18 @@ mod tests {
         let mut objects = fixtures.objects();
         objects.push(MemoryObject::DerivedMemory(second_preference.clone()));
         let graph = graph_with(&objects, &fixtures.links()).await;
-        let vector = RecordingVectorStore::new(vec![
+        let first_vector = RecordingVectorStore::new(vec![
             candidate(second_preference.id, ObjectType::DerivedMemory, 0.90),
             candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.90),
         ]);
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let second_vector = RecordingVectorStore::new(vec![
+            candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.90),
+            candidate(second_preference.id, ObjectType::DerivedMemory, 0.90),
+        ]);
+        let first_embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let second_embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let first_pipeline = RetrievePipeline::new(&graph, &first_vector, &first_embedder);
+        let second_pipeline = RetrievePipeline::new(&graph, &second_vector, &second_embedder);
         let mut context = RetrievalContext::new("preferences");
         context.section_limits = ContinuitySectionLimits {
             preferences: 1,
@@ -2771,11 +2782,20 @@ mod tests {
         };
         context.include_trace = true;
 
-        let first = pipeline.retrieve(context.clone()).await.unwrap();
-        let second = pipeline.retrieve(context).await.unwrap();
+        let first = first_pipeline.retrieve(context.clone()).await.unwrap();
+        let second = second_pipeline.retrieve(context).await.unwrap();
         let trace = first.trace.as_ref().unwrap();
 
-        assert_eq!(first.pack.preferences, second.pack.preferences);
+        assert_eq!(first.pack, second.pack);
+        assert_eq!(first.trace, second.trace);
+        assert_eq!(
+            trace
+                .vector_candidates
+                .iter()
+                .map(|candidate| candidate.object.id)
+                .collect::<Vec<_>>(),
+            vec![fixtures.user_preference.id, second_preference.id]
+        );
         assert_eq!(
             first.pack.preferences[0].memory.id,
             fixtures.user_preference.id
@@ -2945,7 +2965,7 @@ mod tests {
 
     async fn graph_with(
         objects: &[MemoryObject],
-        links: &[crate::api::types::MemoryLink],
+        links: &[crate::domain::MemoryLink],
     ) -> FakeGraphAuthorityStore {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(objects).await.unwrap();
@@ -3108,7 +3128,7 @@ mod tests {
 
         async fn upsert_links(
             &self,
-            _links: &[crate::api::types::MemoryLink],
+            _links: &[crate::domain::MemoryLink],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -3116,7 +3136,7 @@ mod tests {
         async fn upsert_objects_and_links(
             &self,
             _objects: &[MemoryObject],
-            _links: &[crate::api::types::MemoryLink],
+            _links: &[crate::domain::MemoryLink],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -3131,14 +3151,14 @@ mod tests {
         async fn query_derived_memories_by_provenance(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_thread(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
@@ -3155,7 +3175,7 @@ mod tests {
 
         async fn list_diagnostic_links(
             &self,
-        ) -> Result<Vec<crate::api::types::MemoryLink>, CustomError> {
+        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
             Ok(Vec::new())
         }
     }

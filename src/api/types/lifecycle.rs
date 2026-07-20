@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
 use super::retrieval::MemoryObjectRef;
+use crate::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum LifecycleDtoValidationError {
@@ -540,6 +540,7 @@ pub struct LifecycleMutationOutcome {
     pub vector_maintained_object_ids: Vec<MemoryObjectRef>,
     pub vector_maintenance_failure: Option<VectorMaintenanceFailure>,
     pub trace: Option<LifecycleMutationTrace>,
+    pub diagnostics: LifecycleMutationDiagnostics,
 }
 
 impl LifecycleMutationOutcome {
@@ -550,8 +551,26 @@ impl LifecycleMutationOutcome {
             vector_maintained_object_ids: Vec::new(),
             vector_maintenance_failure: None,
             trace: None,
+            diagnostics: LifecycleMutationDiagnostics::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LifecycleMutationDiagnostics {
+    pub warnings: Vec<LifecycleMutationWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LifecycleMutationWarning {
+    pub reason: LifecycleMutationWarningReason,
+    pub affected_memory_ids: Vec<MemoryId>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LifecycleMutationWarningReason {
+    CascadeSuppressesCurrentReplacement,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -889,12 +908,19 @@ mod tests {
                     superseded_by_memory_id: new_memory_id(),
                 }],
             }),
+            diagnostics: LifecycleMutationDiagnostics {
+                warnings: vec![LifecycleMutationWarning {
+                    reason: LifecycleMutationWarningReason::CascadeSuppressesCurrentReplacement,
+                    affected_memory_ids: vec![new_memory_id()],
+                }],
+            },
         };
 
-        let round_tripped: LifecycleMutationOutcome =
-            serde_json::from_str(&serde_json::to_string(&outcome).unwrap()).unwrap();
+        let serialized = serde_json::to_string(&outcome).unwrap();
+        let round_tripped: LifecycleMutationOutcome = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(round_tripped, outcome);
+        assert!(serialized.contains("cascade-suppresses-current-replacement"));
         assert_eq!(
             round_tripped.trace.unwrap().superseded_by[0],
             SupersededByEvidence {

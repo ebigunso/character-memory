@@ -1,8 +1,7 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{
-    DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft, ObjectType, RelationType,
-};
+use crate::api::types::{DraftDefaults, MemoryLinkDraft};
+use crate::domain::{MemoryId, MemoryLink, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
 use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
@@ -178,7 +177,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::api::types::{
+    use crate::domain::{
         DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
