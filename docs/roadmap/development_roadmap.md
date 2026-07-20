@@ -1544,7 +1544,7 @@ This is a future path, not starter scope.
 
 ```rust
 let memory = CharacterMemory::new(settings, collection_name).await?;
-let stored = memory.remember(remember_draft).await?;
+let stored = memory.remember(remember_input, remember_options).await?;
 let context = memory.retrieve(retrieval_context).await?;
 let correction = memory.correct(correct_memory_draft).await?;
 let forget = memory.forget(forget_memory_draft).await?;
