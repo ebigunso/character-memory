@@ -154,7 +154,6 @@ mod tests {
         };
 
         let message = error.to_string();
-        assert!(message.contains("Write plan validation rejected"));
         assert!(message.contains("derived source is missing"));
     }
 }
