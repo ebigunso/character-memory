@@ -1,10 +1,10 @@
 use crate::api::types::{
-    CandidateValidation, CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft,
-    LifecycleMutationOutcome, MemoryLinkDraft, PrepareOptions, RememberInput, RememberOptions,
-    RememberOutcome, RememberWritePlan, RetrievalContext, RetrieveOutcome,
+    CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft, LifecycleMutationOutcome,
+    MemoryLinkDraft, PrepareOptions, RememberInput, RememberOptions, RememberOutcome,
+    RememberWritePlan, RetrievalContext, RetrieveOutcome,
 };
 use crate::composition::MemoryComposition;
-use crate::domain::MemoryLink;
+use crate::domain::{CandidateValidation, MemoryLink};
 use crate::errors::CustomError;
 use crate::usecases::{
     CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RetrievePipeline, WritePlanValidator,
@@ -279,9 +279,31 @@ mod tests {
             .await
             .expect_err("missing link target should reject during commit revalidation");
 
-        assert!(error
-            .to_string()
-            .contains("memory link to target does not exist"));
+        assert_validation_rejection_contains(
+            error,
+            MemoryCandidateKind::MemoryLink,
+            "target does not exist",
+        );
+    }
+
+    #[tokio::test]
+    async fn remember_returns_structured_validation_rejection() {
+        let memory = injected_memory();
+        let missing_entity_id = id("550e8400-e29b-41d4-a716-446655445022");
+
+        let error = memory
+            .remember(
+                RememberInput::new("remember rejection").with_entity_id(missing_entity_id),
+                RememberOptions::default(),
+            )
+            .await
+            .expect_err("remember should return the structured commit rejection");
+
+        assert_validation_rejection_contains(
+            error,
+            MemoryCandidateKind::MemoryLink,
+            &missing_entity_id.to_string(),
+        );
     }
 
     #[tokio::test]
@@ -1048,6 +1070,24 @@ mod tests {
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
             Ok(())
         }
+    }
+
+    fn assert_validation_rejection_contains(
+        error: CustomError,
+        expected_kind: MemoryCandidateKind,
+        needle: &str,
+    ) {
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected structured write-plan validation rejection, got {error:?}");
+        };
+        assert!(
+            validations.iter().any(|validation| {
+                validation.candidate_kind == expected_kind
+                    && validation.status == CandidateValidationStatus::Invalid
+                    && validation.errors.iter().any(|error| error.contains(needle))
+            }),
+            "expected invalid {expected_kind:?} validation containing {needle:?}, got {validations:?}"
+        );
     }
 
     fn id(value: &str) -> MemoryId {

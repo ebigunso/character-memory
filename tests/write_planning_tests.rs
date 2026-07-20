@@ -193,8 +193,9 @@ async fn ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and
         .commit(plan, CommitOptions::default())
         .await
         .expect_err("commit should reject ungrounded behavior-influencing derived memory");
-    assert_error_contains(
+    assert_validation_rejection_contains(
         error,
+        character_memory::MemoryCandidateKind::DerivedMemory,
         "derived memory must reference at least one source episode or observation",
     );
     base::cleanup_collection(&collection_name).await;
@@ -218,7 +219,11 @@ async fn missing_memory_link_target_is_strictly_rejected() {
         .commit(plan, CommitOptions::default())
         .await
         .expect_err("missing link target should be rejected at commit");
-    assert_error_contains(error, "target");
+    assert_validation_rejection_contains(
+        error,
+        character_memory::MemoryCandidateKind::MemoryLink,
+        "target does not exist",
+    );
     base::cleanup_collection(&collection_name).await;
 }
 
@@ -1171,6 +1176,24 @@ fn provenance(candidate: &MemoryCandidate) -> &CandidateProvenance {
         MemoryCandidate::VectorIndex(candidate) => &candidate.provenance,
         MemoryCandidate::StatsUpdate(candidate) => &candidate.provenance,
     }
+}
+
+fn assert_validation_rejection_contains(
+    error: CustomError,
+    expected_kind: character_memory::MemoryCandidateKind,
+    needle: &str,
+) {
+    let CustomError::WritePlanValidationRejected { validations } = error else {
+        panic!("expected structured write-plan validation rejection, got {error:?}");
+    };
+    assert!(
+        validations.iter().any(|validation| {
+            validation.candidate_kind == expected_kind
+                && validation.status == CandidateValidationStatus::Invalid
+                && validation.errors.iter().any(|error| error.contains(needle))
+        }),
+        "expected invalid {expected_kind:?} validation containing {needle:?}, got {validations:?}"
+    );
 }
 
 fn assert_error_contains(error: CustomError, needle: &str) {

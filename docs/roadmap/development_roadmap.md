@@ -337,6 +337,7 @@ src/
   domain/
     schema.rs
     tests.rs
+    write_validation.rs
   errors.rs
   lib.rs
   memory.rs
