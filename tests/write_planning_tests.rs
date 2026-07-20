@@ -505,6 +505,18 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         wrapper_outcome.vector_indexed_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
+    let validation_warning = wrapper_outcome
+        .diagnostics
+        .messages
+        .iter()
+        .find(|diagnostic| diagnostic.code == "write_plan_validation_warning")
+        .expect("equivalent outcomes should include validation warnings");
+    assert_eq!(
+        validation_warning.severity,
+        character_memory::DiagnosticSeverity::Warning
+    );
+    assert!(validation_warning.message.contains("echo-surface"));
+    assert!(validation_warning.message.contains(&episode_id.to_string()));
 
     let query = RetrievalContext::new("equivalent graph state").with_trace();
     let wrapper_retrieval = wrapper_memory
@@ -523,7 +535,7 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .iter()
         .find(|episode| episode.id == episode_id)
         .expect("caller-supplied episode should be in canonical graph state");
-    assert_eq!(episode.summary, "Equivalent graph state source");
+    assert_eq!(episode.summary, "Equivalent graph state observation");
     let observation = wrapper_retrieval
         .pack
         .salient_observations
@@ -889,7 +901,7 @@ fn remember_equivalence_input() -> RememberInput {
     let entity_id = id("550e8400-e29b-41d4-a716-446655613403");
     let derived_id = id("550e8400-e29b-41d4-a716-446655613404");
 
-    let mut episode = EpisodeDraft::new("Equivalent graph state source");
+    let mut episode = EpisodeDraft::new("Equivalent graph state observation");
     episode.id = Some(episode_id);
     episode.participant_entity_ids.push(entity_id);
     episode.created_at = Some(timestamp);

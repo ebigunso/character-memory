@@ -94,11 +94,24 @@ where
         plan: RememberWritePlan,
         options: CommitOptions,
     ) -> Result<RememberPipelineOutcome, CustomError> {
-        WritePlanValidator::new(self.graph_store)
+        let validation = WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
             .into_result()?;
-        let diagnostics = plan.diagnostics.clone();
+        let mut diagnostics = plan.diagnostics.clone();
+        diagnostics.messages.extend(
+            validation
+                .validations
+                .iter()
+                .flat_map(|validation| validation.warnings.iter())
+                .map(|warning| {
+                    RememberDiagnostic::new(
+                        DiagnosticSeverity::Warning,
+                        "write_plan_validation_warning",
+                        warning.clone(),
+                    )
+                }),
+        );
         let values = WritePlanCommitValues::from_plan(plan)?;
         let vector_targets = if options.update_vectors {
             VectorWriteIntent::PlanTargets(values.vector_targets)

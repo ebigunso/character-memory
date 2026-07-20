@@ -199,6 +199,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remember_surfaces_write_plan_validation_warnings() {
+        let memory = injected_memory();
+        let episode_id = id("550e8400-e29b-41d4-a716-446655445011");
+        let mut episode = EpisodeDraft::new("echoed source content");
+        episode.id = Some(episode_id);
+        let observation = ObservationDraft::new(episode_id, "echoed source content");
+
+        let outcome = memory
+            .remember(
+                RememberInput::new("echoed source content")
+                    .with_episode(episode)
+                    .with_observation(observation),
+                RememberOptions::default(),
+            )
+            .await
+            .expect("remember should accept warning-bearing write plans");
+
+        let warnings = outcome
+            .diagnostics
+            .messages
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "write_plan_validation_warning")
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1);
+        let warning = warnings[0];
+        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
+        assert!(warning.message.contains("echo-surface"));
+        assert!(warning.message.contains(&episode_id.to_string()));
+    }
+
+    #[tokio::test]
     async fn prepare_and_validate_plan_do_not_persist() {
         let memory = injected_memory();
 
