@@ -22,3 +22,4 @@ last_updated: "2026-07-21"
 ## Global Migration Candidates (Placeholder)
 
 - None yet.
+- Any compatibility or reader-behavior claim in a design or evidence document that names a concrete reader path must cite the file:line of that reader; tolerance verified for one artifact family must never be generalized to another by analogy (Tier A finding 2026-07-21: a "tolerant 1.0.0 result reader" was asserted that did not exist).
