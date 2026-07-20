@@ -455,54 +455,101 @@ async fn commit_with_and_without_explicit_validation_produce_equivalent_graph_st
 
 #[tokio::test]
 async fn remember_wrapper_commits_equivalent_graph_state() {
-    let (memory, collection_name) = match setup_basic().await {
+    let (wrapper_memory, wrapper_collection_name) = match setup_basic().await {
         Some(fixture) => fixture,
         None => return,
     };
-    let wrapper_outcome = memory
-        .remember(
-            RememberInput::new("remember-wrapper source observation"),
-            RememberOptions::default(),
-        )
+    let (manual_memory, manual_collection_name) = match setup_basic().await {
+        Some(fixture) => fixture,
+        None => {
+            base::cleanup_collection(&wrapper_collection_name).await;
+            return;
+        }
+    };
+    let input = remember_equivalence_input();
+    let options = RememberOptions::default();
+
+    let wrapper_outcome = wrapper_memory
+        .remember(input.clone(), options.clone())
         .await
         .expect("remember wrapper should compose the public write-plan path");
 
-    let plan = memory
-        .prepare(
-            RememberInput::new("manual remember source observation"),
-            PrepareOptions::default(),
-        )
+    let plan = manual_memory
+        .prepare(input, options.prepare)
         .await
-        .expect("manual prepare should create an equivalent simple plan");
-    let validations = memory
+        .expect("manual prepare should create the equivalent plan");
+    let validations = manual_memory
         .validate_plan(&plan)
         .await
         .expect("manual validation should succeed");
     assert!(validations
         .iter()
         .all(|validation| validation.status == CandidateValidationStatus::Valid));
-    let plan_outcome = memory
-        .commit(plan, CommitOptions::default())
+    let manual_outcome = manual_memory
+        .commit(plan, options.commit)
         .await
         .expect("plan path should commit equivalent graph state");
 
+    let episode_id = id("550e8400-e29b-41d4-a716-446655613401");
+    let observation_id = id("550e8400-e29b-41d4-a716-446655613402");
+    let entity_id = id("550e8400-e29b-41d4-a716-446655613403");
+    let derived_id = id("550e8400-e29b-41d4-a716-446655613404");
+    let link_id = id("550e8400-e29b-41d4-a716-446655613405");
+    assert_eq!(wrapper_outcome, manual_outcome);
     assert_eq!(
-        wrapper_outcome.persisted_object_ids.len(),
-        plan_outcome.persisted_object_ids.len()
+        wrapper_outcome.persisted_object_ids,
+        vec![episode_id, observation_id, entity_id, derived_id]
     );
+    assert_eq!(wrapper_outcome.persisted_link_ids, vec![link_id]);
     assert_eq!(
-        wrapper_outcome.persisted_link_ids.len(),
-        plan_outcome.persisted_link_ids.len()
+        wrapper_outcome.vector_indexed_object_ids,
+        vec![episode_id, observation_id, entity_id, derived_id]
     );
-    assert_eq!(
-        wrapper_outcome.vector_indexed_object_ids.len(),
-        plan_outcome.vector_indexed_object_ids.len()
-    );
-    assert_eq!(
-        wrapper_outcome.stats_update_status.failure.is_none(),
-        plan_outcome.stats_update_status.failure.is_none()
-    );
-    base::cleanup_collection(&collection_name).await;
+
+    let query = RetrievalContext::new("equivalent graph state").with_trace();
+    let wrapper_retrieval = wrapper_memory
+        .retrieve(query.clone())
+        .await
+        .expect("wrapper graph state should be retrievable");
+    let manual_retrieval = manual_memory
+        .retrieve(query)
+        .await
+        .expect("manual graph state should be retrievable");
+    assert_eq!(wrapper_retrieval, manual_retrieval);
+
+    let episode = wrapper_retrieval
+        .pack
+        .relevant_episodes
+        .iter()
+        .find(|episode| episode.id == episode_id)
+        .expect("caller-supplied episode should be in canonical graph state");
+    assert_eq!(episode.summary, "Equivalent graph state source");
+    let observation = wrapper_retrieval
+        .pack
+        .salient_observations
+        .iter()
+        .find(|observation| observation.id == observation_id)
+        .expect("caller-supplied observation should be in canonical graph state");
+    assert_eq!(observation.text, "Equivalent graph state observation");
+    let derived = all_derived(&wrapper_retrieval)
+        .into_iter()
+        .find(|included| included.memory.id == derived_id)
+        .expect("caller-supplied derived memory should be in canonical graph state");
+    assert_eq!(derived.memory.text, "Equivalent graph state claim");
+    assert!(wrapper_retrieval
+        .trace
+        .as_ref()
+        .expect("trace requested")
+        .graph_relations
+        .iter()
+        .any(|relation| {
+            relation.from.id == entity_id
+                && relation.to.id == derived_id
+                && relation.relation == RelationType::About
+        }));
+
+    base::cleanup_collection(&wrapper_collection_name).await;
+    base::cleanup_collection(&manual_collection_name).await;
 }
 
 #[tokio::test]
@@ -833,6 +880,54 @@ fn core_input(label: &str) -> RememberInput {
         .with_observation(observation)
         .with_entity(entity)
         .with_derived_memory(derived)
+}
+
+fn remember_equivalence_input() -> RememberInput {
+    let timestamp = fixed_timestamp();
+    let episode_id = id("550e8400-e29b-41d4-a716-446655613401");
+    let observation_id = id("550e8400-e29b-41d4-a716-446655613402");
+    let entity_id = id("550e8400-e29b-41d4-a716-446655613403");
+    let derived_id = id("550e8400-e29b-41d4-a716-446655613404");
+
+    let mut episode = EpisodeDraft::new("Equivalent graph state source");
+    episode.id = Some(episode_id);
+    episode.participant_entity_ids.push(entity_id);
+    episode.created_at = Some(timestamp);
+
+    let mut observation =
+        character_memory::ObservationDraft::new(episode_id, "Equivalent graph state observation");
+    observation.id = Some(observation_id);
+    observation.created_at = Some(timestamp);
+
+    let mut entity = EntityDraft::new(EntityType::Project, "Equivalence Project");
+    entity.id = Some(entity_id);
+    entity.created_at = Some(timestamp);
+    entity.updated_at = Some(timestamp);
+
+    let mut derived = DerivedMemoryDraft::new(DerivedType::Claim, "Equivalent graph state claim")
+        .with_source_episode(episode_id)
+        .with_source_observation(observation_id);
+    derived.id = Some(derived_id);
+    derived.entity_ids.push(entity_id);
+    derived.created_at = Some(timestamp);
+    derived.updated_at = Some(timestamp);
+
+    let mut link = MemoryLinkDraft::new(
+        ObjectType::Entity,
+        entity_id,
+        RelationType::About,
+        ObjectType::DerivedMemory,
+        derived_id,
+    );
+    link.id = Some(id("550e8400-e29b-41d4-a716-446655613405"));
+    link.created_at = Some(timestamp);
+
+    RememberInput::new("Equivalent graph state observation")
+        .with_episode(episode)
+        .with_observation(observation)
+        .with_entity(entity)
+        .with_derived_memory(derived)
+        .with_memory_link(link)
 }
 
 async fn link_to_existing_entity_plan(label: &str, entity_id: MemoryId) -> RememberWritePlan {
