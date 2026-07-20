@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "common"
-last_updated: "2026-07-11"
+last_updated: "2026-07-21"
 ---
 
 # Common Repository Rules
@@ -27,6 +27,11 @@ last_updated: "2026-07-11"
 ## Repo Safety / Boundaries
 
 - None yet.
+
+## Compatibility Policy
+
+- Until the library has external consumers, backwards compatibility is not a goal: changes replace old surfaces outright and only the latest supported surfaces remain (user-directed 2026-07-21).
+- Do not introduce compat shims, legacy aliases or re-exports kept so old paths resolve, serde tolerance for old field names or schema shapes, deprecated-but-retained APIs, or migration code for formats that never shipped; remove a superseded surface in the same change that replaces it.
 
 ## Repo Naming / Structure
 

@@ -703,3 +703,39 @@ Fix:
 
 Prevention:
 - New default: opening or being handed a PR immediately arms a monitor covering new reviews, review comments, issue comments, and terminal merge/close state, in the same action as PR creation.
+
+## 2026-07-21 - Backcompat Code Slipped Through All Review Rounds  [tags: review, validation, scope-owns]
+
+Context:
+- Plan: v0.1.5 closeout merge PRs (CM #63, CME #13); post-hoc sweep plan `backcompat-sweep-plan.md`
+- Roles involved: Orchestrator | Worker | Reviewer
+
+Symptom:
+- The user found unnecessary backwards-compatibility code in both merge PRs after multiple Copilot rounds and Tier D reviews had passed them as clean.
+
+Root cause:
+- No rule declared that a pre-consumer library never needs backwards compatibility, so neither workers (who wrote shims defensively) nor reviewers (who check against rules and acceptance criteria) had any basis to flag compat surfaces as defects.
+
+Fix applied:
+- Forensic inventories dispatched to codex workers, cleanup commits on both PR branches; Compatibility Policy section added to both repos' `rules/common.md` (user-directed 2026-07-21).
+
+Prevention:
+- The Compatibility Policy rule makes compat surfaces a rule violation reviewers must flag; Tier D review prompts should name it explicitly for API-surface diffs until it becomes habitual.
+
+## 2026-07-21 - Checked Incidental "Legacy" Phrasing, Not The Design Record  [tags: review, planning, delegation]
+
+Context:
+- Plan: backcompat-sweep-plan; item E (remember() facade)
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- Orchestrator approved removing the public remember() facade because an inventory cited phase-doc phrasing calling it "legacy/source-compatible"; the user vetoed — remember() is the intended consumer convenience API wrapping prepare/validate/commit.
+
+Root cause:
+- The removal ruling was made from the forensic inventory's evidence alone without consulting the design-intent record (philosophy §9.1, ADR-I-0012, roadmap), which unambiguously specifies remember() as a first-class surface; "legacy" in the phase doc described the shipped internals/signature, not the surface.
+
+Fix applied:
+- E reclassified as rework: implement remember(RememberInput, RememberOptions) as the thin prepare→validate_plan→commit composition per ADR-I-0012; remove only the divergent pre-plan-era pipeline.
+
+Prevention:
+- Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
