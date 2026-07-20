@@ -757,3 +757,21 @@ Fix applied:
 
 Prevention:
 - For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
+
+## 2026-07-21 - Constraint-Induced Workarounds Need A Tripwire, Not Hindsight  [tags: delegation, planning, review]
+
+Context:
+- Plan: post-sweep Copilot fix on PR #63 (warning propagation); rule generalization discussion
+- Roles involved: Orchestrator | Worker
+
+Symptom:
+- A dispatch constraint ("no new public types unless unavoidable") steered the worker into flattening a structured verdict into prose; the lossy design was implemented without an alert and caught only by user review. When first generalizing the lesson into a rule, the Orchestrator framed tripwires as the five observed shapes — too specific; the user re-framed it to the failure mode itself.
+
+Root cause:
+- Constraints in dispatches were treated as terminal rather than instrumental, and no role owned noticing at implementation time that the work was going around something cleaner to change. Rule drafting then repeated the altitude error: encoding instances instead of the failure mode.
+
+Fix applied:
+- Workaround Tripwire rules added to both repos (common.md definition at failure-mode altitude with symptoms as non-exhaustive examples; worker.md escalation-outranks-compliance hook; orchestrator.md framing/replan obligations); harness migration candidate staged for subagent-strategy and a design_alerts report field.
+
+Prevention:
+- Frame rules at the altitude of the failure mode, with observed instances as examples only; dispatch constraints must carry their own escape hatch; tripwire escalations are replan triggers with recorded rulings.
