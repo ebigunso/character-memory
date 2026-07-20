@@ -165,6 +165,8 @@
   - Tradeoffs considered: a CM typed-import seam would reopen the settled library after validation and duplicate what the plan surface already provides; ADR-I-0012 names application-owned plan composition as the intended workflow.
   - User approval: within standing directive; recorded for closeout review.
 
+- 2026-07-21 Post-completion addendum: Copilot's 22:13Z round flagged two ADR-I-0018 edges (`models/vector/candidate_record.rs:7` importing `default_retrieval_object_types` from api; `policy/retrieval_selectivity.rs:4` importing `RetrievalLifecyclePolicy` from api). Verified pre-existing at baseline 28347ff — grandfathered debt made visible by the B2 domain-import split, not introduced by this PR. Disposition: deferred to the approved post-merge structured-verdict-observability/workaround follow-up phase (fix shapes: move the shared default list to a lower layer; convert the lifecycle-policy DTO at the use-case boundary). No code change in this PR.
+
 ## Notes
 - Risks: removals that silently change persisted-store schema in CME; mitigated by the sealed-artifact flag rule and byte-identity acceptance in Task_2.
 - Edge cases: ordinary `#[serde(rename)]` for wire-name conventions is not backcompat; do not remove.
