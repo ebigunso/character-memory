@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
-    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Stability,
-    ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
+    Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
@@ -313,7 +313,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
                 let (object_id, object_type) = object_identity(object);
                 (query.object_refs.is_empty()
                     || query.object_refs.iter().any(|object_ref| {
-                        object_ref.object_id == object_id && object_ref.object_type == object_type
+                        object_ref.id == object_id && object_ref.object_type == object_type
                     }))
                     && (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
                     && (query.object_types.is_empty() || query.object_types.contains(&object_type))
@@ -927,7 +927,7 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
 mod lifecycle_tests {
     use super::*;
     use crate::ports::graph_authority::{
-        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
 
     #[tokio::test]
@@ -980,11 +980,11 @@ mod lifecycle_tests {
 
         let explicit_history = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(replacement.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(episode.id, ObjectType::Episode),
-                GraphObjectRef::new(observation.id, ObjectType::Observation),
-                GraphObjectRef::new(thread.id, ObjectType::MemoryThread),
+                MemoryObjectRef::from_id_type(old_memory.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(replacement.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(observation.id, ObjectType::Observation),
+                MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread),
             ]))
             .await
             .unwrap();
@@ -1005,7 +1005,8 @@ mod lifecycle_tests {
         );
         assert!(default_expansion.links.is_empty());
         assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
-            filtered.object_ref == GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory)
+            filtered.object_ref
+                == MemoryObjectRef::from_id_type(old_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Suppressed
         }));
 
@@ -1043,7 +1044,8 @@ mod lifecycle_tests {
             .filtered_nodes
             .iter()
             .any(|filtered| {
-                filtered.object_ref == GraphObjectRef::new(thread.id, ObjectType::MemoryThread)
+                filtered.object_ref
+                    == MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread)
                     && filtered.reason == GraphExpansionFilteredReason::Archived
             }));
     }
@@ -1184,7 +1186,7 @@ mod tests {
     use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
     use crate::ports::graph_authority::{
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
 
     #[tokio::test]
@@ -1460,10 +1462,9 @@ mod tests {
             .unwrap();
 
         let queried = store
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                fixtures.episode.id,
-                ObjectType::Episode,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+            ]))
             .await
             .unwrap();
 
@@ -1602,7 +1603,7 @@ mod tests {
         assert_eq!(default_expansion.filtered_nodes.len(), 1);
         assert_eq!(
             default_expansion.filtered_nodes[0].object_ref,
-            GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+            MemoryObjectRef::from_id_type(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
         );
         assert_eq!(
             default_expansion.filtered_nodes[0].reason,

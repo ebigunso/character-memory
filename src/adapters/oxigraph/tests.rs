@@ -11,7 +11,8 @@ mod tests {
         ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, RetrievalContext,
     };
     use crate::domain::{
-        graph_uri, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, ThreadStatus,
+        graph_uri, MemoryId, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+        RetentionState, ThreadStatus,
     };
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
@@ -23,7 +24,7 @@ mod tests {
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFanoutOverride, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-        GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+        GraphExpansionQuery, GraphObjectQuery,
     };
     use crate::ports::vector_candidate::VectorCandidateStore;
     use crate::test_support::{
@@ -409,7 +410,7 @@ mod tests {
             expansion.bounded_failure
         );
         assert!(expansion.fanout_utilization.iter().any(|entry| {
-            entry.root.object_id == fixture.hub_entity.id
+            entry.root.id == fixture.hub_entity.id
                 && entry.relation == RelationType::About
                 && entry.object_type == ObjectType::DerivedMemory
                 && entry.selected_cap == 2
@@ -478,17 +479,17 @@ mod tests {
         let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
 
         assert!(embedded_expansion.filtered_nodes.iter().any(|filtered| {
-            filtered.object_ref.object_id == fixtures.suppressed_seed.id
+            filtered.object_ref.id == fixtures.suppressed_seed.id
                 && filtered.reason == GraphExpansionFilteredReason::Suppressed
         }));
         assert!(!embedded_expansion
             .fanout_utilization
             .iter()
-            .any(|entry| { entry.root.object_id == fixtures.suppressed_seed.id }));
+            .any(|entry| { entry.root.id == fixtures.suppressed_seed.id }));
         assert!(embedded_expansion
             .fanout_utilization
             .iter()
-            .all(|entry| entry.root.object_id == fixtures.hub_entity.id));
+            .all(|entry| entry.root.id == fixtures.hub_entity.id));
         assert!(!embedded_expansion.fanout_utilization.is_empty());
         assert_eq!(
             embedded_expansion.fanout_utilization,
@@ -585,11 +586,11 @@ mod tests {
         assert!(!embedded_expansion
             .fanout_utilization
             .iter()
-            .any(|entry| entry.root.object_id == fixtures.user_preference.id));
+            .any(|entry| entry.root.id == fixtures.user_preference.id));
         assert!(embedded_expansion
             .fanout_utilization
             .iter()
-            .any(|entry| entry.root.object_id == fixtures.salient_observation.id));
+            .any(|entry| entry.root.id == fixtures.salient_observation.id));
         assert_eq!(
             embedded_expansion.fanout_utilization,
             in_memory_expansion.fanout_utilization
@@ -739,7 +740,7 @@ mod tests {
 
         let visibility = bounded_graph_visible_refs(
             &selectors,
-            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            MemoryObjectRef::from_id_type(fixture.hub_entity.id, ObjectType::Entity),
             &query,
         )
         .unwrap();
@@ -770,7 +771,7 @@ mod tests {
 
         let visibility = bounded_graph_visible_refs(
             &selectors,
-            GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
+            MemoryObjectRef::from_id_type(fixture.hub_entity.id, ObjectType::Entity),
             &query,
         )
         .unwrap();
@@ -903,7 +904,7 @@ mod tests {
         assert!(depth_zero_root.objects.is_empty());
         assert!(depth_zero_root.filtered_nodes.iter().any(|filtered| {
             filtered.object_ref
-                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
         }));
 
@@ -923,7 +924,7 @@ mod tests {
         assert!(depth_one_neighbor.links.is_empty());
         assert!(depth_one_neighbor.filtered_nodes.iter().any(|filtered| {
             filtered.object_ref
-                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
         }));
 
@@ -965,7 +966,7 @@ mod tests {
         assert_eq!(default_expansion.filtered_nodes.len(), 1);
         assert_eq!(
             default_expansion.filtered_nodes[0].object_ref,
-            GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+            MemoryObjectRef::from_id_type(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
         );
         assert_eq!(
             default_expansion.filtered_nodes[0].reason,
@@ -1107,7 +1108,7 @@ mod tests {
         assert!(default_expansion.links.is_empty());
         assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
             filtered.object_ref
-                == GraphObjectRef::new(superseded_memory.id, ObjectType::DerivedMemory)
+                == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
         }));
 
@@ -1141,7 +1142,8 @@ mod tests {
             .await
             .unwrap();
         assert!(thread_expansion.filtered_nodes.iter().any(|filtered| {
-            filtered.object_ref == GraphObjectRef::new(archived_thread.id, ObjectType::MemoryThread)
+            filtered.object_ref
+                == MemoryObjectRef::from_id_type(archived_thread.id, ObjectType::MemoryThread)
                 && filtered.reason == GraphExpansionFilteredReason::Archived
         }));
 
@@ -1503,12 +1505,21 @@ mod tests {
             let reopened = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
             let queried = reopened
                 .query_objects(&GraphObjectQuery::by_refs(vec![
-                    GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                    GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation),
-                    GraphObjectRef::new(fixtures.user_entity.id, ObjectType::Entity),
-                    GraphObjectRef::new(archived_thread.id, ObjectType::MemoryThread),
-                    GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
-                    GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
+                    MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                    MemoryObjectRef::from_id_type(
+                        fixtures.salient_observation.id,
+                        ObjectType::Observation,
+                    ),
+                    MemoryObjectRef::from_id_type(fixtures.user_entity.id, ObjectType::Entity),
+                    MemoryObjectRef::from_id_type(archived_thread.id, ObjectType::MemoryThread),
+                    MemoryObjectRef::from_id_type(
+                        fixtures.correction.id,
+                        ObjectType::DerivedMemory,
+                    ),
+                    MemoryObjectRef::from_id_type(
+                        fixtures.suppressed_seed.id,
+                        ObjectType::DerivedMemory,
+                    ),
                 ]))
                 .await
                 .unwrap();
@@ -1559,7 +1570,10 @@ mod tests {
                 )));
             assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
                 filtered.object_ref
-                    == GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+                    == MemoryObjectRef::from_id_type(
+                        fixtures.suppressed_seed.id,
+                        ObjectType::DerivedMemory,
+                    )
             }));
         }
     }
@@ -1735,10 +1749,9 @@ mod tests {
             None
         );
         let graph_refs = store
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                link.id,
-                ObjectType::MemoryLink,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(link.id, ObjectType::MemoryLink),
+            ]))
             .await
             .unwrap();
         assert_eq!(graph_refs, Vec::<MemoryObject>::new());

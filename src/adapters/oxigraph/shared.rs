@@ -7,8 +7,8 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
@@ -16,7 +16,7 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionFanoutUtilization, GraphExpansionQuery, GraphObjectRef,
+    GraphExpansionFanoutUtilization, GraphExpansionQuery,
 };
 
 use super::rdf_mapping::{RdfObject, RdfTriple};
@@ -26,11 +26,11 @@ impl BoundedExpansionLinkRef for SparqlLinkRef {
         self.link_id
     }
 
-    fn from(self) -> GraphObjectRef {
+    fn from(self) -> MemoryObjectRef {
         self.from
     }
 
-    fn to(self) -> GraphObjectRef {
+    fn to(self) -> MemoryObjectRef {
         self.to
     }
 
@@ -41,8 +41,8 @@ impl BoundedExpansionLinkRef for SparqlLinkRef {
 
 pub(super) fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
     link_refs: &[T],
-) -> HashMap<GraphObjectRef, Vec<T>> {
-    let mut refs_by_endpoint = HashMap::<GraphObjectRef, Vec<T>>::new();
+) -> HashMap<MemoryObjectRef, Vec<T>> {
+    let mut refs_by_endpoint = HashMap::<MemoryObjectRef, Vec<T>>::new();
     for link_ref in link_refs.iter().copied() {
         refs_by_endpoint
             .entry(link_ref.from())
@@ -60,9 +60,9 @@ pub(super) fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
 
 pub(super) fn insert_visible_ref(
     query: &GraphExpansionQuery,
-    graph_refs: &mut HashSet<GraphObjectRef>,
-    next_frontier: &mut Vec<GraphObjectRef>,
-    object_ref: GraphObjectRef,
+    graph_refs: &mut HashSet<MemoryObjectRef>,
+    next_frontier: &mut Vec<MemoryObjectRef>,
+    object_ref: MemoryObjectRef,
     bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
 ) -> Result<(), CustomError> {
     if graph_refs.contains(&object_ref) {
@@ -143,7 +143,7 @@ impl RdfSubjectValues {
 
 pub(super) fn hydrate_objects_by_refs_from_store(
     store: &Store,
-    refs: &[GraphObjectRef],
+    refs: &[MemoryObjectRef],
 ) -> Result<Vec<MemoryObject>, CustomError> {
     let subjects = rdf_subject_values(store)?;
     let mut objects = Vec::new();
@@ -151,7 +151,7 @@ pub(super) fn hydrate_objects_by_refs_from_store(
         if object_ref.object_type == ObjectType::MemoryLink {
             continue;
         }
-        let subject = graph_uri(object_ref.object_type, object_ref.object_id);
+        let subject = graph_uri(object_ref.object_type, object_ref.id);
         if let Some(values) = subjects.get(&subject) {
             objects.push(memory_object_from_rdf(
                 &subject,
@@ -186,7 +186,7 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
     store: &Store,
     graph_link_ids: &HashSet<MemoryId>,
     lifecycle_link_ids: &HashSet<MemoryId>,
-    graph_ref_set: &HashSet<GraphObjectRef>,
+    graph_ref_set: &HashSet<MemoryObjectRef>,
 ) -> Result<Vec<MemoryLink>, CustomError> {
     let links = hydrate_all_links_from_store(store)?;
     Ok(links
@@ -194,8 +194,8 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
         .filter(|link| graph_link_ids.contains(&link.id) || lifecycle_link_ids.contains(&link.id))
         .filter(|link| {
             let endpoints_in_graph = graph_ref_set
-                .contains(&GraphObjectRef::new(link.from_id, link.from_type))
-                && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type));
+                .contains(&MemoryObjectRef::from_id_type(link.from_id, link.from_type))
+                && graph_ref_set.contains(&MemoryObjectRef::from_id_type(link.to_id, link.to_type));
             (graph_link_ids.contains(&link.id) && endpoints_in_graph)
                 || lifecycle_link_ids.contains(&link.id)
         })
@@ -468,7 +468,7 @@ pub(super) fn rdf_parse_error(
 
 #[derive(Debug, Default)]
 pub(super) struct BoundedGraphVisibility {
-    pub(super) object_refs: HashSet<GraphObjectRef>,
+    pub(super) object_refs: HashSet<MemoryObjectRef>,
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
     pub(super) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
@@ -487,7 +487,7 @@ pub(super) fn assign_expanded_fanout_utilization(
 
 pub(super) fn bounded_graph_visible_refs(
     selectors: &SparqlGraphSelectors<'_>,
-    root_ref: GraphObjectRef,
+    root_ref: MemoryObjectRef,
     query: &GraphExpansionQuery,
 ) -> Result<BoundedGraphVisibility, CustomError> {
     let mut graph_refs = HashSet::from([root_ref]);

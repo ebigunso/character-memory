@@ -9,13 +9,13 @@ use crate::api::types::lifecycle::{
     LifecycleMutationWarning, LifecycleMutationWarningReason,
 };
 use crate::api::types::{
-    CorrectMemoryDraft, CorrectionTarget, ForgetMemoryDraft, LifecycleTargetRef, MemoryObjectRef,
+    CorrectMemoryDraft, CorrectionTarget, ForgetMemoryDraft, LifecycleTargetRef,
     ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget, SourceProvenanceReference,
     SupersededByEvidence, VectorMaintenanceFailure,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    ObjectType, Observation, RelationType, RetentionState, Stability, ThreadStatus,
+    DerivedMemory, DerivedType, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType, RetentionState, Stability, ThreadStatus,
     DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
@@ -24,7 +24,7 @@ use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansionLifecyclePolicy, GraphObjectQuery, GraphObjectRef,
+    GraphExpansionLifecyclePolicy, GraphObjectQuery,
 };
 use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
 use crate::ports::vector_candidate::VectorCandidateStore;
@@ -452,7 +452,7 @@ where
 
     async fn fetch_derived_memory(&self, id: MemoryId) -> Result<DerivedMemory, CustomError> {
         let object = self
-            .fetch_one(GraphObjectRef::new(id, ObjectType::DerivedMemory))
+            .fetch_one(MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
             .await?;
         match object {
             MemoryObject::DerivedMemory(memory) => Ok(memory),
@@ -462,7 +462,7 @@ where
 
     async fn fetch_episode(&self, id: MemoryId) -> Result<Episode, CustomError> {
         let object = self
-            .fetch_one(GraphObjectRef::new(id, ObjectType::Episode))
+            .fetch_one(MemoryObjectRef::from_id_type(id, ObjectType::Episode))
             .await?;
         match object {
             MemoryObject::Episode(episode) => Ok(episode),
@@ -472,7 +472,7 @@ where
 
     async fn fetch_observation(&self, id: MemoryId) -> Result<Observation, CustomError> {
         let object = self
-            .fetch_one(GraphObjectRef::new(id, ObjectType::Observation))
+            .fetch_one(MemoryObjectRef::from_id_type(id, ObjectType::Observation))
             .await?;
         match object {
             MemoryObject::Observation(observation) => Ok(observation),
@@ -482,7 +482,7 @@ where
 
     async fn fetch_thread(&self, id: MemoryId) -> Result<MemoryThread, CustomError> {
         let object = self
-            .fetch_one(GraphObjectRef::new(id, ObjectType::MemoryThread))
+            .fetch_one(MemoryObjectRef::from_id_type(id, ObjectType::MemoryThread))
             .await?;
         match object {
             MemoryObject::MemoryThread(thread) => Ok(thread),
@@ -490,14 +490,14 @@ where
         }
     }
 
-    async fn fetch_one(&self, object_ref: GraphObjectRef) -> Result<MemoryObject, CustomError> {
+    async fn fetch_one(&self, object_ref: MemoryObjectRef) -> Result<MemoryObject, CustomError> {
         let mut objects = self
             .graph_store
             .query_objects(&GraphObjectQuery::by_refs(vec![object_ref]))
             .await?;
         objects
             .pop()
-            .ok_or_else(|| missing_object_error(object_ref.object_type, object_ref.object_id))
+            .ok_or_else(|| missing_object_error(object_ref.object_type, object_ref.id))
     }
 
     async fn ensure_source_object_matches_original_refs(
@@ -1514,10 +1514,9 @@ mod tests {
 
         assert_eq!(graph.calls()[2], StoreCall::GraphLinks(Vec::new()));
         let objects = graph
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                ids.replacement,
-                ObjectType::DerivedMemory,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(ids.replacement, ObjectType::DerivedMemory),
+            ]))
             .await
             .unwrap();
         let MemoryObject::DerivedMemory(replacement) = &objects[0] else {
@@ -1577,9 +1576,12 @@ mod tests {
             )));
         let objects = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(replacement_id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(
+                    fixtures.user_preference.id,
+                    ObjectType::DerivedMemory,
+                ),
+                MemoryObjectRef::from_id_type(replacement_id, ObjectType::DerivedMemory),
             ]))
             .await
             .unwrap();
@@ -1662,8 +1664,8 @@ mod tests {
             )));
         let objects = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(observation_only.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(replacement_id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(observation_only.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(replacement_id, ObjectType::DerivedMemory),
             ]))
             .await
             .unwrap();
@@ -1966,8 +1968,14 @@ mod tests {
         );
         let objects = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation),
-                GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(
+                    fixtures.salient_observation.id,
+                    ObjectType::Observation,
+                ),
+                MemoryObjectRef::from_id_type(
+                    fixtures.user_preference.id,
+                    ObjectType::DerivedMemory,
+                ),
             ]))
             .await
             .unwrap();
@@ -2013,10 +2021,9 @@ mod tests {
                 observation_only.id,
             )));
         let objects = graph
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                observation_only.id,
-                ObjectType::DerivedMemory,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(observation_only.id, ObjectType::DerivedMemory),
+            ]))
             .await
             .unwrap();
         let MemoryObject::DerivedMemory(memory) = &objects[0] else {
@@ -2055,8 +2062,11 @@ mod tests {
         );
         let objects = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(
+                    fixtures.user_preference.id,
+                    ObjectType::DerivedMemory,
+                ),
             ]))
             .await
             .unwrap();
@@ -2099,10 +2109,9 @@ mod tests {
         assert!(outcome.graph_mutated_object_ids.is_empty());
         assert!(outcome.vector_maintained_object_ids.is_empty());
         let objects = graph
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                fixtures.episode.id,
-                ObjectType::Episode,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+            ]))
             .await
             .unwrap();
         assert!(matches!(
@@ -2137,10 +2146,9 @@ mod tests {
             )]
         );
         let objects = graph
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                fixtures.soft_thread.id,
-                ObjectType::MemoryThread,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.soft_thread.id, ObjectType::MemoryThread),
+            ]))
             .await
             .unwrap();
         let MemoryObject::MemoryThread(thread) = &objects[0] else {
@@ -2166,10 +2174,9 @@ mod tests {
         assert!(outcome.graph_mutated_object_ids.is_empty());
         assert!(outcome.vector_maintained_object_ids.is_empty());
         let objects = graph
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                fixtures.soft_thread.id,
-                ObjectType::MemoryThread,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.soft_thread.id, ObjectType::MemoryThread),
+            ]))
             .await
             .unwrap();
         assert!(matches!(
@@ -2598,7 +2605,7 @@ mod tests {
                 query
                     .object_refs
                     .iter()
-                    .map(|object_ref| object_ref.object_id)
+                    .map(|object_ref| object_ref.id)
                     .collect(),
             ));
             Ok(lock(&self.objects)
@@ -2607,7 +2614,7 @@ mod tests {
                     let object_ref = memory_object_ref(object);
                     (query.object_refs.is_empty()
                         || query.object_refs.iter().any(|query_ref| {
-                            query_ref.object_id == object_ref.id
+                            query_ref.id == object_ref.id
                                 && query_ref.object_type == object_ref.object_type
                         }))
                         && (query.object_ids.is_empty()

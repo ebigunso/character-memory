@@ -1,15 +1,17 @@
 // Remember pipeline used by the public facade and internal tests. Some
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
-    CommitOptions, DiagnosticSeverity, MemoryObjectRef, RememberDiagnostic, RememberDiagnostics,
-    RememberWritePlan, RepairMarker, StatsUpdateStatus,
+    CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnostics, RememberWritePlan,
+    RepairMarker, StatsUpdateStatus,
 };
-use crate::domain::{CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, ObjectType};
+use crate::domain::{
+    CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+};
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 use crate::ports::retrieval_stats::{
     record_stats_after_write, RetrievalStatsHealthState, RetrievalStatsStore,
 };
@@ -308,7 +310,7 @@ where
             .iter()
             .map(|object| {
                 let (id, object_type) = memory_object_identity(object);
-                GraphObjectRef::new(id, object_type)
+                MemoryObjectRef::from_id_type(id, object_type)
             })
             .collect::<Vec<_>>();
         if !refs.is_empty() {
@@ -411,7 +413,7 @@ fn vector_records_for_targets(
 fn remember_stats_endpoint_refs(
     objects: &[MemoryObject],
     links: &[MemoryLink],
-) -> Vec<GraphObjectRef> {
+) -> Vec<MemoryObjectRef> {
     let mut refs = Vec::new();
     for link in links {
         push_stats_endpoint_ref(&mut refs, objects, link.from_id, link.from_type);
@@ -421,7 +423,7 @@ fn remember_stats_endpoint_refs(
 }
 
 fn push_stats_endpoint_ref(
-    refs: &mut Vec<GraphObjectRef>,
+    refs: &mut Vec<MemoryObjectRef>,
     objects: &[MemoryObject],
     object_id: MemoryId,
     object_type: ObjectType,
@@ -430,14 +432,14 @@ fn push_stats_endpoint_ref(
         || objects
             .iter()
             .any(|object| memory_object_identity(object) == (object_id, object_type))
-        || refs.iter().any(|object_ref| {
-            object_ref.object_id == object_id && object_ref.object_type == object_type
-        })
+        || refs
+            .iter()
+            .any(|object_ref| object_ref.id == object_id && object_ref.object_type == object_type)
     {
         return;
     }
 
-    refs.push(GraphObjectRef::new(object_id, object_type));
+    refs.push(MemoryObjectRef::from_id_type(object_id, object_type));
 }
 
 fn stats_objects_with_endpoint_lifecycle(

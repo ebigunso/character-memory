@@ -4,27 +4,14 @@
 // stores keep tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
 
-use crate::domain::{DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType};
+use crate::domain::{
+    DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+};
 use crate::errors::CustomError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct GraphObjectRef {
-    pub(crate) object_id: MemoryId,
-    pub(crate) object_type: ObjectType,
-}
-
-impl GraphObjectRef {
-    pub(crate) const fn new(object_id: MemoryId, object_type: ObjectType) -> Self {
-        Self {
-            object_id,
-            object_type,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphObjectQuery {
-    pub(crate) object_refs: Vec<GraphObjectRef>,
+    pub(crate) object_refs: Vec<MemoryObjectRef>,
     pub(crate) object_ids: Vec<MemoryId>,
     pub(crate) object_types: Vec<ObjectType>,
     pub(crate) limit: Option<usize>,
@@ -108,7 +95,7 @@ impl GraphObjectQuery {
         }
     }
 
-    pub(crate) fn by_refs(object_refs: Vec<GraphObjectRef>) -> Self {
+    pub(crate) fn by_refs(object_refs: Vec<MemoryObjectRef>) -> Self {
         Self {
             object_refs,
             object_ids: Vec::new(),
@@ -258,7 +245,7 @@ pub(crate) enum GraphExpansionFilteredReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFilteredNode {
-    pub(crate) object_ref: GraphObjectRef,
+    pub(crate) object_ref: MemoryObjectRef,
     pub(crate) reason: GraphExpansionFilteredReason,
 }
 
@@ -272,14 +259,14 @@ pub(crate) enum GraphExpansionBoundedFailureReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionBoundedFailure {
     pub(crate) reason: GraphExpansionBoundedFailureReason,
-    pub(crate) at: Option<GraphObjectRef>,
+    pub(crate) at: Option<MemoryObjectRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphExpansionRelation {
     pub(crate) link_id: MemoryId,
-    pub(crate) from: GraphObjectRef,
-    pub(crate) to: GraphObjectRef,
+    pub(crate) from: MemoryObjectRef,
+    pub(crate) to: MemoryObjectRef,
     pub(crate) relation: RelationType,
     pub(crate) proximity: u8,
 }
@@ -290,14 +277,14 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
-    pub(crate) expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+    pub(crate) expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFanoutUtilization {
-    pub(crate) root: GraphObjectRef,
+    pub(crate) root: MemoryObjectRef,
     pub(crate) relation: RelationType,
     pub(crate) object_type: ObjectType,
     pub(crate) configured_cap: usize,
@@ -326,7 +313,7 @@ impl GraphExpansion {
         links: Vec<MemoryLink>,
         relations: Vec<GraphExpansionRelation>,
         filtered_nodes: Vec<GraphExpansionFilteredNode>,
-        expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+        expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
         fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
         bounded_failure: Option<GraphExpansionBoundedFailure>,
     ) -> Self {
@@ -444,13 +431,15 @@ mod tests {
     fn graph_queries_use_domain_ids_and_object_types() {
         let episode_id = MemoryId::new_v4();
         let by_ids = GraphObjectQuery::by_ids(vec![episode_id]);
-        let by_refs =
-            GraphObjectQuery::by_refs(vec![GraphObjectRef::new(episode_id, ObjectType::Episode)]);
+        let by_refs = GraphObjectQuery::by_refs(vec![MemoryObjectRef::from_id_type(
+            episode_id,
+            ObjectType::Episode,
+        )]);
         let by_types = GraphObjectQuery::by_types(vec![ObjectType::Episode], Some(5));
 
         assert_eq!(by_ids.object_ids, vec![episode_id]);
         assert_eq!(by_ids.object_types, Vec::<ObjectType>::new());
-        assert_eq!(by_refs.object_refs[0].object_id, episode_id);
+        assert_eq!(by_refs.object_refs[0].id, episode_id);
         assert_eq!(by_refs.object_refs[0].object_type, ObjectType::Episode);
         assert_eq!(by_types.object_types, vec![ObjectType::Episode]);
         assert_eq!(by_types.limit, Some(5));

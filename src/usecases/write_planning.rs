@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::api::types::lifecycle::ExternalSourceReference;
-use crate::api::types::retrieval::MemoryObjectRef;
 use crate::api::types::{
     CandidateProducerKind, CandidateProvenance, DerivedMemoryCandidate, EntityCandidate,
     EpisodeCandidate, MemoryCandidate, MemoryLinkCandidate, MemoryThreadCandidate,
@@ -13,6 +12,7 @@ use crate::api::types::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
     ObservationDraft,
 };
+use crate::domain::MemoryObjectRef;
 use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION};
 
 /// Stable UUIDv5 namespace for write-plan IDs. IDs remain stable across releases as long as this
@@ -631,7 +631,7 @@ use crate::domain::{
     RetentionState,
 };
 use crate::errors::CustomError;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -724,9 +724,9 @@ where
 
 #[derive(Debug)]
 struct PlanValidationContext {
-    plan_refs: HashSet<GraphObjectRef>,
-    refs_requiring_graph: HashSet<GraphObjectRef>,
-    existing_refs: HashSet<GraphObjectRef>,
+    plan_refs: HashSet<MemoryObjectRef>,
+    refs_requiring_graph: HashSet<MemoryObjectRef>,
+    existing_refs: HashSet<MemoryObjectRef>,
     episode_content_by_id: HashMap<MemoryId, String>,
     plan_errors: Vec<String>,
 }
@@ -755,37 +755,37 @@ impl PlanValidationContext {
             MemoryCandidate::Episode(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::Episode));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::Episode));
                 }
             }
             MemoryCandidate::Observation(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::Observation));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::Observation));
                 }
             }
             MemoryCandidate::Entity(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::Entity));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::Entity));
                 }
             }
             MemoryCandidate::MemoryThread(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::MemoryThread));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::MemoryThread));
                 }
             }
             MemoryCandidate::DerivedMemory(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::DerivedMemory));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory));
                 }
             }
             MemoryCandidate::MemoryLink(candidate) => {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
-                        .insert(GraphObjectRef::new(id, ObjectType::MemoryLink));
+                        .insert(MemoryObjectRef::from_id_type(id, ObjectType::MemoryLink));
                 }
             }
             MemoryCandidate::VectorIndex(_) | MemoryCandidate::StatsUpdate(_) => {}
@@ -796,21 +796,24 @@ impl PlanValidationContext {
         match candidate {
             MemoryCandidate::DerivedMemory(candidate) => {
                 for episode_id in &candidate.draft.derived_from_episode_ids {
-                    self.add_ref_to_check(GraphObjectRef::new(*episode_id, ObjectType::Episode));
+                    self.add_ref_to_check(MemoryObjectRef::from_id_type(
+                        *episode_id,
+                        ObjectType::Episode,
+                    ));
                 }
                 for observation_id in &candidate.draft.derived_from_observation_ids {
-                    self.add_ref_to_check(GraphObjectRef::new(
+                    self.add_ref_to_check(MemoryObjectRef::from_id_type(
                         *observation_id,
                         ObjectType::Observation,
                     ));
                 }
             }
             MemoryCandidate::MemoryLink(candidate) => {
-                self.add_ref_to_check(GraphObjectRef::new(
+                self.add_ref_to_check(MemoryObjectRef::from_id_type(
                     candidate.draft.from_id,
                     candidate.draft.from_type,
                 ));
-                self.add_ref_to_check(GraphObjectRef::new(
+                self.add_ref_to_check(MemoryObjectRef::from_id_type(
                     candidate.draft.to_id,
                     candidate.draft.to_type,
                 ));
@@ -838,13 +841,13 @@ impl PlanValidationContext {
         }
     }
 
-    fn add_ref_to_check(&mut self, object_ref: GraphObjectRef) {
+    fn add_ref_to_check(&mut self, object_ref: MemoryObjectRef) {
         if !self.plan_refs.contains(&object_ref) {
             self.refs_requiring_graph.insert(object_ref);
         }
     }
 
-    fn graph_refs_to_check(&self) -> Vec<GraphObjectRef> {
+    fn graph_refs_to_check(&self) -> Vec<MemoryObjectRef> {
         self.refs_requiring_graph.iter().copied().collect()
     }
 
@@ -1081,13 +1084,13 @@ impl PlanValidationContext {
         let mut errors = Vec::new();
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
-                GraphObjectRef::new(*episode_id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(*episode_id, ObjectType::Episode),
                 "derived memory source episode",
             ));
         }
         for observation_id in &object.derived_from_observation_ids {
             errors.extend(self.validate_graph_authoritative_ref(
-                GraphObjectRef::new(*observation_id, ObjectType::Observation),
+                MemoryObjectRef::from_id_type(*observation_id, ObjectType::Observation),
                 "derived memory source observation",
             ));
         }
@@ -1097,11 +1100,11 @@ impl PlanValidationContext {
     fn validate_link_targets(&self, link: &MemoryLink) -> Vec<String> {
         let mut errors = Vec::new();
         errors.extend(self.validate_graph_authoritative_ref(
-            GraphObjectRef::new(link.from_id, link.from_type),
+            MemoryObjectRef::from_id_type(link.from_id, link.from_type),
             "memory link from target",
         ));
         errors.extend(self.validate_graph_authoritative_ref(
-            GraphObjectRef::new(link.to_id, link.to_type),
+            MemoryObjectRef::from_id_type(link.to_id, link.to_type),
             "memory link to target",
         ));
         errors
@@ -1109,7 +1112,7 @@ impl PlanValidationContext {
 
     fn validate_graph_authoritative_ref(
         &self,
-        object_ref: GraphObjectRef,
+        object_ref: MemoryObjectRef,
         label: &str,
     ) -> Vec<String> {
         if self.plan_refs.contains(&object_ref) || self.existing_refs.contains(&object_ref) {
@@ -1118,18 +1121,18 @@ impl PlanValidationContext {
 
         vec![format!(
             "{label} does not exist in write plan or graph: {:?} {}",
-            object_ref.object_type, object_ref.object_id
+            object_ref.object_type, object_ref.id
         )]
     }
 
-    fn validate_in_plan_ref(&self, object_ref: GraphObjectRef, label: &str) -> Vec<String> {
+    fn validate_in_plan_ref(&self, object_ref: MemoryObjectRef, label: &str) -> Vec<String> {
         if self.plan_refs.contains(&object_ref) {
             return Vec::new();
         }
 
         vec![format!(
             "{label} must reference an object candidate in the write plan: {:?} {}",
-            object_ref.object_type, object_ref.object_id
+            object_ref.object_type, object_ref.id
         )]
     }
 }
@@ -1449,20 +1452,26 @@ fn validate_provenance(provenance: &crate::api::types::CandidateProvenance) -> V
     errors
 }
 
-fn memory_object_ref(object: &MemoryObject) -> GraphObjectRef {
+fn memory_object_ref(object: &MemoryObject) -> MemoryObjectRef {
     match object {
-        MemoryObject::Episode(object) => GraphObjectRef::new(object.id, ObjectType::Episode),
-        MemoryObject::Observation(object) => {
-            GraphObjectRef::new(object.id, ObjectType::Observation)
+        MemoryObject::Episode(object) => {
+            MemoryObjectRef::from_id_type(object.id, ObjectType::Episode)
         }
-        MemoryObject::Entity(object) => GraphObjectRef::new(object.id, ObjectType::Entity),
+        MemoryObject::Observation(object) => {
+            MemoryObjectRef::from_id_type(object.id, ObjectType::Observation)
+        }
+        MemoryObject::Entity(object) => {
+            MemoryObjectRef::from_id_type(object.id, ObjectType::Entity)
+        }
         MemoryObject::MemoryThread(object) => {
-            GraphObjectRef::new(object.id, ObjectType::MemoryThread)
+            MemoryObjectRef::from_id_type(object.id, ObjectType::MemoryThread)
         }
         MemoryObject::DerivedMemory(object) => {
-            GraphObjectRef::new(object.id, ObjectType::DerivedMemory)
+            MemoryObjectRef::from_id_type(object.id, ObjectType::DerivedMemory)
         }
-        MemoryObject::MemoryLink(object) => GraphObjectRef::new(object.id, ObjectType::MemoryLink),
+        MemoryObject::MemoryLink(object) => {
+            MemoryObjectRef::from_id_type(object.id, ObjectType::MemoryLink)
+        }
     }
 }
 
@@ -1474,12 +1483,6 @@ fn schema_version(object: &MemoryObject) -> &str {
         MemoryObject::MemoryThread(object) => &object.schema_version,
         MemoryObject::DerivedMemory(object) => &object.schema_version,
         MemoryObject::MemoryLink(object) => &object.schema_version,
-    }
-}
-
-impl From<MemoryObjectRef> for GraphObjectRef {
-    fn from(value: MemoryObjectRef) -> Self {
-        Self::new(value.id, value.object_type)
     }
 }
 

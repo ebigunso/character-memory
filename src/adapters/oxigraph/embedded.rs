@@ -9,14 +9,16 @@ use oxigraph::model::{GraphName, NamedNode, Quad};
 use oxigraph::model::{Literal, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
 
-use crate::domain::{graph_uri, DerivedMemory, MemoryLink, MemoryObject, ObjectType};
+use crate::domain::{
+    graph_uri, DerivedMemory, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+};
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
 };
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
 
 #[cfg(test)]
@@ -283,7 +285,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &selected_ids
                 .iter()
                 .copied()
-                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
         let links = hydrate_all_links_from_store(&self.store)?;
@@ -312,7 +314,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &selected_ids
                 .iter()
                 .copied()
-                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
         let links = hydrate_all_links_from_store(&self.store)?;
@@ -330,7 +332,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
         let selectors = SparqlGraphSelectors::new(&self.store);
-        let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
+        let root_ref = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
         let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
         if root_refs.is_empty() {
             return Err(CustomError::GraphExpansionRootNotFound {

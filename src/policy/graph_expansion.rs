@@ -20,21 +20,21 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::domain::{
-    DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
-    ThreadStatus,
+    DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+    RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
     GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
     GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation, GraphObjectRef,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation,
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
-    pub(crate) visited: HashSet<GraphObjectRef>,
-    pub(crate) expanded_nodes: HashSet<GraphObjectRef>,
+    pub(crate) visited: HashSet<MemoryObjectRef>,
+    pub(crate) expanded_nodes: HashSet<MemoryObjectRef>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
@@ -67,10 +67,10 @@ pub(crate) fn bounded_expansion(
             traversed_link_ids.contains(&link.id)
                 && plan
                     .visited
-                    .contains(&GraphObjectRef::new(link.from_id, link.from_type))
+                    .contains(&MemoryObjectRef::from_id_type(link.from_id, link.from_type))
                 && plan
                     .visited
-                    .contains(&GraphObjectRef::new(link.to_id, link.to_type))
+                    .contains(&MemoryObjectRef::from_id_type(link.to_id, link.to_type))
         })
         .collect();
     expanded_links.sort_by_key(|link| link.id);
@@ -200,26 +200,24 @@ fn provenance_linked_derived_memory_id(
     observation_ids: &HashSet<MemoryId>,
     link: &MemoryLink,
 ) -> Option<MemoryId> {
-    let from = GraphObjectRef::new(link.from_id, link.from_type);
-    let to = GraphObjectRef::new(link.to_id, link.to_type);
+    let from = MemoryObjectRef::from_id_type(link.from_id, link.from_type);
+    let to = MemoryObjectRef::from_id_type(link.to_id, link.to_type);
     match (from.object_type, to.object_type) {
-        (ObjectType::DerivedMemory, ObjectType::Episode) if episode_ids.contains(&to.object_id) => {
-            Some(from.object_id)
+        (ObjectType::DerivedMemory, ObjectType::Episode) if episode_ids.contains(&to.id) => {
+            Some(from.id)
         }
-        (ObjectType::Episode, ObjectType::DerivedMemory)
-            if episode_ids.contains(&from.object_id) =>
-        {
-            Some(to.object_id)
+        (ObjectType::Episode, ObjectType::DerivedMemory) if episode_ids.contains(&from.id) => {
+            Some(to.id)
         }
         (ObjectType::DerivedMemory, ObjectType::Observation)
-            if observation_ids.contains(&to.object_id) =>
+            if observation_ids.contains(&to.id) =>
         {
-            Some(from.object_id)
+            Some(from.id)
         }
         (ObjectType::Observation, ObjectType::DerivedMemory)
-            if observation_ids.contains(&from.object_id) =>
+            if observation_ids.contains(&from.id) =>
         {
-            Some(to.object_id)
+            Some(to.id)
         }
         _ => None,
     }
@@ -321,7 +319,7 @@ fn bounded_expansion_plan<'a>(
         .iter()
         .map(|object| graph_object_ref(object))
         .collect::<HashSet<_>>();
-    let root = GraphObjectRef::new(query.root_id, query.root_type);
+    let root = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
 
     if !object_refs.contains(&root) {
         return Err(CustomError::GraphExpansionRootNotFound {
@@ -435,7 +433,7 @@ fn bounded_expansion_plan<'a>(
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
 
         let apply_selectivity_overrides = depth == 0
-            && object_ref.object_id == query.root_id
+            && object_ref.id == query.root_id
             && object_ref.object_type == query.root_type;
         let pre_limit_counts = query.record_fanout_utilization.then(|| {
             fanout_counts_by_pair(&incident_links, &|item| {
@@ -476,8 +474,8 @@ fn bounded_expansion_plan<'a>(
             if relation_link_ids.insert(link.id) {
                 relations.push(GraphExpansionRelation {
                     link_id: link.id,
-                    from: GraphObjectRef::new(link.from_id, link.from_type),
-                    to: GraphObjectRef::new(link.to_id, link.to_type),
+                    from: MemoryObjectRef::from_id_type(link.from_id, link.from_type),
+                    to: MemoryObjectRef::from_id_type(link.to_id, link.to_type),
                     relation: link.relation,
                     proximity: depth.saturating_add(1),
                 });
@@ -512,14 +510,11 @@ fn bounded_expansion_plan<'a>(
         (
             relation.proximity,
             relation.link_id,
-            stable_node_key((relation.to.object_id, relation.to.object_type)),
+            stable_node_key((relation.to.id, relation.to.object_type)),
         )
     });
     filtered_nodes.sort_by_key(|filtered| {
-        stable_node_key((
-            filtered.object_ref.object_id,
-            filtered.object_ref.object_type,
-        ))
+        stable_node_key((filtered.object_ref.id, filtered.object_ref.object_type))
     });
     filtered_nodes.dedup_by_key(|filtered| filtered.object_ref);
 
@@ -535,9 +530,9 @@ fn bounded_expansion_plan<'a>(
 
 fn apply_fanout_limits<'a>(
     query: &GraphExpansionQuery,
-    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
     apply_selectivity_overrides: bool,
-) -> Vec<(&'a MemoryLink, GraphObjectRef)> {
+) -> Vec<(&'a MemoryLink, MemoryObjectRef)> {
     apply_fanout_limits_by_pair(
         query,
         incident_links,
@@ -548,12 +543,12 @@ fn apply_fanout_limits<'a>(
 
 fn apply_fanout_limits_with_utilization<'a>(
     query: &GraphExpansionQuery,
-    root: GraphObjectRef,
-    incident_links: Vec<(&'a MemoryLink, GraphObjectRef)>,
+    root: MemoryObjectRef,
+    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
     pre_limit_counts: FanoutCounts,
     apply_selectivity_overrides: bool,
 ) -> (
-    Vec<(&'a MemoryLink, GraphObjectRef)>,
+    Vec<(&'a MemoryLink, MemoryObjectRef)>,
     Vec<GraphExpansionFanoutUtilization>,
 ) {
     apply_fanout_limits_with_utilization_by_pair(
@@ -568,7 +563,7 @@ fn apply_fanout_limits_with_utilization<'a>(
 
 fn apply_fanout_limits_with_utilization_by_pair<T>(
     query: &GraphExpansionQuery,
-    root: GraphObjectRef,
+    root: MemoryObjectRef,
     incident_items: Vec<T>,
     pre_limit_counts: FanoutCounts,
     apply_selectivity_overrides: bool,
@@ -700,7 +695,7 @@ pub(crate) fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailur
                 format!(
                     " at object_type={} object_id={}",
                     graph_object_type_name(object_ref.object_type),
-                    object_ref.object_id
+                    object_ref.id
                 )
             })
             .unwrap_or_default(),
@@ -728,7 +723,7 @@ fn graph_object_type_name(object_type: ObjectType) -> &'static str {
 
 fn push_filtered_node(
     filtered_nodes: &mut Vec<GraphExpansionFilteredNode>,
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
 ) {
     if !filtered_nodes
@@ -822,22 +817,22 @@ fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> 
     query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
 }
 
-fn link_touches_ref(link: &MemoryLink, object_ref: GraphObjectRef) -> bool {
-    (link.from_id == object_ref.object_id && link.from_type == object_ref.object_type)
-        || (link.to_id == object_ref.object_id && link.to_type == object_ref.object_type)
+fn link_touches_ref(link: &MemoryLink, object_ref: MemoryObjectRef) -> bool {
+    (link.from_id == object_ref.id && link.from_type == object_ref.object_type)
+        || (link.to_id == object_ref.id && link.to_type == object_ref.object_type)
 }
 
-fn other_endpoint(link: &MemoryLink, object_ref: GraphObjectRef) -> GraphObjectRef {
-    if link.from_id == object_ref.object_id && link.from_type == object_ref.object_type {
-        GraphObjectRef::new(link.to_id, link.to_type)
+fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> MemoryObjectRef {
+    if link.from_id == object_ref.id && link.from_type == object_ref.object_type {
+        MemoryObjectRef::from_id_type(link.to_id, link.to_type)
     } else {
-        GraphObjectRef::new(link.from_id, link.from_type)
+        MemoryObjectRef::from_id_type(link.from_id, link.from_type)
     }
 }
 
-fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
+fn graph_object_ref(object: &MemoryObject) -> MemoryObjectRef {
     let (object_id, object_type) = object_identity(object);
-    GraphObjectRef::new(object_id, object_type)
+    MemoryObjectRef::from_id_type(object_id, object_type)
 }
 
 fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
@@ -905,11 +900,11 @@ fn relation_type_rank(relation_type: RelationType) -> u8 {
 // `bounded_incident_link_refs` to bound traversal before hydrating objects.
 pub(crate) trait BoundedExpansionLinkRef: Copy {
     fn link_id(self) -> MemoryId;
-    fn from(self) -> GraphObjectRef;
-    fn to(self) -> GraphObjectRef;
+    fn from(self) -> MemoryObjectRef;
+    fn to(self) -> MemoryObjectRef;
     fn relation(self) -> RelationType;
 
-    fn other_endpoint(self, object_ref: GraphObjectRef) -> GraphObjectRef {
+    fn other_endpoint(self, object_ref: MemoryObjectRef) -> MemoryObjectRef {
         if self.from() == object_ref {
             self.to()
         } else {
@@ -920,8 +915,8 @@ pub(crate) trait BoundedExpansionLinkRef: Copy {
 
 pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
     query: &GraphExpansionQuery,
-    root_ref: GraphObjectRef,
-    object_ref: GraphObjectRef,
+    root_ref: MemoryObjectRef,
+    object_ref: MemoryObjectRef,
     depth: u8,
     link_refs: &[T],
     bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
@@ -984,7 +979,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
 
 pub(crate) fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
     query: &GraphExpansionQuery,
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     incident_links: Vec<T>,
     apply_selectivity_overrides: bool,
 ) -> Vec<T> {
@@ -1123,7 +1118,7 @@ mod tests {
             .fanout_utilization
             .iter()
             .find(|entry| {
-                entry.root.object_id == fixture.hub_entity.id
+                entry.root.id == fixture.hub_entity.id
                     && entry.relation == RelationType::About
                     && entry.object_type == ObjectType::DerivedMemory
             })
@@ -1144,7 +1139,7 @@ mod tests {
             expansion.bounded_failure,
             Some(GraphExpansionBoundedFailure {
                 reason: GraphExpansionBoundedFailureReason::HubLimit,
-                at: Some(GraphObjectRef::new(
+                at: Some(MemoryObjectRef::from_id_type(
                     fixture.hub_entity.id,
                     ObjectType::Entity
                 )),
@@ -1337,8 +1332,11 @@ mod tests {
         assert_eq!(
             about_derived_roots,
             HashSet::from([
-                GraphObjectRef::new(fixture.hub_entity.id, ObjectType::Entity),
-                GraphObjectRef::new(fixture.derived_reflection.id, ObjectType::DerivedMemory,),
+                MemoryObjectRef::from_id_type(fixture.hub_entity.id, ObjectType::Entity),
+                MemoryObjectRef::from_id_type(
+                    fixture.derived_reflection.id,
+                    ObjectType::DerivedMemory,
+                ),
             ])
         );
     }

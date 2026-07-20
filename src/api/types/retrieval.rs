@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    DerivedMemory, Episode, MemoryId, MemoryThread, ObjectType, Observation, RelationType,
-    RetentionState,
+    DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
+    MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -286,14 +286,6 @@ pub struct GraphExpansionBoundedFailureSummary {
     pub count: usize,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GraphExpansionBoundedReason {
-    NodeLimit,
-    Timeout,
-    HubLimit,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SectionPressureSummary {
     pub section: ContextPackSection,
@@ -345,18 +337,6 @@ impl RetrievalTrace {
 impl Default for RetrievalTrace {
     fn default() -> Self {
         Self::empty()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MemoryObjectRef {
-    pub object_type: ObjectType,
-    pub id: MemoryId,
-}
-
-impl MemoryObjectRef {
-    pub const fn new(object_type: ObjectType, id: MemoryId) -> Self {
-        Self { object_type, id }
     }
 }
 
@@ -432,12 +412,6 @@ pub enum SelectivityDecision {
     LowSelectivitySupported,
     LowSelectivityRejected,
     ConservativeFallback,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GraphExpansionBoundedFailureTrace {
-    pub reason: GraphExpansionBoundedReason,
-    pub at: Option<MemoryObjectRef>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

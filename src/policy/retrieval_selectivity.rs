@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use crate::api::types::{
-    MemoryObjectRef, RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision,
-    SelectivityTelemetry, SelectivityTrace,
+    RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
+    SelectivityTrace,
 };
-use crate::domain::{ObjectType, RelationType};
+use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;

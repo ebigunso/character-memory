@@ -1,28 +1,8 @@
+use crate::domain::{
+    DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType,
+    RetentionState, Stability, ThreadStatus,
+};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use super::retrieval::MemoryObjectRef;
-use crate::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum LifecycleDtoValidationError {
-    #[error("rationale must not be empty")]
-    EmptyRationale,
-    #[error("correction origin provenance is required")]
-    EmptyCorrectionOrigin,
-    #[error("replacement derived memory text must not be empty")]
-    EmptyReplacementText,
-    #[error(
-        "replacement derived memory must reference at least one source episode or observation"
-    )]
-    MissingReplacementSource,
-    #[error("correction requires at least one target")]
-    MissingCorrectionTarget,
-    #[error("forget requires at least one target")]
-    MissingForgetTarget,
-    #[error("unsupported lifecycle target: {0:?}")]
-    UnsupportedLifecycleTarget(ObjectType),
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "object_type", content = "id", rename_all = "snake_case")]

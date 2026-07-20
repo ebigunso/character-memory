@@ -7,7 +7,7 @@ use super::draft::{
     ObservationDraft, VectorIndexingFailure,
 };
 use super::lifecycle::ExternalSourceReference;
-use super::retrieval::MemoryObjectRef;
+use crate::domain::MemoryObjectRef;
 use crate::domain::{CandidateValidation, MemoryCandidateKind, MemoryId, RelationType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

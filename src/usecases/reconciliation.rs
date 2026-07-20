@@ -5,13 +5,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::{
-    graph_uri, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
+    graph_uri, MemoryId, MemoryObject, MemoryObjectRef, ObjectType, RelationType, RetentionState,
     CURRENT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::VectorCandidateDiagnosticRecord;
 
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectRef};
+use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub(crate) struct ReconciliationReport {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReconciliationDiagnostic {
-    pub(crate) object_ref: GraphObjectRef,
+    pub(crate) object_ref: MemoryObjectRef,
     pub(crate) kind: ReconciliationDriftKind,
     pub(crate) detail: String,
 }
@@ -67,7 +67,7 @@ fn reconcile_records(
         .collect::<HashMap<_, _>>();
     let vector_refs = vector_records
         .iter()
-        .map(|record| GraphObjectRef::new(record.object_id, record.object_type))
+        .map(|record| MemoryObjectRef::from_id_type(record.object_id, record.object_type))
         .collect::<HashSet<_>>();
     let superseded = graph_links
         .iter()
@@ -81,7 +81,7 @@ fn reconcile_records(
     let mut diagnostics = Vec::new();
 
     for record in &vector_records {
-        let object_ref = GraphObjectRef::new(record.object_id, record.object_type);
+        let object_ref = MemoryObjectRef::from_id_type(record.object_id, record.object_type);
         let expected_graph_uri = graph_uri(record.object_type, record.object_id);
         if record.graph_uri != expected_graph_uri {
             push_diagnostic(
@@ -148,7 +148,7 @@ fn reconcile_records(
 
     diagnostics.sort_by_key(|diagnostic| {
         (
-            diagnostic.object_ref.object_id,
+            diagnostic.object_ref.id,
             object_type_rank(diagnostic.object_ref.object_type),
             drift_kind_rank(diagnostic.kind),
         )
@@ -158,7 +158,7 @@ fn reconcile_records(
 
 fn push_lifecycle_diagnostics(
     diagnostics: &mut Vec<ReconciliationDiagnostic>,
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     record: &VectorCandidateDiagnosticRecord,
     graph_object: &MemoryObject,
     superseded: &HashSet<MemoryId>,
@@ -195,7 +195,7 @@ fn push_lifecycle_diagnostics(
             );
         }
 
-        let graph_is_superseded = superseded.contains(&object_ref.object_id);
+        let graph_is_superseded = superseded.contains(&object_ref.id);
         if record
             .is_superseded
             .is_some_and(|vector_is_superseded| vector_is_superseded != graph_is_superseded)
@@ -237,7 +237,7 @@ fn missing_required_provenance(object: &MemoryObject, links: &[crate::domain::Me
 
 fn push_diagnostic(
     diagnostics: &mut Vec<ReconciliationDiagnostic>,
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     kind: ReconciliationDriftKind,
     detail: impl Into<String>,
 ) {
@@ -248,7 +248,7 @@ fn push_diagnostic(
     });
 }
 
-fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
+fn graph_object_ref(object: &MemoryObject) -> MemoryObjectRef {
     let (object_id, object_type) = match object {
         MemoryObject::Episode(object) => (object.id, object.object_type),
         MemoryObject::Observation(object) => (object.id, object.object_type),
@@ -257,7 +257,7 @@ fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
         MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
         MemoryObject::MemoryLink(object) => (object.id, object.object_type),
     };
-    GraphObjectRef::new(object_id, object_type)
+    MemoryObjectRef::from_id_type(object_id, object_type)
 }
 
 fn graph_retention_state(object: &MemoryObject) -> Option<RetentionState> {
@@ -441,11 +441,11 @@ mod tests {
         }
         assert!(report.diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == ReconciliationDriftKind::MissingProvenance
-                && diagnostic.object_ref.object_id == missing_provenance.id
+                && diagnostic.object_ref.id == missing_provenance.id
         }));
         assert!(report.diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == ReconciliationDriftKind::UnsupportedVectorSchema
-                && diagnostic.object_ref.object_id == id(999)
+                && diagnostic.object_ref.id == id(999)
         }));
     }
 

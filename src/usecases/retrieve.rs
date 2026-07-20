@@ -3,17 +3,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace,
-    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
+    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
-    RationaleCategory, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
-    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory,
+    RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
+    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
     StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryThread, ObjectType, RelationType,
+    DerivedMemory, DerivedType, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
+    MemoryId, MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RelationType,
     RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
@@ -29,7 +29,7 @@ use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
     GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphObjectRef,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
@@ -272,9 +272,9 @@ struct RetrievalDetails {
 
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
-    objects: HashMap<GraphObjectRef, RankedObject>,
-    candidate_scores: HashMap<GraphObjectRef, f32>,
-    candidate_refs: HashSet<GraphObjectRef>,
+    objects: HashMap<MemoryObjectRef, RankedObject>,
+    candidate_scores: HashMap<MemoryObjectRef, f32>,
+    candidate_refs: HashSet<MemoryObjectRef>,
     superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
@@ -291,7 +291,8 @@ impl RetrieveAssembly {
 
     fn absorb_expansion(&mut self, candidate: &VectorCandidateMatch, expansion: GraphExpansion) {
         let bounded_failure = expansion.bounded_failure;
-        let candidate_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
+        let candidate_ref =
+            MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
         self.candidate_refs.insert(candidate_ref);
         self.candidate_scores
             .entry(candidate_ref)
@@ -304,17 +305,17 @@ impl RetrieveAssembly {
                 && relation.to.object_type == ObjectType::DerivedMemory
             {
                 self.superseded_by
-                    .entry(relation.to.object_id)
+                    .entry(relation.to.id)
                     .or_default()
-                    .push(relation.from.object_id);
+                    .push(relation.from.id);
             }
         }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
                 graph_relations.push(crate::api::types::GraphRelationTrace {
-                    from: memory_object_ref(relation.from.object_type, relation.from.object_id),
-                    to: memory_object_ref(relation.to.object_type, relation.to.object_id),
+                    from: memory_object_ref(relation.from.object_type, relation.from.id),
+                    to: memory_object_ref(relation.to.object_type, relation.to.id),
                     relation: relation.relation,
                     proximity: relation.proximity,
                 });
@@ -390,7 +391,7 @@ impl RetrieveAssembly {
         for filtered in expansion.filtered_nodes {
             let superseded_by = self
                 .superseded_by
-                .get(&filtered.object_ref.object_id)
+                .get(&filtered.object_ref.id)
                 .cloned()
                 .unwrap_or_default();
             let decision =
@@ -465,7 +466,7 @@ impl RetrieveAssembly {
         for (object_ref, mut ranked) in std::mem::take(&mut self.objects) {
             let superseded_by = self
                 .superseded_by
-                .get(&object_ref.object_id)
+                .get(&object_ref.id)
                 .cloned()
                 .unwrap_or_default();
             let decision = lifecycle_decision(&ranked.object, &superseded_by, *policy);
@@ -475,7 +476,7 @@ impl RetrieveAssembly {
             } else if self.candidate_refs.contains(&object_ref) {
                 let stale_reason = stale_reason_from_decision(decision.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: memory_object_ref(object_ref.object_type, object_ref.object_id),
+                    candidate: memory_object_ref(object_ref.object_type, object_ref.id),
                     vector_score: self.candidate_scores.get(&object_ref).copied(),
                     reason: stale_reason,
                     rationale_categories: rationale_categories_for_stale_reason(stale_reason),
@@ -491,13 +492,13 @@ impl RetrieveAssembly {
             .collect::<HashSet<_>>();
         self.lifecycle_decisions.retain(|decision| {
             decision.action != LifecycleFilterAction::Omitted
-                || !included_refs.contains(&GraphObjectRef::new(
+                || !included_refs.contains(&MemoryObjectRef::from_id_type(
                     decision.object.id,
                     decision.object.object_type,
                 ))
         });
         self.stale_omissions.retain(|omission| {
-            !included_refs.contains(&GraphObjectRef::new(
+            !included_refs.contains(&MemoryObjectRef::from_id_type(
                 omission.candidate.id,
                 omission.candidate.object_type,
             ))
@@ -635,7 +636,7 @@ struct GraphPathSignals {
 }
 
 impl GraphPathSignals {
-    fn root(candidate_ref: GraphObjectRef) -> Self {
+    fn root(candidate_ref: MemoryObjectRef) -> Self {
         Self {
             entity: candidate_ref.object_type == ObjectType::Entity,
             thread: false,
@@ -645,8 +646,8 @@ impl GraphPathSignals {
     fn through(
         self,
         relation: RelationType,
-        source: GraphObjectRef,
-        target: GraphObjectRef,
+        source: MemoryObjectRef,
+        target: MemoryObjectRef,
     ) -> Self {
         let mut signals = self;
         match relation_rationale(relation, source, target) {
@@ -667,8 +668,8 @@ enum RelationRationale {
 
 fn relation_rationale(
     relation: RelationType,
-    source: GraphObjectRef,
-    target: GraphObjectRef,
+    source: MemoryObjectRef,
+    target: MemoryObjectRef,
 ) -> RelationRationale {
     match relation {
         RelationType::PartOfThread
@@ -706,9 +707,9 @@ fn relation_rationale(
 /// - Results are independent of same-depth relation iteration order: each BFS depth is built from the prior depth's snapshot, and same-depth path states union without mutating parent state.
 /// - Across multiple candidates admitting the same object, signals OR-merge.
 fn graph_provenance(
-    candidate_ref: GraphObjectRef,
+    candidate_ref: MemoryObjectRef,
     relations: &[crate::ports::graph_authority::GraphExpansionRelation],
-) -> HashMap<GraphObjectRef, GraphRationaleSignals> {
+) -> HashMap<MemoryObjectRef, GraphRationaleSignals> {
     let mut depth_by_ref = HashMap::from([(candidate_ref, 0_u8)]);
     let mut paths_by_ref = HashMap::from([(
         candidate_ref,
@@ -724,7 +725,7 @@ fn graph_provenance(
     // cannot leak signals into one another through relation iteration order.
     for proximity in 1..=max_proximity {
         let parent_depth = proximity - 1;
-        let mut next_paths: HashMap<GraphObjectRef, HashSet<GraphPathSignals>> = HashMap::new();
+        let mut next_paths: HashMap<MemoryObjectRef, HashSet<GraphPathSignals>> = HashMap::new();
         for relation in relations
             .iter()
             .filter(|relation| relation.proximity == proximity)
@@ -1032,9 +1033,9 @@ fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
     max_graph_roots: usize,
 ) -> CandidateRootSelection {
-    let mut by_ref: HashMap<GraphObjectRef, VectorCandidateMatch> = HashMap::new();
+    let mut by_ref: HashMap<MemoryObjectRef, VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
-        let object_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
+        let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
         by_ref
             .entry(object_ref)
             .and_modify(|existing| {
@@ -1108,7 +1109,7 @@ fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
             format!(
                 " at object_type={} object_id={}",
                 object_type_name(object_ref.object_type),
-                object_ref.object_id
+                object_ref.id
             )
         })
         .unwrap_or_default();
@@ -1171,7 +1172,7 @@ fn fanout_utilization_traces_for_expansion(
         .fanout_utilization
         .iter()
         .map(|entry| FanoutUtilizationTrace {
-            root: memory_object_ref(entry.root.object_type, entry.root.object_id),
+            root: memory_object_ref(entry.root.object_type, entry.root.id),
             relation: entry.relation,
             object_type: entry.object_type,
             configured_cap: entry.configured_cap,
@@ -1200,7 +1201,7 @@ fn graph_expansion_bounded_failure_trace(
         reason: public_bounded_failure_reason(failure.reason),
         at: failure
             .at
-            .map(|object_ref| memory_object_ref(object_ref.object_type, object_ref.object_id)),
+            .map(|object_ref| memory_object_ref(object_ref.object_type, object_ref.id)),
     }
 }
 
@@ -1332,12 +1333,12 @@ fn omission_reason(reason: LifecycleFilterReason) -> bool {
 }
 
 fn filtered_lifecycle_decision(
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
     superseded_by: &[MemoryId],
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
-        object: memory_object_ref(object_ref.object_type, object_ref.object_id),
+        object: memory_object_ref(object_ref.object_type, object_ref.id),
         retention_state: None,
         is_current: None,
         superseded_by: superseded_by.to_vec(),
@@ -1503,9 +1504,9 @@ fn memory_object_ref_from_object(object: &MemoryObject) -> MemoryObjectRef {
     memory_object_ref(object_type, object_id)
 }
 
-fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
+fn graph_object_ref(object: &MemoryObject) -> MemoryObjectRef {
     let (object_id, object_type) = object_identity(object);
-    GraphObjectRef::new(object_id, object_type)
+    MemoryObjectRef::from_id_type(object_id, object_type)
 }
 
 fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
@@ -1877,7 +1878,8 @@ mod tests {
         let fixtures = representative_fixtures();
         let mut preference = fixtures.user_preference.clone();
         preference.salience_score = 0.0;
-        let preference_ref = GraphObjectRef::new(preference.id, ObjectType::DerivedMemory);
+        let preference_ref =
+            MemoryObjectRef::from_id_type(preference.id, ObjectType::DerivedMemory);
         let preference_candidate = candidate(preference.id, ObjectType::DerivedMemory, 0.95);
         let hub_candidate = candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.90);
         let episode_candidate = candidate(fixtures.episode.id, ObjectType::Episode, 0.89);
@@ -1893,7 +1895,7 @@ mod tests {
                 .relations
                 .push(crate::ports::graph_authority::GraphExpansionRelation {
                     link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0210),
-                    from: GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+                    from: MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity),
                     to: preference_ref,
                     relation: RelationType::About,
                     proximity: 1,
@@ -1913,7 +1915,7 @@ mod tests {
                 .push(crate::ports::graph_authority::GraphExpansionRelation {
                     link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0211),
                     from: preference_ref,
-                    to: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                    to: MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
                     relation: RelationType::DerivedFrom,
                     proximity: 1,
                 });
@@ -1932,7 +1934,7 @@ mod tests {
 
         let mut episode = fixtures.episode.clone();
         episode.salience_score = 0.0;
-        let episode_ref = GraphObjectRef::new(episode.id, ObjectType::Episode);
+        let episode_ref = MemoryObjectRef::from_id_type(episode.id, ObjectType::Episode);
         let mut semantic_episode = RetrieveAssembly::new(true);
         semantic_episode.absorb_expansion(
             &candidate(episode.id, ObjectType::Episode, 0.94),
@@ -1949,7 +1951,7 @@ mod tests {
 
         let mut thread = fixtures.soft_thread.clone();
         thread.salience_score = 0.0;
-        let thread_ref = GraphObjectRef::new(thread.id, ObjectType::MemoryThread);
+        let thread_ref = MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread);
         let mut semantic_thread = RetrieveAssembly::new(true);
         semantic_thread.absorb_expansion(
             &candidate(thread.id, ObjectType::MemoryThread, 0.93),
@@ -2008,12 +2010,14 @@ mod tests {
     #[test]
     fn entity_side_branch_does_not_affect_target_and_is_order_independent() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
-        let bridge_ref =
-            GraphObjectRef::new(fixtures.derived_reflection.id, ObjectType::DerivedMemory);
-        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
+        let bridge_ref = MemoryObjectRef::from_id_type(
+            fixtures.derived_reflection.id,
+            ObjectType::DerivedMemory,
+        );
+        let entity_ref = MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let categories_with_ids = |entity_link_id: u128, target_link_id: u128| {
             let mut expansion = GraphExpansion::new(
                 vec![
@@ -2082,8 +2086,8 @@ mod tests {
     fn mentions_path_uses_entity_nodes_not_relation_name_for_entity_rationale() {
         let fixtures = representative_fixtures();
         let target_ref =
-            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
-        let categories_for_root = |root_ref: GraphObjectRef, root: MemoryObject| {
+            MemoryObjectRef::from_id_type(fixtures.salient_observation.id, ObjectType::Observation);
+        let categories_for_root = |root_ref: MemoryObjectRef, root: MemoryObject| {
             let mut expansion = GraphExpansion::new(
                 vec![
                     root,
@@ -2102,7 +2106,7 @@ mod tests {
                 });
             let mut assembly = RetrieveAssembly::new(true);
             assembly.absorb_expansion(
-                &candidate(root_ref.object_id, root_ref.object_type, 0.90),
+                &candidate(root_ref.id, root_ref.object_type, 0.90),
                 expansion,
             );
             assembly
@@ -2114,11 +2118,11 @@ mod tests {
         };
 
         let entityless = categories_for_root(
-            GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+            MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
             MemoryObject::Episode(fixtures.episode.clone()),
         );
         let entity_backed = categories_for_root(
-            GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+            MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity),
             MemoryObject::Entity(fixtures.hub_entity.clone()),
         );
 
@@ -2131,9 +2135,10 @@ mod tests {
     #[test]
     fn part_of_thread_path_emits_thread_without_graph_bound() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread);
+        let root_ref =
+            MemoryObjectRef::from_id_type(fixtures.soft_thread.id, ObjectType::MemoryThread);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
@@ -2171,9 +2176,9 @@ mod tests {
     #[test]
     fn part_of_thread_without_thread_endpoint_falls_back_to_graph_bound() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
         let target_ref =
-            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
+            MemoryObjectRef::from_id_type(fixtures.salient_observation.id, ObjectType::Observation);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2212,7 +2217,7 @@ mod tests {
     fn graph_categories_union_across_distinct_candidate_paths() {
         let fixtures = representative_fixtures();
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut generic_expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2224,7 +2229,7 @@ mod tests {
             .relations
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0231),
-                from: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                from: MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
                 to: target_ref,
                 relation: RelationType::DerivedFrom,
                 proximity: 1,
@@ -2241,7 +2246,10 @@ mod tests {
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0232),
                 from: target_ref,
-                to: GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread),
+                to: MemoryObjectRef::from_id_type(
+                    fixtures.soft_thread.id,
+                    ObjectType::MemoryThread,
+                ),
                 relation: RelationType::PartOfThread,
                 proximity: 1,
             });
@@ -2270,10 +2278,10 @@ mod tests {
     #[test]
     fn entity_on_admitting_path_emits_entity_for_target() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
-        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
+        let entity_ref = MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2525,15 +2533,21 @@ mod tests {
             .relations
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
-                from: GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
-                to: GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
+                from: MemoryObjectRef::from_id_type(
+                    fixtures.correction.id,
+                    ObjectType::DerivedMemory,
+                ),
+                to: MemoryObjectRef::from_id_type(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                ),
                 relation: RelationType::Supersedes,
                 proximity: 1,
             });
         expansion
             .filtered_nodes
             .push(crate::ports::graph_authority::GraphExpansionFilteredNode {
-                object_ref: GraphObjectRef::new(
+                object_ref: MemoryObjectRef::from_id_type(
                     fixtures.suppressed_seed.id,
                     ObjectType::DerivedMemory,
                 ),

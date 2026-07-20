@@ -1,9 +1,9 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, MemoryLinkDraft};
-use crate::domain::{MemoryId, MemoryLink, ObjectType, RelationType};
+use crate::domain::{MemoryId, MemoryLink, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +117,7 @@ where
     }
 }
 
-fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
+fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<MemoryObjectRef> {
     let mut refs = Vec::new();
     if object_type_has_stats_state(link.from_type) {
         push_link_stats_endpoint_ref(&mut refs, link.from_id, link.from_type);
@@ -129,11 +129,11 @@ fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
 }
 
 fn push_link_stats_endpoint_ref(
-    refs: &mut Vec<GraphObjectRef>,
+    refs: &mut Vec<MemoryObjectRef>,
     object_id: MemoryId,
     object_type: ObjectType,
 ) {
-    let object_ref = GraphObjectRef::new(object_id, object_type);
+    let object_ref = MemoryObjectRef::from_id_type(object_id, object_type);
     if refs.contains(&object_ref) {
         return;
     }
@@ -294,7 +294,10 @@ mod tests {
 
         assert_eq!(
             refs,
-            vec![GraphObjectRef::new(object_id, ObjectType::Observation)]
+            vec![MemoryObjectRef::from_id_type(
+                object_id,
+                ObjectType::Observation
+            )]
         );
     }
 

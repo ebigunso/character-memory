@@ -8,11 +8,10 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType};
+use crate::domain::{graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
-    GraphObjectRef,
 };
 
 use super::vocabulary as vocab;
@@ -24,8 +23,8 @@ pub(crate) struct SparqlGraphSelectors<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SparqlLinkRef {
     pub(crate) link_id: MemoryId,
-    pub(crate) from: GraphObjectRef,
-    pub(crate) to: GraphObjectRef,
+    pub(crate) from: MemoryObjectRef,
+    pub(crate) to: MemoryObjectRef,
     pub(crate) relation: RelationType,
 }
 
@@ -48,7 +47,7 @@ impl<'a> SparqlGraphSelectors<'a> {
     pub(crate) fn select_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<GraphObjectRef>, CustomError> {
+    ) -> Result<Vec<MemoryObjectRef>, CustomError> {
         let id_values =
             sparql_literal_values("id", query.object_ids.iter().map(|id| id.to_string()));
         let type_values = sparql_literal_values(
@@ -227,7 +226,7 @@ impl<'a> SparqlGraphSelectors<'a> {
 
     pub(crate) fn select_links_touching(
         &self,
-        object_refs: &[GraphObjectRef],
+        object_refs: &[MemoryObjectRef],
     ) -> Result<Vec<SparqlLinkRef>, CustomError> {
         if object_refs.is_empty() {
             return Ok(Vec::new());
@@ -273,11 +272,11 @@ impl<'a> SparqlGraphSelectors<'a> {
         for solution in self.query_solutions(&query_text)? {
             let link_ref = SparqlLinkRef {
                 link_id: memory_id_binding(&solution, "linkId")?,
-                from: GraphObjectRef::new(
+                from: MemoryObjectRef::from_id_type(
                     memory_id_binding(&solution, "fromId")?,
                     enum_binding(&solution, "fromType")?,
                 ),
-                to: GraphObjectRef::new(
+                to: MemoryObjectRef::from_id_type(
                     memory_id_binding(&solution, "toId")?,
                     enum_binding(&solution, "toType")?,
                 ),
@@ -289,8 +288,8 @@ impl<'a> SparqlGraphSelectors<'a> {
         }
         refs.sort_by_key(|link_ref| {
             (
-                link_ref.to.object_id,
-                link_ref.from.object_id,
+                link_ref.to.id,
+                link_ref.from.id,
                 link_ref.link_id,
                 object_type_rank(link_ref.to.object_type),
                 object_type_rank(link_ref.from.object_type),
@@ -325,12 +324,12 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_memory_ids(&query_text, limit)
     }
 
-    fn select_object_refs(&self, query_text: &str) -> Result<Vec<GraphObjectRef>, CustomError> {
+    fn select_object_refs(&self, query_text: &str) -> Result<Vec<MemoryObjectRef>, CustomError> {
         let mut refs = Vec::new();
         for solution in self.query_solutions(query_text)? {
             let id = memory_id_binding(&solution, "id")?;
             let object_type = enum_binding(&solution, "objectType")?;
-            refs.push(GraphObjectRef::new(id, object_type));
+            refs.push(MemoryObjectRef::from_id_type(id, object_type));
         }
         Ok(refs)
     }
@@ -376,9 +375,9 @@ impl<'a> SparqlGraphSelectors<'a> {
     }
 }
 
-fn object_matches_query(object_ref: GraphObjectRef, query: &GraphObjectQuery) -> bool {
+fn object_matches_query(object_ref: MemoryObjectRef, query: &GraphObjectQuery) -> bool {
     (query.object_refs.is_empty() || query.object_refs.contains(&object_ref))
-        && (query.object_ids.is_empty() || query.object_ids.contains(&object_ref.object_id))
+        && (query.object_ids.is_empty() || query.object_ids.contains(&object_ref.id))
         && (query.object_types.is_empty() || query.object_types.contains(&object_ref.object_type))
 }
 
@@ -426,11 +425,11 @@ fn sparql_iri_values<'a>(variable: &str, values: impl Iterator<Item = &'a str>) 
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
-fn sparql_node_iri_values(variable: &str, object_refs: &[GraphObjectRef]) -> String {
+fn sparql_node_iri_values(variable: &str, object_refs: &[MemoryObjectRef]) -> String {
     let values = object_refs
         .iter()
         .map(|object_ref| {
-            let graph_uri = graph_uri(object_ref.object_type, object_ref.object_id);
+            let graph_uri = graph_uri(object_ref.object_type, object_ref.id);
             format!("<{}>", sparql_iri(&graph_uri))
         })
         .collect::<Vec<_>>()
@@ -456,13 +455,13 @@ fn sparql_literal_values(variable: &str, values: impl Iterator<Item = String>) -
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
-fn sparql_object_ref_values(object_refs: &[GraphObjectRef]) -> String {
+fn sparql_object_ref_values(object_refs: &[MemoryObjectRef]) -> String {
     let values = object_refs
         .iter()
         .map(|object_ref| {
             format!(
                 "({} {})",
-                sparql_string_literal(&object_ref.object_id.to_string()),
+                sparql_string_literal(&object_ref.id.to_string()),
                 sparql_string_literal(&enum_value(object_ref.object_type)),
             )
         })
@@ -485,8 +484,8 @@ fn enum_value(value: impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
-fn sort_object_refs(refs: &mut [GraphObjectRef]) {
-    refs.sort_by_key(|object_ref| stable_node_key(object_ref.object_id, object_ref.object_type));
+fn sort_object_refs(refs: &mut [MemoryObjectRef]) {
+    refs.sort_by_key(|object_ref| stable_node_key(object_ref.id, object_ref.object_type));
 }
 
 fn stable_node_key(object_id: MemoryId, object_type: ObjectType) -> (MemoryId, u8) {
@@ -556,8 +555,8 @@ mod tests {
         assert_eq!(
             selected,
             vec![
-                GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(fixtures.correction.id, ObjectType::DerivedMemory),
             ]
         );
     }
@@ -591,7 +590,7 @@ mod tests {
 
         assert_eq!(
             selected,
-            vec![GraphObjectRef::new(
+            vec![MemoryObjectRef::from_id_type(
                 fixtures.episode.id,
                 ObjectType::Episode
             )]
@@ -613,7 +612,7 @@ mod tests {
             .select_objects(&GraphObjectQuery::by_ids(vec![fixtures.episode.id]))
             .unwrap();
 
-        assert_eq!(selected, Vec::<GraphObjectRef>::new());
+        assert_eq!(selected, Vec::<MemoryObjectRef>::new());
     }
 
     #[test]
@@ -648,7 +647,7 @@ mod tests {
         let store = store_with_representative_fixture();
         let fixtures = representative_fixtures();
         let selected = SparqlGraphSelectors::new(&store)
-            .select_links_touching(&[GraphObjectRef::new(
+            .select_links_touching(&[MemoryObjectRef::from_id_type(
                 fixtures.hub_entity.id,
                 ObjectType::Entity,
             )])
@@ -663,8 +662,10 @@ mod tests {
         assert!(selected_ids.contains(&fixtures.hub_links[1].id));
         assert!(!selected_ids.contains(&fixtures.soft_thread_link.id));
         assert!(selected.iter().all(|link_ref| {
-            link_ref.from == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
-                || link_ref.to == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
+            link_ref.from
+                == MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity)
+                || link_ref.to
+                    == MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity)
         }));
     }
 

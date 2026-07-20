@@ -1,6 +1,12 @@
+mod lifecycle;
+mod object_ref;
+mod retrieval;
 pub(crate) mod schema;
 mod write_validation;
 
+pub use lifecycle::LifecycleDtoValidationError;
+pub use object_ref::MemoryObjectRef;
+pub use retrieval::{GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason};
 pub use write_validation::{CandidateValidation, CandidateValidationStatus, MemoryCandidateKind};
 
 use chrono::{DateTime, Utc};
