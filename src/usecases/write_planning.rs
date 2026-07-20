@@ -5,9 +5,9 @@ use crate::api::types::lifecycle::ExternalSourceReference;
 use crate::api::types::retrieval::MemoryObjectRef;
 use crate::api::types::{
     CandidateProducerKind, CandidateProvenance, DerivedMemoryCandidate, EntityCandidate,
-    EpisodeCandidate, MemoryCandidate, MemoryCandidateKind, MemoryLinkCandidate,
-    MemoryThreadCandidate, ObservationCandidate, RememberDiagnostics, RememberInput,
-    RememberWritePlan, SourceSpan, StatsUpdateCandidate, VectorIndexCandidate,
+    EpisodeCandidate, MemoryCandidate, MemoryLinkCandidate, MemoryThreadCandidate,
+    ObservationCandidate, RememberDiagnostics, RememberInput, RememberWritePlan, SourceSpan,
+    StatsUpdateCandidate, VectorIndexCandidate,
 };
 use crate::api::types::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
@@ -610,14 +610,12 @@ mod construction_tests {
         let episode_count = plan
             .candidates
             .iter()
-            .filter(|candidate| candidate.kind() == crate::api::types::MemoryCandidateKind::Episode)
+            .filter(|candidate| candidate.kind() == MemoryCandidateKind::Episode)
             .count();
         let observation_count = plan
             .candidates
             .iter()
-            .filter(|candidate| {
-                candidate.kind() == crate::api::types::MemoryCandidateKind::Observation
-            })
+            .filter(|candidate| candidate.kind() == MemoryCandidateKind::Observation)
             .count();
 
         assert_eq!(episode_count, 1);
@@ -627,10 +625,11 @@ mod construction_tests {
 
 use std::collections::{HashMap, HashSet};
 
-use crate::api::types::{
-    CandidateRationale, CandidateValidation, CandidateValidationStatus, DraftDefaults,
+use crate::api::types::{CandidateRationale, DraftDefaults};
+use crate::domain::{
+    CandidateValidation, CandidateValidationStatus, MemoryCandidateKind, MemoryLink, MemoryObject,
+    RetentionState,
 };
-use crate::domain::{MemoryLink, MemoryObject, RetentionState};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
 use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
@@ -650,14 +649,9 @@ impl WritePlanValidationVerdict {
         if self.is_valid() {
             Ok(self)
         } else {
-            let errors = self
-                .validations
-                .iter()
-                .flat_map(|validation| validation.errors.iter())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("; ");
-            Err(validation_error(format!("write plan rejected: {errors}")))
+            Err(CustomError::WritePlanValidationRejected {
+                validations: self.validations,
+            })
         }
     }
 }
@@ -1691,7 +1685,24 @@ mod tests {
         assert!(!verdict.validations.is_empty());
         assert_rejected_with(&verdict, "write plan operation_id must be present");
         assert_rejected_with(&verdict, "idempotency_key must be present");
-        assert!(verdict.into_result().is_err());
+        let error = verdict
+            .into_result()
+            .expect_err("invalid plan should return structured rejection rows");
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected structured write-plan validation rejection, got {error:?}");
+        };
+        assert!(validations.iter().any(|validation| {
+            validation.candidate_kind == MemoryCandidateKind::Episode
+                && validation.status == CandidateValidationStatus::Invalid
+                && validation
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("write plan operation_id"))
+                && validation
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("idempotency_key"))
+        }));
     }
 
     #[tokio::test]

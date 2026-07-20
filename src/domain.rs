@@ -1,4 +1,7 @@
 pub(crate) mod schema;
+mod write_validation;
+
+pub use write_validation::{CandidateValidation, CandidateValidationStatus, MemoryCandidateKind};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

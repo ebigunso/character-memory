@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::domain::{MemoryId, ObjectType};
+use crate::domain::{CandidateValidation, MemoryId, ObjectType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -78,6 +78,14 @@ pub enum CustomError {
     #[error("Memory validation error: {0}")]
     MemoryValidation(String),
 
+    #[error(
+        "Write plan validation rejected: {}",
+        write_plan_validation_errors(.validations)
+    )]
+    WritePlanValidationRejected {
+        validations: Vec<CandidateValidation>,
+    },
+
     #[error("Missing required field for episodic memory: {0}")]
     MissingEpisodicField(&'static str),
 
@@ -117,4 +125,36 @@ pub enum CustomError {
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+}
+
+fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
+    validations
+        .iter()
+        .flat_map(|validation| validation.errors.iter())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CandidateValidationStatus, MemoryCandidateKind};
+
+    #[test]
+    fn write_plan_rejection_display_projects_validation_errors() {
+        let error = CustomError::WritePlanValidationRejected {
+            validations: vec![CandidateValidation {
+                candidate_index: 2,
+                candidate_kind: MemoryCandidateKind::DerivedMemory,
+                status: CandidateValidationStatus::Invalid,
+                errors: vec!["derived source is missing".to_owned()],
+                warnings: Vec::new(),
+            }],
+        };
+
+        let message = error.to_string();
+        assert!(message.contains("Write plan validation rejected"));
+        assert!(message.contains("derived source is missing"));
+    }
 }

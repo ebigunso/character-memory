@@ -4,7 +4,7 @@ use crate::api::types::{
     CommitOptions, DiagnosticSeverity, MemoryObjectRef, RememberDiagnostic, RememberDiagnostics,
     RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
-use crate::domain::{MemoryId, MemoryLink, MemoryObject, ObjectType};
+use crate::domain::{CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::policy::memory_object_vector_record;
@@ -102,7 +102,7 @@ where
             plan.diagnostics
                 .clone()
                 .with_validations(validation.validations.into_iter().filter(|validation| {
-                    validation.status == crate::api::types::CandidateValidationStatus::Invalid
+                    validation.status == CandidateValidationStatus::Invalid
                         || !validation.warnings.is_empty()
                 }));
         let values = WritePlanCommitValues::from_plan(plan)?;
