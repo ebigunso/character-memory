@@ -35,7 +35,7 @@ A deployment-shape analysis of the intended use cases resolved the question of w
 
 Remove the Oxigraph HTTP service mode.
 `GraphStoreMode::Persistent` (embedded persistent storage at a caller-configured local path) becomes the default; `in_memory` remains for tests and explicit fixture runs.
-Configuration parsing rejects the removed `service` value with an explicit migration hint directing endpoint-URL configurations to a local store path.
+Configuration parsing rejects the removed `service` value as an ordinary unsupported mode; per the repository Compatibility Policy (no external consumers, latest surface only, 2026-07-21), no migration hint is carried.
 Historical phase documents are left unchanged as append-only records; this ADR records the supersession of their service-default guidance.
 
 The `GraphAuthorityStore` port is unchanged.
@@ -75,14 +75,14 @@ The authority split is unaffected: Qdrant suggests vector candidates, stats guid
 
 ### Negative / Tradeoffs
 
-- Adopters who followed the prior service-mode instructions must migrate an endpoint URL configuration to a local store path; the configuration error message carries the hint.
+- Anyone following the prior service-mode instructions must switch to a local store path (`OXIGRAPH_PATH`); with no external consumers, the configuration error is the standard unsupported-value error without a migration hint (Compatibility Policy, 2026-07-21).
 - Multi-process graph access is explicitly out of scope until a future phase designs a remote graph authority with its own validation budget.
 - Qdrant remains the one required external service; a fully self-contained local deployment additionally needs an embedded vector-recall option, which is recorded as a separate roadmap concern rather than solved here.
 
 ## Validation
 
 - The full test suite passes with the service surface removed; the default-mode construction test asserts persistent mode.
-- Configuration with `GRAPH_STORE_MODE=service` fails with the migration hint.
+- Configuration with `GRAPH_STORE_MODE=service` fails with the standard unsupported-value error.
 - Live integration and continuity evaluation evidence is unchanged, since it already exercises the embedded path.
 - A documentation sweep confirms no remaining service-default claims outside historical phase documents and this ADR.
 
