@@ -216,17 +216,29 @@ mod tests {
             .await
             .expect("remember should accept warning-bearing write plans");
 
-        let warnings = outcome
+        let validation = outcome
+            .diagnostics
+            .validations
+            .iter()
+            .find(|validation| {
+                validation.candidate_index == 1
+                    && validation.candidate_kind == MemoryCandidateKind::Observation
+            })
+            .expect("remember outcome should preserve the warning-bearing validation");
+        assert_eq!(validation.status, CandidateValidationStatus::Valid);
+        assert!(validation.errors.is_empty());
+        assert_eq!(validation.warnings.len(), 1);
+        assert!(validation.warnings[0].contains("echo-surface"));
+        assert!(validation.warnings[0].contains(&episode_id.to_string()));
+
+        let messages = outcome
             .diagnostics
             .messages
             .iter()
             .filter(|diagnostic| diagnostic.code == "write_plan_validation_warning")
             .collect::<Vec<_>>();
-        assert_eq!(warnings.len(), 1);
-        let warning = warnings[0];
-        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
-        assert!(warning.message.contains("echo-surface"));
-        assert!(warning.message.contains(&episode_id.to_string()));
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].severity, DiagnosticSeverity::Warning);
     }
 
     #[tokio::test]

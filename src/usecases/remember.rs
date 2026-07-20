@@ -98,20 +98,13 @@ where
             .validate(&plan)
             .await?
             .into_result()?;
-        let mut diagnostics = plan.diagnostics.clone();
-        diagnostics.messages.extend(
-            validation
-                .validations
-                .iter()
-                .flat_map(|validation| validation.warnings.iter())
-                .map(|warning| {
-                    RememberDiagnostic::new(
-                        DiagnosticSeverity::Warning,
-                        "write_plan_validation_warning",
-                        warning.clone(),
-                    )
-                }),
-        );
+        let diagnostics =
+            plan.diagnostics
+                .clone()
+                .with_validations(validation.validations.into_iter().filter(|validation| {
+                    validation.status == crate::api::types::CandidateValidationStatus::Invalid
+                        || !validation.warnings.is_empty()
+                }));
         let values = WritePlanCommitValues::from_plan(plan)?;
         let vector_targets = if options.update_vectors {
             VectorWriteIntent::PlanTargets(values.vector_targets)
@@ -131,6 +124,10 @@ where
         .await
         .map(|mut outcome| {
             outcome.diagnostics.messages.extend(diagnostics.messages);
+            outcome
+                .diagnostics
+                .validations
+                .extend(diagnostics.validations);
             outcome
                 .diagnostics
                 .repair_needed

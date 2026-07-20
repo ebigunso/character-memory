@@ -497,6 +497,10 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
     let link_id = id("550e8400-e29b-41d4-a716-446655613405");
     assert_eq!(wrapper_outcome, manual_outcome);
     assert_eq!(
+        wrapper_outcome.diagnostics.validations,
+        manual_outcome.diagnostics.validations
+    );
+    assert_eq!(
         wrapper_outcome.persisted_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
@@ -505,18 +509,31 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         wrapper_outcome.vector_indexed_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
+    let validation = wrapper_outcome
+        .diagnostics
+        .validations
+        .iter()
+        .find(|validation| {
+            validation.candidate_index == 1
+                && validation.candidate_kind == character_memory::MemoryCandidateKind::Observation
+        })
+        .expect("equivalent outcomes should include the warning-bearing validation");
+    assert_eq!(validation.status, CandidateValidationStatus::Valid);
+    assert!(validation.errors.is_empty());
+    assert_eq!(validation.warnings.len(), 1);
+    assert!(validation.warnings[0].contains("echo-surface"));
+    assert!(validation.warnings[0].contains(&episode_id.to_string()));
+
     let validation_warning = wrapper_outcome
         .diagnostics
         .messages
         .iter()
         .find(|diagnostic| diagnostic.code == "write_plan_validation_warning")
-        .expect("equivalent outcomes should include validation warnings");
+        .expect("equivalent outcomes should include the warning projection");
     assert_eq!(
         validation_warning.severity,
         character_memory::DiagnosticSeverity::Warning
     );
-    assert!(validation_warning.message.contains("echo-surface"));
-    assert!(validation_warning.message.contains(&episode_id.to_string()));
 
     let query = RetrievalContext::new("equivalent graph state").with_trace();
     let wrapper_retrieval = wrapper_memory
