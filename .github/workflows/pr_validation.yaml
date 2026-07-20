@@ -84,7 +84,7 @@ jobs:
           - 6334:6334
     env:
       QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
-      OXIGRAPH_CONNECTION_STRING: ./data/oxigraph
+      OXIGRAPH_PATH: ./data/oxigraph
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
 
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for name in QDRANT_CONNECTION_STRING OXIGRAPH_CONNECTION_STRING OPENAI_API_KEY EMBEDDING_MODEL; do
+          for name in QDRANT_CONNECTION_STRING OXIGRAPH_PATH OPENAI_API_KEY EMBEDDING_MODEL; do
             if [[ -z "${!name}" ]]; then
               echo "$name is required for live Qdrant-backed integration tests" >&2
               missing=1
