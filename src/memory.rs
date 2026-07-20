@@ -649,6 +649,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn constructor_rejects_persistent_endpoint_url_before_qdrant_contact() {
+        let settings = Settings::new(
+            ::config::Config::builder()
+                .set_override("qdrant_connection_string", "http://127.0.0.1:1")
+                .unwrap()
+                .set_override("oxigraph_connection_string", "http://127.0.0.1:7878")
+                .unwrap()
+                .set_override("openai_api_key", "dummy-key")
+                .unwrap()
+                .set_override("embedding_model", "text-embedding-3-small")
+                .unwrap()
+                .set_override("graph_store_mode", "persistent")
+                .unwrap()
+                .set_override("retrieval_stats_store_mode", "in_memory")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+        let vector_size = settings.get_embedding_vector_size().unwrap();
+
+        let error = match CharacterMemory::new_with_embedding_provider(
+            settings,
+            "graph_config_fails_before_qdrant".to_owned(),
+            Box::new(FixedEmbeddingProvider::new(vector_size)),
+        )
+        .await
+        {
+            Ok(_) => panic!("constructor should reject the removed service endpoint"),
+            Err(error) => error,
+        };
+        let CustomError::ConfigParseError(message) = error else {
+            panic!("expected configuration parse error");
+        };
+
+        assert!(message.contains("OXIGRAPH_CONNECTION_STRING"));
+        assert!(message.contains("service"));
+        assert!(message.contains("local filesystem path"));
+    }
+
+    #[tokio::test]
     async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
         let settings = Settings::new(
             ::config::Config::builder()

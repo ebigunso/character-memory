@@ -129,19 +129,21 @@ impl CharacterMemory {
             )));
         }
 
+        let persistent_graph_path = match settings.get_graph_store_mode() {
+            ConfigGraphStoreMode::Persistent => Some(settings.get_oxigraph_path()?),
+            ConfigGraphStoreMode::InMemory => None,
+        };
+
         let vector_store = QdrantVectorCandidateStore::new(
             settings.get_qdrant_connection(),
             collection_name,
             expected_vector_size as u64,
         )?;
         vector_store.init_collection().await?;
-        let graph_store = match settings.get_graph_store_mode() {
-            ConfigGraphStoreMode::Persistent => Box::new(
-                OxigraphGraphAuthorityStore::new_persistent(settings.get_oxigraph_path()?)?,
-            ) as Box<dyn GraphAuthorityStore>,
-            ConfigGraphStoreMode::InMemory => {
-                Box::new(OxigraphGraphAuthorityStore::new_in_memory()?)
-            }
+        let graph_store = match persistent_graph_path {
+            Some(path) => Box::new(OxigraphGraphAuthorityStore::new_persistent(path)?)
+                as Box<dyn GraphAuthorityStore>,
+            None => Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
         };
         let stats_store = retrieval_stats_store(&settings)?;
         let fanout_budgets = settings.get_retrieval_fanout_budgets().into_iter().map(
