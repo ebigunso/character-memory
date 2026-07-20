@@ -1272,6 +1272,7 @@ mod tests {
 
     #[test]
     fn all_tied_cohort_at_fetch_bound_degrades_to_canonical_fetched_membership() {
+        let admitted_limit = 2;
         let fetched = (1..=6)
             .rev()
             .map(|value| {
@@ -1284,13 +1285,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut candidates = canonicalize_vector_candidates(fetched);
+        let fetch_bound = candidates.len();
 
         assert_eq!(
-            tie_cohort_fetch_decision(2, 6, 6, 6, &candidates),
+            tie_cohort_fetch_decision(
+                admitted_limit,
+                fetch_bound,
+                fetch_bound,
+                fetch_bound,
+                &candidates,
+            ),
             TieCohortFetchDecision::ReturnAtBound
         );
 
-        candidates.truncate(2);
+        candidates.truncate(admitted_limit);
         assert_eq!(
             candidates
                 .iter()

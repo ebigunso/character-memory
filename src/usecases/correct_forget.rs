@@ -149,6 +149,7 @@ where
                             if draft.lifecycle_policy.suppress_superseded_derived_memories {
                                 record_current_replacement_warning(
                                     &memory,
+                                    RetentionState::Suppressed,
                                     &mut cascade_warning_ids,
                                 );
                             }
@@ -388,7 +389,11 @@ where
             .query_current_derived_by_provenance(episode_ids, observation_ids)
             .await?;
         for memory in affected {
-            record_current_replacement_warning(&memory, cascade_warning_ids);
+            record_current_replacement_warning(
+                &memory,
+                target_retention_state,
+                cascade_warning_ids,
+            );
             let id = memory.id;
             push_object_unique(
                 graph_objects,
@@ -421,7 +426,11 @@ where
             )
             .await?;
         for memory in matches {
-            record_current_replacement_warning(&memory, cascade_warning_ids);
+            record_current_replacement_warning(
+                &memory,
+                target_retention_state,
+                cascade_warning_ids,
+            );
             let id = memory.id;
             push_object_unique(
                 graph_objects,
@@ -1111,9 +1120,13 @@ fn push_unique(ids: &mut Vec<MemoryId>, id: MemoryId) {
 
 fn record_current_replacement_warning(
     memory: &DerivedMemory,
+    target_retention_state: RetentionState,
     cascade_warning_ids: &mut Vec<MemoryId>,
 ) {
-    if memory.is_current && !memory.supersedes.is_empty() {
+    if target_retention_state == RetentionState::Suppressed
+        && memory.is_current
+        && !memory.supersedes.is_empty()
+    {
         push_unique(cascade_warning_ids, memory.id);
     }
 }
@@ -1888,6 +1901,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forget_cascade_does_not_warn_when_draft_retention_archives_replacements() {
+        let fixtures = representative_fixtures();
+        let graph = FakeGraphAuthorityStore::new();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        graph.upsert_links(&fixtures.links()).await.unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::Episode(fixtures.episode.id),
+            "Archive the source and its derived memories.",
+        );
+        draft.target_retention_state = RetentionState::Archived;
+
+        let outcome = pipeline.forget(draft).await.unwrap();
+
+        assert!(outcome.diagnostics.warnings.is_empty());
+        assert!(outcome
+            .graph_mutated_object_ids
+            .contains(&MemoryObjectRef::new(
+                ObjectType::DerivedMemory,
+                fixtures.correction.id,
+            )));
+    }
+
+    #[tokio::test]
     async fn forget_suppresses_source_and_dependent_derived_memories_and_deletes_vectors() {
         let fixtures = representative_fixtures();
         let graph = FakeGraphAuthorityStore::new();
@@ -2147,9 +2186,11 @@ mod tests {
         let ids = fixed_ids();
         let mut thread = representative_fixtures().soft_thread;
         thread.id = ids.thread;
+        let mut current_replacement = old_memory(&ids);
+        current_replacement.supersedes.push(ids.replacement);
         let graph = RecordingGraphStore::new(vec![
             MemoryObject::MemoryThread(thread),
-            MemoryObject::DerivedMemory(old_memory(&ids)),
+            MemoryObject::DerivedMemory(current_replacement),
         ]);
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
@@ -2162,6 +2203,7 @@ mod tests {
 
         let outcome = pipeline.forget(draft).await.unwrap();
 
+        assert!(outcome.diagnostics.warnings.is_empty());
         assert_eq!(
             graph.calls(),
             vec![

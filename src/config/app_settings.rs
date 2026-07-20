@@ -692,11 +692,14 @@ mod tests {
             .unwrap();
 
         let error = Settings::new(external_config).unwrap_err();
-        let message = error.to_string();
+        let CustomError::ConfigParseError(message) = error else {
+            panic!("expected configuration parse error");
+        };
 
-        assert!(message.contains("GRAPH_STORE_MODE=service was removed"));
-        assert!(message.contains("GRAPH_STORE_MODE=persistent"));
-        assert!(message.contains("local store path"));
+        assert!(message.contains("GRAPH_STORE_MODE"));
+        assert!(message.contains("service"));
+        assert!(message.contains("persistent"));
+        assert!(message.contains("OXIGRAPH_CONNECTION_STRING"));
     }
 
     #[test]
@@ -715,11 +718,13 @@ mod tests {
 
         let settings = Settings::new(external_config).unwrap();
         let error = settings.get_oxigraph_path().unwrap_err();
-        let message = error.to_string();
+        let CustomError::ConfigParseError(message) = error else {
+            panic!("expected configuration parse error");
+        };
 
         assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
-        assert!(message.contains("endpoint URL"));
-        assert!(message.contains("service mode was removed"));
+        assert!(message.contains("OXIGRAPH_CONNECTION_STRING"));
+        assert!(message.contains("service"));
         assert!(message.contains("local filesystem path"));
     }
 

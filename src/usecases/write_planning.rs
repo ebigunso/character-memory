@@ -1532,6 +1532,14 @@ mod tests {
     async fn warns_when_observation_content_echoes_source_episode_candidate() {
         let graph = FakeGraphAuthorityStore::new();
         let plan = valid_plan();
+        let source_episode_id = plan
+            .candidates
+            .iter()
+            .find_map(|candidate| match candidate {
+                MemoryCandidate::Observation(candidate) => Some(candidate.draft.episode_id),
+                _ => None,
+            })
+            .unwrap();
 
         let verdict = WritePlanValidator::new(&graph)
             .validate(&plan)
@@ -1546,7 +1554,8 @@ mod tests {
             .unwrap();
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
         assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].starts_with("echo-surface:"));
+        assert!(validation.warnings[0].contains("echo-surface"));
+        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
     }
 
     #[tokio::test]
@@ -1562,6 +1571,16 @@ mod tests {
                 "source episode content",
             ))
             .prepare_write_plan_with_options(&defaults(), false, false);
+        let source_episode_id = plan
+            .candidates
+            .iter()
+            .find_map(|candidate| match candidate {
+                MemoryCandidate::DerivedMemory(candidate) => {
+                    candidate.draft.derived_from_episode_ids.first().copied()
+                }
+                _ => None,
+            })
+            .unwrap();
 
         let verdict = WritePlanValidator::new(&graph)
             .validate(&plan)
@@ -1576,7 +1595,8 @@ mod tests {
             .unwrap();
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
         assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].starts_with("echo-surface:"));
+        assert!(validation.warnings[0].contains("echo-surface"));
+        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
     }
 
     #[tokio::test]
