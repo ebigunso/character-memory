@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use crate::api::types::{
-    MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
-};
+use crate::domain::{MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState};
 use crate::errors::CustomError;
 
 #[async_trait]
@@ -436,7 +434,7 @@ pub(crate) fn recomputed_global_counters(
 mod tests {
     use super::*;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::api::types::{
+    use crate::domain::{
         DerivedMemory, DerivedType, Episode, Modality, Stability, DEFAULT_SCHEMA_VERSION,
     };
 
@@ -750,7 +748,7 @@ mod tests {
     fn speaker_entity_id_does_not_count_as_mentions() {
         let entity_id = id("550e8400-e29b-41d4-a716-446655460061");
         let observation_id = id("550e8400-e29b-41d4-a716-446655460062");
-        let objects = vec![MemoryObject::Observation(crate::api::types::Observation {
+        let objects = vec![MemoryObject::Observation(crate::domain::Observation {
             id: observation_id,
             object_type: ObjectType::Observation,
             episode_id: id("550e8400-e29b-41d4-a716-446655460063"),

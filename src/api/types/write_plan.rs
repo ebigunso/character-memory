@@ -2,13 +2,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::domain::{MemoryId, RelationType};
 use super::draft::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
     ObservationDraft, VectorIndexingFailure,
 };
 use super::lifecycle::ExternalSourceReference;
 use super::retrieval::MemoryObjectRef;
+use crate::domain::{MemoryId, RelationType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {

@@ -4,17 +4,9 @@ pub mod write_plan;
 
 mod draft;
 
-pub use crate::domain;
-pub use crate::domain::{
-    graph_uri, DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode,
-    MemoryId, MemoryLink, MemoryObject, MemoryThread, Modality, ObjectType, Observation,
-    RelationType, RetentionState, Stability, ThreadStatus, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
-};
 pub use draft::{
     DerivedMemoryDraft, DraftDefaults, EntityDraft, EpisodeDraft, MemoryLinkDraft,
-    MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberDraft, RememberOutcome,
-    VectorIndexingFailure,
+    MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberOutcome, VectorIndexingFailure,
 };
 pub use lifecycle::{
     ArchivePolicy, CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy,

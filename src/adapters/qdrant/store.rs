@@ -13,7 +13,7 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
-use crate::api::types::{MemoryId, ObjectType};
+use crate::domain::{MemoryId, ObjectType, RetentionState};
 use crate::errors::{CustomError, VectorDatabaseError};
 use crate::models::vector::{
     canonicalize_vector_candidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
@@ -661,19 +661,14 @@ fn retrieved_point_to_diagnostic_record(
         CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
     })?;
     let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
-    let surface = optional_payload_string(&point.payload, SURFACE_FIELD)
-        .map(parse_vector_surface)
-        .transpose()?
-        .unwrap_or(VectorSurface::Summary);
+    let surface = parse_vector_surface(payload_string(&point.payload, SURFACE_FIELD)?)?;
 
     Ok(VectorCandidateDiagnosticRecord {
         object_id,
         object_type,
-        graph_uri: optional_payload_string(&point.payload, GRAPH_URI_FIELD)
-            .unwrap_or_else(|| "<missing graph_uri>".to_owned()),
+        graph_uri: payload_string(&point.payload, GRAPH_URI_FIELD)?,
         surface,
-        schema_version: optional_payload_string(&point.payload, SCHEMA_VERSION_FIELD)
-            .unwrap_or_else(|| "<missing schema_version>".to_owned()),
+        schema_version: payload_string(&point.payload, SCHEMA_VERSION_FIELD)?,
         retention_state: optional_payload_string(&point.payload, RETENTION_STATE_FIELD)
             .map(parse_retention_state)
             .transpose()?,
@@ -770,12 +765,12 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
     }
 }
 
-fn retention_state_name(retention_state: crate::api::types::RetentionState) -> &'static str {
+fn retention_state_name(retention_state: RetentionState) -> &'static str {
     match retention_state {
-        crate::api::types::RetentionState::Active => "active",
-        crate::api::types::RetentionState::Suppressed => "suppressed",
-        crate::api::types::RetentionState::Archived => "archived",
-        crate::api::types::RetentionState::Deleted => "deleted",
+        RetentionState::Active => "active",
+        RetentionState::Suppressed => "suppressed",
+        RetentionState::Archived => "archived",
+        RetentionState::Deleted => "deleted",
     }
 }
 
@@ -816,12 +811,12 @@ fn parse_object_type(value: String) -> Result<ObjectType, CustomError> {
 
 // Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
 #[allow(dead_code)]
-fn parse_retention_state(value: String) -> Result<crate::api::types::RetentionState, CustomError> {
+fn parse_retention_state(value: String) -> Result<RetentionState, CustomError> {
     match value.as_str() {
-        "active" => Ok(crate::api::types::RetentionState::Active),
-        "suppressed" => Ok(crate::api::types::RetentionState::Suppressed),
-        "archived" => Ok(crate::api::types::RetentionState::Archived),
-        "deleted" => Ok(crate::api::types::RetentionState::Deleted),
+        "active" => Ok(RetentionState::Active),
+        "suppressed" => Ok(RetentionState::Suppressed),
+        "archived" => Ok(RetentionState::Archived),
+        "deleted" => Ok(RetentionState::Deleted),
         _ => Err(CustomError::DatabaseError(format!(
             "Unknown Qdrant retention_state payload value: {value}"
         ))),
@@ -845,7 +840,7 @@ fn parse_vector_surface(value: String) -> Result<VectorSurface, CustomError> {
 mod tests {
     use super::super::payload::{CONTENT_TEXT_FIELD, GRAPH_URI_FIELD};
     use super::*;
-    use crate::api::types::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{
         VectorCandidateFilters, VectorPayloadHints, VectorRecord, VectorRecordEmbedding,
         VectorRelationshipHints, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
@@ -1046,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_mapping_reports_missing_legacy_payload_fields_without_aborting() {
+    fn diagnostic_mapping_requires_current_payload_fields() {
         let object_id = Uuid::new_v4();
         let point = RetrievedPoint {
             payload: HashMap::from([
@@ -1055,17 +1050,19 @@ mod tests {
                     string_value(&object_id.to_string()),
                 ),
                 (OBJECT_TYPE_FIELD.to_owned(), string_value("derived_memory")),
+                (SURFACE_FIELD.to_owned(), string_value("derived_text")),
+                (
+                    GRAPH_URI_FIELD.to_owned(),
+                    string_value("urn:character-memory:derived-memory:test"),
+                ),
             ]),
             ..Default::default()
         };
 
-        let diagnostic = retrieved_point_to_diagnostic_record(point).expect("diagnostic maps");
+        let error = retrieved_point_to_diagnostic_record(point).unwrap_err();
 
-        assert_eq!(diagnostic.object_id, object_id);
-        assert_eq!(diagnostic.object_type, ObjectType::DerivedMemory);
-        assert_eq!(diagnostic.surface, VectorSurface::Summary);
-        assert_eq!(diagnostic.graph_uri, "<missing graph_uri>");
-        assert_eq!(diagnostic.schema_version, "<missing schema_version>");
+        assert!(matches!(error, CustomError::DatabaseError(_)));
+        assert!(error.to_string().contains(SCHEMA_VERSION_FIELD));
     }
 
     #[test]

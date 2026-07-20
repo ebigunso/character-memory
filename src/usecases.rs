@@ -7,8 +7,6 @@ pub(crate) mod write_planning;
 
 pub(crate) use correct_forget::CorrectionForgetPipeline;
 pub(crate) use link::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence, LinkPipeline};
-pub(crate) use remember::{
-    RememberPipeline, RememberPipelineDraft, RememberPipelineOutcome, VectorIndexingFailure,
-};
+pub(crate) use remember::{RememberPipeline, RememberPipelineOutcome, VectorIndexingFailure};
 pub(crate) use retrieve::RetrievePipeline;
 pub(crate) use write_planning::{WritePlanCommitValues, WritePlanValidator};

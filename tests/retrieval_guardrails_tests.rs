@@ -1,7 +1,7 @@
 use character_memory::{
     CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
     EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId,
-    MemoryLinkDraft, MemoryObjectDraft, ObjectType, RelationType, RememberDraft,
+    MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
     ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, SourceProvenanceReference,
 };
@@ -34,39 +34,37 @@ async fn stats_persist_across_facade_reopen() {
     let test_result = async {
         let remember_outcome = memory
             .remember(
-                RememberDraft::new([
-                    MemoryObjectDraft::Entity(entity(entity_id, EntityType::Person, "Aster Archive")),
-                    MemoryObjectDraft::Episode(episode(
+                RememberInput::new("A neutral field note records archival calibration.")
+                    .with_entity(entity(entity_id, EntityType::Person, "Aster Archive"))
+                    .with_episode(episode(
                         episode_id,
                         "A neutral field note records archival calibration.",
                         &[entity_id],
-                    )),
-                    MemoryObjectDraft::DerivedMemory(derived(
+                    ))
+                    .with_derived_memory(derived(
                         memory_id,
                         DerivedType::Claim,
                         "Archival calibration should prefer bounded recall over broad expansion.",
                         episode_id,
                         &[entity_id],
-                    )),
-                ])
-                .with_links([
-                    link(
+                    ))
+                    .with_memory_link(link(
                         id("550e8400-e29b-41d4-a716-446655461004"),
                         ObjectType::Entity,
                         entity_id,
                         RelationType::About,
                         ObjectType::DerivedMemory,
                         memory_id,
-                    ),
-                    link(
+                    ))
+                    .with_memory_link(link(
                         id("550e8400-e29b-41d4-a716-446655461005"),
                         ObjectType::Entity,
                         entity_id,
                         RelationType::Involves,
                         ObjectType::Episode,
                         episode_id,
-                    ),
-                ]),
+                    )),
+                RememberOptions::default(),
             )
             .await
             .map_err(|error| format!("initial remember should populate graph/vector/stats stores: {error}"))?;
@@ -139,50 +137,44 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let test_result = async {
         let remember_outcome = memory
             .remember(
-                RememberDraft::new([
-                    MemoryObjectDraft::Entity(entity(
-                        entity_id,
-                        EntityType::Project,
-                        "Ledger Meridian",
-                    )),
-                    MemoryObjectDraft::Episode(episode(
+                RememberInput::new("Ledger Meridian captured a restart-safe correction fixture.")
+                    .with_entity(entity(entity_id, EntityType::Project, "Ledger Meridian"))
+                    .with_episode(episode(
                         episode_id,
                         "Ledger Meridian captured a restart-safe correction fixture.",
                         &[entity_id],
-                    )),
-                    MemoryObjectDraft::DerivedMemory(derived(
+                    ))
+                    .with_derived_memory(derived(
                         old_id,
                         DerivedType::Claim,
                         "Ledger Meridian should keep the stale restart-safe statement.",
                         episode_id,
                         &[entity_id],
-                    )),
-                    MemoryObjectDraft::DerivedMemory(derived(
+                    ))
+                    .with_derived_memory(derived(
                         suppressed_id,
                         DerivedType::ProjectNote,
                         "Ledger Meridian contains a suppressed restart-safe note.",
                         episode_id,
                         &[entity_id],
-                    )),
-                ])
-                .with_links([
-                    link(
+                    ))
+                    .with_memory_link(link(
                         id("550e8400-e29b-41d4-a716-446655462006"),
                         ObjectType::Entity,
                         entity_id,
                         RelationType::About,
                         ObjectType::DerivedMemory,
                         old_id,
-                    ),
-                    link(
+                    ))
+                    .with_memory_link(link(
                         id("550e8400-e29b-41d4-a716-446655462007"),
                         ObjectType::Entity,
                         entity_id,
                         RelationType::About,
                         ObjectType::DerivedMemory,
                         suppressed_id,
-                    ),
-                ]),
+                    )),
+                RememberOptions::default(),
             )
             .await
             .map_err(|error| format!("initial lifecycle remember should succeed: {error}"))?;
@@ -277,7 +269,7 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
 
     let test_result = async {
         let remember_outcome = memory
-            .remember(high_degree_fixture(&ids))
+            .remember(high_degree_fixture(&ids), RememberOptions::default())
             .await
             .map_err(|error| format!("high-degree fixture remember should succeed: {error}"))?;
         ensure_no_vector_indexing_failure(
@@ -470,61 +462,53 @@ impl HighDegreeIds {
     }
 }
 
-fn high_degree_fixture(ids: &HighDegreeIds) -> RememberDraft {
-    let mut objects = vec![MemoryObjectDraft::Entity(entity(
+fn high_degree_fixture(ids: &HighDegreeIds) -> RememberInput {
+    let mut input = RememberInput::new(
+        "A high-degree project fixture records neutral retrieval expansion pressure.",
+    )
+    .with_entity(entity(
         ids.hub_entity,
         EntityType::Project,
         "Vector Orchard",
-    ))];
+    ));
     for (entity_id, entity_type, name) in [
         (ids.other_entities[0], EntityType::Person, "Mara Quill"),
         (ids.other_entities[1], EntityType::Place, "North Atrium"),
         (ids.other_entities[2], EntityType::Concept, "Signal Weaving"),
         (ids.other_entities[3], EntityType::Tool, "Copper Loom"),
     ] {
-        objects.push(MemoryObjectDraft::Entity(entity(
-            entity_id,
-            entity_type,
-            name,
-        )));
+        input = input.with_entity(entity(entity_id, entity_type, name));
     }
 
     let hub_episode_id = id("550e8400-e29b-41d4-a716-446655463010");
-    objects.push(MemoryObjectDraft::Episode(episode(
+    input = input.with_episode(episode(
         hub_episode_id,
         "A high-degree project fixture records neutral retrieval expansion pressure.",
         &[ids.hub_entity],
-    )));
+    ));
     for (index, memory_id) in ids.hub_derived_ids.iter().copied().enumerate() {
-        objects.push(MemoryObjectDraft::DerivedMemory(derived(
+        input = input.with_derived_memory(derived(
             memory_id,
             DerivedType::ProjectNote,
             &format!("Bounded recall note {index} for orchard calibration pressure."),
             hub_episode_id,
             &[ids.hub_entity],
-        )));
+        ));
     }
 
     for (index, memory_id) in ids.other_derived_ids.iter().copied().enumerate() {
         let entity_id = ids.other_entities[index % ids.other_entities.len()];
-        let episode_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5546_3300 + index as u128);
-        objects.push(MemoryObjectDraft::Episode(episode(
-            episode_id,
-            &format!("Auxiliary heterogeneous fixture episode {index}."),
-            &[entity_id],
-        )));
-        objects.push(MemoryObjectDraft::DerivedMemory(derived(
+        input = input.with_derived_memory(derived(
             memory_id,
             DerivedType::Claim,
             &format!("Auxiliary neutral memory {index} expands global selectivity counts."),
-            episode_id,
+            hub_episode_id,
             &[entity_id],
-        )));
+        ));
     }
 
-    let mut links = Vec::new();
     for (index, memory_id) in ids.hub_derived_ids.iter().copied().enumerate() {
-        links.push(link(
+        input = input.with_memory_link(link(
             Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5546_3400 + index as u128),
             ObjectType::Entity,
             ids.hub_entity,
@@ -534,7 +518,7 @@ fn high_degree_fixture(ids: &HighDegreeIds) -> RememberDraft {
         ));
     }
     for (index, memory_id) in ids.other_derived_ids.iter().copied().enumerate() {
-        links.push(link(
+        input = input.with_memory_link(link(
             Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5546_3500 + index as u128),
             ObjectType::Entity,
             ids.other_entities[index % ids.other_entities.len()],
@@ -544,7 +528,7 @@ fn high_degree_fixture(ids: &HighDegreeIds) -> RememberDraft {
         ));
     }
 
-    RememberDraft::new(objects).with_links(links)
+    input
 }
 
 fn returned_derived_ids(outcome: &character_memory::RetrieveOutcome) -> Vec<MemoryId> {

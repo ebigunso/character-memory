@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
 use super::retrieval::MemoryObjectRef;
+use crate::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum LifecycleDtoValidationError {
@@ -540,7 +540,6 @@ pub struct LifecycleMutationOutcome {
     pub vector_maintained_object_ids: Vec<MemoryObjectRef>,
     pub vector_maintenance_failure: Option<VectorMaintenanceFailure>,
     pub trace: Option<LifecycleMutationTrace>,
-    #[serde(default)]
     pub diagnostics: LifecycleMutationDiagnostics,
 }
 
@@ -559,7 +558,6 @@ impl LifecycleMutationOutcome {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleMutationDiagnostics {
-    #[serde(default)]
     pub warnings: Vec<LifecycleMutationWarning>,
 }
 
@@ -930,21 +928,5 @@ mod tests {
                 superseded_by_memory_id: new_memory_id(),
             }
         );
-    }
-
-    #[test]
-    fn lifecycle_outcome_defaults_missing_diagnostics_for_older_payloads() {
-        let outcome: LifecycleMutationOutcome = serde_json::from_str(
-            r#"{
-                "graph_mutated_object_ids": [],
-                "graph_mutated_link_ids": [],
-                "vector_maintained_object_ids": [],
-                "vector_maintenance_failure": null,
-                "trace": null
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(outcome.diagnostics, LifecycleMutationDiagnostics::default());
     }
 }

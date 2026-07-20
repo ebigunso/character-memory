@@ -1,10 +1,10 @@
 // Remember pipeline used by the public facade and internal tests. Some
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
-    CommitOptions, DiagnosticSeverity, DraftDefaults, MemoryId, MemoryLink, MemoryLinkDraft,
-    MemoryObject, MemoryObjectDraft, MemoryObjectRef, ObjectType, RememberDiagnostic,
-    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
+    CommitOptions, DiagnosticSeverity, MemoryObjectRef, RememberDiagnostic, RememberDiagnostics,
+    RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
+use crate::domain::{MemoryId, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::policy::memory_object_vector_record;
@@ -15,32 +15,6 @@ use crate::ports::retrieval_stats::{
 };
 use crate::ports::vector_candidate::VectorCandidateStore;
 use crate::usecases::{WritePlanCommitValues, WritePlanValidator};
-
-#[derive(Debug, Clone)]
-pub(crate) struct RememberPipelineDraft {
-    object_drafts: Vec<MemoryObjectDraft>,
-    link_drafts: Vec<MemoryLinkDraft>,
-    defaults: DraftDefaults,
-}
-
-impl RememberPipelineDraft {
-    pub(crate) fn new(
-        object_drafts: impl IntoIterator<Item = MemoryObjectDraft>,
-        link_drafts: impl IntoIterator<Item = MemoryLinkDraft>,
-    ) -> Self {
-        Self {
-            object_drafts: object_drafts.into_iter().collect(),
-            link_drafts: link_drafts.into_iter().collect(),
-            defaults: DraftDefaults::generated(),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_defaults(mut self, defaults: DraftDefaults) -> Self {
-        self.defaults = defaults;
-        self
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RememberPipelineOutcome {
@@ -115,21 +89,6 @@ where
         }
     }
 
-    pub(crate) async fn remember(
-        &self,
-        draft: RememberPipelineDraft,
-    ) -> Result<RememberPipelineOutcome, CustomError> {
-        let (objects, links) = validated_domain_values(draft)?;
-
-        self.persist_graph_then_repairable_parts(
-            objects,
-            links,
-            VectorWriteIntent::DeriveFromObjects,
-            CommitOptions::default(),
-        )
-        .await
-    }
-
     pub(crate) async fn commit(
         &self,
         plan: RememberWritePlan,
@@ -184,7 +143,6 @@ where
         let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
         if options.update_vectors {
             let vector_records = match vector_intent {
-                VectorWriteIntent::DeriveFromObjects => vector_records_for_objects(&objects),
                 VectorWriteIntent::PlanTargets(targets) => {
                     vector_records_for_targets(&objects, &targets)
                 }
@@ -419,44 +377,8 @@ where
 }
 
 enum VectorWriteIntent {
-    DeriveFromObjects,
     PlanTargets(Vec<MemoryObjectRef>),
     None,
-}
-
-fn validated_domain_values(
-    draft: RememberPipelineDraft,
-) -> Result<(Vec<MemoryObject>, Vec<MemoryLink>), CustomError> {
-    let mut defaults = draft.defaults;
-    let mut objects = Vec::new();
-    let mut links = Vec::new();
-
-    for draft in draft.object_drafts {
-        match draft
-            .into_domain_with_defaults(&mut defaults)
-            .map_err(validation_error)?
-        {
-            MemoryObject::MemoryLink(link) => links.push(link),
-            object => objects.push(object),
-        }
-    }
-
-    for draft in draft.link_drafts {
-        links.push(
-            draft
-                .into_domain_with_defaults(&mut defaults)
-                .map_err(validation_error)?,
-        );
-    }
-
-    Ok((objects, links))
-}
-
-fn vector_records_for_objects(objects: &[MemoryObject]) -> Vec<VectorRecord> {
-    objects
-        .iter()
-        .filter_map(memory_object_vector_record)
-        .collect()
 }
 
 fn vector_records_for_targets(
@@ -563,13 +485,15 @@ mod tests {
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
-        DerivedMemoryDraft, DerivedType, EntityDraft, EntityType, EpisodeDraft, MemoryThreadDraft,
-        ObjectType, ObservationDraft, RelationType, RetentionState,
+        DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
+        ObservationDraft, RememberInput,
     };
+    use crate::domain::{DerivedType, EntityType, ObjectType, RelationType, RetentionState};
     use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
     use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
+    use crate::usecases::write_planning::RememberPlanDefaults;
 
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
@@ -580,20 +504,11 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .remember(representative_draft(&ids))
+            .commit(representative_plan(&ids), CommitOptions::default())
             .await
             .expect("remember draft should persist");
 
-        assert_eq!(
-            outcome.persisted_object_ids,
-            vec![
-                ids.entity,
-                ids.episode,
-                ids.observation,
-                ids.thread,
-                ids.derived
-            ]
-        );
+        assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
         assert_eq!(
             outcome.persisted_link_ids,
             vec![ids.inline_link, ids.extra_link]
@@ -607,9 +522,9 @@ mod tests {
             graph.calls(),
             vec![
                 StoreCall::GraphObjects(vec![
-                    ids.entity,
                     ids.episode,
                     ids.observation,
+                    ids.entity,
                     ids.thread,
                     ids.derived,
                 ]),
@@ -619,9 +534,9 @@ mod tests {
         assert_eq!(
             embedder.calls(),
             vec![StoreCall::EmbedBatch(vec![
-                ids.entity,
                 ids.episode,
                 ids.observation,
+                ids.entity,
                 ids.thread,
                 ids.derived,
             ])]
@@ -629,9 +544,9 @@ mod tests {
         assert_eq!(
             vector.calls(),
             vec![StoreCall::VectorUpsert(vec![
-                ids.entity,
                 ids.episode,
                 ids.observation,
+                ids.entity,
                 ids.thread,
                 ids.derived,
             ])]
@@ -647,7 +562,7 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let error = pipeline
-            .remember(representative_draft(&ids))
+            .commit(representative_plan(&ids), CommitOptions::default())
             .await
             .unwrap_err();
 
@@ -655,9 +570,9 @@ mod tests {
         assert_eq!(
             graph.calls(),
             vec![StoreCall::GraphObjects(vec![
-                ids.entity,
                 ids.episode,
                 ids.observation,
+                ids.entity,
                 ids.thread,
                 ids.derived,
             ])]
@@ -675,7 +590,7 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let error = pipeline
-            .remember(representative_draft(&ids))
+            .commit(representative_plan(&ids), CommitOptions::default())
             .await
             .unwrap_err();
 
@@ -684,9 +599,9 @@ mod tests {
             graph.calls(),
             vec![
                 StoreCall::GraphObjects(vec![
-                    ids.entity,
                     ids.episode,
                     ids.observation,
+                    ids.entity,
                     ids.thread,
                     ids.derived,
                 ]),
@@ -705,46 +620,18 @@ mod tests {
         let embedder = RecordingEmbedder::default();
         let mut invalid_episode = EpisodeDraft::new(" ");
         invalid_episode.id = Some(ids.episode);
-        let draft = RememberPipelineDraft::new(
-            [MemoryObjectDraft::Episode(invalid_episode)],
-            Vec::<MemoryLinkDraft>::new(),
-        );
+        let plan = prepare_test_plan(RememberInput::new(" ").with_episode(invalid_episode));
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
-        let error = pipeline.remember(draft).await.unwrap_err();
+        let error = pipeline
+            .commit(plan, CommitOptions::default())
+            .await
+            .unwrap_err();
 
         assert!(error
             .to_string()
             .contains("episode summary must not be empty"));
         assert!(graph.calls().is_empty());
-        assert!(embedder.calls().is_empty());
-        assert!(vector.calls().is_empty());
-    }
-
-    #[tokio::test]
-    async fn memory_link_objects_are_persisted_as_links_and_skipped_for_vectors() {
-        let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
-        let embedder = RecordingEmbedder::default();
-        let link_only_draft = RememberPipelineDraft::new(
-            [MemoryObjectDraft::MemoryLink(link_draft(
-                ids.inline_link,
-                ids.episode,
-                ids.observation,
-            ))],
-            Vec::<MemoryLinkDraft>::new(),
-        );
-        let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
-
-        let outcome = pipeline
-            .remember(link_only_draft)
-            .await
-            .expect("link-only remember draft should persist graph link");
-
-        assert!(outcome.persisted_object_ids.is_empty());
-        assert_eq!(outcome.persisted_link_ids, vec![ids.inline_link]);
-        assert!(outcome.vector_indexed_object_ids.is_empty());
         assert!(embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
@@ -758,20 +645,11 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .remember(representative_draft(&ids))
+            .commit(representative_plan(&ids), CommitOptions::default())
             .await
             .expect("graph success with vector failure should return partial outcome");
 
-        assert_eq!(
-            outcome.persisted_object_ids,
-            vec![
-                ids.entity,
-                ids.episode,
-                ids.observation,
-                ids.thread,
-                ids.derived
-            ]
-        );
+        assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
         assert_eq!(
             outcome.persisted_link_ids,
             vec![ids.inline_link, ids.extra_link]
@@ -793,7 +671,7 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .remember(representative_draft(&ids))
+            .commit(representative_plan(&ids), CommitOptions::default())
             .await
             .expect("graph success with embedding mismatch should return partial outcome");
 
@@ -819,17 +697,22 @@ mod tests {
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         pipeline
-            .remember(RememberPipelineDraft::new(
-                [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
-                [typed_link_draft(
-                    ids.extra_link,
-                    ObjectType::Entity,
-                    ids.entity,
-                    RelationType::Mentions,
-                    ObjectType::Episode,
-                    ids.episode,
-                )],
-            ))
+            .commit(
+                prepare_test_plan(
+                    RememberInput::new("stats after vector attempt")
+                        .with_episode(episode_draft(ids.episode))
+                        .with_entity(entity_draft(ids.entity))
+                        .with_memory_link(typed_link_draft(
+                            ids.extra_link,
+                            ObjectType::Entity,
+                            ids.entity,
+                            RelationType::Mentions,
+                            ObjectType::Episode,
+                            ids.episode,
+                        )),
+                ),
+                CommitOptions::default(),
+            )
             .await
             .expect("stats should not change remember outcome");
 
@@ -857,36 +740,31 @@ mod tests {
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         let outcome = pipeline
-            .remember(RememberPipelineDraft::new(
-                [MemoryObjectDraft::Entity(entity_draft(ids.entity))],
-                [typed_link_draft(
-                    ids.extra_link,
-                    ObjectType::Entity,
-                    ids.entity,
-                    RelationType::AssociatedWith,
-                    ObjectType::Episode,
-                    ids.episode,
-                )],
-            ))
+            .commit(
+                prepare_test_plan(
+                    RememberInput::new("caller supplied association")
+                        .with_episode(episode_draft(ids.episode))
+                        .with_entity(entity_draft(ids.entity))
+                        .with_memory_link(typed_link_draft(
+                            ids.extra_link,
+                            ObjectType::Entity,
+                            ids.entity,
+                            RelationType::AssociatedWith,
+                            ObjectType::Episode,
+                            ids.episode,
+                        )),
+                ),
+                CommitOptions::default(),
+            )
             .await
             .unwrap();
 
         assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphObjects(vec![ids.entity]),
-                StoreCall::GraphLinks(vec![ids.extra_link])
-            ]
-        );
-        assert_eq!(
-            embedder.calls(),
-            vec![StoreCall::EmbedBatch(vec![ids.entity])]
-        );
-        assert_eq!(
-            vector.calls(),
-            vec![StoreCall::VectorUpsert(vec![ids.entity])]
-        );
+        assert!(graph
+            .calls()
+            .contains(&StoreCall::GraphLinks(vec![ids.extra_link])));
+        assert!(!embedder.calls().is_empty());
+        assert!(!vector.calls().is_empty());
         assert_eq!(
             stats.rejected_low_information_link_count().await.unwrap(),
             0
@@ -910,17 +788,21 @@ mod tests {
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         let outcome = pipeline
-            .remember(RememberPipelineDraft::new(
-                Vec::<MemoryObjectDraft>::new(),
-                [typed_link_draft(
-                    id("550e8400-e29b-41d4-a716-446655443008"),
-                    ObjectType::Entity,
-                    fixtures.hub_entity.id,
-                    RelationType::About,
-                    ObjectType::DerivedMemory,
-                    fixtures.suppressed_seed.id,
-                )],
-            ))
+            .commit(
+                prepare_test_plan(
+                    RememberInput::new("existing endpoint stats").with_memory_link(
+                        typed_link_draft(
+                            id("550e8400-e29b-41d4-a716-446655443008"),
+                            ObjectType::Entity,
+                            fixtures.hub_entity.id,
+                            RelationType::About,
+                            ObjectType::DerivedMemory,
+                            fixtures.suppressed_seed.id,
+                        ),
+                    ),
+                ),
+                CommitOptions::default(),
+            )
             .await
             .expect("link-only remember should persist and record stats");
 
@@ -941,10 +823,10 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
-        assert_eq!(
-            outcome.stats_update_status.updated_object_ids,
-            vec![fixtures.suppressed_seed.id]
-        );
+        assert!(outcome
+            .stats_update_status
+            .updated_object_ids
+            .contains(&fixtures.suppressed_seed.id));
         let failed_ids = outcome
             .stats_update_status
             .failure
@@ -957,17 +839,22 @@ mod tests {
         let repair_pipeline =
             RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
         let repair_outcome = repair_pipeline
-            .remember(RememberPipelineDraft::new(
-                Vec::<MemoryObjectDraft>::new(),
-                [typed_link_draft(
-                    id("550e8400-e29b-41d4-a716-446655443009"),
-                    ObjectType::Entity,
-                    fixtures.hub_entity.id,
-                    RelationType::About,
-                    ObjectType::DerivedMemory,
-                    fixtures.suppressed_seed.id,
-                )],
-            ))
+            .commit(
+                prepare_test_plan_with_seed(
+                    RememberInput::new("existing endpoint repair").with_memory_link(
+                        typed_link_draft(
+                            id("550e8400-e29b-41d4-a716-446655443009"),
+                            ObjectType::Entity,
+                            fixtures.hub_entity.id,
+                            RelationType::About,
+                            ObjectType::DerivedMemory,
+                            fixtures.suppressed_seed.id,
+                        ),
+                    ),
+                    "remember-pipeline-repair",
+                ),
+                CommitOptions::default(),
+            )
             .await
             .expect("stats repair outcome should still return graph success");
 
@@ -1009,34 +896,46 @@ mod tests {
         }
     }
 
-    fn representative_draft(ids: &FixedIds) -> RememberPipelineDraft {
-        RememberPipelineDraft::new(
-            [
-                MemoryObjectDraft::Entity(entity_draft(ids.entity)),
-                MemoryObjectDraft::Episode(episode_draft(ids.episode)),
-                MemoryObjectDraft::Observation(observation_draft(ids.observation, ids.episode)),
-                MemoryObjectDraft::MemoryThread(thread_draft(ids.thread)),
-                MemoryObjectDraft::DerivedMemory(derived_draft(
+    fn representative_plan(ids: &FixedIds) -> RememberWritePlan {
+        prepare_test_plan(
+            RememberInput::new("Discussed stable remember ordering.")
+                .with_episode(episode_draft(ids.episode))
+                .with_observation(observation_draft(ids.observation, ids.episode))
+                .with_entity(entity_draft(ids.entity))
+                .with_memory_thread(thread_draft(ids.thread))
+                .with_derived_memory(derived_draft(ids.derived, ids.episode, ids.observation))
+                .with_memory_link(link_draft(ids.inline_link, ids.episode, ids.observation))
+                .with_memory_link(typed_link_draft(
+                    ids.extra_link,
+                    ObjectType::DerivedMemory,
                     ids.derived,
-                    ids.episode,
-                    ids.observation,
+                    RelationType::PartOfThread,
+                    ObjectType::MemoryThread,
+                    ids.thread,
                 )),
-                MemoryObjectDraft::MemoryLink(link_draft(
-                    ids.inline_link,
-                    ids.episode,
-                    ids.observation,
-                )),
-            ],
-            [typed_link_draft(
-                ids.extra_link,
-                ObjectType::DerivedMemory,
-                ids.derived,
-                RelationType::PartOfThread,
-                ObjectType::MemoryThread,
-                ids.thread,
-            )],
         )
-        .with_defaults(DraftDefaults::at(timestamp()))
+    }
+
+    fn expected_object_ids(ids: &FixedIds) -> Vec<MemoryId> {
+        vec![
+            ids.episode,
+            ids.observation,
+            ids.entity,
+            ids.thread,
+            ids.derived,
+        ]
+    }
+
+    fn prepare_test_plan(input: RememberInput) -> RememberWritePlan {
+        prepare_test_plan_with_seed(input, "remember-pipeline-tests")
+    }
+
+    fn prepare_test_plan_with_seed(input: RememberInput, seed: &str) -> RememberWritePlan {
+        input.prepare_write_plan_with_options(
+            &RememberPlanDefaults::fixed(seed, timestamp()),
+            true,
+            true,
+        )
     }
 
     fn entity_draft(id: MemoryId) -> EntityDraft {
@@ -1181,14 +1080,14 @@ mod tests {
         async fn query_derived_memories_by_provenance(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_thread(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 

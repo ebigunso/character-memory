@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::domain::{
+use crate::domain::{
     DerivedMemory, Episode, MemoryId, MemoryThread, ObjectType, Observation, RelationType,
     RetentionState,
 };
@@ -219,7 +219,6 @@ pub struct RetrievalRationale {
     pub stale_candidate_omission_reasons: Vec<StaleCandidateOmissionSummary>,
     pub lifecycle_omission_count: usize,
     pub lifecycle_omission_reasons: Vec<LifecycleOmissionSummary>,
-    #[serde(default)]
     pub telemetry: RetrievalTelemetry,
 }
 
@@ -256,7 +255,6 @@ pub struct RetrievalTelemetry {
     pub selected_graph_root_count: usize,
     pub graph_root_omission_count: usize,
     pub graph_expansion: GraphExpansionTelemetry,
-    #[serde(default)]
     pub selectivity: SelectivityTelemetry,
     pub section_pressure: Vec<SectionPressureSummary>,
 }
@@ -321,11 +319,8 @@ pub struct LifecycleOmissionSummary {
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
     pub graph_relations: Vec<GraphRelationTrace>,
-    #[serde(default)]
     pub graph_expansions: Vec<GraphExpansionTrace>,
-    #[serde(default)]
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
-    #[serde(default)]
     pub selectivity_decisions: Vec<SelectivityTrace>,
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
@@ -410,7 +405,6 @@ pub struct SelectivityTrace {
     pub root: MemoryObjectRef,
     pub relation: RelationType,
     pub object_type: ObjectType,
-    #[serde(default)]
     pub count_scope: SelectivityCountScope,
     pub score: Option<f64>,
     pub entity_count: Option<u64>,
@@ -494,7 +488,6 @@ pub struct StaleCandidateOmission {
     pub candidate: MemoryObjectRef,
     pub vector_score: Option<f32>,
     pub reason: StaleCandidateReason,
-    #[serde(default)]
     pub rationale_categories: Vec<RationaleCategory>,
 }
 
@@ -515,7 +508,6 @@ pub struct SectionAssignment {
     pub section: ContextPackSection,
     pub rank: Option<usize>,
     pub reason: Option<String>,
-    #[serde(default)]
     pub rationale_categories: Vec<RationaleCategory>,
 }
 
@@ -898,49 +890,6 @@ mod tests {
             vec![RationaleCategory::Scope, RationaleCategory::Semantic]
         );
         assert_eq!(decoded.fanout_utilization[0].omitted_by_fanout_count, 3);
-    }
-
-    #[test]
-    fn retrieval_trace_deserializes_old_payload_without_graph_expansions() {
-        let encoded = r#"{
-            "vector_candidates": [],
-            "graph_relations": [],
-            "lifecycle_filter_decisions": [],
-            "stale_candidate_omissions": [],
-            "section_assignments": []
-        }"#;
-
-        let decoded: RetrievalTrace = serde_json::from_str(encoded).unwrap();
-
-        assert!(decoded.graph_expansions.is_empty());
-        assert!(decoded.fanout_utilization.is_empty());
-        assert!(decoded.selectivity_decisions.is_empty());
-    }
-
-    #[test]
-    fn new_trace_fields_are_serde_defaulted_for_older_payloads() {
-        let encoded_omission = r#"{
-            "candidate": {
-                "object_type": "derived_memory",
-                "id": "550e8400-e29b-41d4-a716-446655442090"
-            },
-            "vector_score": 0.5,
-            "reason": "section_limit"
-        }"#;
-        let omission: StaleCandidateOmission = serde_json::from_str(encoded_omission).unwrap();
-        assert!(omission.rationale_categories.is_empty());
-
-        let encoded_assignment = r#"{
-            "object": {
-                "object_type": "derived_memory",
-                "id": "550e8400-e29b-41d4-a716-446655442091"
-            },
-            "section": "preferences",
-            "rank": 1,
-            "reason": "legacy trace"
-        }"#;
-        let assignment: SectionAssignment = serde_json::from_str(encoded_assignment).unwrap();
-        assert!(assignment.rationale_categories.is_empty());
     }
 
     #[test]

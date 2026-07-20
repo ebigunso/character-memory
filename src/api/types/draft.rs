@@ -3,12 +3,12 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::domain::{
+use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
+use crate::domain::{
     DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode, MemoryId,
     MemoryLink, MemoryObject, MemoryThread, Modality, ObjectType, Observation, RelationType,
     RetentionState, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 
 /// Supplies generated IDs and timestamps for converting draft inputs into canonical objects.
 #[derive(Debug, Clone)]
@@ -522,32 +522,6 @@ impl TryFrom<MemoryLinkDraft> for MemoryLink {
     }
 }
 
-/// Backend-free draft for the remember write surface.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RememberDraft {
-    pub object_drafts: Vec<MemoryObjectDraft>,
-    pub link_drafts: Vec<MemoryLinkDraft>,
-}
-
-impl RememberDraft {
-    pub fn new(object_drafts: impl IntoIterator<Item = MemoryObjectDraft>) -> Self {
-        Self {
-            object_drafts: object_drafts.into_iter().collect(),
-            link_drafts: Vec::new(),
-        }
-    }
-
-    pub fn with_link(mut self, link_draft: MemoryLinkDraft) -> Self {
-        self.link_drafts.push(link_draft);
-        self
-    }
-
-    pub fn with_links(mut self, link_drafts: impl IntoIterator<Item = MemoryLinkDraft>) -> Self {
-        self.link_drafts.extend(link_drafts);
-        self
-    }
-}
-
 /// Result of a remember write.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberOutcome {
@@ -765,8 +739,5 @@ mod tests {
     fn assistant_preference_is_the_public_serialized_derived_type_name() {
         let serialized = serde_json::to_string(&DerivedType::AssistantPreference).unwrap();
         assert_eq!(serialized, "\"assistant_preference\"");
-
-        let legacy: DerivedType = serde_json::from_str("\"assistant_behavior_note\"").unwrap();
-        assert_eq!(legacy, DerivedType::AssistantPreference);
     }
 }

@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::api::types::{
+use crate::domain::{
     graph_uri, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
     CURRENT_SCHEMA_VERSION,
 };
@@ -58,7 +58,7 @@ where
 
 fn reconcile_records(
     graph_objects: Vec<MemoryObject>,
-    graph_links: Vec<crate::api::types::MemoryLink>,
+    graph_links: Vec<crate::domain::MemoryLink>,
     vector_records: Vec<VectorCandidateDiagnosticRecord>,
 ) -> ReconciliationReport {
     let graph_by_ref = graph_objects
@@ -212,10 +212,7 @@ fn push_lifecycle_diagnostics(
     }
 }
 
-fn missing_required_provenance(
-    object: &MemoryObject,
-    links: &[crate::api::types::MemoryLink],
-) -> bool {
+fn missing_required_provenance(object: &MemoryObject, links: &[crate::domain::MemoryLink]) -> bool {
     let MemoryObject::DerivedMemory(memory) = object else {
         return false;
     };
@@ -307,7 +304,7 @@ fn drift_kind_rank(kind: ReconciliationDriftKind) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{
+    use crate::domain::{
         DerivedMemory, DerivedType, MemoryObject, MemoryThread, Stability, ThreadStatus,
         DEFAULT_SCHEMA_VERSION,
     };
@@ -334,7 +331,7 @@ mod tests {
         let mut missing_provenance = invalid_derived_memory(id(503));
         missing_provenance.text = "Corrupt derived memory without provenance.".to_owned();
         let graph_only_thread = graph_only_thread(id(504));
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: id(601),
             object_type: ObjectType::MemoryLink,
             from_id: replacement_memory.id,

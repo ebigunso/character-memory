@@ -296,7 +296,7 @@ fn vector_surface(surface: VectorSurface) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{
+    use crate::domain::{
         graph_uri, DerivedType, ObjectType, RetentionState, Stability, DEFAULT_SCHEMA_VERSION,
     };
     use crate::models::vector::{

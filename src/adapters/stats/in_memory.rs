@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use crate::api::types::{ObjectType, RelationType};
+use crate::domain::{ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::retrieval_stats::{
     insert_edge, recomputed_counters, recomputed_global_counters, RetrievalStatsCounter,

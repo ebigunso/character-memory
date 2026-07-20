@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::api::types::{
-    MemoryObjectRef, ObjectType, RelationType, RetrievalLifecyclePolicy, SelectivityCountScope,
-    SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
+    MemoryObjectRef, RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision,
+    SelectivityTelemetry, SelectivityTrace,
 };
+use crate::domain::{ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
@@ -633,7 +634,7 @@ mod tests {
                 relation_kind: RelationType::About,
                 object_id: derived_id,
                 object_type: ObjectType::DerivedMemory,
-                retention_state: crate::api::types::RetentionState::Active,
+                retention_state: crate::domain::RetentionState::Active,
                 is_current: true,
                 first_seen_at: chrono::DateTime::UNIX_EPOCH,
                 last_seen_at: chrono::DateTime::UNIX_EPOCH,
@@ -821,7 +822,7 @@ mod tests {
                     object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462004")
                         .unwrap(),
                     object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::api::types::RetentionState::Active,
+                    retention_state: crate::domain::RetentionState::Active,
                     is_current: true,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
@@ -833,7 +834,7 @@ mod tests {
                     object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462005")
                         .unwrap(),
                     object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::api::types::RetentionState::Active,
+                    retention_state: crate::domain::RetentionState::Active,
                     is_current: false,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
@@ -845,7 +846,7 @@ mod tests {
                     object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462007")
                         .unwrap(),
                     object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::api::types::RetentionState::Archived,
+                    retention_state: crate::domain::RetentionState::Archived,
                     is_current: false,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
@@ -857,7 +858,7 @@ mod tests {
                     object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462006")
                         .unwrap(),
                     object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::api::types::RetentionState::Suppressed,
+                    retention_state: crate::domain::RetentionState::Suppressed,
                     is_current: false,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,

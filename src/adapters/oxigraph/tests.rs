@@ -8,8 +8,10 @@ mod tests {
     use super::super::sparql_selectors::SparqlGraphSelectors;
     use super::super::vocabulary as vocab;
     use crate::api::types::{
-        graph_uri, ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, MemoryId,
-        MemoryObject, ObjectType, RelationType, RetentionState, RetrievalContext, ThreadStatus,
+        ContextPackSection, LifecycleFilterAction, LifecycleFilterReason, RetrievalContext,
+    };
+    use crate::domain::{
+        graph_uri, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState, ThreadStatus,
     };
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
@@ -849,7 +851,7 @@ mod tests {
         let fixtures = representative_fixtures();
         let superseded_memory = fixtures.user_preference.clone();
         let replacement = fixtures.correction.clone();
-        let hub_link = crate::api::types::MemoryLink {
+        let hub_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0002),
             object_type: ObjectType::MemoryLink,
             from_id: fixtures.hub_entity.id,
@@ -862,7 +864,7 @@ mod tests {
             created_at: superseded_memory.created_at,
             schema_version: superseded_memory.schema_version.clone(),
         };
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5500_0003),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,
@@ -1016,7 +1018,7 @@ mod tests {
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         archived_thread.status = ThreadStatus::Archived;
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0001),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,
@@ -1173,7 +1175,7 @@ mod tests {
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         archived_thread.status = ThreadStatus::Archived;
-        let supersedes_link = crate::api::types::MemoryLink {
+        let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0002),
             object_type: ObjectType::MemoryLink,
             from_id: replacement.id,

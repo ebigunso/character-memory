@@ -8,7 +8,7 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::api::types::{graph_uri, MemoryId, ObjectType, RelationType};
+use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
@@ -535,7 +535,7 @@ mod tests {
     use crate::adapters::oxigraph::rdf_mapping::{
         rdf_triples_for_link, rdf_triples_for_object, RdfObject, RdfTriple,
     };
-    use crate::api::types::{graph_uri, MemoryObject};
+    use crate::domain::{graph_uri, MemoryObject};
     use crate::test_support::representative_fixtures;
 
     #[test]

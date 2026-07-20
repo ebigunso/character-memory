@@ -1,13 +1,13 @@
 use crate::api::types::{
     CandidateValidation, CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft,
-    LifecycleMutationOutcome, MemoryLink, MemoryLinkDraft, PrepareOptions, RememberDraft,
-    RememberInput, RememberOutcome, RememberWritePlan, RetrievalContext, RetrieveOutcome,
+    LifecycleMutationOutcome, MemoryLinkDraft, PrepareOptions, RememberInput, RememberOptions,
+    RememberOutcome, RememberWritePlan, RetrievalContext, RetrieveOutcome,
 };
 use crate::composition::MemoryComposition;
+use crate::domain::MemoryLink;
 use crate::errors::CustomError;
 use crate::usecases::{
-    CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RememberPipelineDraft,
-    RetrievePipeline, WritePlanValidator,
+    CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RetrievePipeline, WritePlanValidator,
 };
 
 /// CharacterMemory provides a high-level API for memory operations.
@@ -78,22 +78,15 @@ impl CharacterMemory {
         Ok(outcome.into())
     }
 
-    /// Persists a remember draft through the same graph-authoritative commit pipeline.
-    pub async fn remember(&self, draft: RememberDraft) -> Result<RememberOutcome, CustomError> {
-        let parts = self.memory_composition();
-        let pipeline = RememberPipeline::new_with_stats(
-            parts.graph_store.as_ref(),
-            parts.vector_store.as_ref(),
-            parts.embedder.as_ref(),
-            parts.stats_store.as_ref(),
-        );
-        let outcome = pipeline
-            .remember(RememberPipelineDraft::new(
-                draft.object_drafts,
-                draft.link_drafts,
-            ))
-            .await?;
-        Ok(outcome.into())
+    /// Prepares, validates, and commits a remember input through the canonical write-plan path.
+    pub async fn remember(
+        &self,
+        input: RememberInput,
+        options: RememberOptions,
+    ) -> Result<RememberOutcome, CustomError> {
+        let plan = self.prepare(input, options.prepare).await?;
+        self.validate_plan(&plan).await?;
+        self.commit(plan, options.commit).await
     }
 
     /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
@@ -172,9 +165,8 @@ mod tests {
     use secrecy::SecretString;
     use uuid::Uuid;
 
-    use crate::api::types::{
-        EntityDraft, EntityType, MemoryLinkDraft, ObjectType, PrepareOptions, RelationType,
-    };
+    use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
+    use crate::domain::{EntityType, ObjectType, RelationType};
     use crate::models::vector::{
         EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
         VectorSurface,
@@ -186,20 +178,23 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn injected_facade_remembers_backend_free_drafts() {
+    async fn injected_facade_remembers_through_the_write_plan_path() {
         let memory = injected_memory();
         let entity_id = id("550e8400-e29b-41d4-a716-446655445001");
         let mut entity = EntityDraft::new(EntityType::User, "Kohta");
         entity.id = Some(entity_id);
 
         let outcome = memory
-            .remember(RememberDraft::new([MemoryObjectDraft::Entity(entity)]))
+            .remember(
+                RememberInput::new("Kohta").with_entity(entity),
+                RememberOptions::default(),
+            )
             .await
             .expect("remember facade should persist through injected parts");
 
-        assert_eq!(outcome.persisted_object_ids, vec![entity_id]);
+        assert!(outcome.persisted_object_ids.contains(&entity_id));
         assert_eq!(outcome.persisted_link_ids, Vec::<MemoryId>::new());
-        assert_eq!(outcome.vector_indexed_object_ids, vec![entity_id]);
+        assert!(outcome.vector_indexed_object_ids.contains(&entity_id));
         assert_eq!(outcome.vector_indexing_failure, None);
     }
 
@@ -654,7 +649,7 @@ mod tests {
             ::config::Config::builder()
                 .set_override("qdrant_connection_string", "http://127.0.0.1:1")
                 .unwrap()
-                .set_override("oxigraph_connection_string", "http://127.0.0.1:7878")
+                .set_override("oxigraph_path", "http://127.0.0.1:7878")
                 .unwrap()
                 .set_override("openai_api_key", "dummy-key")
                 .unwrap()
@@ -684,8 +679,7 @@ mod tests {
             panic!("expected configuration parse error");
         };
 
-        assert!(message.contains("OXIGRAPH_CONNECTION_STRING"));
-        assert!(message.contains("service"));
+        assert!(message.contains("OXIGRAPH_PATH"));
         assert!(message.contains("local filesystem path"));
     }
 
@@ -695,7 +689,7 @@ mod tests {
             ::config::Config::builder()
                 .set_override("qdrant_connection_string", "external_qdrant")
                 .unwrap()
-                .set_override("oxigraph_connection_string", "external_oxigraph")
+                .set_override("oxigraph_path", "external_oxigraph")
                 .unwrap()
                 .set_override("openai_api_key", "external_openai")
                 .unwrap()

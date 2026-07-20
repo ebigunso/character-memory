@@ -9,7 +9,7 @@ use oxigraph::model::{GraphName, NamedNode, Quad};
 use oxigraph::model::{Literal, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
 
-use crate::api::types::{graph_uri, DerivedMemory, MemoryLink, MemoryObject, ObjectType};
+use crate::domain::{graph_uri, DerivedMemory, MemoryLink, MemoryObject, ObjectType};
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,

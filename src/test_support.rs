@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::api::types::{
+use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Stability,
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
@@ -160,7 +160,7 @@ fn default_diagnostic_record(record: &VectorCandidateRecord) -> VectorCandidateD
     VectorCandidateDiagnosticRecord {
         object_id: record.object_id,
         object_type: record.object_type,
-        graph_uri: crate::api::types::graph_uri(record.object_type, record.object_id),
+        graph_uri: crate::domain::graph_uri(record.object_type, record.object_id),
         surface: record.surface,
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         retention_state: record.retention_state,

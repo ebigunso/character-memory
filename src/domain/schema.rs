@@ -16,19 +16,6 @@ pub(crate) fn require_current_schema_version(
     })
 }
 
-// This seam is intentionally unused by production paths while only the current
-// schema exists; boundary code should reject unsupported versions until a
-// second schema introduces a real migration.
-#[allow(dead_code)]
-pub(crate) fn migrate_current_schema<T>(
-    value: T,
-    schema_version: &str,
-    context: &'static str,
-) -> Result<T, CustomError> {
-    require_current_schema_version(schema_version, context)?;
-    Ok(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,37 +25,6 @@ mod tests {
         assert!(
             require_current_schema_version(CURRENT_SCHEMA_VERSION, "test storage boundary").is_ok()
         );
-    }
-
-    #[test]
-    fn current_schema_migration_is_a_noop() {
-        let value = String::from("unchanged");
-
-        let migrated = migrate_current_schema(
-            value.clone(),
-            CURRENT_SCHEMA_VERSION,
-            "test mapping boundary",
-        )
-        .expect("current schema should migrate without changes");
-
-        assert_eq!(migrated, value);
-    }
-
-    #[test]
-    fn forward_migrations_are_absent_until_a_second_schema_exists() {
-        let value = String::from("unchanged");
-
-        let error = migrate_current_schema(value, "future_schema", "test migration boundary")
-            .expect_err("unsupported schema should not be migrated without a real migration");
-
-        assert!(matches!(
-            error,
-            CustomError::UnsupportedSchemaVersion {
-                context: "test migration boundary",
-                expected: CURRENT_SCHEMA_VERSION,
-                actual
-            } if actual == "future_schema"
-        ));
     }
 
     #[test]

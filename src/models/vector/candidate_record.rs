@@ -4,7 +4,8 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use chrono::{DateTime, Utc};
 
-use crate::api::types::{default_retrieval_object_types, MemoryId, ObjectType, RetentionState};
+use crate::api::types::default_retrieval_object_types;
+use crate::domain::{MemoryId, ObjectType, RetentionState};
 
 use super::{VectorPayloadHints, VectorRelationshipHints};
 

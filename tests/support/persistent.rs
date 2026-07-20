@@ -24,7 +24,7 @@ pub async fn try_setup_persistent_character_memory(
             base_settings.get_qdrant_connection(),
         )
         .map_err(config_error)?
-        .set_override("oxigraph_connection_string", path_string(graph_path))
+        .set_override("oxigraph_path", path_string(graph_path))
         .map_err(config_error)?
         .set_override("openai_api_key", base_settings.get_openai_api_key())
         .map_err(config_error)?

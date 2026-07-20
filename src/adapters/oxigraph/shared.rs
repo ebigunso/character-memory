@@ -6,7 +6,7 @@ use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Ter
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
-use crate::api::types::{
+use crate::domain::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
     ObjectType, Observation, RelationType,
 };
@@ -540,7 +540,7 @@ pub(super) fn bounded_graph_visible_refs(
         .select_links_touching(&candidate_refs)?
         .into_iter()
         .filter(|link_ref| {
-            link_ref.relation == crate::api::types::RelationType::Supersedes
+            link_ref.relation == RelationType::Supersedes
                 && link_ref.to.object_type == ObjectType::DerivedMemory
                 && graph_refs.contains(&link_ref.to)
         })

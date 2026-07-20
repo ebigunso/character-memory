@@ -3,11 +3,11 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 
-use crate::api::types::{
+use crate::domain::schema::require_current_schema_version;
+use crate::domain::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
     ObjectType, Observation,
 };
-use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
 
 use super::vocabulary as vocab;
@@ -408,7 +408,7 @@ fn enum_value(value: impl Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::types::{graph_uri, ObjectType, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::{graph_uri, ObjectType, DEFAULT_SCHEMA_VERSION};
     use crate::test_support::representative_fixtures;
 
     #[test]

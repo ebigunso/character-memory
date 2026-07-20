@@ -4,9 +4,7 @@
 // stores keep tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
 
-use crate::api::types::{
-    DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType,
-};
+use crate::domain::{DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType};
 use crate::errors::CustomError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

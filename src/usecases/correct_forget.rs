@@ -9,11 +9,14 @@ use crate::api::types::lifecycle::{
     LifecycleMutationWarning, LifecycleMutationWarningReason,
 };
 use crate::api::types::{
-    CorrectMemoryDraft, CorrectionTarget, DerivedMemory, DerivedType, ForgetMemoryDraft,
-    LifecycleTargetRef, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
-    RelationType, ReplacementDerivedMemoryDraft, RetentionState, SourceObjectCorrectionTarget,
-    SourceProvenanceReference, Stability, SupersededByEvidence, ThreadStatus,
-    VectorMaintenanceFailure, DEFAULT_SCHEMA_VERSION,
+    CorrectMemoryDraft, CorrectionTarget, ForgetMemoryDraft, LifecycleTargetRef, MemoryObjectRef,
+    ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget, SourceProvenanceReference,
+    SupersededByEvidence, VectorMaintenanceFailure,
+};
+use crate::domain::{
+    DerivedMemory, DerivedType, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
+    ObjectType, Observation, RelationType, RetentionState, Stability, ThreadStatus,
+    DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
@@ -457,7 +460,7 @@ where
         }
     }
 
-    async fn fetch_episode(&self, id: MemoryId) -> Result<crate::api::types::Episode, CustomError> {
+    async fn fetch_episode(&self, id: MemoryId) -> Result<Episode, CustomError> {
         let object = self
             .fetch_one(GraphObjectRef::new(id, ObjectType::Episode))
             .await?;
@@ -467,10 +470,7 @@ where
         }
     }
 
-    async fn fetch_observation(
-        &self,
-        id: MemoryId,
-    ) -> Result<crate::api::types::Observation, CustomError> {
+    async fn fetch_observation(&self, id: MemoryId) -> Result<Observation, CustomError> {
         let object = self
             .fetch_one(GraphObjectRef::new(id, ObjectType::Observation))
             .await?;
@@ -480,10 +480,7 @@ where
         }
     }
 
-    async fn fetch_thread(
-        &self,
-        id: MemoryId,
-    ) -> Result<crate::api::types::MemoryThread, CustomError> {
+    async fn fetch_thread(&self, id: MemoryId) -> Result<MemoryThread, CustomError> {
         let object = self
             .fetch_one(GraphObjectRef::new(id, ObjectType::MemoryThread))
             .await?;
@@ -1185,9 +1182,9 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
 
     use crate::api::types::{
-        Episode, ExternalSourceReference, Modality, Observation, RetrievalContext,
-        StaleCandidateReason, VectorCandidateTrace,
+        ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
     };
+    use crate::domain::{Episode, Modality, Observation};
     use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery};
     use crate::ports::retrieval_stats::{

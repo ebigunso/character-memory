@@ -19,7 +19,7 @@
 // construction (`graph_expansion_bounded_error`).
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::api::types::{
+use crate::domain::{
     DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState,
     ThreadStatus,
 };

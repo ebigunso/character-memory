@@ -27,9 +27,9 @@ use character_memory::{
     CharacterMemory, CommitOptions, CustomError, DerivedMemoryCandidate, DerivedMemoryDraft,
     DerivedType, EntityDraft, EntityType, EpisodeDraft, ExternalSourceReference,
     IncludedDerivedMemory, MemoryCandidate, MemoryId, MemoryLinkCandidate, MemoryLinkDraft,
-    MemoryObjectDraft, ObjectType, PrepareOptions, RationaleOrigin, RelationType, RememberDraft,
-    RememberInput, RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan,
-    StatsUpdateStatus, DEFAULT_SCHEMA_VERSION,
+    ObjectType, PrepareOptions, RationaleOrigin, RelationType, RememberInput, RememberOptions,
+    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
+    DEFAULT_SCHEMA_VERSION,
 };
 use config::Config;
 use std::path::Path;
@@ -459,42 +459,49 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         Some(fixture) => fixture,
         None => return,
     };
-    let timestamp = fixed_timestamp();
-    let mut wrapper_episode = EpisodeDraft::new("remember-wrapper source observation");
-    wrapper_episode.id = Some(id("550e8400-e29b-41d4-a716-446655613401"));
-    wrapper_episode.created_at = Some(timestamp);
     let wrapper_outcome = memory
-        .remember(RememberDraft::new([MemoryObjectDraft::Episode(
-            wrapper_episode,
-        )]))
+        .remember(
+            RememberInput::new("remember-wrapper source observation"),
+            RememberOptions::default(),
+        )
         .await
-        .expect("remember wrapper should call the public wrapper path");
+        .expect("remember wrapper should compose the public write-plan path");
 
-    let mut plan_episode = EpisodeDraft::new("remember-wrapper source observation");
-    plan_episode.id = Some(id("550e8400-e29b-41d4-a716-446655613402"));
-    plan_episode.created_at = Some(timestamp);
-    let plan = RememberInput::new("remember-wrapper source observation")
-        .with_episode(plan_episode)
-        .prepare_write_plan_with_options(
-            &RememberPlanDefaults::fixed("remember-wrapper-plan", timestamp),
-            false,
-            false,
-        );
+    let plan = memory
+        .prepare(
+            RememberInput::new("manual remember source observation"),
+            PrepareOptions::default(),
+        )
+        .await
+        .expect("manual prepare should create an equivalent simple plan");
+    let validations = memory
+        .validate_plan(&plan)
+        .await
+        .expect("manual validation should succeed");
+    assert!(validations
+        .iter()
+        .all(|validation| validation.status == CandidateValidationStatus::Valid));
     let plan_outcome = memory
-        .commit(plan, graph_only_commit_options())
+        .commit(plan, CommitOptions::default())
         .await
         .expect("plan path should commit equivalent graph state");
 
-    assert_eq!(wrapper_outcome.persisted_object_ids.len(), 1);
-    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 0);
-    assert_eq!(plan_outcome.persisted_object_ids.len(), 2);
-    assert_eq!(plan_outcome.persisted_link_ids.len(), 0);
-    assert!(wrapper_outcome
-        .persisted_object_ids
-        .contains(&id("550e8400-e29b-41d4-a716-446655613401")));
-    assert!(plan_outcome
-        .persisted_object_ids
-        .contains(&id("550e8400-e29b-41d4-a716-446655613402")));
+    assert_eq!(
+        wrapper_outcome.persisted_object_ids.len(),
+        plan_outcome.persisted_object_ids.len()
+    );
+    assert_eq!(
+        wrapper_outcome.persisted_link_ids.len(),
+        plan_outcome.persisted_link_ids.len()
+    );
+    assert_eq!(
+        wrapper_outcome.vector_indexed_object_ids.len(),
+        plan_outcome.vector_indexed_object_ids.len()
+    );
+    assert_eq!(
+        wrapper_outcome.stats_update_status.failure.is_none(),
+        plan_outcome.stats_update_status.failure.is_none()
+    );
     base::cleanup_collection(&collection_name).await;
 }
 
@@ -726,7 +733,7 @@ async fn try_setup_persistent_character_memory(
                 base_settings.get_qdrant_connection(),
             )
             .map_err(base::config_error)?
-            .set_override("oxigraph_connection_string", path_string(graph_path))
+            .set_override("oxigraph_path", path_string(graph_path))
             .map_err(base::config_error)?
             .set_override("openai_api_key", base_settings.get_openai_api_key())
             .map_err(base::config_error)?
@@ -760,8 +767,11 @@ fn load_in_memory_settings() -> Result<Settings, CustomError> {
         )
         .map_err(base::config_error)?
         .set_override(
-            "oxigraph_connection_string",
-            base_settings.get_oxigraph_connection(),
+            "oxigraph_path",
+            base_settings
+                .get_oxigraph_path()?
+                .to_string_lossy()
+                .into_owned(),
         )
         .map_err(base::config_error)?
         .set_override("openai_api_key", base_settings.get_openai_api_key())

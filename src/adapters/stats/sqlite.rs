@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::api::types::RetentionState;
+use crate::domain::{ObjectType, RelationType, RetentionState};
 use crate::errors::CustomError;
 use crate::ports::retrieval_stats::{
     object_type_key, relation_type_key, retention_state_key, RetrievalStatsCounter,
@@ -91,8 +91,8 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
 
     async fn global_counter(
         &self,
-        relation_kind: crate::api::types::RelationType,
-        object_type: crate::api::types::ObjectType,
+        relation_kind: RelationType,
+        object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
         let connection = lock(&self.connection)?;
         connection
@@ -566,7 +566,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use tempfile::tempdir;
 
-    use crate::api::types::{MemoryId, ObjectType, RelationType};
+    use crate::domain::{MemoryId, ObjectType, RelationType};
 
     #[tokio::test]
     async fn sqlite_store_persists_idempotent_counters() {

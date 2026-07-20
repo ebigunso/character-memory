@@ -628,9 +628,9 @@ mod construction_tests {
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    CandidateRationale, CandidateValidation, CandidateValidationStatus, DraftDefaults, MemoryLink,
-    MemoryObject, RetentionState,
+    CandidateRationale, CandidateValidation, CandidateValidationStatus, DraftDefaults,
 };
+use crate::domain::{MemoryLink, MemoryObject, RetentionState};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
 use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
@@ -1083,7 +1083,7 @@ impl PlanValidationContext {
         ))
     }
 
-    fn validate_derived_sources(&self, object: &crate::api::types::DerivedMemory) -> Vec<String> {
+    fn validate_derived_sources(&self, object: &crate::domain::DerivedMemory) -> Vec<String> {
         let mut errors = Vec::new();
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
@@ -1411,7 +1411,7 @@ fn validate_link(link: &MemoryLink) -> Vec<String> {
     errors
 }
 
-fn validate_derived_memory_lifecycle(object: &crate::api::types::DerivedMemory) -> Vec<String> {
+fn validate_derived_memory_lifecycle(object: &crate::domain::DerivedMemory) -> Vec<String> {
     let mut errors = Vec::new();
     if object.retention_state == RetentionState::Suppressed && object.is_current {
         errors.push("suppressed memories are not current".to_owned());
@@ -1501,10 +1501,10 @@ mod tests {
 
     use super::RememberPlanDefaults;
     use crate::api::types::{
-        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, DerivedType, EntityDraft,
-        EpisodeDraft, MemoryLinkDraft, RelationType, RememberInput, SourceSpan, Stability,
-        StatsUpdateCandidate, VectorIndexCandidate, DEFAULT_SCHEMA_VERSION,
+        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, EntityDraft, EpisodeDraft,
+        MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate, VectorIndexCandidate,
     };
+    use crate::domain::{DerivedType, RelationType, Stability, DEFAULT_SCHEMA_VERSION};
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
@@ -1974,7 +1974,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_missing_candidate_timestamps() {
         let graph = FakeGraphAuthorityStore::new();
-        let mut draft = EntityDraft::new(crate::api::types::EntityType::Project, "no timestamps");
+        let mut draft = EntityDraft::new(crate::domain::EntityType::Project, "no timestamps");
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445055"));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let plan = valid_plan().with_candidate(MemoryCandidate::Entity(

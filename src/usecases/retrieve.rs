@@ -3,15 +3,18 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, DerivedMemory, DerivedType, FanoutUtilizationTrace,
+    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace,
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryId,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RationaleCategory, RelationType,
-    RetentionState, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
+    RationaleCategory, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
     RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, ThreadStatus, VectorCandidateTrace,
+    StaleCandidateReason, VectorCandidateTrace,
+};
+use crate::domain::{
+    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryThread, ObjectType, RelationType,
+    RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
@@ -2962,7 +2965,7 @@ mod tests {
 
     async fn graph_with(
         objects: &[MemoryObject],
-        links: &[crate::api::types::MemoryLink],
+        links: &[crate::domain::MemoryLink],
     ) -> FakeGraphAuthorityStore {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(objects).await.unwrap();
@@ -3125,7 +3128,7 @@ mod tests {
 
         async fn upsert_links(
             &self,
-            _links: &[crate::api::types::MemoryLink],
+            _links: &[crate::domain::MemoryLink],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -3133,7 +3136,7 @@ mod tests {
         async fn upsert_objects_and_links(
             &self,
             _objects: &[MemoryObject],
-            _links: &[crate::api::types::MemoryLink],
+            _links: &[crate::domain::MemoryLink],
         ) -> Result<(), CustomError> {
             Ok(())
         }
@@ -3148,14 +3151,14 @@ mod tests {
         async fn query_derived_memories_by_provenance(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_thread(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<crate::api::types::DerivedMemory>, CustomError> {
+        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
         }
 
@@ -3172,7 +3175,7 @@ mod tests {
 
         async fn list_diagnostic_links(
             &self,
-        ) -> Result<Vec<crate::api::types::MemoryLink>, CustomError> {
+        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
             Ok(Vec::new())
         }
     }

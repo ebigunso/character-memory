@@ -2,7 +2,7 @@
 // tests use deterministic fake stores.
 use async_trait::async_trait;
 
-use crate::api::types::MemoryId;
+use crate::domain::MemoryId;
 use crate::errors::CustomError;
 use crate::models::vector::{
     VectorCandidateDiagnosticRecord, VectorCandidateMatch, VectorCandidateSearch,
