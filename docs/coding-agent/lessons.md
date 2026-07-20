@@ -739,3 +739,21 @@ Fix applied:
 
 Prevention:
 - Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
+
+## 2026-07-21 - Equivalence Tests Must Compare The Full Observable Contract  [tags: validation, review]
+
+Context:
+- Plan: backcompat-sweep-plan; ADR-I-0012 equivalence test (CM) and typed-plan migration test (CME)
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Both repos' workers independently wrote equivalence/migration tests that compared cardinalities or partial fields (vector counts + a stats flag in CM; ID vectors + timestamps in CME), so a wrapper or migration persisting wrong content with matching counts would pass; both Tier D reviewers caught the same class independently.
+
+Root cause:
+- Equivalence was asserted on the easiest observable slice rather than the contract: different inputs per path, coarse assertions, no canonical-state comparison.
+
+Fix applied:
+- CM: identical deterministic inputs through wrapper and manual paths in isolated stores, comparing complete outcomes plus retrieved canonical graph state. CME: complete object/link MemoryCandidate value equality plus exact vector target/text pins.
+
+Prevention:
+- For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
