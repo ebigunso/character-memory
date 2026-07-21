@@ -58,7 +58,6 @@ impl CandidateValidation {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum CandidateValidationIssue {
     #[error("write plan is missing {field:?}")]
     MissingPlanIdentity { field: PlanIdentityField },

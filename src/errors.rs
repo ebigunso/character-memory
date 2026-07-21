@@ -8,7 +8,6 @@ use crate::domain::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum VectorDatabaseErrorKind {
     Response,
     ResourceExhausted,
@@ -26,7 +25,6 @@ pub enum VectorDatabaseErrorKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum TransportStatus {
     Ok,
     Cancelled,
@@ -63,7 +61,6 @@ pub struct VectorDatabaseError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum EmbeddingError {
     #[error("embedding API key is missing")]
     MissingApiKey,
@@ -108,7 +105,6 @@ pub enum EmbeddingError {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum EmbeddingTransportErrorKind {
     Timeout,
     Connect,
@@ -119,7 +115,6 @@ pub enum EmbeddingTransportErrorKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "cause", content = "detail", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum VectorIndexingCause {
     #[error("embedding failed: {0}")]
     Embedding(#[source] EmbeddingError),
@@ -131,7 +126,6 @@ pub enum VectorIndexingCause {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "cause", rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum StatsUpdateCause {
     #[error("stats endpoint hydration failed: {detail}")]
     EndpointHydration { detail: String },
