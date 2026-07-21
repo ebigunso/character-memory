@@ -103,28 +103,7 @@ impl Default for RetrievalStatsHealth {
     }
 }
 
-pub(crate) async fn record_stats_after_write(
-    stats_store: &dyn RetrievalStatsStore,
-    objects: &[MemoryObject],
-    links: &[MemoryLink],
-) {
-    let states = retrieval_stats_object_states(objects);
-    let edges = retrieval_stats_edges_with_states(objects, links, &states);
-    if let Err(error) = stats_store.record_edges(&edges).await {
-        let _ = stats_store.mark_unhealthy(error.to_string()).await;
-        return;
-    }
-
-    if states.is_empty() {
-        return;
-    }
-
-    if let Err(error) = stats_store.record_object_states(&states).await {
-        let _ = stats_store.mark_unhealthy(error.to_string()).await;
-    }
-}
-
-// Reconciliation diagnostics need raw edge derivation; remove once reconciliation is wired to record_stats_after_write only.
+// Reconciliation diagnostics and stats projection share raw edge derivation.
 #[allow(dead_code)]
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],

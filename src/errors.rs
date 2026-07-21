@@ -129,6 +129,22 @@ pub enum VectorIndexingCause {
     VectorDatabase(#[source] VectorDatabaseError),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "cause", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum StatsUpdateCause {
+    #[error("stats endpoint hydration failed: {detail}")]
+    EndpointHydration { detail: String },
+    #[error("stats edge write failed: {detail}")]
+    EdgeWrite { detail: String },
+    #[error("stats object-state write failed: {detail}")]
+    ObjectStateWrite { detail: String },
+    #[error("stats health check failed: {detail}")]
+    HealthCheck { detail: String },
+    #[error("stats store is unhealthy: {detail:?}")]
+    StoreUnhealthy { detail: Option<String> },
+}
+
 impl VectorDatabaseError {
     pub(crate) fn new(
         backend: &'static str,

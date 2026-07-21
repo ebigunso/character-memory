@@ -29,8 +29,8 @@ use character_memory::{
     EpisodeDraft, ExternalSourceReference, IncludedDerivedMemory, MemoryCandidate, MemoryId,
     MemoryLinkCandidate, MemoryLinkDraft, MemoryObjectRef, ObjectType, PrepareOptions,
     RationaleOrigin, RelationType, RememberDiagnosticCode, RememberInput, RememberOptions,
-    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
-    DEFAULT_SCHEMA_VERSION,
+    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateCause,
+    StatsUpdateStatus, DEFAULT_SCHEMA_VERSION,
 };
 use config::Config;
 use std::path::Path;
@@ -700,7 +700,14 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
     }
     if let Some(failure) = &outcome.stats_update_status.failure {
         assert!(!failure.failed_object_ids.is_empty());
-        assert!(!failure.error_message.is_empty());
+        assert!(matches!(
+            failure.cause,
+            StatsUpdateCause::EndpointHydration { .. }
+                | StatsUpdateCause::EdgeWrite { .. }
+                | StatsUpdateCause::ObjectStateWrite { .. }
+                | StatsUpdateCause::HealthCheck { .. }
+                | StatsUpdateCause::StoreUnhealthy { .. }
+        ));
     } else {
         assert!(!outcome.stats_update_status.updated_object_ids.is_empty());
     }

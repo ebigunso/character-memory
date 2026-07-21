@@ -60,7 +60,8 @@ pub use crate::domain::{
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
     ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
-    TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
+    StatsUpdateCause, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
+    VectorIndexingCause,
 };
 pub use crate::memory::CharacterMemory;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};

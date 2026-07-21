@@ -1,10 +1,11 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, MemoryLinkDraft};
-use crate::domain::{MemoryId, MemoryLink, MemoryObjectRef, ObjectType, RelationType};
+use crate::domain::{MemoryLink, RelationType};
 use crate::errors::CustomError;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
-use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
+use crate::ports::graph_authority::GraphAuthorityStore;
+use crate::ports::retrieval_stats::RetrievalStatsStore;
+use crate::usecases::StatsProjectionService;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
@@ -88,64 +89,11 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
-        self.record_link_stats_after_write(&link).await;
+        StatsProjectionService::new(self.graph_store, self.stats_store)
+            .project(&[], std::slice::from_ref(&link))
+            .await;
         Ok(link)
     }
-
-    async fn record_link_stats_after_write(&self, link: &MemoryLink) {
-        let endpoint_refs = link_stats_endpoint_refs(link);
-        if endpoint_refs.is_empty() {
-            record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
-            return;
-        }
-
-        match self
-            .graph_store
-            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
-            .await
-        {
-            Ok(objects) => {
-                record_stats_after_write(self.stats_store, &objects, std::slice::from_ref(link))
-                    .await;
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
-                let _ = self.stats_store.mark_unhealthy(error_message).await;
-            }
-        }
-    }
-}
-
-fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<MemoryObjectRef> {
-    let mut refs = Vec::new();
-    if object_type_has_stats_state(link.from_type) {
-        push_link_stats_endpoint_ref(&mut refs, link.from_id, link.from_type);
-    }
-    if object_type_has_stats_state(link.to_type) {
-        push_link_stats_endpoint_ref(&mut refs, link.to_id, link.to_type);
-    }
-    refs
-}
-
-fn push_link_stats_endpoint_ref(
-    refs: &mut Vec<MemoryObjectRef>,
-    object_id: MemoryId,
-    object_type: ObjectType,
-) {
-    let object_ref = MemoryObjectRef::from_id_type(object_id, object_type);
-    if refs.contains(&object_ref) {
-        return;
-    }
-
-    refs.push(object_ref);
-}
-
-fn object_type_has_stats_state(object_type: ObjectType) -> bool {
-    matches!(
-        object_type,
-        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
-    )
 }
 
 pub(crate) fn admit_link(
@@ -183,7 +131,7 @@ mod tests {
     };
     use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansion, GraphExpansionQuery,
+        GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
     };
     use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
@@ -271,34 +219,6 @@ mod tests {
         assert!(error
             .to_string()
             .contains("cannot point from an object to itself"));
-    }
-
-    #[test]
-    fn link_stats_endpoint_refs_dedupes_self_referential_endpoint() {
-        let object_id = id("550e8400-e29b-41d4-a716-446655444010");
-        let link = MemoryLink {
-            id: id("550e8400-e29b-41d4-a716-446655444011"),
-            object_type: ObjectType::MemoryLink,
-            from_id: object_id,
-            from_type: ObjectType::Observation,
-            to_id: object_id,
-            to_type: ObjectType::Observation,
-            relation: RelationType::AssociatedWith,
-            confidence: 0.8,
-            rationale: None,
-            created_at: timestamp(),
-            schema_version: DEFAULT_SCHEMA_VERSION.to_string(),
-        };
-
-        let refs = link_stats_endpoint_refs(&link);
-
-        assert_eq!(
-            refs,
-            vec![MemoryObjectRef::from_id_type(
-                object_id,
-                ObjectType::Observation
-            )]
-        );
     }
 
     #[tokio::test]

@@ -26,9 +26,9 @@ use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
     GraphExpansionLifecyclePolicy, GraphObjectQuery,
 };
-use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
+use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::VectorIndexingService;
+use crate::usecases::{StatsProjectionService, VectorIndexingService};
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
 where
@@ -89,7 +89,9 @@ where
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await?;
         apply_vector_result(&mut outcome, vector_result);
-        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
+        StatsProjectionService::new(self.graph_store, self.stats_store)
+            .project(&plan.graph_objects, &plan.graph_links)
+            .await;
         Ok(outcome)
     }
 
@@ -106,7 +108,9 @@ where
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await?;
         apply_vector_result(&mut outcome, vector_result);
-        record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
+        StatsProjectionService::new(self.graph_store, self.stats_store)
+            .project(&plan.graph_objects, &plan.graph_links)
+            .await;
         Ok(outcome)
     }
 

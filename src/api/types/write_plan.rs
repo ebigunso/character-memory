@@ -10,7 +10,7 @@ use super::lifecycle::ExternalSourceReference;
 use crate::domain::{
     CandidateValidation, MemoryCandidateKind, MemoryId, MemoryObjectRef, RelationType,
 };
-use crate::errors::VectorIndexingCause;
+use crate::errors::{StatsUpdateCause, VectorIndexingCause};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {
@@ -744,7 +744,7 @@ pub enum RepairMarker {
     },
     StatsUpdate {
         object_ids: Vec<MemoryId>,
-        error_message: String,
+        cause: StatsUpdateCause,
     },
 }
 
@@ -774,13 +774,13 @@ impl StatsUpdateStatus {
     pub fn failed(
         updated_object_ids: impl IntoIterator<Item = MemoryId>,
         failed_object_ids: impl IntoIterator<Item = MemoryId>,
-        error_message: impl Into<String>,
+        cause: StatsUpdateCause,
     ) -> Self {
         Self {
             updated_object_ids: updated_object_ids.into_iter().collect(),
             failure: Some(StatsUpdateFailure {
                 failed_object_ids: failed_object_ids.into_iter().collect(),
-                error_message: error_message.into(),
+                cause,
             }),
         }
     }
@@ -795,7 +795,7 @@ impl Default for StatsUpdateStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatsUpdateFailure {
     pub failed_object_ids: Vec<MemoryId>,
-    pub error_message: String,
+    pub cause: StatsUpdateCause,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -980,5 +980,23 @@ mod tests {
         let deserialized: RememberWritePlan = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(deserialized, plan);
+    }
+
+    #[test]
+    fn stats_update_failure_round_trips_with_typed_cause() {
+        let object_id = memory_id("550e8400-e29b-41d4-a716-446655442010");
+        let status = StatsUpdateStatus::failed(
+            [],
+            [object_id],
+            StatsUpdateCause::ObjectStateWrite {
+                detail: "state write rejected".to_owned(),
+            },
+        );
+
+        let serialized = serde_json::to_string(&status).unwrap();
+        let deserialized: StatsUpdateStatus = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized, status);
+        assert!(serialized.contains("\"cause\":\"object_state_write\""));
     }
 }
