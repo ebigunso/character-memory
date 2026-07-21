@@ -836,3 +836,21 @@ Fix applied:
 
 Prevention:
 - For every closed error vocabulary, audit four surfaces together: producer return type, adapter conversion, serialization of every variant, and downstream branching. Coverage must be compiler-exhaustive, unknown fallbacks must use opaque markers or representation-frozen tokens rather than Debug output, and regression tests must traverse production wiring instead of testing only the extracted helper. Any skip/retry/fallback predicate must consume typed classification, and its verification must include both a forced-failure control and a successful exercised path.
+
+## 2026-07-22 - Typed Observability Must Include Persistence And Failure Multiplicity  [tags: review, validation, errors, configuration]
+
+Context:
+- Plan: structured-verdict-observability; final thesis audit
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Follow-up fixes left stats causes as prose at the graph and stats ports, persisted a rendered cause in health metadata, discarded a second simultaneous stats failure, classified one upstream-erased transport error through an undocumented prefix, and special-cased one configuration field with a pre-read before deserializing the full settings object again.
+
+Root cause:
+- The typed-contract audit stopped at the immediate public enum and did not trace the same information through producer signatures, durable state, multi-error aggregation, external dependency loss, and configuration admission.
+
+Fix applied:
+- Closed graph-query and stats-store error vocabularies now cross their ports, health metadata persists a typed operation and error, stats failures and repair markers retain every observed cause, the unavoidable qdrant-client 1.17.0 prefix dependency is ruled and pinned by a canary, and settings deserialize once into a raw representation before structured conversion and validation.
+
+Prevention:
+- For typed observability changes, review a cause matrix from producer to adapter, persistence, public DTO, serde, and every branching consumer; include simultaneous-failure tests wherever operations can continue after an earlier failure. Treat external prose coupling as an exception requiring an exact upstream citation, version marker, drift canary, and retirement condition. Configuration admission must deserialize once into raw data and perform semantic parsing in one typed conversion rather than pre-reading individual fields.
