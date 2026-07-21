@@ -12,7 +12,7 @@ use oxigraph::store::Store;
 use crate::domain::{
     graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
 };
-use crate::errors::CustomError;
+use crate::errors::{CustomError, GraphQueryError};
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
 };
@@ -262,9 +262,17 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
-        let selected_refs = SparqlGraphSelectors::new(&self.store).select_objects(query)?;
-        hydrate_objects_by_refs_from_store(&self.store, &selected_refs)
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
+        let selected_refs = SparqlGraphSelectors::new(&self.store)
+            .select_objects(query)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })?;
+        hydrate_objects_by_refs_from_store(&self.store, &selected_refs).map_err(|error| {
+            GraphQueryError::Hydration {
+                detail: error.to_string(),
+            }
+        })
     }
 
     async fn query_links_by_ids(

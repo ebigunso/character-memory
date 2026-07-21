@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::domain::{ObjectType, RelationType, RetentionState};
-use crate::errors::CustomError;
+use crate::errors::{IoErrorKind, RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
     object_type_key, relation_type_key, retention_state_key, RetrievalStatsCounter,
     RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
@@ -19,15 +19,18 @@ pub(crate) struct SqliteRetrievalStatsStore {
 }
 
 impl SqliteRetrievalStatsStore {
-    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self, CustomError> {
+    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self, RetrievalStatsStoreError> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent).map_err(|error| {
-                    CustomError::DatabaseError(format!(
-                        "failed to create retrieval stats directory {}: {error}",
-                        parent.display()
-                    ))
+                    RetrievalStatsStoreError::Filesystem {
+                        io_kind: IoErrorKind::from(error.kind()),
+                        detail: format!(
+                            "failed to create retrieval stats directory {}: {error}",
+                            parent.display()
+                        ),
+                    }
                 })?;
             }
         }
@@ -41,7 +44,10 @@ impl SqliteRetrievalStatsStore {
 
 #[async_trait]
 impl RetrievalStatsStore for SqliteRetrievalStatsStore {
-    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+    async fn record_edges(
+        &self,
+        edges: &[RetrievalStatsEdge],
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for edge in edges {
@@ -53,7 +59,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     async fn record_object_states(
         &self,
         states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError> {
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for state in states {
@@ -65,7 +71,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     async fn counter(
         &self,
         key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
         connection
             .query_row(
@@ -93,7 +99,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         &self,
         relation_kind: RelationType,
         object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
         connection
             .query_row(
@@ -116,36 +122,47 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
             .map_err(sqlite_error)
     }
 
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
         let state =
             meta_value(&connection, "health_state")?.unwrap_or_else(|| "healthy".to_owned());
-        let last_error_message = meta_value(&connection, "last_error_message")?;
+        let last_error_cause = meta_value(&connection, "last_error_cause")?
+            .map(|value| {
+                serde_json::from_str(&value).map_err(|error| {
+                    RetrievalStatsStoreError::HealthDeserialization {
+                        detail: error.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
         Ok(RetrievalStatsHealth {
             state: if state == "unhealthy" {
                 RetrievalStatsHealthState::Unhealthy
             } else {
                 RetrievalStatsHealthState::Healthy
             },
-            last_error_message,
+            last_error_cause,
         })
     }
 
-    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
+    async fn mark_unhealthy(
+        &self,
+        cause: RetrievalStatsHealthCause,
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         set_health(
             &transaction,
             RetrievalStatsHealth {
                 state: RetrievalStatsHealthState::Unhealthy,
-                last_error_message: Some(message),
+                last_error_cause: Some(cause),
             },
         )?;
         transaction.commit().map_err(sqlite_error)
     }
 }
 
-fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
+fn initialize_schema(connection: &Connection) -> Result<(), RetrievalStatsStoreError> {
     connection
         .execute_batch(
             "
@@ -194,14 +211,17 @@ fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
     initialize_health_metadata(connection)
 }
 
-fn initialize_health_metadata(connection: &Connection) -> Result<(), CustomError> {
+fn initialize_health_metadata(connection: &Connection) -> Result<(), RetrievalStatsStoreError> {
     if meta_value(connection, "health_state")?.is_none() {
         set_health(connection, RetrievalStatsHealth::default())?;
     }
     Ok(())
 }
 
-fn upsert_edge(connection: &Connection, edge: &RetrievalStatsEdge) -> Result<(), CustomError> {
+fn upsert_edge(
+    connection: &Connection,
+    edge: &RetrievalStatsEdge,
+) -> Result<(), RetrievalStatsStoreError> {
     let existing = connection
         .query_row(
             "SELECT retention_state, is_current FROM entity_edge_index WHERE edge_key = ?1",
@@ -276,7 +296,7 @@ fn upsert_edge(connection: &Connection, edge: &RetrievalStatsEdge) -> Result<(),
 fn update_object_state(
     connection: &Connection,
     state: &RetrievalStatsObjectState,
-) -> Result<(), CustomError> {
+) -> Result<(), RetrievalStatsStoreError> {
     let mut statement = connection
         .prepare(
             "SELECT edge_key, entity_id, relation_kind, object_type, retention_state, is_current
@@ -347,7 +367,7 @@ fn apply_count_delta(
     total_delta: i64,
     active_delta: i64,
     current_delta: i64,
-) -> Result<(), CustomError> {
+) -> Result<(), RetrievalStatsStoreError> {
     apply_count_delta_by_names(
         connection,
         &edge.entity_id.to_string(),
@@ -367,7 +387,7 @@ fn apply_count_delta_by_names(
     total_delta: i64,
     active_delta: i64,
     current_delta: i64,
-) -> Result<(), CustomError> {
+) -> Result<(), RetrievalStatsStoreError> {
     connection
         .execute(
             "INSERT INTO entity_relation_counts
@@ -423,24 +443,31 @@ fn apply_count_delta_by_names(
     Ok(())
 }
 
-fn set_health(connection: &Connection, health: RetrievalStatsHealth) -> Result<(), CustomError> {
+fn set_health(
+    connection: &Connection,
+    health: RetrievalStatsHealth,
+) -> Result<(), RetrievalStatsStoreError> {
     let state = match health.state {
         RetrievalStatsHealthState::Healthy => "healthy",
         RetrievalStatsHealthState::Unhealthy => "unhealthy",
     };
     set_meta_value(connection, "health_state", Some(state))?;
-    set_meta_value(
-        connection,
-        "last_error_message",
-        health.last_error_message.as_deref(),
-    )
+    let serialized_cause = health
+        .last_error_cause
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| RetrievalStatsStoreError::HealthSerialization {
+            detail: error.to_string(),
+        })?;
+    set_meta_value(connection, "last_error_cause", serialized_cause.as_deref())
 }
 
 fn set_meta_value(
     connection: &Connection,
     key: &str,
     value: Option<&str>,
-) -> Result<(), CustomError> {
+) -> Result<(), RetrievalStatsStoreError> {
     connection
         .execute(
             "INSERT INTO stats_meta (key, value) VALUES (?1, ?2)
@@ -451,7 +478,10 @@ fn set_meta_value(
     Ok(())
 }
 
-fn meta_value(connection: &Connection, key: &str) -> Result<Option<String>, CustomError> {
+fn meta_value(
+    connection: &Connection,
+    key: &str,
+) -> Result<Option<String>, RetrievalStatsStoreError> {
     connection
         .query_row(
             "SELECT value FROM stats_meta WHERE key = ?1",
@@ -496,8 +526,10 @@ fn bool_int(value: bool) -> i64 {
     i64::from(value)
 }
 
-fn sqlite_error(error: rusqlite::Error) -> CustomError {
-    CustomError::DatabaseError(format!("retrieval stats sqlite error: {error}"))
+fn sqlite_error(error: rusqlite::Error) -> RetrievalStatsStoreError {
+    RetrievalStatsStoreError::Sqlite {
+        detail: error.to_string(),
+    }
 }
 
 fn non_negative_count(column_index: usize, value: i64) -> rusqlite::Result<u64> {
@@ -505,17 +537,17 @@ fn non_negative_count(column_index: usize, value: i64) -> rusqlite::Result<u64> 
         rusqlite::Error::FromSqlConversionFailure(
             column_index,
             rusqlite::types::Type::Integer,
-            Box::new(CustomError::DatabaseError(format!(
-                "retrieval stats counter was negative: {value}"
-            ))),
+            Box::new(RetrievalStatsStoreError::Sqlite {
+                detail: format!("retrieval stats counter was negative: {value}"),
+            }),
         )
     })
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
-    mutex.lock().map_err(|_| {
-        CustomError::DatabaseError("retrieval stats sqlite mutex was poisoned".to_owned())
-    })
+fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, RetrievalStatsStoreError> {
+    mutex
+        .lock()
+        .map_err(|_| RetrievalStatsStoreError::LockPoisoned)
 }
 
 #[cfg(test)]
@@ -734,13 +766,15 @@ mod tests {
     async fn sqlite_store_preserves_unhealthy_marker_across_reopen() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("stats.sqlite3");
+        let failure = RetrievalStatsHealthCause::EdgeWrite {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "transient stats failure".to_owned(),
+            },
+        };
 
         {
             let store = SqliteRetrievalStatsStore::open(&path).unwrap();
-            store
-                .mark_unhealthy("transient stats failure".to_owned())
-                .await
-                .unwrap();
+            store.mark_unhealthy(failure.clone()).await.unwrap();
             store
                 .record_edges(&[test_edge(
                     id("550e8400-e29b-41d4-a716-446655461051"),
@@ -755,10 +789,7 @@ mod tests {
         let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
         let health = reopened.health().await.unwrap();
         assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert_eq!(
-            health.last_error_message.as_deref(),
-            Some("transient stats failure")
-        );
+        assert_eq!(health.last_error_cause, Some(failure));
     }
 
     #[tokio::test]

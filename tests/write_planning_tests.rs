@@ -701,12 +701,16 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
     if let Some(failure) = &outcome.stats_update_status.failure {
         assert!(!failure.failed_object_ids.is_empty());
         assert!(matches!(
-            failure.cause,
-            StatsUpdateCause::EndpointHydration { .. }
-                | StatsUpdateCause::EdgeWrite { .. }
-                | StatsUpdateCause::ObjectStateWrite { .. }
-                | StatsUpdateCause::HealthCheck { .. }
-                | StatsUpdateCause::StoreUnhealthy { .. }
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EndpointHydration { .. }
+                    | StatsUpdateCause::EdgeWrite { .. }
+                    | StatsUpdateCause::ObjectStateWrite { .. }
+                    | StatsUpdateCause::HealthCheck { .. }
+                    | StatsUpdateCause::HealthMark { .. }
+                    | StatsUpdateCause::StoreUnhealthy { .. },
+                ..
+            ]
         ));
     } else {
         assert!(!outcome.stats_update_status.updated_object_ids.is_empty());

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 #[cfg(test)]
 use crate::domain::{ObjectType, RelationType};
 #[cfg(test)]
-use crate::errors::CustomError;
+use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 #[cfg(test)]
 use crate::ports::retrieval_stats::{
     RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
@@ -21,21 +21,24 @@ pub(crate) struct NoopRetrievalStatsStore;
 #[cfg(test)]
 #[async_trait]
 impl RetrievalStatsStore for NoopRetrievalStatsStore {
-    async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+    async fn record_edges(
+        &self,
+        _edges: &[RetrievalStatsEdge],
+    ) -> Result<(), RetrievalStatsStoreError> {
         Ok(())
     }
 
     async fn record_object_states(
         &self,
         _states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError> {
+    ) -> Result<(), RetrievalStatsStoreError> {
         Ok(())
     }
 
     async fn counter(
         &self,
         _key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         Ok(None)
     }
 
@@ -43,15 +46,18 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
         &self,
         _relation_kind: RelationType,
         _object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         Ok(None)
     }
 
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         Ok(RetrievalStatsHealth::default())
     }
 
-    async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+    async fn mark_unhealthy(
+        &self,
+        _cause: RetrievalStatsHealthCause,
+    ) -> Result<(), RetrievalStatsStoreError> {
         Ok(())
     }
 }

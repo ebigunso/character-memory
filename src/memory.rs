@@ -817,11 +817,10 @@ mod tests {
             health.state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
-        assert!(health
-            .last_error_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("using in-memory fallback"));
+        assert!(matches!(
+            health.last_error_cause,
+            Some(crate::errors::RetrievalStatsHealthCause::StoreInitialization { .. })
+        ));
     }
 
     fn injected_memory() -> CharacterMemory {

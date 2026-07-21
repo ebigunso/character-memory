@@ -2887,7 +2887,7 @@ mod tests {
         async fn query_objects(
             &self,
             _query: &crate::ports::graph_authority::GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
             Ok(Vec::new())
         }
 

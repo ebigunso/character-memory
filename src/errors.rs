@@ -219,16 +219,89 @@ pub enum VectorIndexingCause {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "cause", rename_all = "snake_case")]
 pub enum StatsUpdateCause {
-    #[error("stats endpoint hydration failed: {detail}")]
-    EndpointHydration { detail: String },
-    #[error("stats edge write failed: {detail}")]
-    EdgeWrite { detail: String },
-    #[error("stats object-state write failed: {detail}")]
-    ObjectStateWrite { detail: String },
-    #[error("stats health check failed: {detail}")]
-    HealthCheck { detail: String },
-    #[error("stats store is unhealthy: {detail:?}")]
-    StoreUnhealthy { detail: Option<String> },
+    #[error("stats endpoint hydration failed: {error}")]
+    EndpointHydration { error: GraphQueryError },
+    #[error("stats edge write failed: {error}")]
+    EdgeWrite { error: RetrievalStatsStoreError },
+    #[error("stats object-state write failed: {error}")]
+    ObjectStateWrite { error: RetrievalStatsStoreError },
+    #[error("stats health check failed: {error}")]
+    HealthCheck { error: RetrievalStatsStoreError },
+    #[error("stats unhealthy-state write failed: {error}")]
+    HealthMark { error: RetrievalStatsStoreError },
+    #[error("stats store is unhealthy: {health_cause:?}")]
+    StoreUnhealthy {
+        health_cause: Option<RetrievalStatsHealthCause>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GraphQueryError {
+    #[error("graph object selection failed: {detail}")]
+    Selection { detail: String },
+    #[error("graph object hydration failed: {detail}")]
+    Hydration { detail: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RetrievalStatsStoreError {
+    #[error("retrieval stats sqlite operation failed: {detail}")]
+    Sqlite { detail: String },
+    #[error("retrieval stats filesystem operation failed ({io_kind:?}): {detail}")]
+    Filesystem {
+        io_kind: IoErrorKind,
+        detail: String,
+    },
+    #[error("retrieval stats store lock is poisoned")]
+    LockPoisoned,
+    #[error("retrieval stats health serialization failed: {detail}")]
+    HealthSerialization { detail: String },
+    #[error("retrieval stats health deserialization failed: {detail}")]
+    HealthDeserialization { detail: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum RetrievalStatsHealthCause {
+    #[error("stats store initialization failed: {error}")]
+    StoreInitialization { error: RetrievalStatsStoreError },
+    #[error("stats endpoint hydration failed: {error}")]
+    EndpointHydration { error: GraphQueryError },
+    #[error("stats edge write failed: {error}")]
+    EdgeWrite { error: RetrievalStatsStoreError },
+    #[error("stats object-state write failed: {error}")]
+    ObjectStateWrite { error: RetrievalStatsStoreError },
+    #[error("stats health check failed: {error}")]
+    HealthCheck { error: RetrievalStatsStoreError },
+    #[error("stats counter read failed: {error}")]
+    CounterRead { error: RetrievalStatsStoreError },
+    #[error("stats global-counter read failed: {error}")]
+    GlobalCounterRead { error: RetrievalStatsStoreError },
+}
+
+impl StatsUpdateCause {
+    pub(crate) fn health_cause(&self) -> Option<RetrievalStatsHealthCause> {
+        match self {
+            Self::EndpointHydration { error } => {
+                Some(RetrievalStatsHealthCause::EndpointHydration {
+                    error: error.clone(),
+                })
+            }
+            Self::EdgeWrite { error } => Some(RetrievalStatsHealthCause::EdgeWrite {
+                error: error.clone(),
+            }),
+            Self::ObjectStateWrite { error } => Some(RetrievalStatsHealthCause::ObjectStateWrite {
+                error: error.clone(),
+            }),
+            Self::HealthCheck { error } => Some(RetrievalStatsHealthCause::HealthCheck {
+                error: error.clone(),
+            }),
+            Self::HealthMark { .. } => None,
+            Self::StoreUnhealthy { .. } => None,
+        }
+    }
 }
 
 impl VectorDatabaseError {
@@ -339,6 +412,12 @@ pub enum CustomError {
 
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
+
+    #[error(transparent)]
+    GraphQuery(#[from] GraphQueryError),
+
+    #[error(transparent)]
+    RetrievalStatsStore(#[from] RetrievalStatsStoreError),
 
     #[error(transparent)]
     CollectionIncompatible(#[from] CollectionCompatibilityError),

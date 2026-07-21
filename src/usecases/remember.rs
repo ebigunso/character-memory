@@ -182,23 +182,28 @@ where
         let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(objects, links)
             .await;
-        match projection.cause {
-            Some(cause) => {
-                let diagnostic_code =
-                    if matches!(cause, crate::errors::StatsUpdateCause::HealthCheck { .. }) {
-                        RememberDiagnosticCode::StatsUpdateHealthCheckFailed
-                    } else {
-                        RememberDiagnosticCode::StatsUpdateFailed
-                    };
-                let message = cause.to_string();
+        match projection.causes.as_slice() {
+            causes @ [_, ..] => {
+                let diagnostic_code = if causes.iter().any(|cause| {
+                    matches!(cause, crate::errors::StatsUpdateCause::HealthCheck { .. })
+                }) {
+                    RememberDiagnosticCode::StatsUpdateHealthCheckFailed
+                } else {
+                    RememberDiagnosticCode::StatsUpdateFailed
+                };
+                let message = causes
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 outcome.stats_update_status = StatsUpdateStatus::failed(
                     Vec::new(),
                     projection.attempted_object_ids.clone(),
-                    cause.clone(),
+                    causes.to_vec(),
                 );
                 outcome.repair_needed.push(RepairMarker::StatsUpdate {
                     object_ids: projection.attempted_object_ids,
-                    cause,
+                    causes: causes.to_vec(),
                 });
                 outcome.diagnostics =
                     outcome
@@ -210,7 +215,7 @@ where
                             message,
                         ));
             }
-            None => {
+            [] => {
                 outcome.stats_update_status =
                     StatsUpdateStatus::succeeded(projection.attempted_object_ids);
             }
@@ -322,13 +327,17 @@ mod tests {
         DEFAULT_SCHEMA_VERSION,
     };
     use crate::errors::{
-        StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
+        RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
+        VectorDatabaseErrorKind, VectorIndexingCause,
     };
     use crate::models::vector::{
         CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
-    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState, RetrievalStatsStore,
+    };
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
     use crate::usecases::write_planning::RememberPlanDefaults;
 
@@ -700,7 +709,12 @@ mod tests {
             .unwrap_or_default();
         assert!(failed_ids.is_empty());
 
-        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy("repair required".to_owned());
+        let health_cause = RetrievalStatsHealthCause::StoreInitialization {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "repair required".to_owned(),
+            },
+        };
+        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy(health_cause.clone());
         let repair_pipeline =
             RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
         let repair_outcome = repair_pipeline
@@ -732,18 +746,18 @@ mod tests {
             .failed_object_ids
             .contains(&fixtures.suppressed_seed.id));
         assert_eq!(
-            failure.cause,
-            crate::errors::StatsUpdateCause::StoreUnhealthy {
-                detail: Some("repair required".to_owned()),
-            }
+            failure.causes,
+            vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
+                health_cause: Some(health_cause.clone()),
+            }]
         );
         assert!(repair_outcome.repair_needed.iter().any(|marker| matches!(
             marker,
-            RepairMarker::StatsUpdate { object_ids, cause }
+            RepairMarker::StatsUpdate { object_ids, causes }
                 if object_ids.contains(&fixtures.suppressed_seed.id)
-                    && cause == &crate::errors::StatsUpdateCause::StoreUnhealthy {
-                        detail: Some("repair required".to_owned()),
-                    }
+                    && causes == &vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
+                        health_cause: Some(health_cause.clone()),
+                    }]
         )));
     }
 
@@ -794,14 +808,67 @@ mod tests {
 
         assert_eq!(failure.failed_object_ids, expected_ids);
         assert!(matches!(
-            failure.cause,
-            StatsUpdateCause::EndpointHydration { .. }
+            failure.causes.as_slice(),
+            [StatsUpdateCause::EndpointHydration { .. }]
         ));
         assert!(outcome.repair_needed.iter().any(|marker| matches!(
             marker,
-            RepairMarker::StatsUpdate { object_ids, cause }
+            RepairMarker::StatsUpdate { object_ids, causes }
                 if object_ids == &expected_ids
-                    && matches!(cause, StatsUpdateCause::EndpointHydration { .. })
+                    && matches!(causes.as_slice(), [StatsUpdateCause::EndpointHydration { .. }])
+        )));
+    }
+
+    #[tokio::test]
+    async fn stats_failure_and_repair_preserve_hydration_and_write_causes() {
+        let fixtures = representative_fixtures();
+        let episode_id = fixtures.episode.id;
+        let observation_id = fixtures.salient_observation.id;
+        let graph = RecordingGraphStore::default()
+            .with_query_objects(vec![
+                MemoryObject::Episode(fixtures.episode),
+                MemoryObject::Observation(fixtures.salient_observation),
+            ])
+            .fail_id_queries();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = EdgeFailingStatsStore::default();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut link = typed_link_draft(
+            id("550e8400-e29b-41d4-a716-446655443012"),
+            ObjectType::Episode,
+            episode_id,
+            RelationType::Mentions,
+            ObjectType::Observation,
+            observation_id,
+        );
+        link.created_at = Some(timestamp());
+        link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655443013"),
+            "link-only-two-stats-failures",
+        )
+        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+            link,
+            CandidateProvenance::caller("exercise multiple typed stats failures"),
+        )));
+
+        let outcome = pipeline
+            .commit(plan, CommitOptions::default())
+            .await
+            .unwrap();
+        let failure = outcome.stats_update_status.failure.as_ref().unwrap();
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EndpointHydration { .. },
+                StatsUpdateCause::EdgeWrite { .. }
+            ]
+        ));
+        assert!(outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { causes, .. }
+                if causes == &failure.causes
         )));
     }
 
@@ -957,6 +1024,60 @@ mod tests {
         fail_id_queries: bool,
     }
 
+    #[derive(Debug, Default)]
+    struct EdgeFailingStatsStore {
+        health: Mutex<RetrievalStatsHealth>,
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for EdgeFailingStatsStore {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "edge write failed".to_owned(),
+            })
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            Ok(lock(&self.health).clone())
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            *lock(&self.health) = RetrievalStatsHealth {
+                state: crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy,
+                last_error_cause: Some(cause),
+            };
+            Ok(())
+        }
+    }
+
     impl RecordingGraphStore {
         fn fail_objects(mut self) -> Self {
             self.fail_objects = true;
@@ -1017,11 +1138,11 @@ mod tests {
         async fn query_objects(
             &self,
             query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
             if self.fail_id_queries && matches!(query, GraphObjectQuery::ByIds(_)) {
-                return Err(CustomError::DatabaseError(
-                    "endpoint lifecycle lookup failed".to_owned(),
-                ));
+                return Err(crate::errors::GraphQueryError::Selection {
+                    detail: "endpoint lifecycle lookup failed".to_owned(),
+                });
             }
 
             Ok(self

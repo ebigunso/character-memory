@@ -9,7 +9,7 @@ use crate::config::{
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
     Settings,
 };
-use crate::errors::{CustomError, EmbeddingError};
+use crate::errors::{CustomError, EmbeddingError, RetrievalStatsHealthCause};
 use crate::memory::CharacterMemory;
 use crate::models::vector::EmbeddingInput;
 use crate::policy::RetrievalSelectivityPolicy;
@@ -202,9 +202,9 @@ pub(crate) fn retrieval_stats_store(
                 Ok(store) => Ok(Box::new(store)),
                 Err(error) => match settings.get_retrieval_stats_health_fail_mode() {
                     RetrievalStatsHealthFailMode::Conservative => {
-                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
-                            "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
-                        ))))
+                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(
+                            RetrievalStatsHealthCause::StoreInitialization { error },
+                        )))
                     }
                 },
             }

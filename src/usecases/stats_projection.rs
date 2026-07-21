@@ -9,7 +9,7 @@ use crate::ports::retrieval_stats::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatsProjectionOutcome {
     pub(crate) attempted_object_ids: Vec<MemoryId>,
-    pub(crate) cause: Option<StatsUpdateCause>,
+    pub(crate) causes: Vec<StatsUpdateCause>,
 }
 
 pub(crate) struct StatsProjectionService<'a, G>
@@ -38,8 +38,8 @@ where
     ) -> StatsProjectionOutcome {
         let endpoint_refs = stats_endpoint_refs(objects, links);
         let attempted_object_ids = attempted_stats_object_ids(objects, &endpoint_refs);
-        let (stats_objects, mut cause) = if endpoint_refs.is_empty() {
-            (objects.to_vec(), None)
+        let (stats_objects, mut causes) = if endpoint_refs.is_empty() {
+            (objects.to_vec(), Vec::new())
         } else {
             let endpoint_ids = endpoint_refs
                 .iter()
@@ -57,50 +57,45 @@ where
                         .collect();
                     (
                         stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
-                        None,
+                        Vec::new(),
                     )
                 }
                 Err(error) => (
                     objects.to_vec(),
-                    Some(StatsUpdateCause::EndpointHydration {
-                        detail: error.to_string(),
-                    }),
+                    vec![StatsUpdateCause::EndpointHydration { error }],
                 ),
             }
         };
 
         if let Err(write_cause) = self.write_projection(&stats_objects, links).await {
-            if cause.is_none() {
-                cause = Some(write_cause);
-            }
+            causes.push(write_cause);
         }
 
-        if let Some(primary_cause) = &cause {
-            let _ = self
-                .stats_store
-                .mark_unhealthy(primary_cause.to_string())
-                .await;
+        if let Some(primary_cause) = causes.first() {
+            if let Some(health_cause) = primary_cause.health_cause() {
+                if let Err(error) = self.stats_store.mark_unhealthy(health_cause).await {
+                    causes.push(StatsUpdateCause::HealthMark { error });
+                }
+            }
         }
 
         match self.stats_store.health().await {
             Ok(health)
-                if cause.is_none() && health.state == RetrievalStatsHealthState::Unhealthy =>
+                if causes.is_empty() && health.state == RetrievalStatsHealthState::Unhealthy =>
             {
-                cause = Some(StatsUpdateCause::StoreUnhealthy {
-                    detail: health.last_error_message,
+                causes.push(StatsUpdateCause::StoreUnhealthy {
+                    health_cause: health.last_error_cause,
                 });
             }
-            Err(error) if cause.is_none() => {
-                cause = Some(StatsUpdateCause::HealthCheck {
-                    detail: error.to_string(),
-                });
+            Err(error) => {
+                causes.push(StatsUpdateCause::HealthCheck { error });
             }
             _ => {}
         }
 
         StatsProjectionOutcome {
             attempted_object_ids,
-            cause,
+            causes,
         }
     }
 
@@ -114,17 +109,13 @@ where
         self.stats_store
             .record_edges(&edges)
             .await
-            .map_err(|error| StatsUpdateCause::EdgeWrite {
-                detail: error.to_string(),
-            })?;
+            .map_err(|error| StatsUpdateCause::EdgeWrite { error })?;
 
         if !states.is_empty() {
             self.stats_store
                 .record_object_states(&states)
                 .await
-                .map_err(|error| StatsUpdateCause::ObjectStateWrite {
-                    detail: error.to_string(),
-                })?;
+                .map_err(|error| StatsUpdateCause::ObjectStateWrite { error })?;
         }
         Ok(())
     }

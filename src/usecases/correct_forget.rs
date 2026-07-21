@@ -1096,7 +1096,10 @@ mod tests {
         ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
     };
     use crate::domain::{Episode, Modality, Observation};
-    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind};
+    use crate::errors::{
+        RetrievalStatsHealthCause, RetrievalStatsStoreError, VectorDatabaseError,
+        VectorDatabaseErrorKind,
+    };
     use crate::models::vector::{
         CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
@@ -2549,7 +2552,7 @@ mod tests {
         async fn query_objects(
             &self,
             query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
             let queried_ids = match query {
                 GraphObjectQuery::ByRefs(object_refs) => {
                     object_refs.iter().map(|object_ref| object_ref.id).collect()
@@ -2714,12 +2717,15 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for RecordingStatsStore {
-        async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        async fn record_edges(
+            &self,
+            edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
             lock(&self.calls).push(StoreCall::StatsEdges(edges.len()));
             if self.fail_edges {
-                return Err(CustomError::DatabaseError(
-                    "stats edge write failed".to_owned(),
-                ));
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "stats edge write failed".to_owned(),
+                });
             }
             Ok(())
         }
@@ -2727,7 +2733,7 @@ mod tests {
         async fn record_object_states(
             &self,
             states: &[RetrievalStatsObjectState],
-        ) -> Result<(), CustomError> {
+        ) -> Result<(), RetrievalStatsStoreError> {
             lock(&self.calls).push(StoreCall::StatsObjectStates(states.len()));
             Ok(())
         }
@@ -2735,7 +2741,7 @@ mod tests {
         async fn counter(
             &self,
             _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             Ok(None)
         }
 
@@ -2743,15 +2749,18 @@ mod tests {
             &self,
             _relation_kind: RelationType,
             _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             Ok(None)
         }
 
-        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
 
-        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
             lock(&self.calls).push(StoreCall::StatsUnhealthy);
             Ok(())
         }

@@ -426,10 +426,10 @@ mod tests {
         async fn query_objects(
             &self,
             _query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "endpoint lifecycle lookup failed".to_owned(),
-            ))
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+            Err(crate::errors::GraphQueryError::Selection {
+                detail: "endpoint lifecycle lookup failed".to_owned(),
+            })
         }
 
         async fn query_links_by_ids(

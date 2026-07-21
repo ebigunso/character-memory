@@ -12,7 +12,7 @@ use crate::domain::{
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
     Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::CustomError;
+use crate::errors::{CustomError, GraphQueryError};
 use crate::models::vector::{
     CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord,
     VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
@@ -160,12 +160,15 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
         if query.is_empty() {
             return Ok(Vec::new());
         }
 
-        let mut objects: Vec<_> = lock(&self.objects)?
+        let mut objects: Vec<_> = lock(&self.objects)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })?
             .iter()
             .filter(|object| {
                 let object_id = object.id();

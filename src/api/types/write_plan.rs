@@ -743,7 +743,7 @@ pub enum RepairMarker {
     },
     StatsUpdate {
         object_ids: Vec<MemoryId>,
-        cause: StatsUpdateCause,
+        causes: Vec<StatsUpdateCause>,
     },
 }
 
@@ -773,13 +773,13 @@ impl StatsUpdateStatus {
     pub fn failed(
         updated_object_ids: impl IntoIterator<Item = MemoryId>,
         failed_object_ids: impl IntoIterator<Item = MemoryId>,
-        cause: StatsUpdateCause,
+        causes: Vec<StatsUpdateCause>,
     ) -> Self {
         Self {
             updated_object_ids: updated_object_ids.into_iter().collect(),
             failure: Some(StatsUpdateFailure {
                 failed_object_ids: failed_object_ids.into_iter().collect(),
-                cause,
+                causes,
             }),
         }
     }
@@ -794,7 +794,7 @@ impl Default for StatsUpdateStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatsUpdateFailure {
     pub failed_object_ids: Vec<MemoryId>,
-    pub cause: StatsUpdateCause,
+    pub causes: Vec<StatsUpdateCause>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -987,9 +987,11 @@ mod tests {
         let status = StatsUpdateStatus::failed(
             [],
             [object_id],
-            StatsUpdateCause::ObjectStateWrite {
-                detail: "state write rejected".to_owned(),
-            },
+            vec![StatsUpdateCause::ObjectStateWrite {
+                error: crate::errors::RetrievalStatsStoreError::Sqlite {
+                    detail: "state write rejected".to_owned(),
+                },
+            }],
         );
 
         let serialized = serde_json::to_string(&status).unwrap();
@@ -997,5 +999,6 @@ mod tests {
 
         assert_eq!(deserialized, status);
         assert!(serialized.contains("\"cause\":\"object_state_write\""));
+        assert!(serialized.contains("\"kind\":\"sqlite\""));
     }
 }

@@ -5,7 +5,11 @@ use crate::api::types::{
     SelectivityTrace,
 };
 use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
-use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
+#[cfg(test)]
+use crate::errors::RetrievalStatsStoreError;
+use crate::errors::{
+    ConfigValidationError, ConfigValidationReason, CustomError, RetrievalStatsHealthCause,
+};
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 use crate::ports::graph_authority::TraceMode;
@@ -114,11 +118,14 @@ impl SelectivityStatsContext {
         let health = match stats_store.health().await {
             Ok(health) => health,
             Err(error) => {
-                let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                let cause = RetrievalStatsHealthCause::HealthCheck {
+                    error: error.clone(),
+                };
+                let _ = stats_store.mark_unhealthy(cause.clone()).await;
                 return Ok(Self {
                     health: RetrievalStatsHealth {
                         state: RetrievalStatsHealthState::Unhealthy,
-                        last_error_message: Some(error.to_string()),
+                        last_error_cause: Some(cause),
                     },
                     specs,
                     global_counters: HashMap::new(),
@@ -134,11 +141,14 @@ impl SelectivityStatsContext {
                 {
                     Ok(counter) => counter,
                     Err(error) => {
-                        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                        let cause = RetrievalStatsHealthCause::GlobalCounterRead {
+                            error: error.clone(),
+                        };
+                        let _ = stats_store.mark_unhealthy(cause.clone()).await;
                         return Ok(Self {
                             health: RetrievalStatsHealth {
                                 state: RetrievalStatsHealthState::Unhealthy,
-                                last_error_message: Some(error.to_string()),
+                                last_error_cause: Some(cause),
                             },
                             specs,
                             global_counters: HashMap::new(),
@@ -194,7 +204,9 @@ pub(crate) async fn selectivity_plan_for_candidate(
             let entity = match stats_store.counter(&key).await {
                 Ok(counter) => counter,
                 Err(error) => {
-                    let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                    let _ = stats_store
+                        .mark_unhealthy(RetrievalStatsHealthCause::CounterRead { error })
+                        .await;
                     stats_reads_failed = true;
                     None
                 }
@@ -1021,41 +1033,47 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for FailingRetrievalStatsStore {
-        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn record_object_states(
             &self,
             _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), CustomError> {
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn counter(
             &self,
             _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "stats counter read failed".to_owned(),
-            ))
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats counter read failed".to_owned(),
+            })
         }
 
         async fn global_counter(
             &self,
             _relation_kind: RelationType,
             _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "stats global counter read failed".to_owned(),
-            ))
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats global counter read failed".to_owned(),
+            })
         }
 
-        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
 
-        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
     }
@@ -1067,27 +1085,30 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for PartiallyFailingRetrievalStatsStore {
-        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn record_object_states(
             &self,
             _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), CustomError> {
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn counter(
             &self,
             _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             let mut reads = self.counter_reads.lock().unwrap();
             *reads += 1;
             if *reads == 1 {
-                return Err(CustomError::DatabaseError(
-                    "first stats counter read failed".to_owned(),
-                ));
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "first stats counter read failed".to_owned(),
+                });
             }
             Ok(Some(RetrievalStatsCounter {
                 total_count: 100,
@@ -1100,7 +1121,7 @@ mod tests {
             &self,
             _relation_kind: RelationType,
             _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             Ok(Some(RetrievalStatsCounter {
                 total_count: 100,
                 active_count: 100,
@@ -1108,11 +1129,14 @@ mod tests {
             }))
         }
 
-        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
 
-        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
     }

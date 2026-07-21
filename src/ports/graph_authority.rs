@@ -8,7 +8,7 @@ use crate::domain::{
     DerivedMemory, GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
     ObjectType, RelationType,
 };
-use crate::errors::CustomError;
+use crate::errors::{CustomError, GraphQueryError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
@@ -347,7 +347,7 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError>;
+    ) -> Result<Vec<MemoryObject>, GraphQueryError>;
 
     async fn query_links_by_ids(
         &self,
@@ -391,7 +391,7 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
         (**self).query_objects(query).await
     }
 

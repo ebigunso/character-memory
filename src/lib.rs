@@ -59,7 +59,8 @@ pub use crate::domain::{
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
-    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind, IoErrorKind,
+    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
+    GraphQueryError, IoErrorKind, RetrievalStatsHealthCause, RetrievalStatsStoreError,
     StatsUpdateCause, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
     VectorIndexingCause,
 };

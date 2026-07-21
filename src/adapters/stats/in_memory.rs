@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use crate::domain::{ObjectType, RelationType};
-use crate::errors::CustomError;
+use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
     insert_edge, recomputed_counters, recomputed_global_counters, RetrievalStatsCounter,
     RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
@@ -20,12 +20,12 @@ impl InMemoryRetrievalStatsStore {
         Self::default()
     }
 
-    pub(crate) fn unhealthy(message: String) -> Self {
+    pub(crate) fn unhealthy(cause: RetrievalStatsHealthCause) -> Self {
         Self {
             state: Mutex::new(InMemoryState {
                 health: RetrievalStatsHealth {
                     state: RetrievalStatsHealthState::Unhealthy,
-                    last_error_message: Some(message),
+                    last_error_cause: Some(cause),
                 },
                 ..InMemoryState::default()
             }),
@@ -44,7 +44,10 @@ pub(crate) struct InMemoryState {
 
 #[async_trait]
 impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
-    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+    async fn record_edges(
+        &self,
+        edges: &[RetrievalStatsEdge],
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         for edge in edges {
             insert_edge(&mut state.edges, edge.clone());
@@ -56,7 +59,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn record_object_states(
         &self,
         states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError> {
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         for object_state in states {
             for edge in state.edges.values_mut() {
@@ -76,7 +79,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     async fn counter(
         &self,
         key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         state.refresh_counters_if_dirty();
         Ok(state.counters.get(key).copied())
@@ -86,7 +89,7 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         &self,
         relation_kind: RelationType,
         object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         state.refresh_counters_if_dirty();
         Ok(state
@@ -95,15 +98,18 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             .copied())
     }
 
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         Ok(self.state.lock().await.health.clone())
     }
 
-    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError> {
+    async fn mark_unhealthy(
+        &self,
+        cause: RetrievalStatsHealthCause,
+    ) -> Result<(), RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         state.health = RetrievalStatsHealth {
             state: RetrievalStatsHealthState::Unhealthy,
-            last_error_message: Some(message),
+            last_error_cause: Some(cause),
         };
         Ok(())
     }
