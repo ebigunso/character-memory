@@ -396,7 +396,9 @@ mod tests {
             .with_max_fanout_per_node(2);
         let without_utilization = store.expand_bounded(&query).await.unwrap();
         let expansion = store
-            .expand_bounded(&query.with_fanout_utilization_recording(true))
+            .expand_bounded(&query.with_fanout_utilization_recording(
+                crate::ports::graph_authority::TraceMode::Enabled,
+            ))
             .await
             .unwrap();
 
@@ -474,7 +476,7 @@ mod tests {
         let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 10)
             .with_allowed_object_types(vec![ObjectType::DerivedMemory])
             .with_max_fanout_per_node(1)
-            .with_fanout_utilization_recording(true);
+            .with_fanout_utilization_recording(crate::ports::graph_authority::TraceMode::Enabled);
         let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
         let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
 
@@ -576,7 +578,7 @@ mod tests {
         in_memory.upsert_links(&links).await.unwrap();
 
         let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 3, 20)
-            .with_fanout_utilization_recording(true);
+            .with_fanout_utilization_recording(crate::ports::graph_authority::TraceMode::Enabled);
         let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
         let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
 
@@ -834,7 +836,7 @@ mod tests {
                     .with_max_hub_edges(1)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(250),
-                        allow_partial_results: false,
+                        mode: crate::api::types::GraphFailureMode::FailClosed,
                     }),
             )
             .await
@@ -998,7 +1000,7 @@ mod tests {
                 &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(0),
-                        allow_partial_results: true,
+                        mode: crate::api::types::GraphFailureMode::AllowPartialResults,
                     }),
             )
             .await
@@ -1630,7 +1632,10 @@ mod tests {
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.episode.id
                 && assignment.section == ContextPackSection::RelevantEpisodes
-                && assignment.reason.is_some()
+                && matches!(
+                    assignment.reason,
+                    crate::api::types::SectionAssignmentReason::Selected { .. }
+                )
         }));
         assert_eq!(trace.vector_candidates.len(), 1);
         assert_eq!(trace.vector_candidates[0].object.id, fixtures.hub_entity.id);

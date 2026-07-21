@@ -20,14 +20,14 @@ pub use lifecycle::{
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,
     ContinuitySectionLimits, FanoutUtilizationTrace, GraphExpansionBoundedFailureSummary,
-    GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace, GraphRelationTrace,
-    IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
-    LifecycleOmissionSummary, RationaleCategory, RetrievalCandidateLimits, RetrievalContext,
-    RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
-    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
-    SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace,
+    GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace, GraphFailureMode,
+    GraphRelationTrace, IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision,
+    LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory, RetrievalCandidateLimits,
+    RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale,
+    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityCountScope,
+    SelectivityDecision, SelectivityTelemetry, SelectivityTrace, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace, VectorSurface,
 };
 pub use write_plan::{
     CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,

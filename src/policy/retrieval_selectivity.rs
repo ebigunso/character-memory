@@ -8,6 +8,7 @@ use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
+use crate::ports::graph_authority::TraceMode;
 use crate::ports::retrieval_stats::{
     RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsHealth,
     RetrievalStatsHealthState, RetrievalStatsStore,
@@ -173,7 +174,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     policy: RetrievalSelectivityPolicy,
     stats_context: &SelectivityStatsContext,
     lifecycle_policy: RetrievalLifecyclePolicy,
-    include_trace: bool,
+    trace_mode: TraceMode,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
         return Ok(SelectivityPlan::default());
@@ -242,7 +243,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
             object_type: spec.object_type,
             max_fanout: chosen_fanout,
         });
-        if include_trace {
+        if trace_mode.is_enabled() {
             plan.traces.push(SelectivityTrace {
                 root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                 relation: spec.relation,
@@ -622,7 +623,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            false,
+            TraceMode::Disabled,
         )
         .await
         .unwrap();
@@ -633,7 +634,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -661,7 +662,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -715,7 +716,7 @@ mod tests {
             policy,
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -750,7 +751,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -781,7 +782,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -818,7 +819,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -856,7 +857,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -937,7 +938,7 @@ mod tests {
                 include_non_current: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -951,7 +952,7 @@ mod tests {
                 include_archived: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -967,7 +968,7 @@ mod tests {
                 include_deleted: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();

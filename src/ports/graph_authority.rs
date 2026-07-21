@@ -4,6 +4,7 @@
 // stores keep tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
 
+use crate::api::types::GraphFailureMode;
 use crate::domain::{
     DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
 };
@@ -117,15 +118,36 @@ impl GraphObjectQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFailurePolicy {
     pub(crate) timeout_ms: Option<u64>,
-    pub(crate) allow_partial_results: bool,
+    pub(crate) mode: GraphFailureMode,
 }
 
 impl Default for GraphExpansionFailurePolicy {
     fn default() -> Self {
         Self {
             timeout_ms: Some(250),
-            allow_partial_results: true,
+            mode: GraphFailureMode::AllowPartialResults,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum TraceMode {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+impl TraceMode {
+    pub(crate) const fn from_enabled(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    pub(crate) const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
     }
 }
 
@@ -149,7 +171,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
-    pub(crate) record_fanout_utilization: bool,
+    pub(crate) trace_mode: TraceMode,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
 }
@@ -178,7 +200,7 @@ impl GraphExpansionQuery {
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
-            record_fanout_utilization: false,
+            trace_mode: TraceMode::Disabled,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -202,8 +224,8 @@ impl GraphExpansionQuery {
         self
     }
 
-    pub(crate) fn with_fanout_utilization_recording(mut self, record: bool) -> Self {
-        self.record_fanout_utilization = record;
+    pub(crate) fn with_fanout_utilization_recording(mut self, trace_mode: TraceMode) -> Self {
+        self.trace_mode = trace_mode;
         self
     }
 
@@ -457,7 +479,7 @@ mod tests {
         assert_eq!(query.max_nodes, 25);
         assert_eq!(query.max_fanout_per_node, usize::MAX);
         assert_eq!(query.max_hub_edges, usize::MAX);
-        assert!(!query.record_fanout_utilization);
+        assert_eq!(query.trace_mode, TraceMode::Disabled);
         assert_eq!(
             query.allowed_object_types,
             vec![ObjectType::Observation, ObjectType::DerivedMemory]

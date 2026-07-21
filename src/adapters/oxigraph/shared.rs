@@ -6,6 +6,7 @@ use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Ter
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
+use crate::api::types::GraphFailureMode;
 use crate::domain::{
     graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
     MemoryThread, ObjectType, Observation, RelationType,
@@ -73,7 +74,7 @@ pub(super) fn insert_visible_ref(
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        if !query.failure_policy.allow_partial_results {
+        if query.failure_policy.mode == GraphFailureMode::FailClosed {
             return Err(graph_expansion_bounded_error(failure));
         }
         bounded_failure.get_or_insert(failure);

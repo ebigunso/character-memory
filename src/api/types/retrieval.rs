@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{
     DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
     MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
+    ThreadStatus,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,7 +84,7 @@ pub struct RetrievalGraphLimits {
     pub max_fanout_per_node: usize,
     pub max_hub_edges: usize,
     pub timeout_ms: Option<u64>,
-    pub allow_degraded_results: bool,
+    pub failure_mode: GraphFailureMode,
     pub allowed_relation_types: Vec<RelationType>,
 }
 
@@ -95,10 +96,18 @@ impl Default for RetrievalGraphLimits {
             max_fanout_per_node: 16,
             max_hub_edges: 64,
             timeout_ms: Some(250),
-            allow_degraded_results: true,
+            failure_mode: GraphFailureMode::AllowPartialResults,
             allowed_relation_types: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphFailureMode {
+    #[default]
+    AllowPartialResults,
+    FailClosed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -249,6 +258,8 @@ pub struct RetrievalTelemetry {
     pub configured_candidate_limits: RetrievalCandidateLimits,
     pub configured_graph_limits: RetrievalGraphLimits,
     pub configured_section_limits: ContinuitySectionLimits,
+    pub configured_object_types: Vec<ObjectType>,
+    pub configured_lifecycle_policy: RetrievalLifecyclePolicy,
     pub query_embedding_dimension: usize,
     pub returned_vector_candidate_count: usize,
     pub unique_graph_root_candidate_count: usize,
@@ -343,12 +354,14 @@ impl Default for RetrievalTrace {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VectorCandidateTrace {
     pub object: MemoryObjectRef,
+    pub surface: VectorSurface,
     pub score: f32,
     pub rank: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphRelationTrace {
+    pub link_id: MemoryId,
     pub from: MemoryObjectRef,
     pub to: MemoryObjectRef,
     pub relation: RelationType,
@@ -476,13 +489,49 @@ pub enum StaleCandidateReason {
     GraphExpansionBounded,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SectionAssignment {
     pub object: MemoryObjectRef,
     pub section: ContextPackSection,
     pub rank: Option<usize>,
-    pub reason: Option<String>,
+    pub reason: SectionAssignmentReason,
     pub rationale_categories: Vec<RationaleCategory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SectionAssignmentReason {
+    Selected {
+        scores: SectionScoreComponents,
+    },
+    OmittedByLimit {
+        intended_section: ContextPackSection,
+        scores: SectionScoreComponents,
+    },
+    OmittedNonActiveThread {
+        thread_status: ThreadStatus,
+    },
+    OmittedNoPromptSection {
+        object_type: ObjectType,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct SectionScoreComponents {
+    pub final_score: f32,
+    pub vector_score: Option<f32>,
+    pub graph_score: Option<f32>,
+    pub salience_score: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorSurface {
+    Summary,
+    Text,
+    Name,
+    DerivedText,
+    Query,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -697,7 +746,14 @@ mod tests {
             ),
             section: ContextPackSection::Preferences,
             rank: Some(2),
-            reason: Some("derived type maps to preference section".to_owned()),
+            reason: SectionAssignmentReason::Selected {
+                scores: SectionScoreComponents {
+                    final_score: 0.75,
+                    vector_score: Some(0.8),
+                    graph_score: Some(0.5),
+                    salience_score: None,
+                },
+            },
             rationale_categories: vec![RationaleCategory::Scope],
         };
 
@@ -705,6 +761,8 @@ mod tests {
 
         assert_eq!(encoded["section"], "preferences");
         assert_eq!(encoded["rank"], 2);
+        assert_eq!(encoded["reason"]["kind"], "selected");
+        assert_eq!(encoded["reason"]["scores"]["final_score"], 0.75);
         assert_eq!(encoded["rationale_categories"][0], "scope");
     }
 
@@ -774,10 +832,12 @@ mod tests {
         let trace = RetrievalTrace {
             vector_candidates: vec![VectorCandidateTrace {
                 object: candidate,
+                surface: VectorSurface::DerivedText,
                 score: 0.82,
                 rank: 1,
             }],
             graph_relations: vec![GraphRelationTrace {
+                link_id: memory_id("550e8400-e29b-41d4-a716-446655442042"),
                 from: candidate,
                 to: episode,
                 relation: RelationType::DerivedFrom,
@@ -822,7 +882,14 @@ mod tests {
                 object: candidate,
                 section: ContextPackSection::Preferences,
                 rank: Some(1),
-                reason: None,
+                reason: SectionAssignmentReason::Selected {
+                    scores: SectionScoreComponents {
+                        final_score: 0.82,
+                        vector_score: Some(0.82),
+                        graph_score: None,
+                        salience_score: None,
+                    },
+                },
                 rationale_categories: vec![RationaleCategory::Scope, RationaleCategory::Semantic],
             }],
         };
@@ -831,6 +898,14 @@ mod tests {
         let decoded: RetrievalTrace = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded.vector_candidates[0].score, 0.82);
+        assert_eq!(
+            decoded.vector_candidates[0].surface,
+            VectorSurface::DerivedText
+        );
+        assert_eq!(
+            decoded.graph_relations[0].link_id,
+            memory_id("550e8400-e29b-41d4-a716-446655442042")
+        );
         assert_eq!(
             decoded.graph_relations[0].relation,
             RelationType::DerivedFrom

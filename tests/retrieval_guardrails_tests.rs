@@ -1,7 +1,7 @@
 use character_memory::{
     CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId,
-    MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
+    EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, GraphFailureMode, LifecycleTargetRef,
+    MemoryId, MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
     ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, SourceProvenanceReference,
 };
@@ -377,7 +377,7 @@ fn entity_root_context(query: &str) -> RetrievalContext {
         max_fanout_per_node: 32,
         max_hub_edges: 64,
         timeout_ms: Some(500),
-        allow_degraded_results: true,
+        failure_mode: GraphFailureMode::AllowPartialResults,
         allowed_relation_types: Vec::new(),
     };
     context
