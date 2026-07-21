@@ -15,8 +15,8 @@ mod tests {
         RetentionState, ThreadStatus,
     };
     use crate::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
-        VectorSurface,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
+        VectorRecordEmbedding, VectorSurface,
     };
     use crate::policy::memory_object_vector_record;
     use crate::ports::embedder::MemoryEmbedder;
@@ -1624,11 +1624,9 @@ mod tests {
             .rationale
             .summary
             .contains("final context-pack objects"));
-        assert!(trace
-            .lifecycle_filter_decisions
-            .iter()
-            .any(|decision| decision.object.id == fixtures.hub_entity.id
-                && decision.action == LifecycleFilterAction::Included));
+        assert!(trace.graph_expansions.iter().any(|expansion| {
+            expansion.root.id == fixtures.hub_entity.id && expansion.object_count > 0
+        }));
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.episode.id
                 && assignment.section == ContextPackSection::RelevantEpisodes
@@ -1822,10 +1820,8 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            let mut candidates = self.candidates.clone();
-            candidates.truncate(query.limit);
-            Ok(candidates)
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
         async fn list_candidate_diagnostics(

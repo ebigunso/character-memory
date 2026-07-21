@@ -6,20 +6,20 @@ use crate::api::types::{
     ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, GraphFailureMode, IncludedDerivedMemory,
     LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
-    LifecycleOmissionSummary, RationaleCategory, RetrievalContext, RetrievalLifecyclePolicy,
-    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    LifecycleOmissionSummary, RationaleCategory, RetrievalContext, RetrievalRationale,
+    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
     SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
     StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
     VectorCandidateTrace, VectorSurface as PublicVectorSurface,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
-    MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState, ThreadStatus,
+    MemoryObjectRef, ObjectType, RelationType, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateSearch, VectorSurface as InternalVectorSurface,
+    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
+    VectorSurface as InternalVectorSurface,
 };
 use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
@@ -93,9 +93,7 @@ where
         )
         .with_object_types(context.object_type_defaults.clone())
         .with_filters(VectorCandidateFilters::new());
-        let vector_candidates = canonicalize_vector_candidates(
-            self.vector_store.search_candidates(&vector_search).await?,
-        );
+        let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
 
         let root_selection =
@@ -174,7 +172,7 @@ where
             }
         }
 
-        let ranked_objects = assembly.ranked_objects(&context.lifecycle_policy);
+        let ranked_objects = assembly.ranked_objects();
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -277,8 +275,6 @@ struct RetrievalDetails {
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
     objects: HashMap<MemoryObjectRef, RankedObject>,
-    candidate_scores: HashMap<MemoryObjectRef, f32>,
-    candidate_refs: HashSet<MemoryObjectRef>,
     superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
@@ -297,11 +293,6 @@ impl RetrieveAssembly {
         let bounded_failure = expansion.bounded_failure;
         let candidate_ref =
             MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
-        self.candidate_refs.insert(candidate_ref);
-        self.candidate_scores
-            .entry(candidate_ref)
-            .and_modify(|score| *score = score.max(candidate.score))
-            .or_insert(candidate.score);
 
         for relation in &expansion.relations {
             if relation.relation == RelationType::Supersedes
@@ -461,68 +452,18 @@ impl RetrieveAssembly {
         });
     }
 
-    fn ranked_objects(&mut self, policy: &RetrievalLifecyclePolicy) -> Vec<RankedObject> {
+    fn ranked_objects(&mut self) -> Vec<RankedObject> {
         for superseded in self.superseded_by.values_mut() {
             superseded.sort();
             superseded.dedup();
         }
 
         let mut ranked_objects = Vec::new();
-        for (object_ref, mut ranked) in std::mem::take(&mut self.objects) {
-            let superseded_by = self
-                .superseded_by
-                .get(&object_ref.id)
-                .cloned()
-                .unwrap_or_default();
-            let decision = lifecycle_decision(&ranked.object, &superseded_by, *policy);
-            if decision.action == LifecycleFilterAction::Included {
-                ranked.superseded_by = superseded_by;
-                ranked_objects.push(ranked);
-            } else if self.candidate_refs.contains(&object_ref) {
-                let stale_reason = stale_reason_from_decision(decision.reason);
-                self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: memory_object_ref(object_ref.object_type, object_ref.id),
-                    vector_score: self.candidate_scores.get(&object_ref).copied(),
-                    reason: stale_reason,
-                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
-                });
-            }
-            self.lifecycle_decisions.push(decision);
+        for (_, ranked) in std::mem::take(&mut self.objects) {
+            ranked_objects.push(ranked);
         }
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
-        let included_refs = ranked_objects
-            .iter()
-            .map(|ranked| graph_object_ref(&ranked.object))
-            .collect::<HashSet<_>>();
-        self.lifecycle_decisions.retain(|decision| {
-            decision.action != LifecycleFilterAction::Omitted
-                || !included_refs.contains(&MemoryObjectRef::from_id_type(
-                    decision.object.id,
-                    decision.object.object_type,
-                ))
-        });
-        self.stale_omissions.retain(|omission| {
-            !included_refs.contains(&MemoryObjectRef::from_id_type(
-                omission.candidate.id,
-                omission.candidate.object_type,
-            ))
-        });
-        self.lifecycle_decisions.sort_by_key(|decision| {
-            (
-                decision.object.id,
-                object_type_rank(decision.object.object_type),
-                lifecycle_action_rank(decision.action),
-                lifecycle_reason_rank(decision.reason),
-            )
-        });
-        self.lifecycle_decisions.dedup_by_key(|decision| {
-            (
-                decision.object.object_type,
-                decision.object.id,
-                decision.action,
-            )
-        });
         self.stale_omissions.sort_by_key(|omission| {
             (
                 omission.candidate.id,
@@ -550,7 +491,6 @@ struct RankedObject {
     graph_component: f32,
     graph_rationale: GraphRationaleSignals,
     salience_component: f32,
-    superseded_by: Vec<MemoryId>,
 }
 
 impl RankedObject {
@@ -569,7 +509,6 @@ impl RankedObject {
             graph_component,
             graph_rationale,
             salience_component,
-            superseded_by: Vec::new(),
         }
     }
 
@@ -1196,111 +1135,6 @@ fn public_bounded_failure_reason(
     }
 }
 
-fn lifecycle_decision(
-    object: &MemoryObject,
-    superseded_by: &[MemoryId],
-    policy: RetrievalLifecyclePolicy,
-) -> LifecycleFilterDecision {
-    let (object_id, object_type) = object_identity(object);
-    let (retention_state, is_current) = object_lifecycle_fields(object);
-    let reason = match object {
-        MemoryObject::Episode(object) => retention_reason(object.retention_state, policy),
-        MemoryObject::Observation(object) => retention_reason(object.retention_state, policy),
-        MemoryObject::MemoryThread(object) => thread_reason(object, policy),
-        MemoryObject::DerivedMemory(object) => retention_reason(object.retention_state, policy)
-            .or_else(|| currentness_reason(object.is_current, policy))
-            .or_else(|| supersession_reason(superseded_by, policy)),
-        MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
-    };
-    let action = if reason.is_some_and(omission_reason) {
-        LifecycleFilterAction::Omitted
-    } else {
-        LifecycleFilterAction::Included
-    };
-
-    LifecycleFilterDecision {
-        object: memory_object_ref(object_type, object_id),
-        retention_state,
-        is_current,
-        superseded_by: superseded_by.to_vec(),
-        action,
-        reason: reason.unwrap_or(LifecycleFilterReason::Active),
-    }
-}
-
-fn retention_reason(
-    retention_state: RetentionState,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    match retention_state {
-        RetentionState::Active => None,
-        RetentionState::Archived if policy.include_archived => {
-            Some(LifecycleFilterReason::ArchivedIncludedByPolicy)
-        }
-        RetentionState::Archived => Some(LifecycleFilterReason::ArchivedOmitted),
-        RetentionState::Suppressed if policy.include_suppressed => {
-            Some(LifecycleFilterReason::SuppressedIncludedByPolicy)
-        }
-        RetentionState::Suppressed => Some(LifecycleFilterReason::SuppressedOmitted),
-        RetentionState::Deleted if policy.include_deleted => {
-            Some(LifecycleFilterReason::DeletedIncludedByPolicy)
-        }
-        RetentionState::Deleted => Some(LifecycleFilterReason::DeletedOmitted),
-    }
-}
-
-fn thread_reason(
-    thread: &MemoryThread,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if thread.status == ThreadStatus::Archived && !policy.include_archived {
-        Some(LifecycleFilterReason::ArchivedOmitted)
-    } else if thread.status == ThreadStatus::Archived {
-        Some(LifecycleFilterReason::ArchivedIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn currentness_reason(
-    is_current: bool,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if !is_current && !policy.include_non_current {
-        Some(LifecycleFilterReason::NonCurrentOmitted)
-    } else if !is_current {
-        Some(LifecycleFilterReason::NonCurrentIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn supersession_reason(
-    superseded_by: &[MemoryId],
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if !superseded_by.is_empty() && !policy.include_superseded {
-        Some(LifecycleFilterReason::SupersededOmitted)
-    } else if !superseded_by.is_empty() {
-        Some(LifecycleFilterReason::SupersededIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn omission_reason(reason: LifecycleFilterReason) -> bool {
-    matches!(
-        reason,
-        LifecycleFilterReason::ArchivedOmitted
-            | LifecycleFilterReason::SuppressedOmitted
-            | LifecycleFilterReason::DeletedOmitted
-            | LifecycleFilterReason::NonCurrentOmitted
-            | LifecycleFilterReason::SupersededOmitted
-            | LifecycleFilterReason::GraphObjectMissing
-            | LifecycleFilterReason::GraphExpansionBounded
-    )
-}
-
 fn filtered_lifecycle_decision(
     object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
@@ -1332,16 +1166,6 @@ fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCand
     }
 }
 
-fn stale_reason_from_decision(reason: LifecycleFilterReason) -> StaleCandidateReason {
-    match reason {
-        LifecycleFilterReason::NonCurrentOmitted => StaleCandidateReason::CurrentnessMismatch,
-        LifecycleFilterReason::SupersededOmitted => StaleCandidateReason::Superseded,
-        LifecycleFilterReason::GraphObjectMissing => StaleCandidateReason::GraphObjectMissing,
-        LifecycleFilterReason::GraphExpansionBounded => StaleCandidateReason::GraphExpansionBounded,
-        _ => StaleCandidateReason::LifecycleMismatch,
-    }
-}
-
 fn rationale_categories_for_stale_reason(reason: StaleCandidateReason) -> Vec<RationaleCategory> {
     match reason {
         StaleCandidateReason::GraphObjectMissing => vec![RationaleCategory::Semantic],
@@ -1364,19 +1188,6 @@ fn rationale_categories_for_section_limit() -> Vec<RationaleCategory> {
 fn push_unique_category(categories: &mut Vec<RationaleCategory>, category: RationaleCategory) {
     if !categories.contains(&category) {
         categories.push(category);
-    }
-}
-
-fn object_lifecycle_fields(object: &MemoryObject) -> (Option<RetentionState>, Option<bool>) {
-    match object {
-        MemoryObject::Episode(object) => (Some(object.retention_state), None),
-        MemoryObject::Observation(object) => (Some(object.retention_state), None),
-        MemoryObject::DerivedMemory(object) => {
-            (Some(object.retention_state), Some(object.is_current))
-        }
-        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
-            (None, None)
-        }
     }
 }
 
@@ -1501,13 +1312,6 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
     }
 }
 
-fn lifecycle_action_rank(action: LifecycleFilterAction) -> u8 {
-    match action {
-        LifecycleFilterAction::Included => 0,
-        LifecycleFilterAction::Omitted => 1,
-    }
-}
-
 fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
         LifecycleFilterReason::Active => 0,
@@ -1560,9 +1364,12 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::api::types::{ContinuitySectionLimits, RetrievalCandidateLimits};
+    use crate::api::types::{
+        ContinuitySectionLimits, RetrievalCandidateLimits, RetrievalLifecyclePolicy,
+    };
+    use crate::domain::RetentionState;
     use crate::models::vector::{
-        VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
+        CanonicalCandidates, VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
     };
     use crate::policy::RetrievalSelectivityPolicy;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
@@ -1892,7 +1699,7 @@ mod tests {
         let mut pure_vector = RetrieveAssembly::new(TraceMode::Enabled);
         pure_vector.absorb_expansion(&preference_candidate, non_entity_linked_expansion());
         let pure_vector_ranked = pure_vector
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
             .unwrap();
@@ -1908,7 +1715,7 @@ mod tests {
             GraphExpansion::new(vec![MemoryObject::Episode(episode)], Vec::new()),
         );
         let episode_categories = semantic_episode
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == episode_ref)
             .unwrap()
@@ -1925,7 +1732,7 @@ mod tests {
             GraphExpansion::new(vec![MemoryObject::MemoryThread(thread)], Vec::new()),
         );
         let thread_categories = semantic_thread
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == thread_ref)
             .unwrap()
@@ -1937,7 +1744,7 @@ mod tests {
         non_entity_graph_expanded
             .absorb_expansion(&episode_candidate, non_entity_linked_expansion());
         let non_entity_graph_expanded_ranked = non_entity_graph_expanded
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
             .unwrap();
@@ -1949,7 +1756,7 @@ mod tests {
         let mut entity_graph_expanded = RetrieveAssembly::new(TraceMode::Enabled);
         entity_graph_expanded.absorb_expansion(&hub_candidate, entity_linked_expansion());
         let entity_graph_expanded_ranked = entity_graph_expanded
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
             .unwrap();
@@ -1965,7 +1772,7 @@ mod tests {
             GraphExpansion::new(vec![MemoryObject::DerivedMemory(preference)], Vec::new()),
         );
         let both_ranked = both
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
             .unwrap();
@@ -2028,7 +1835,7 @@ mod tests {
                 expansion,
             );
             assembly
-                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .ranked_objects()
                 .into_iter()
                 .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
                 .unwrap()
@@ -2077,7 +1884,7 @@ mod tests {
                 expansion,
             );
             assembly
-                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .ranked_objects()
                 .into_iter()
                 .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
                 .unwrap()
@@ -2129,7 +1936,7 @@ mod tests {
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
             .unwrap()
@@ -2169,7 +1976,7 @@ mod tests {
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
             .unwrap()
@@ -2231,7 +2038,7 @@ mod tests {
             thread_expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
             .unwrap()
@@ -2280,7 +2087,7 @@ mod tests {
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
             .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
             .unwrap()
@@ -2459,7 +2266,7 @@ mod tests {
     }
 
     #[test]
-    fn included_objects_prune_prior_stale_omission_trace_details() {
+    fn assembly_does_not_repair_contradictory_port_outputs() {
         let fixtures = representative_fixtures();
         let candidate = candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.99);
         let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
@@ -2474,18 +2281,18 @@ mod tests {
             ),
         );
 
-        let ranked = assembly.ranked_objects(&RetrievalLifecyclePolicy::default());
+        let ranked = assembly.ranked_objects();
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(
             object_identity(&ranked[0].object).0,
             fixtures.user_preference.id
         );
-        assert!(!assembly
+        assert!(assembly
             .stale_omissions
             .iter()
             .any(|omission| omission.candidate.id == fixtures.user_preference.id));
-        assert!(!assembly.lifecycle_decisions.iter().any(|decision| {
+        assert!(assembly.lifecycle_decisions.iter().any(|decision| {
             decision.object.id == fixtures.user_preference.id
                 && decision.action == LifecycleFilterAction::Omitted
         }));
@@ -3092,11 +2899,9 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        ) -> Result<CanonicalCandidates, CustomError> {
             lock(&self.searches)?.push(query.clone());
-            let mut candidates = self.candidates.clone();
-            candidates.truncate(query.limit);
-            Ok(candidates)
+            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
         async fn list_candidate_diagnostics(

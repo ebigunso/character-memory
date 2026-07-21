@@ -259,7 +259,29 @@ impl VectorCandidateMatch {
     }
 }
 
-pub(crate) fn canonicalize_vector_candidates(
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CanonicalCandidates(Vec<VectorCandidateMatch>);
+
+impl CanonicalCandidates {
+    pub(crate) fn new(candidates: impl IntoIterator<Item = VectorCandidateMatch>) -> Self {
+        Self(canonicalize_vector_candidates(candidates))
+    }
+
+    pub(crate) fn truncated(mut self, limit: usize) -> Self {
+        self.0.truncate(limit);
+        self
+    }
+}
+
+impl std::ops::Deref for CanonicalCandidates {
+    type Target = [VectorCandidateMatch];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn canonicalize_vector_candidates(
     candidates: impl IntoIterator<Item = VectorCandidateMatch>,
 ) -> Vec<VectorCandidateMatch> {
     let mut by_identity = HashMap::new();
@@ -366,7 +388,7 @@ mod tests {
             VectorCandidateMatch::new(episode_id, ObjectType::Episode, VectorSurface::Summary, 0.9),
         ];
 
-        let canonical = canonicalize_vector_candidates(candidates);
+        let canonical = CanonicalCandidates::new(candidates);
 
         assert_eq!(canonical.len(), 2);
         assert_eq!(canonical[0].object_id, episode_id);

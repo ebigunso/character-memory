@@ -1127,7 +1127,7 @@ mod tests {
     use crate::domain::{Episode, Modality, Observation};
     use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind};
     use crate::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery};
     use crate::ports::retrieval_stats::{
@@ -2688,8 +2688,8 @@ mod tests {
         async fn search_candidates(
             &self,
             _query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new([]))
         }
 
         async fn list_candidate_diagnostics(
@@ -2825,7 +2825,7 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        ) -> Result<CanonicalCandidates, CustomError> {
             self.inner.search_candidates(query).await
         }
 

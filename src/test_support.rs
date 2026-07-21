@@ -20,9 +20,9 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateDiagnosticRecord,
-    VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
-    VectorRecordEmbedding, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
+    VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding,
+    VectorSurface, VectorTimeField, VectorTimeRangeFilter,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -116,9 +116,9 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+    ) -> Result<CanonicalCandidates, CustomError> {
         let records = lock(&self.records)?;
-        let mut matches: Vec<_> = records
+        let matches: Vec<_> = records
             .iter()
             .filter(|record| {
                 query.object_types.is_empty() || query.object_types.contains(&record.object_type)
@@ -134,10 +134,7 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             })
             .collect();
 
-        matches = canonicalize_vector_candidates(matches);
-        matches.truncate(query.limit);
-
-        Ok(matches)
+        Ok(CanonicalCandidates::new(matches).truncated(query.limit))
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {

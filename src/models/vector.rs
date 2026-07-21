@@ -7,7 +7,7 @@ mod record;
 // Candidate query builders are used by adapter/test subsets; remove when all callers import concrete modules.
 #[allow(unused_imports)]
 pub(crate) use candidate_record::{
-    canonicalize_vector_candidates, default_vector_candidate_object_types, EmbeddingInput,
+    default_vector_candidate_object_types, CanonicalCandidates, EmbeddingInput,
     VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
     VectorSurface, VectorTimeField, VectorTimeRangeFilter,
 };

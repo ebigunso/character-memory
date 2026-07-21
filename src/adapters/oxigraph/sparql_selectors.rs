@@ -58,6 +58,10 @@ impl<'a> SparqlGraphSelectors<'a> {
                 .map(|object_type| enum_value(*object_type)),
         );
         let ref_values = sparql_object_ref_values(&query.object_refs);
+        let limit_clause = query
+            .limit
+            .map(|limit| format!("LIMIT {limit}"))
+            .unwrap_or_default();
         let select_query = format!(
             r#"
             SELECT DISTINCT ?id ?objectType WHERE {{
@@ -69,21 +73,19 @@ impl<'a> SparqlGraphSelectors<'a> {
                          <{object_type}> ?objectType .
               }}
             }}
-            ORDER BY ?id ?objectType
+            ORDER BY ?id
+              (IF(?objectType = "episode", 0,
+                IF(?objectType = "observation", 1,
+                  IF(?objectType = "entity", 2,
+                    IF(?objectType = "memory_thread", 3,
+                      IF(?objectType = "derived_memory", 4, 5))))))
+            {limit_clause}
             "#,
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
         );
 
-        let mut refs = self.select_object_refs(&select_query)?;
-
-        refs.retain(|object_ref| object_matches_query(*object_ref, query));
-        sort_object_refs(&mut refs);
-        refs.dedup();
-        if let Some(limit) = query.limit {
-            refs.truncate(limit);
-        }
-        Ok(refs)
+        self.select_object_refs(&select_query)
     }
 
     pub(crate) fn select_derived_memories_by_provenance(
@@ -375,12 +377,6 @@ impl<'a> SparqlGraphSelectors<'a> {
     }
 }
 
-fn object_matches_query(object_ref: MemoryObjectRef, query: &GraphObjectQuery) -> bool {
-    (query.object_refs.is_empty() || query.object_refs.contains(&object_ref))
-        && (query.object_ids.is_empty() || query.object_ids.contains(&object_ref.id))
-        && (query.object_types.is_empty() || query.object_types.contains(&object_ref.object_type))
-}
-
 fn memory_id_binding(solution: &QuerySolution, name: &str) -> Result<MemoryId, CustomError> {
     let value = literal_binding(solution, name)?;
     value.parse::<MemoryId>().map_err(|error| {
@@ -484,14 +480,6 @@ fn enum_value(value: impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
-fn sort_object_refs(refs: &mut [MemoryObjectRef]) {
-    refs.sort_by_key(|object_ref| stable_node_key(object_ref.id, object_ref.object_type));
-}
-
-fn stable_node_key(object_id: MemoryId, object_type: ObjectType) -> (MemoryId, u8) {
-    (object_id, object_type_rank(object_type))
-}
-
 fn object_type_rank(object_type: ObjectType) -> u8 {
     match object_type {
         ObjectType::Episode => 0,
@@ -562,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn sparql_selectors_apply_limit_after_stable_rust_ordering() {
+    fn sparql_selectors_apply_limit_after_stable_query_ordering() {
         let store = Store::new().unwrap();
         let fixtures = representative_fixtures();
         let mut entity_with_episode_id = fixtures.project_entity.clone();

@@ -455,7 +455,7 @@ mod tests {
     use crate::domain::{DerivedType, EntityType, ObjectType, RelationType, RetentionState};
     use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause};
     use crate::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
     use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
@@ -1128,8 +1128,8 @@ mod tests {
         async fn search_candidates(
             &self,
             _query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new([]))
         }
 
         async fn list_candidate_diagnostics(

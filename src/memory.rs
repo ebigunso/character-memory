@@ -170,8 +170,8 @@ mod tests {
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{EntityType, ObjectType, RelationType};
     use crate::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
-        VectorSurface,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
+        VectorRecordEmbedding, VectorSurface,
     };
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
@@ -497,12 +497,12 @@ mod tests {
             .trace
             .as_ref()
             .unwrap()
-            .lifecycle_filter_decisions
+            .graph_relations
             .iter()
-            .any(|decision| {
-                decision.object.id == fixtures.user_preference.id
-                    && decision.superseded_by.contains(&replacement_id)
-                    && decision.action == LifecycleFilterAction::Included
+            .any(|relation| {
+                relation.from.id == replacement_id
+                    && relation.to.id == fixtures.user_preference.id
+                    && relation.relation == RelationType::Supersedes
             }));
     }
 
@@ -1037,10 +1037,8 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            let mut candidates = self.candidates.clone();
-            candidates.truncate(query.limit);
-            Ok(candidates)
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
         async fn list_candidate_diagnostics(
@@ -1075,8 +1073,8 @@ mod tests {
         async fn search_candidates(
             &self,
             _query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new([]))
         }
 
         async fn list_candidate_diagnostics(

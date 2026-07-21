@@ -19,7 +19,7 @@ use crate::errors::{
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use crate::models::vector::{
-    canonicalize_vector_candidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
+    CanonicalCandidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
     VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
     VectorTimeField, VectorTimeRangeFilter,
 };
@@ -290,9 +290,9 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+    ) -> Result<CanonicalCandidates, CustomError> {
         if query.limit == 0 {
-            return Ok(Vec::new());
+            return Ok(CanonicalCandidates::new([]));
         }
 
         // Fetch past K until the boundary tie is closed. Growth is bounded by
@@ -306,7 +306,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         loop {
             let fetched = self.search_candidate_batch(query, fetch_limit).await?;
             let fetched_count = fetched.len();
-            let mut candidates = canonicalize_vector_candidates(fetched);
+            let candidates = CanonicalCandidates::new(fetched);
 
             match tie_cohort_fetch_decision(
                 query.limit,
@@ -317,8 +317,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             ) {
                 TieCohortFetchDecision::Grow(next_limit) => fetch_limit = next_limit,
                 TieCohortFetchDecision::Return | TieCohortFetchDecision::ReturnAtBound => {
-                    candidates.truncate(query.limit);
-                    return Ok(candidates);
+                    return Ok(candidates.truncated(query.limit));
                 }
             }
         }
@@ -1331,7 +1330,7 @@ mod tests {
             scored_point(first_tied_id, ObjectType::DerivedMemory, 0.42),
         ];
 
-        let matches = canonicalize_vector_candidates(
+        let matches = CanonicalCandidates::new(
             points
                 .into_iter()
                 .map(scored_point_to_match)
@@ -1360,7 +1359,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let mut candidates = canonicalize_vector_candidates(fetched);
+        let candidates = CanonicalCandidates::new(fetched);
         let fetch_bound = candidates.len();
 
         assert_eq!(
@@ -1374,7 +1373,7 @@ mod tests {
             TieCohortFetchDecision::ReturnAtBound
         );
 
-        candidates.truncate(admitted_limit);
+        let candidates = candidates.truncated(admitted_limit);
         assert_eq!(
             candidates
                 .iter()
