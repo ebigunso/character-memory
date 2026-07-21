@@ -124,7 +124,8 @@ pub enum SectionAssignmentReason {
 
 pub struct SectionScoreComponents {
     pub final_score: f32,
-    pub vector_score: Option<f32>,
+    pub vector_score: Option<f32>,                          // the EFFECTIVE vector input used by scoring
+    pub vector_score_source: Option<SectionVectorScoreSource>, // DirectMatch | DerivedFromRoot { root_score } (Amendment 11)
     pub graph_score: Option<f32>,
     pub salience_score: Option<f32>,
 }
@@ -318,3 +319,4 @@ These rulings, recorded in the plan Decision Log at the time they were made, ame
 10. HttpConnect classification exception (rules a verified external constraint, thesis-audit F-02): qdrant-client 1.17.0 irretrievably erases the tonic transport source (`channel_pool.rs` wraps it into `Status::internal(format!("Failed to connect to {}: {:?}", ...))`), so no structural downcast can exist at our boundary.
 The adapter-contained prefix normalization is a ruled, documented exception — cited at the classification site, pinned by a canary test whose failure means the upstream message contract drifted, and retired automatically when a qdrant-client upgrade preserves the source (checked on every dependency bump).
 Forking the client for one error path was rejected on cost; the tripwire's requirement is that unavoidable workarounds be ruled and visible, never silent.
+11. Score-breakdown reconstruction invariant (rules the lossy-breakdown review finding): SectionScoreComponents publishes the EFFECTIVE vector input used by scoring plus typed provenance (`vector_score_source`: DirectMatch | DerivedFromRoot { root_score }), and max-merge keeps provenance tied to the winning component; published components must reconstruct the published final_score for both direct and derived rows, enforced by a production-path regression.
