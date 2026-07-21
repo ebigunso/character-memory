@@ -5,7 +5,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{ObjectType, RelationType};
-use crate::errors::CustomError;
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::EmbeddingModel;
 
 #[derive(Debug, Deserialize)]
@@ -84,9 +84,14 @@ impl GraphStoreMode {
         match value {
             "persistent" => Ok(Self::Persistent),
             "in_memory" => Ok(Self::InMemory),
-            other => Err(CustomError::ConfigParseError(format!(
-                "GRAPH_STORE_MODE must be persistent or in_memory, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["GRAPH_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "persistent or in_memory",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
     }
 }
@@ -114,9 +119,14 @@ impl RetrievalStatsStoreMode {
         match value {
             "sqlite" => Ok(Self::Sqlite),
             "in_memory" => Ok(Self::InMemory),
-            other => Err(CustomError::ConfigParseError(format!(
-                "RETRIEVAL_STATS_STORE_MODE must be sqlite or in_memory, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "sqlite or in_memory",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
     }
 }
@@ -132,9 +142,14 @@ impl RetrievalStatsHealthFailMode {
     fn parse(value: &str) -> Result<Self, CustomError> {
         match value {
             "conservative" => Ok(Self::Conservative),
-            other => Err(CustomError::ConfigParseError(format!(
-                "RETRIEVAL_STATS_HEALTH_FAIL_MODE must be conservative, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_HEALTH_FAIL_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "conservative",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
     }
 }
@@ -279,17 +294,23 @@ impl Settings {
     pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
         let configured_path = self.oxigraph_path.expose_secret();
         if configured_path.contains("://") {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_PATH must be a local filesystem path for persistent graph mode"
-                    .to_owned(),
-            ));
+            return Err(ConfigValidationError {
+                keys: vec!["OXIGRAPH_PATH"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a local filesystem path",
+                    actual: configured_path.to_owned(),
+                },
+            }
+            .into());
         }
 
         let path = Path::new(configured_path);
         if path.as_os_str().is_empty() {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_PATH must be a filesystem path for persistent graph mode".to_owned(),
-            ));
+            return Err(ConfigValidationError {
+                keys: vec!["OXIGRAPH_PATH"],
+                reason: ConfigValidationReason::MissingValue,
+            }
+            .into());
         }
         Ok(path.to_path_buf())
     }
@@ -317,14 +338,7 @@ impl Settings {
     fn validate_fanout_settings(&self) -> Result<(), CustomError> {
         self.retrieval.fanout.validate_supported_targets()?;
         for (relation, object_type, budget) in self.get_retrieval_fanout_budgets() {
-            validate_fanout_budget(
-                &format!(
-                    "retrieval.fanout.{}.{}",
-                    fanout_relation_name(relation),
-                    fanout_object_type_name(object_type)
-                ),
-                budget,
-            )?;
+            validate_fanout_budget(fanout_budget_name(relation, object_type), budget)?;
         }
         Ok(())
     }
@@ -378,13 +392,18 @@ impl RetrievalFanoutSettings {
 }
 
 fn reject_unsupported_fanout_target(
-    name: &str,
+    name: &'static str,
     budget: Option<FanoutBudgetSettings>,
 ) -> Result<(), CustomError> {
     if budget.is_some() {
-        return Err(CustomError::ConfigParseError(format!(
-            "unsupported retrieval fanout target: {name}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "an implemented retrieval fanout target",
+                actual: name.to_owned(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
@@ -492,8 +511,8 @@ fn load_env_fanout_settings() -> Result<RetrievalFanoutSettings, CustomError> {
 }
 
 fn parse_env_fanout_budget(
-    min_name: &str,
-    max_name: &str,
+    min_name: &'static str,
+    max_name: &'static str,
 ) -> Result<Option<FanoutBudgetSettings>, CustomError> {
     let min_value = env::var(min_name).ok();
     let max_value = env::var(max_name).ok();
@@ -507,9 +526,14 @@ fn parse_env_fanout_budget(
             validate_fanout_budget(fanout_env_budget_name(min_name, max_name), budget)?;
             Ok(Some(budget))
         }
-        _ => Err(CustomError::ConfigParseError(format!(
-            "{min_name} and {max_name} must be provided together"
-        ))),
+        _ => Err(ConfigValidationError {
+            keys: vec![min_name, max_name],
+            reason: ConfigValidationReason::PairedKeyViolation {
+                first: min_name,
+                second: max_name,
+            },
+        }
+        .into()),
     }
 }
 
@@ -526,51 +550,57 @@ fn parse_usize(name: &str, value: &str) -> Result<usize, CustomError> {
     })
 }
 
-fn parse_positive_f64(name: &str, value: &str) -> Result<f64, CustomError> {
+fn parse_positive_f64(name: &'static str, value: &str) -> Result<f64, CustomError> {
     let parsed = value.parse::<f64>().map_err(|error| {
         CustomError::ConfigParseError(format!("{name} must be a finite positive number: {error}"))
     })?;
-    validate_positive_f64(name, parsed).map_err(|_| {
-        CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        ))
-    })?;
+    validate_positive_f64(name, parsed)?;
     Ok(parsed)
 }
 
-fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
     if !value.is_finite() || value <= 0.0 {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "a finite positive number",
+                actual: value.to_string(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
 
-fn validate_fanout_budget(name: &str, budget: FanoutBudgetSettings) -> Result<(), CustomError> {
+fn validate_fanout_budget(
+    name: &'static str,
+    budget: FanoutBudgetSettings,
+) -> Result<(), CustomError> {
     if budget.min > budget.max {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name}.min must be less than or equal to {name}.max, got min={} max={}",
-            budget.min, budget.max
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "min <= max",
+                actual: format!("min={} max={}", budget.min, budget.max),
+            },
+        }
+        .into());
     }
     Ok(())
 }
 
-fn fanout_relation_name(relation: RelationType) -> &'static str {
-    match relation {
-        RelationType::About => "about_entity",
-        RelationType::Involves => "participant_entity",
-        RelationType::PartOfThread => "part_of_thread",
-        _ => "unsupported_relation",
-    }
-}
-
-fn fanout_object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::Episode => "episode",
-        _ => "unsupported_object_type",
+fn fanout_budget_name(relation: RelationType, object_type: ObjectType) -> &'static str {
+    match (relation, object_type) {
+        (RelationType::About, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.about_entity.derived_memory"
+        }
+        (RelationType::Involves, ObjectType::Episode) => {
+            "retrieval.fanout.participant_entity.episode"
+        }
+        (RelationType::PartOfThread, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.part_of_thread.derived_memory"
+        }
+        _ => unreachable!("unsupported configured fanout target: {relation:?} {object_type:?}"),
     }
 }
 
@@ -711,13 +741,19 @@ mod tests {
 
         let settings = Settings::new(external_config).unwrap();
         let error = settings.get_oxigraph_path().unwrap_err();
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
         assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
-        assert!(message.contains("OXIGRAPH_PATH"));
-        assert!(message.contains("local filesystem path"));
+        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "a local filesystem path",
+                actual: "http://localhost:7878".to_owned(),
+            }
+        );
     }
 
     #[test]
@@ -824,11 +860,19 @@ mod tests {
 
         let result = Settings::new(external_config);
 
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("retrieval.fanout.about_entity.derived_memory")
-        ));
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout.about_entity.derived_memory"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "min <= max",
+                    actual: "min=9 max=8".to_owned(),
+                },
+            }
+        );
     }
 
     #[test]
@@ -856,11 +900,19 @@ mod tests {
 
             let result = Settings::new(external_config);
 
-            assert!(
-                matches!(result, Err(CustomError::ConfigParseError(message))
-                    if message.contains("unsupported retrieval fanout target")
-                        && message.contains(target)),
-                "{target} should be rejected"
+            let Err(CustomError::ConfigValidation(error)) = result else {
+                panic!("expected configuration validation error for {target}");
+            };
+            assert_eq!(
+                error,
+                ConfigValidationError {
+                    keys: vec![target],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "an implemented retrieval fanout target",
+                        actual: target.to_owned(),
+                    },
+                },
+                "{target} should be rejected",
             );
         }
     }
@@ -875,13 +927,19 @@ mod tests {
             FanoutBudgetSettings::new(9, 8),
         );
 
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY.min")
-                    && !message.contains("_MIN/")
-                    && !message.contains("_MAX.min")
-        ));
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "min <= max",
+                    actual: "min=9 max=8".to_owned(),
+                },
+            }
+        );
     }
 
     #[test]
@@ -913,8 +971,17 @@ mod tests {
             let result = Settings::new(external_config);
 
             assert!(
-                matches!(result, Err(CustomError::ConfigParseError(_))),
-                "{key}={value:?} should be rejected"
+                matches!(
+                    result,
+                    Err(CustomError::ConfigValidation(ConfigValidationError {
+                        keys,
+                        reason: ConfigValidationReason::OutOfDomain {
+                            expected: "a finite positive number",
+                            ..
+                        },
+                    })) if keys == vec![key]
+                ),
+                "{key}={value:?} should be rejected",
             );
         }
     }

@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use character_memory::test_utils::load_test_settings;
-use character_memory::{CustomError, EmbeddingProvider, VectorDatabaseError};
+use character_memory::{
+    CustomError, EmbeddingProvider, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
+};
 use qdrant_client::Qdrant;
 use uuid::Uuid;
 
@@ -70,22 +72,25 @@ pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
     }
 
     let message = error.message.to_ascii_lowercase();
-    error
-        .status
-        .as_deref()
-        .is_some_and(|status| status.to_ascii_lowercase().contains("unavailable"))
-        || (error.kind == "response"
+    error.status == Some(TransportStatus::Unavailable)
+        || (error.kind == VectorDatabaseErrorKind::Response
             && message.contains("failed to connect")
             && message.contains("tcp connect error"))
         || matches!(
-            error.kind.as_str(),
-            "reqwest::connect"
-                | "reqwest::timeout"
-                | "io::ConnectionRefused"
-                | "io::ConnectionReset"
-                | "io::ConnectionAborted"
-                | "io::NotConnected"
-                | "io::TimedOut"
+            error.kind,
+            VectorDatabaseErrorKind::HttpConnect | VectorDatabaseErrorKind::HttpTimeout
+        )
+        || matches!(
+            &error.kind,
+            VectorDatabaseErrorKind::Io { io_kind }
+                if matches!(
+                    io_kind.as_str(),
+                    "ConnectionRefused"
+                        | "ConnectionReset"
+                        | "ConnectionAborted"
+                        | "NotConnected"
+                        | "TimedOut"
+                )
         )
 }
 

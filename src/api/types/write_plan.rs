@@ -666,7 +666,8 @@ impl RememberDiagnostics {
     }
 
     fn refresh_validation_warning_messages(&mut self) {
-        const VALIDATION_WARNING_CODE: &str = "write_plan_validation_warning";
+        const VALIDATION_WARNING_CODE: RememberDiagnosticCode =
+            RememberDiagnosticCode::WritePlanValidationWarning;
 
         let warning_messages = self
             .validations
@@ -695,22 +696,33 @@ pub struct CandidateCount {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberDiagnostic {
     pub severity: DiagnosticSeverity,
-    pub code: String,
+    pub code: RememberDiagnosticCode,
     pub message: String,
 }
 
 impl RememberDiagnostic {
     pub fn new(
         severity: DiagnosticSeverity,
-        code: impl Into<String>,
+        code: RememberDiagnosticCode,
         message: impl Into<String>,
     ) -> Self {
         Self {
             severity,
-            code: code.into(),
+            code,
             message: message.into(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RememberDiagnosticCode {
+    WritePlanValidationWarning,
+    VectorIndexingFailed,
+    StatsUpdateFailed,
+    StatsUpdateHealthCheckFailed,
+    Prepared,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -919,7 +931,7 @@ mod tests {
         );
         assert_eq!(
             diagnostics.messages[0].code,
-            "write_plan_validation_warning"
+            RememberDiagnosticCode::WritePlanValidationWarning
         );
         assert!(matches!(
             diagnostics.validations[0].warnings.as_slice(),
@@ -957,7 +969,7 @@ mod tests {
                     .with_candidate_count(MemoryCandidateKind::Episode, 1)
                     .with_message(RememberDiagnostic::new(
                         DiagnosticSeverity::Info,
-                        "prepared",
+                        RememberDiagnosticCode::Prepared,
                         "prepared one candidate",
                     )),
             );

@@ -5,7 +5,7 @@ use crate::api::types::{
     SelectivityTrace,
 };
 use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
-use crate::errors::CustomError;
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 use crate::ports::retrieval_stats::{
@@ -47,9 +47,14 @@ impl RetrievalSelectivityPolicy {
                 spec.min_fanout = min_fanout;
                 spec.max_fanout = max_fanout;
             } else {
-                return Err(CustomError::ConfigParseError(format!(
-                    "unsupported retrieval fanout override for relation={relation:?} object_type={object_type:?}"
-                )));
+                return Err(ConfigValidationError {
+                    keys: vec!["retrieval.fanout"],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "an implemented retrieval fanout target",
+                        actual: format!("{relation:?}->{object_type:?}"),
+                    },
+                }
+                .into());
             }
         }
         Ok(Self {
@@ -258,11 +263,16 @@ pub(crate) async fn selectivity_plan_for_candidate(
     Ok(plan)
 }
 
-fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
     if !value.is_finite() || value <= 0.0 {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "a finite positive number",
+                actual: value.to_string(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
@@ -274,11 +284,31 @@ fn validate_fanout_budget(
     max_fanout: usize,
 ) -> Result<(), CustomError> {
     if min_fanout > max_fanout {
-        return Err(CustomError::ConfigParseError(format!(
-            "retrieval fanout budget for {relation:?}->{object_type:?} must have min <= max, got min={min_fanout} max={max_fanout}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![fanout_config_key(relation, object_type)],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "min <= max",
+                actual: format!("min={min_fanout} max={max_fanout}"),
+            },
+        }
+        .into());
     }
     Ok(())
+}
+
+fn fanout_config_key(relation: RelationType, object_type: ObjectType) -> &'static str {
+    match (relation, object_type) {
+        (RelationType::About, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.about_entity.derived_memory"
+        }
+        (RelationType::Involves, ObjectType::Episode) => {
+            "retrieval.fanout.participant_entity.episode"
+        }
+        (RelationType::PartOfThread, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.part_of_thread.derived_memory"
+        }
+        _ => "retrieval.fanout",
+    }
 }
 
 pub(crate) fn selectivity_score(entity_count: u64, global_count: u64, alpha: f64) -> f64 {
@@ -472,12 +502,23 @@ mod tests {
 
         assert!(matches!(
             invalid_alpha,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("selectivity_smoothing_alpha")
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a finite positive number",
+                    ..
+                },
+            })) if keys == vec!["selectivity_smoothing_alpha"]
         ));
         assert!(matches!(
             invalid_gamma,
-            Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a finite positive number",
+                    ..
+                },
+            })) if keys == vec!["selectivity_gamma"]
         ));
     }
 
@@ -525,8 +566,18 @@ mod tests {
             [(RelationType::About, ObjectType::DerivedMemory, 9, 8)],
         );
 
-        assert!(
-            matches!(result, Err(CustomError::ConfigParseError(message)) if message.contains("min <= max"))
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout.about_entity.derived_memory"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "min <= max",
+                    actual: "min=9 max=8".to_owned(),
+                },
+            }
         );
     }
 
@@ -538,13 +589,19 @@ mod tests {
             [(RelationType::About, ObjectType::Episode, 0, 8)],
         );
 
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("unsupported retrieval fanout override")
-                    && message.contains("About")
-                    && message.contains("Episode")
-        ));
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "an implemented retrieval fanout target",
+                    actual: "About->Episode".to_owned(),
+                },
+            }
+        );
     }
 
     #[tokio::test]

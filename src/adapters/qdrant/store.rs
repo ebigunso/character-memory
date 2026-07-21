@@ -14,7 +14,10 @@ use qdrant_client::qdrant::{
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
 use crate::domain::{MemoryId, ObjectType, RetentionState};
-use crate::errors::{CustomError, VectorDatabaseError};
+use crate::errors::{
+    CollectionCompatibilityError, CollectionMismatch, CustomError, TransportStatus,
+    VectorDatabaseError, VectorDatabaseErrorKind,
+};
 use crate::models::vector::{
     canonicalize_vector_candidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
     VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
@@ -222,9 +225,11 @@ fn validate_collection_vector_config(
     vectors_config: Option<&VectorsConfig>,
 ) -> Result<(), CustomError> {
     let Some(vectors_config) = vectors_config else {
-        return Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' is missing vector configuration; expected unnamed vectors with size {expected_vector_size}."
-        )));
+        return Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::MissingVectorConfiguration,
+        }
+        .into());
     };
 
     match vectors_config.config.as_ref() {
@@ -234,31 +239,42 @@ fn validate_collection_vector_config(
         {
             Ok(())
         }
-        Some(vectors_config::Config::Params(params))
-            if params.size == expected_vector_size =>
-        {
-            Err(CustomError::DatabaseError(format!(
-                "Qdrant collection '{collection_name}' vector distance mismatch: expected Cosine, found {}.",
-                Distance::try_from(params.distance)
-                    .map(|distance| distance.as_str_name().to_owned())
-                    .unwrap_or_else(|_| params.distance.to_string())
-            )))
+        Some(vectors_config::Config::Params(params)) if params.size == expected_vector_size => {
+            Err(CollectionCompatibilityError {
+                collection: collection_name.to_owned(),
+                mismatch: CollectionMismatch::Distance {
+                    expected: "Cosine",
+                    actual: Distance::try_from(params.distance)
+                        .map(|distance| distance.as_str_name().to_owned())
+                        .unwrap_or_else(|_| params.distance.to_string()),
+                },
+            }
+            .into())
         }
-        Some(vectors_config::Config::Params(params)) => Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' vector size mismatch: expected {expected_vector_size}, found {}.",
-            params.size
-        ))),
+        Some(vectors_config::Config::Params(params)) => Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::VectorSize {
+                expected: expected_vector_size,
+                actual: params.size,
+            },
+        }
+        .into()),
         Some(vectors_config::Config::ParamsMap(params_map)) => {
             let mut vector_names = params_map.map.keys().cloned().collect::<Vec<_>>();
             vector_names.sort();
-            Err(CustomError::DatabaseError(format!(
-                "Qdrant collection '{collection_name}' uses named vectors ({}) but CharacterMemory expects an unnamed vector with size {expected_vector_size}.",
-                vector_names.join(", ")
-            )))
+            Err(CollectionCompatibilityError {
+                collection: collection_name.to_owned(),
+                mismatch: CollectionMismatch::NamedVectors {
+                    names: vector_names,
+                },
+            }
+            .into())
         }
-        None => Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' vector configuration is empty; expected unnamed vectors with size {expected_vector_size}."
-        ))),
+        None => Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::EmptyVectorConfiguration,
+        }
+        .into()),
     }
 }
 
@@ -368,8 +384,8 @@ fn qdrant_error(error: QdrantError) -> CustomError {
     let vector_error = match error {
         QdrantError::ResponseError { status } => VectorDatabaseError::new(
             "qdrant",
-            "response",
-            Some(status.code().to_string()),
+            VectorDatabaseErrorKind::Response,
+            Some(transport_status(status.code() as i32)),
             status.message().to_owned(),
         ),
         QdrantError::ResourceExhaustedError {
@@ -377,47 +393,84 @@ fn qdrant_error(error: QdrantError) -> CustomError {
             retry_after_seconds,
         } => VectorDatabaseError::new(
             "qdrant",
-            "resource_exhausted",
-            Some(status.code().to_string()),
+            VectorDatabaseErrorKind::ResourceExhausted,
+            Some(transport_status(status.code() as i32)),
             status.message().to_owned(),
         )
         .with_retry_after_seconds(retry_after_seconds),
         QdrantError::ConversionError(message) => {
-            VectorDatabaseError::new("qdrant", "conversion", None, message)
+            VectorDatabaseError::new("qdrant", VectorDatabaseErrorKind::Conversion, None, message)
         }
-        QdrantError::InvalidUri(error) => {
-            VectorDatabaseError::new("qdrant", "invalid_uri", None, error.to_string())
-        }
-        QdrantError::NoSnapshotFound(collection) => {
-            VectorDatabaseError::new("qdrant", "no_snapshot_found", None, collection)
-        }
+        QdrantError::InvalidUri(error) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::InvalidUri,
+            None,
+            error.to_string(),
+        ),
+        QdrantError::NoSnapshotFound(collection) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::NoSnapshotFound,
+            None,
+            collection,
+        ),
         QdrantError::Io(error) => VectorDatabaseError::new(
             "qdrant",
-            format!("io::{:?}", error.kind()),
+            VectorDatabaseErrorKind::Io {
+                io_kind: format!("{:?}", error.kind()),
+            },
             None,
             error.to_string(),
         ),
         QdrantError::Reqwest(error) => {
             let kind = if error.is_timeout() {
-                "reqwest::timeout"
+                VectorDatabaseErrorKind::HttpTimeout
             } else if error.is_connect() {
-                "reqwest::connect"
+                VectorDatabaseErrorKind::HttpConnect
             } else if error.is_status() {
-                "reqwest::status"
+                VectorDatabaseErrorKind::HttpStatus
             } else {
-                "reqwest"
+                VectorDatabaseErrorKind::Http
             };
             VectorDatabaseError::new("qdrant", kind, None, error.to_string())
         }
-        QdrantError::JsonToPayload(value) => {
-            VectorDatabaseError::new("qdrant", "json_to_payload", None, value.to_string())
-        }
-        QdrantError::PayloadDeserialization(error) => {
-            VectorDatabaseError::new("qdrant", "payload_deserialization", None, error.to_string())
-        }
+        QdrantError::JsonToPayload(value) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::JsonToPayload,
+            None,
+            value.to_string(),
+        ),
+        QdrantError::PayloadDeserialization(error) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::PayloadDeserialization,
+            None,
+            error.to_string(),
+        ),
     };
 
     CustomError::VectorDatabaseError(vector_error)
+}
+
+fn transport_status(code: i32) -> TransportStatus {
+    match code {
+        0 => TransportStatus::Ok,
+        1 => TransportStatus::Cancelled,
+        2 => TransportStatus::Unknown,
+        3 => TransportStatus::InvalidArgument,
+        4 => TransportStatus::DeadlineExceeded,
+        5 => TransportStatus::NotFound,
+        6 => TransportStatus::AlreadyExists,
+        7 => TransportStatus::PermissionDenied,
+        8 => TransportStatus::ResourceExhausted,
+        9 => TransportStatus::FailedPrecondition,
+        10 => TransportStatus::Aborted,
+        11 => TransportStatus::OutOfRange,
+        12 => TransportStatus::Unimplemented,
+        13 => TransportStatus::Internal,
+        14 => TransportStatus::Unavailable,
+        15 => TransportStatus::DataLoss,
+        16 => TransportStatus::Unauthenticated,
+        other => TransportStatus::Unrecognized(other.to_string()),
+    }
 }
 
 fn qdrant_candidate_config(url: &str) -> QdrantConfig {
@@ -866,6 +919,24 @@ mod tests {
         assert!(config.keep_alive_while_idle);
     }
 
+    #[test]
+    fn qdrant_response_error_preserves_typed_transport_status() {
+        let error = qdrant_error(QdrantError::ResponseError {
+            status: tonic::Status::unavailable("offline"),
+        });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                backend: "qdrant",
+                kind: VectorDatabaseErrorKind::Response,
+                status: Some(TransportStatus::Unavailable),
+                message,
+                retry_after_seconds: None,
+            }) if message == "offline"
+        ));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "requires live Qdrant at QDRANT_CONNECTION_STRING or 127.0.0.1:6334"]
     async fn qdrant_channel_survives_idle_gap_before_mutating_upsert() {
@@ -960,10 +1031,13 @@ mod tests {
             .expect_err("mismatched existing collection should fail");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("memories")
-                    && message.contains("expected 3072")
-                    && message.contains("found 1536")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: 3072,
+                    actual: 1536,
+                },
+            }) if collection == "memories"
         ));
     }
 
@@ -981,10 +1055,13 @@ mod tests {
             .expect_err("same-size collection with wrong distance should fail");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("memories")
-                    && message.contains("expected Cosine")
-                    && message.contains("Euclid")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::Distance {
+                    expected: "Cosine",
+                    actual,
+                },
+            }) if collection == "memories" && actual == "Euclid"
         ));
     }
 
@@ -1007,8 +1084,10 @@ mod tests {
             .expect_err("named vectors should not be accepted for unnamed vector store");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("named vectors") && message.contains("content")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::NamedVectors { names },
+            }) if collection == "memories" && names == vec!["content"]
         ));
     }
 

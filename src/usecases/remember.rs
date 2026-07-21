@@ -1,8 +1,8 @@
 // Remember pipeline used by the public facade and internal tests. Some
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
-    CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnostics, RememberWritePlan,
-    RepairMarker, StatsUpdateStatus,
+    CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnosticCode,
+    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
 use crate::domain::{
     CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
@@ -202,7 +202,7 @@ where
                         .clone()
                         .with_message(RememberDiagnostic::new(
                             DiagnosticSeverity::Warning,
-                            "vector_indexing_failed",
+                            RememberDiagnosticCode::VectorIndexingFailed,
                             failure.error_message.clone(),
                         ));
                 outcome.vector_indexing_failure = Some(failure);
@@ -237,7 +237,7 @@ where
                         .clone()
                         .with_message(RememberDiagnostic::new(
                             DiagnosticSeverity::Warning,
-                            "stats_update_failed",
+                            RememberDiagnosticCode::StatsUpdateFailed,
                             error_message,
                         ));
             }
@@ -258,7 +258,7 @@ where
                         .clone()
                         .with_message(RememberDiagnostic::new(
                             DiagnosticSeverity::Warning,
-                            "stats_update_health_check_failed",
+                            RememberDiagnosticCode::StatsUpdateHealthCheckFailed,
                             error_message,
                         ));
             }

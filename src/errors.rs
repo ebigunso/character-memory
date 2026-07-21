@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
@@ -5,12 +6,57 @@ use crate::domain::{
     LifecyclePolicyKnob, MemoryId, ObjectType,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum VectorDatabaseErrorKind {
+    Response,
+    ResourceExhausted,
+    Conversion,
+    InvalidUri,
+    NoSnapshotFound,
+    Io { io_kind: String },
+    HttpTimeout,
+    HttpConnect,
+    HttpStatus,
+    Http,
+    JsonToPayload,
+    PayloadDeserialization,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TransportStatus {
+    Ok,
+    Cancelled,
+    Unknown,
+    InvalidArgument,
+    DeadlineExceeded,
+    NotFound,
+    AlreadyExists,
+    PermissionDenied,
+    ResourceExhausted,
+    FailedPrecondition,
+    Aborted,
+    OutOfRange,
+    Unimplemented,
+    Internal,
+    Unavailable,
+    DataLoss,
+    Unauthenticated,
+    Unrecognized(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "{backend} error: kind={kind:?} status={status:?} message={message} retry_after_seconds={retry_after_seconds:?}"
+)]
 #[non_exhaustive]
 pub struct VectorDatabaseError {
     pub backend: &'static str,
-    pub kind: String,
-    pub status: Option<String>,
+    pub kind: VectorDatabaseErrorKind,
+    pub status: Option<TransportStatus>,
     pub message: String,
     pub retry_after_seconds: Option<u64>,
 }
@@ -18,13 +64,13 @@ pub struct VectorDatabaseError {
 impl VectorDatabaseError {
     pub(crate) fn new(
         backend: &'static str,
-        kind: impl Into<String>,
-        status: Option<String>,
+        kind: VectorDatabaseErrorKind,
+        status: Option<TransportStatus>,
         message: impl Into<String>,
     ) -> Self {
         Self {
             backend,
-            kind: kind.into(),
+            kind,
             status,
             message: message.into(),
             retry_after_seconds: None,
@@ -37,34 +83,54 @@ impl VectorDatabaseError {
     }
 }
 
-impl std::fmt::Display for VectorDatabaseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (&self.status, self.retry_after_seconds) {
-            (Some(status), Some(retry_after_seconds)) => write!(
-                formatter,
-                "{} error: kind={} status={} message={} retry_after_seconds={}",
-                self.backend, self.kind, status, self.message, retry_after_seconds
-            ),
-            (Some(status), None) => write!(
-                formatter,
-                "{} error: kind={} status={} message={}",
-                self.backend, self.kind, status, self.message
-            ),
-            (None, Some(retry_after_seconds)) => write!(
-                formatter,
-                "{} error: kind={} message={} retry_after_seconds={}",
-                self.backend, self.kind, self.message, retry_after_seconds
-            ),
-            (None, None) => write!(
-                formatter,
-                "{} error: kind={} message={}",
-                self.backend, self.kind, self.message
-            ),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("collection {collection:?} is incompatible: {mismatch}")]
+pub struct CollectionCompatibilityError {
+    pub collection: String,
+    pub mismatch: CollectionMismatch,
 }
 
-impl std::error::Error for VectorDatabaseError {}
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum CollectionMismatch {
+    #[error("missing vector configuration")]
+    MissingVectorConfiguration,
+    #[error("vector size mismatch: expected {expected}, got {actual}")]
+    VectorSize { expected: u64, actual: u64 },
+    #[error("distance mismatch: expected {expected}, got {actual}")]
+    Distance {
+        expected: &'static str,
+        actual: String,
+    },
+    #[error("named vectors are unsupported: {names:?}")]
+    NamedVectors { names: Vec<String> },
+    #[error("vector configuration is empty")]
+    EmptyVectorConfiguration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("configuration validation failed for {keys:?}: {reason}")]
+pub struct ConfigValidationError {
+    pub keys: Vec<&'static str>,
+    pub reason: ConfigValidationReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum ConfigValidationReason {
+    #[error("required value is missing")]
+    MissingValue,
+    #[error("expected {expected}, got {actual:?}")]
+    OutOfDomain {
+        expected: &'static str,
+        actual: String,
+    },
+    #[error("keys {first} and {second} must be provided together")]
+    PairedKeyViolation {
+        first: &'static str,
+        second: &'static str,
+    },
+}
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -77,6 +143,9 @@ pub enum CustomError {
 
     #[error("Configuration parse error: {0}")]
     ConfigParseError(String),
+
+    #[error(transparent)]
+    ConfigValidation(#[from] ConfigValidationError),
 
     #[error("Memory validation error: {0}")]
     MemoryValidation(String),
@@ -100,6 +169,9 @@ pub enum CustomError {
 
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
+
+    #[error(transparent)]
+    CollectionIncompatible(#[from] CollectionCompatibilityError),
 
     #[error("Unsupported schema version for {context}: expected {expected}, got {actual}")]
     UnsupportedSchemaVersion {

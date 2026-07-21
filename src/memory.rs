@@ -241,7 +241,9 @@ mod tests {
             .diagnostics
             .messages
             .iter()
-            .filter(|diagnostic| diagnostic.code == "write_plan_validation_warning")
+            .filter(|diagnostic| {
+                diagnostic.code == RememberDiagnosticCode::WritePlanValidationWarning
+            })
             .collect::<Vec<_>>();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].severity, DiagnosticSeverity::Warning);

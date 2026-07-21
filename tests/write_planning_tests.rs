@@ -28,8 +28,8 @@ use character_memory::{
     CustomError, DerivedMemoryCandidate, DerivedMemoryDraft, DerivedType, EntityDraft, EntityType,
     EpisodeDraft, ExternalSourceReference, IncludedDerivedMemory, MemoryCandidate, MemoryId,
     MemoryLinkCandidate, MemoryLinkDraft, MemoryObjectRef, ObjectType, PrepareOptions,
-    RationaleOrigin, RelationType, RememberInput, RememberOptions, RememberOutcome,
-    RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
+    RationaleOrigin, RelationType, RememberDiagnosticCode, RememberInput, RememberOptions,
+    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
     DEFAULT_SCHEMA_VERSION,
 };
 use config::Config;
@@ -545,7 +545,7 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .diagnostics
         .messages
         .iter()
-        .find(|diagnostic| diagnostic.code == "write_plan_validation_warning")
+        .find(|diagnostic| diagnostic.code == RememberDiagnosticCode::WritePlanValidationWarning)
         .expect("equivalent outcomes should include the warning projection");
     assert_eq!(
         validation_warning.severity,

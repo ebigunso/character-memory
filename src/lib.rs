@@ -29,9 +29,9 @@ pub use crate::api::types::{
     LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleOmissionSummary,
     LifecycleTargetRef, MemoryCandidate, MemoryLinkCandidate, MemoryLinkDraft, MemoryObjectDraft,
     MemoryThreadCandidate, MemoryThreadDraft, ObservationCandidate, ObservationDraft,
-    PrepareOptions, RationaleCategory, RationaleOrigin, RememberDiagnostic, RememberDiagnostics,
-    RememberInput, RememberOptions, RememberOutcome, RememberWritePlan, RepairMarker,
-    ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
+    PrepareOptions, RationaleCategory, RationaleOrigin, RememberDiagnostic, RememberDiagnosticCode,
+    RememberDiagnostics, RememberInput, RememberOptions, RememberOutcome, RememberWritePlan,
+    RepairMarker, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
     RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
     SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
@@ -55,7 +55,11 @@ pub use crate::domain::{
     RetentionState, Stability, ThreadStatus, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION,
     EPISODIC_MEMORY_SCHEMA_VERSION,
 };
-pub use crate::errors::{CustomError, VectorDatabaseError};
+pub use crate::errors::{
+    CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
+    ConfigValidationReason, CustomError, TransportStatus, VectorDatabaseError,
+    VectorDatabaseErrorKind,
+};
 pub use crate::memory::CharacterMemory;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};
 
