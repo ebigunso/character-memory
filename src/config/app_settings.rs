@@ -1,7 +1,6 @@
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
-use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{ObjectType, RelationType};
@@ -114,44 +113,11 @@ pub enum RetrievalStatsStoreMode {
     InMemory,
 }
 
-impl RetrievalStatsStoreMode {
-    fn parse(value: &str) -> Result<Self, CustomError> {
-        match value {
-            "sqlite" => Ok(Self::Sqlite),
-            "in_memory" => Ok(Self::InMemory),
-            other => Err(ConfigValidationError {
-                keys: vec!["RETRIEVAL_STATS_STORE_MODE"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "sqlite or in_memory",
-                    actual: other.to_owned(),
-                },
-            }
-            .into()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalStatsHealthFailMode {
     #[default]
     Conservative,
-}
-
-impl RetrievalStatsHealthFailMode {
-    fn parse(value: &str) -> Result<Self, CustomError> {
-        match value {
-            "conservative" => Ok(Self::Conservative),
-            other => Err(ConfigValidationError {
-                keys: vec!["RETRIEVAL_STATS_HEALTH_FAIL_MODE"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "conservative",
-                    actual: other.to_owned(),
-                },
-            }
-            .into()),
-        }
-    }
 }
 
 impl Settings {
@@ -179,79 +145,6 @@ impl Settings {
         let settings: Self = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
         })?;
-        settings.validate_selectivity_settings()?;
-        settings.validate_fanout_settings()?;
-        Ok(settings)
-    }
-
-    /// Loads settings from environment variables and configuration files using default loaders.
-    ///
-    /// # Description
-    ///
-    /// This function provides a convenient way to load settings using the default environment and configuration loaders.
-    /// If a `.env` file exists in the project root it will be loaded automatically.
-    /// When the file is absent the function relies solely on the current environment variables.
-    ///
-    /// # Important
-    ///
-    /// This function is intended ONLY for use in integration tests and should not be used anywhere else in the codebase.
-    /// For production code, use the `Settings::new()` constructor with an explicitly configured `Config` instance.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A new `Settings` instance with configuration loaded from environment and config files
-    /// - `Err`: A `CustomError` if:
-    ///     - Environment variables are missing or invalid
-    ///     - There are errors parsing the configuration
-    ///
-    pub(crate) fn load() -> Result<Self, CustomError> {
-        dotenvy::dotenv().ok();
-
-        let qdrant_connection_string = env::var("QDRANT_CONNECTION_STRING")
-            .map_err(|e| CustomError::ConfigParseError(format!("QDRANT_CONNECTION_STRING: {e}")))?;
-        let oxigraph_path = env::var("OXIGRAPH_PATH")
-            .map_err(|e| CustomError::ConfigParseError(format!("OXIGRAPH_PATH: {e}")))?;
-        let openai_api_key = env::var("OPENAI_API_KEY")
-            .map_err(|e| CustomError::ConfigParseError(format!("OPENAI_API_KEY: {e}")))?;
-        let embedding_model = env::var("EMBEDDING_MODEL")
-            .map_err(|e| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {e}")))?;
-        let graph_store_mode = env::var("GRAPH_STORE_MODE")
-            .map(|value| GraphStoreMode::parse(&value))
-            .unwrap_or(Ok(GraphStoreMode::Persistent))?;
-        let retrieval_stats_store_mode = env::var("RETRIEVAL_STATS_STORE_MODE")
-            .map(|value| RetrievalStatsStoreMode::parse(&value))
-            .unwrap_or(Ok(RetrievalStatsStoreMode::Sqlite))?;
-        let retrieval_stats_path = env::var("RETRIEVAL_STATS_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| default_retrieval_stats_path());
-        let retrieval_stats_health_fail_mode = env::var("RETRIEVAL_STATS_HEALTH_FAIL_MODE")
-            .map(|value| RetrievalStatsHealthFailMode::parse(&value))
-            .unwrap_or(Ok(RetrievalStatsHealthFailMode::Conservative))?;
-        let selectivity_smoothing_alpha = env::var("SELECTIVITY_SMOOTHING_ALPHA")
-            .map(|value| parse_positive_f64("SELECTIVITY_SMOOTHING_ALPHA", &value))
-            .unwrap_or(Ok(default_selectivity_smoothing_alpha()))?;
-        let selectivity_gamma = env::var("SELECTIVITY_GAMMA")
-            .map(|value| parse_positive_f64("SELECTIVITY_GAMMA", &value))
-            .unwrap_or(Ok(default_selectivity_gamma()))?;
-        let retrieval = RetrievalSettings {
-            fanout: load_env_fanout_settings()?,
-        };
-
-        let settings = Self {
-            qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
-            oxigraph_path: SecretString::new(oxigraph_path.into()),
-            openai_api_key: SecretString::new(openai_api_key.into()),
-            embedding_model: SecretString::new(embedding_model.into()),
-            graph_store_mode,
-            retrieval_stats_store_mode,
-            retrieval_stats_path,
-            retrieval_stats_health_fail_mode,
-            selectivity_smoothing_alpha,
-            selectivity_gamma,
-            retrieval,
-        };
         settings.validate_selectivity_settings()?;
         settings.validate_fanout_settings()?;
         Ok(settings)
@@ -482,80 +375,6 @@ fn upsert_fanout_budget(
     } else {
         budgets.push((relation, object_type, budget));
     }
-}
-
-fn load_env_fanout_settings() -> Result<RetrievalFanoutSettings, CustomError> {
-    Ok(RetrievalFanoutSettings {
-        about_entity: FanoutObjectSettings {
-            derived_memory: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
-            )?,
-            episode: None,
-        },
-        participant_entity: FanoutObjectSettings {
-            derived_memory: None,
-            episode: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MIN",
-                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MAX",
-            )?,
-        },
-        part_of_thread: FanoutObjectSettings {
-            derived_memory: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MAX",
-            )?,
-            episode: None,
-        },
-    })
-}
-
-fn parse_env_fanout_budget(
-    min_name: &'static str,
-    max_name: &'static str,
-) -> Result<Option<FanoutBudgetSettings>, CustomError> {
-    let min_value = env::var(min_name).ok();
-    let max_value = env::var(max_name).ok();
-    match (min_value, max_value) {
-        (None, None) => Ok(None),
-        (Some(min_value), Some(max_value)) => {
-            let budget = FanoutBudgetSettings::new(
-                parse_usize(min_name, &min_value)?,
-                parse_usize(max_name, &max_value)?,
-            );
-            validate_fanout_budget(fanout_env_budget_name(min_name, max_name), budget)?;
-            Ok(Some(budget))
-        }
-        _ => Err(ConfigValidationError {
-            keys: vec![min_name, max_name],
-            reason: ConfigValidationReason::PairedKeyViolation {
-                first: min_name,
-                second: max_name,
-            },
-        }
-        .into()),
-    }
-}
-
-fn fanout_env_budget_name<'a>(min_name: &'a str, max_name: &'a str) -> &'a str {
-    min_name
-        .strip_suffix("_MIN")
-        .filter(|base| max_name == format!("{base}_MAX"))
-        .unwrap_or(min_name)
-}
-
-fn parse_usize(name: &str, value: &str) -> Result<usize, CustomError> {
-    value.parse::<usize>().map_err(|error| {
-        CustomError::ConfigParseError(format!("{name} must be a non-negative integer: {error}"))
-    })
-}
-
-fn parse_positive_f64(name: &'static str, value: &str) -> Result<f64, CustomError> {
-    let parsed = value.parse::<f64>().map_err(|error| {
-        CustomError::ConfigParseError(format!("{name} must be a finite positive number: {error}"))
-    })?;
-    validate_positive_f64(name, parsed)?;
-    Ok(parsed)
 }
 
 fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
@@ -915,31 +734,6 @@ mod tests {
                 "{target} should be rejected",
             );
         }
-    }
-
-    #[test]
-    fn env_fanout_budget_error_uses_base_env_name() {
-        let result = validate_fanout_budget(
-            fanout_env_budget_name(
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
-            ),
-            FanoutBudgetSettings::new(9, 8),
-        );
-
-        let Err(CustomError::ConfigValidation(error)) = result else {
-            panic!("expected configuration validation error");
-        };
-        assert_eq!(
-            error,
-            ConfigValidationError {
-                keys: vec!["RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "min <= max",
-                    actual: "min=9 max=8".to_owned(),
-                },
-            }
-        );
     }
 
     #[test]

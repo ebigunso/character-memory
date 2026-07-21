@@ -1,10 +1,74 @@
 use async_trait::async_trait;
-use character_memory::test_utils::load_test_settings;
 use character_memory::{
-    CustomError, EmbeddingProvider, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
+    CustomError, EmbeddingProvider, Settings, TransportStatus, VectorDatabaseError,
+    VectorDatabaseErrorKind,
 };
+use config::Config;
 use qdrant_client::Qdrant;
 use uuid::Uuid;
+
+pub fn load_test_settings() -> Result<Settings, CustomError> {
+    dotenvy::dotenv().ok();
+
+    let mut builder = Config::builder();
+    for (environment_key, config_key) in [
+        ("QDRANT_CONNECTION_STRING", "qdrant_connection_string"),
+        ("OXIGRAPH_PATH", "oxigraph_path"),
+        ("OPENAI_API_KEY", "openai_api_key"),
+        ("EMBEDDING_MODEL", "embedding_model"),
+    ] {
+        let value = std::env::var(environment_key).map_err(|error| {
+            CustomError::ConfigParseError(format!("{environment_key}: {error}"))
+        })?;
+        builder = builder
+            .set_override(config_key, value)
+            .map_err(config_error)?;
+    }
+
+    for (environment_key, config_key) in [
+        ("GRAPH_STORE_MODE", "graph_store_mode"),
+        ("RETRIEVAL_STATS_STORE_MODE", "retrieval_stats_store_mode"),
+        ("RETRIEVAL_STATS_PATH", "retrieval_stats_path"),
+        (
+            "RETRIEVAL_STATS_HEALTH_FAIL_MODE",
+            "retrieval_stats_health_fail_mode",
+        ),
+        ("SELECTIVITY_SMOOTHING_ALPHA", "selectivity_smoothing_alpha"),
+        ("SELECTIVITY_GAMMA", "selectivity_gamma"),
+        (
+            "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
+            "retrieval.fanout.about_entity.derived_memory.min",
+        ),
+        (
+            "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
+            "retrieval.fanout.about_entity.derived_memory.max",
+        ),
+        (
+            "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MIN",
+            "retrieval.fanout.participant_entity.episode.min",
+        ),
+        (
+            "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MAX",
+            "retrieval.fanout.participant_entity.episode.max",
+        ),
+        (
+            "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MIN",
+            "retrieval.fanout.part_of_thread.derived_memory.min",
+        ),
+        (
+            "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MAX",
+            "retrieval.fanout.part_of_thread.derived_memory.max",
+        ),
+    ] {
+        if let Ok(value) = std::env::var(environment_key) {
+            builder = builder
+                .set_override(config_key, value)
+                .map_err(config_error)?;
+        }
+    }
+
+    Settings::new(builder.build().map_err(config_error)?)
+}
 
 pub fn unique_collection_name() -> String {
     format!("test_collection_{}", Uuid::new_v4())

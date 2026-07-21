@@ -20,7 +20,6 @@
 //! - "Missing rationale can be represented explicitly as unavailable." -> candidate_provenance_records_producer_kind_and_rationale_origin
 //! - "No v0.1.3 helper persists raw logs or resolves raw_ref values." -> source_refs_and_source_spans_are_preserved_and_raw_ref_is_opaque
 
-use character_memory::test_utils::load_test_settings;
 use character_memory::RememberPlanDefaults;
 use character_memory::{
     CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateReferenceRole,
@@ -37,8 +36,9 @@ use std::path::Path;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-#[path = "support/base.rs"]
-mod base;
+#[path = "support/mod.rs"]
+pub mod test_support;
+use test_support as base;
 
 #[tokio::test]
 async fn prepare_without_persist_leaves_graph_and_vectors_empty() {
@@ -829,7 +829,7 @@ async fn try_setup_persistent_character_memory(
     graph_path: &Path,
     stats_path: &Path,
 ) -> Result<CharacterMemory, CustomError> {
-    let base_settings = load_test_settings()?;
+    let base_settings = base::load_test_settings()?;
     let embedding_model = std::env::var("EMBEDDING_MODEL")
         .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
 
@@ -863,7 +863,7 @@ async fn try_setup_persistent_character_memory(
 }
 
 fn load_in_memory_settings() -> Result<Settings, CustomError> {
-    let base_settings = load_test_settings()?;
+    let base_settings = base::load_test_settings()?;
     let embedding_model = std::env::var("EMBEDDING_MODEL")
         .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
 

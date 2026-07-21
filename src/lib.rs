@@ -65,27 +65,3 @@ pub use crate::errors::{
 };
 pub use crate::memory::CharacterMemory;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};
-
-// Re-export for integration tests
-pub mod test_utils {
-    use crate::config::Settings;
-    use crate::errors::CustomError;
-
-    /// Loads settings from environment variables for integration tests.
-    ///
-    /// # Important
-    ///
-    /// This function is intended ONLY for use in integration tests and should not be used in production code.
-    /// A `.env` file in the project root directory will be loaded if present,
-    /// otherwise existing environment variables are used.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A new `Settings` instance with configuration loaded from environment
-    /// - `Err`: A `CustomError` if loading fails
-    pub fn load_test_settings() -> Result<Settings, CustomError> {
-        Settings::load()
-    }
-}
