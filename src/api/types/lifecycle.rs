@@ -560,7 +560,7 @@ pub struct VectorMaintenanceFailure {
 }
 
 impl VectorMaintenanceFailure {
-    pub fn unmaintained_object_ids(&self) -> Vec<MemoryObjectRef> {
+    pub fn unmaintained_objects(&self) -> Vec<MemoryObjectRef> {
         let mut objects = self
             .failures
             .iter()

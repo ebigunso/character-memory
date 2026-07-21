@@ -1439,7 +1439,7 @@ mod tests {
             .vector_maintenance_failure
             .expect("delete failure should be explicit");
         assert_eq!(
-            failure.unmaintained_object_ids(),
+            failure.unmaintained_objects(),
             vec![MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old)]
         );
         assert_eq!(failure.failures.len(), 1);
