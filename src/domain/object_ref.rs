@@ -16,4 +16,8 @@ impl MemoryObjectRef {
     pub(crate) const fn from_id_type(id: MemoryId, object_type: ObjectType) -> Self {
         Self { object_type, id }
     }
+
+    pub(crate) const fn stable_order_key(self) -> (MemoryId, u8) {
+        (self.id, self.object_type.stable_rank())
+    }
 }

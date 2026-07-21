@@ -230,7 +230,7 @@ where
                 .iter()
                 .enumerate()
                 .map(|(index, candidate)| VectorCandidateTrace {
-                    object: memory_object_ref(candidate.object_type, candidate.object_id),
+                    object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                     surface: public_vector_surface(candidate.surface),
                     score: candidate.score,
                     rank: index + 1,
@@ -309,8 +309,8 @@ impl RetrieveAssembly {
             for relation in &expansion.relations {
                 graph_relations.push(crate::api::types::GraphRelationTrace {
                     link_id: relation.link_id,
-                    from: memory_object_ref(relation.from.object_type, relation.from.id),
-                    to: memory_object_ref(relation.to.object_type, relation.to.id),
+                    from: MemoryObjectRef::new(relation.from.object_type, relation.from.id),
+                    to: MemoryObjectRef::new(relation.to.object_type, relation.to.id),
                     relation: relation.relation,
                     proximity: relation.proximity,
                 });
@@ -336,7 +336,7 @@ impl RetrieveAssembly {
 
         let mut root_verified = false;
         for object in expansion.objects {
-            let object_ref = graph_object_ref(&object);
+            let object_ref = object.object_ref();
             if object_ref == candidate_ref {
                 root_verified = true;
             }
@@ -395,7 +395,7 @@ impl RetrieveAssembly {
                 root_filtered = true;
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+                    candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                     vector_score: Some(candidate.score),
                     reason: stale_reason,
                     rationale_categories: rationale_categories_for_stale_reason(stale_reason),
@@ -415,7 +415,7 @@ impl RetrieveAssembly {
 
     fn omit_bounded_candidate(&mut self, candidate: &VectorCandidateMatch) {
         self.stale_omissions.push(StaleCandidateOmission {
-            candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphExpansionBounded,
             rationale_categories: rationale_categories_for_stale_reason(
@@ -423,7 +423,7 @@ impl RetrieveAssembly {
             ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: memory_object_ref(candidate.object_type, candidate.object_id),
+            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
             is_current: None,
             superseded_by: Vec::new(),
@@ -434,7 +434,7 @@ impl RetrieveAssembly {
 
     fn omit_missing_candidate(&mut self, candidate: &VectorCandidateMatch) {
         self.stale_omissions.push(StaleCandidateOmission {
-            candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphObjectMissing,
             rationale_categories: rationale_categories_for_stale_reason(
@@ -442,7 +442,7 @@ impl RetrieveAssembly {
             ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: memory_object_ref(candidate.object_type, candidate.object_id),
+            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
             is_current: None,
             superseded_by: Vec::new(),
@@ -466,7 +466,7 @@ impl RetrieveAssembly {
         self.stale_omissions.sort_by_key(|omission| {
             (
                 omission.candidate.id,
-                object_type_rank(omission.candidate.object_type),
+                omission.candidate.object_type.stable_rank(),
                 stale_reason_rank(omission.reason),
             )
         });
@@ -518,10 +518,11 @@ impl RankedObject {
     }
 
     fn rank_key(&self) -> RankKey {
-        let (object_id, object_type) = object_identity(&self.object);
+        let object_id = self.object.id();
+        let object_type = self.object.object_type();
         RankKey {
             score: SortableScore(self.final_score()),
-            object_type_rank: object_type_rank(object_type),
+            object_type_rank: object_type.stable_rank(),
             object_id,
         }
     }
@@ -754,7 +755,7 @@ fn build_pack(
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked.object) else {
             details.section_assignments.push(SectionAssignment {
-                object: memory_object_ref_from_object(&ranked.object),
+                object: ranked.object.object_ref(),
                 section: ContextPackSection::Omitted,
                 rank: None,
                 reason: section_omission_reason(&ranked.object),
@@ -769,7 +770,7 @@ fn build_pack(
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
-                    candidate: memory_object_ref_from_object(&ranked.object),
+                    candidate: ranked.object.object_ref(),
                     vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
                     rationale_categories: rationale_categories_for_stale_reason(
@@ -777,7 +778,7 @@ fn build_pack(
                     ),
                 });
             details.section_assignments.push(SectionAssignment {
-                object: memory_object_ref_from_object(&ranked.object),
+                object: ranked.object.object_ref(),
                 section: ContextPackSection::Omitted,
                 rank: None,
                 reason: SectionAssignmentReason::OmittedByLimit {
@@ -793,7 +794,7 @@ fn build_pack(
         increment_section_included(section_pressure, section);
         let rank = *count;
         details.section_assignments.push(SectionAssignment {
-            object: memory_object_ref_from_object(&ranked.object),
+            object: ranked.object.object_ref(),
             section,
             rank: Some(rank),
             reason: SectionAssignmentReason::Selected {
@@ -996,7 +997,9 @@ fn select_candidate_roots(
             .score
             .total_cmp(&left.score)
             .then_with(|| {
-                object_type_rank(left.object_type).cmp(&object_type_rank(right.object_type))
+                left.object_type
+                    .stable_rank()
+                    .cmp(&right.object_type.stable_rank())
             })
             .then_with(|| left.object_id.cmp(&right.object_id))
     });
@@ -1080,7 +1083,7 @@ fn graph_expansion_trace(
     expansion: &GraphExpansion,
 ) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        root: memory_object_ref(candidate.object_type, candidate.object_id),
+        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: expansion.objects.len(),
         relation_count: expansion.relations.len(),
         filtered_node_count: expansion.filtered_nodes.len(),
@@ -1102,7 +1105,7 @@ fn fanout_utilization_traces_for_expansion(
         .fanout_utilization
         .iter()
         .map(|entry| FanoutUtilizationTrace {
-            root: memory_object_ref(entry.root.object_type, entry.root.id),
+            root: MemoryObjectRef::new(entry.root.object_type, entry.root.id),
             relation: entry.relation,
             object_type: entry.object_type,
             configured_cap: entry.configured_cap,
@@ -1115,7 +1118,7 @@ fn fanout_utilization_traces_for_expansion(
 
 fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        root: memory_object_ref(candidate.object_type, candidate.object_id),
+        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: 0,
         relation_count: 0,
         filtered_node_count: 0,
@@ -1140,7 +1143,7 @@ fn filtered_lifecycle_decision(
     superseded_by: &[MemoryId],
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
-        object: memory_object_ref(object_ref.object_type, object_ref.id),
+        object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
         retention_state: None,
         is_current: None,
         superseded_by: superseded_by.to_vec(),
@@ -1222,7 +1225,7 @@ fn section_omission_reason(object: &MemoryObject) -> SectionAssignmentReason {
         },
         MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {
             SectionAssignmentReason::OmittedNoPromptSection {
-                object_type: object_identity(object).1,
+                object_type: object.object_type(),
             }
         }
         MemoryObject::Episode(_)
@@ -1272,42 +1275,6 @@ fn salience_component(object: &MemoryObject) -> f32 {
         MemoryObject::MemoryThread(object) => object.salience_score,
         MemoryObject::DerivedMemory(object) => object.salience_score,
         MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => 0.0,
-    }
-}
-
-fn memory_object_ref(object_type: ObjectType, object_id: MemoryId) -> MemoryObjectRef {
-    MemoryObjectRef::new(object_type, object_id)
-}
-
-fn memory_object_ref_from_object(object: &MemoryObject) -> MemoryObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    memory_object_ref(object_type, object_id)
-}
-
-fn graph_object_ref(object: &MemoryObject) -> MemoryObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    MemoryObjectRef::from_id_type(object_id, object_type)
-}
-
-fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
     }
 }
 
@@ -1700,7 +1667,7 @@ mod tests {
         let pure_vector_ranked = pure_vector
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let pure_vector_categories = pure_vector_ranked.rationale_categories();
         assert_eq!(pure_vector_categories, vec![RationaleCategory::Semantic]);
@@ -1716,7 +1683,7 @@ mod tests {
         let episode_categories = semantic_episode
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == episode_ref)
+            .find(|ranked| ranked.object.object_ref() == episode_ref)
             .unwrap()
             .rationale_categories();
         assert_eq!(episode_categories, vec![RationaleCategory::Semantic]);
@@ -1733,7 +1700,7 @@ mod tests {
         let thread_categories = semantic_thread
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == thread_ref)
+            .find(|ranked| ranked.object.object_ref() == thread_ref)
             .unwrap()
             .rationale_categories();
         assert_eq!(thread_categories, vec![RationaleCategory::Semantic]);
@@ -1745,7 +1712,7 @@ mod tests {
         let non_entity_graph_expanded_ranked = non_entity_graph_expanded
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let non_entity_graph_categories = non_entity_graph_expanded_ranked.rationale_categories();
         assert!(!non_entity_graph_categories.contains(&RationaleCategory::Semantic));
@@ -1757,7 +1724,7 @@ mod tests {
         let entity_graph_expanded_ranked = entity_graph_expanded
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let entity_graph_categories = entity_graph_expanded_ranked.rationale_categories();
         assert!(!entity_graph_categories.contains(&RationaleCategory::Semantic));
@@ -1773,7 +1740,7 @@ mod tests {
         let both_ranked = both
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let both_categories = both_ranked.rationale_categories();
         assert!(both_categories.contains(&RationaleCategory::Semantic));
@@ -1836,7 +1803,7 @@ mod tests {
             assembly
                 .ranked_objects()
                 .into_iter()
-                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .find(|ranked| ranked.object.object_ref() == target_ref)
                 .unwrap()
                 .rationale_categories()
         };
@@ -1885,7 +1852,7 @@ mod tests {
             assembly
                 .ranked_objects()
                 .into_iter()
-                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .find(|ranked| ranked.object.object_ref() == target_ref)
                 .unwrap()
                 .rationale_categories()
         };
@@ -1937,7 +1904,7 @@ mod tests {
         let categories = assembly
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -1977,7 +1944,7 @@ mod tests {
         let categories = assembly
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2039,7 +2006,7 @@ mod tests {
         let categories = assembly
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2088,7 +2055,7 @@ mod tests {
         let categories = assembly
             .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2283,10 +2250,7 @@ mod tests {
         let ranked = assembly.ranked_objects();
 
         assert_eq!(ranked.len(), 1);
-        assert_eq!(
-            object_identity(&ranked[0].object).0,
-            fixtures.user_preference.id
-        );
+        assert_eq!(ranked[0].object.id(), fixtures.user_preference.id);
         assert!(assembly
             .stale_omissions
             .iter()

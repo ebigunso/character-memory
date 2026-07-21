@@ -472,7 +472,7 @@ fn bool_delta(old: bool, new: bool) -> i64 {
 }
 
 fn more_restrictive_retention_key(existing: &str, incoming: RetentionState) -> RetentionState {
-    if retention_rank(incoming) > retention_key_rank(existing) {
+    if incoming.restrictiveness_rank() > retention_key_rank(existing) {
         incoming
     } else {
         retention_from_key(existing)
@@ -489,16 +489,7 @@ fn retention_from_key(value: &str) -> RetentionState {
 }
 
 fn retention_key_rank(value: &str) -> u8 {
-    retention_rank(retention_from_key(value))
-}
-
-fn retention_rank(retention_state: RetentionState) -> u8 {
-    match retention_state {
-        RetentionState::Active => 0,
-        RetentionState::Archived => 1,
-        RetentionState::Suppressed => 2,
-        RetentionState::Deleted => 3,
-    }
+    retention_from_key(value).restrictiveness_rank()
 }
 
 fn bool_int(value: bool) -> i64 {

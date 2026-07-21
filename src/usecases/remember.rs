@@ -4,9 +4,7 @@ use crate::api::types::{
     CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnosticCode,
     RememberDiagnostics, RememberOutcome, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
-use crate::domain::{
-    CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
-};
+use crate::domain::{CandidateValidationStatus, MemoryLink, MemoryObject, MemoryObjectRef};
 use crate::errors::CustomError;
 use crate::models::vector::VectorRecord;
 use crate::policy::memory_object_vector_record;
@@ -228,10 +226,7 @@ where
         // conditional upsert or persisted operation ledger belongs in a future write-path design.
         let refs = objects
             .iter()
-            .map(|object| {
-                let (id, object_type) = memory_object_identity(object);
-                MemoryObjectRef::from_id_type(id, object_type)
-            })
+            .map(MemoryObject::object_ref)
             .collect::<Vec<_>>();
         if !refs.is_empty() {
             for existing in self
@@ -239,14 +234,15 @@ where
                 .query_objects(&GraphObjectQuery::by_refs(refs))
                 .await?
             {
-                if let Some(planned) = objects.iter().find(|object| {
-                    memory_object_identity(object) == memory_object_identity(&existing)
-                }) {
+                if let Some(planned) = objects
+                    .iter()
+                    .find(|object| object.object_ref() == existing.object_ref())
+                {
                     if planned != &existing {
                         return Err(validation_error(format!(
                             "write plan deterministic ID collided with existing divergent object content: {:?} {}",
-                            memory_object_type(planned),
-                            memory_object_id(planned)
+                            planned.object_type(),
+                            planned.id()
                         )));
                     }
                 }
@@ -284,8 +280,7 @@ fn vector_records_for_targets(
         .iter()
         .filter_map(|target| {
             objects.iter().find_map(|object| {
-                (memory_object_id(object) == target.id
-                    && memory_object_type(object) == target.object_type)
+                (object.id() == target.id && object.object_type() == target.object_type)
                     .then(|| memory_object_vector_record(object))
                     .flatten()
             })
@@ -297,34 +292,15 @@ fn validation_error(error: impl ToString) -> CustomError {
     CustomError::MemoryValidation(error.to_string())
 }
 
-fn memory_object_id(object: &MemoryObject) -> MemoryId {
-    memory_object_identity(object).0
-}
-
 fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> RememberOutcome {
     RememberOutcome {
-        persisted_object_ids: objects.iter().map(memory_object_id).collect(),
+        persisted_object_ids: objects.iter().map(MemoryObject::id).collect(),
         persisted_link_ids: links.iter().map(|link| link.id).collect(),
         vector_indexed_object_ids: Vec::new(),
         vector_indexing_failure: None,
         stats_update_status: StatsUpdateStatus::default(),
         repair_needed: Vec::new(),
         diagnostics: RememberDiagnostics::default(),
-    }
-}
-
-fn memory_object_type(object: &MemoryObject) -> ObjectType {
-    memory_object_identity(object).1
-}
-
-fn memory_object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
     }
 }
 
@@ -341,7 +317,9 @@ mod tests {
         DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
         ObservationDraft, RememberInput,
     };
-    use crate::domain::{DerivedType, EntityType, ObjectType, RelationType, RetentionState};
+    use crate::domain::{
+        DerivedType, EntityType, MemoryId, ObjectType, RelationType, RetentionState,
+    };
     use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause};
     use crate::models::vector::{
         CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
@@ -936,7 +914,7 @@ mod tests {
     impl GraphAuthorityStore for RecordingGraphStore {
         async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
-                objects.iter().map(memory_object_id).collect(),
+                objects.iter().map(MemoryObject::id).collect(),
             ));
             if self.fail_objects {
                 return Err(CustomError::DatabaseError("object write failed".to_owned()));

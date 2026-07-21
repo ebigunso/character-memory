@@ -264,7 +264,7 @@ fn canonicalize_vector_candidates(
     for candidate in candidates {
         let identity = (
             candidate.object_id,
-            object_type_rank(candidate.object_type),
+            candidate.object_type.stable_rank(),
             vector_surface_rank(candidate.surface),
         );
         match by_identity.entry(identity) {
@@ -290,20 +290,13 @@ fn compare_vector_candidates(
     right
         .score
         .total_cmp(&left.score)
-        .then_with(|| object_type_rank(left.object_type).cmp(&object_type_rank(right.object_type)))
+        .then_with(|| {
+            left.object_type
+                .stable_rank()
+                .cmp(&right.object_type.stable_rank())
+        })
         .then_with(|| left.object_id.cmp(&right.object_id))
         .then_with(|| vector_surface_rank(left.surface).cmp(&vector_surface_rank(right.surface)))
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
 }
 
 fn vector_surface_rank(surface: VectorSurface) -> u8 {

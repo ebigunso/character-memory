@@ -859,7 +859,7 @@ impl PlanValidationContext {
     }
 
     fn add_existing_object(&mut self, object: &MemoryObject) {
-        self.existing_refs.insert(memory_object_ref(object));
+        self.existing_refs.insert(object.object_ref());
     }
 
     fn validate_candidate(&self, index: usize, candidate: &MemoryCandidate) -> CandidateValidation {
@@ -1537,29 +1537,6 @@ fn candidate_source_span_issue(error: SourceSpanValidationError) -> CandidateSou
         SourceSpanValidationError::InvalidByteRange => CandidateSourceSpanIssue::InvalidByteRange,
         SourceSpanValidationError::InvalidTimestampRange => {
             CandidateSourceSpanIssue::InvalidTimestampRange
-        }
-    }
-}
-
-fn memory_object_ref(object: &MemoryObject) -> MemoryObjectRef {
-    match object {
-        MemoryObject::Episode(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::Episode)
-        }
-        MemoryObject::Observation(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::Observation)
-        }
-        MemoryObject::Entity(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::Entity)
-        }
-        MemoryObject::MemoryThread(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::MemoryThread)
-        }
-        MemoryObject::DerivedMemory(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::DerivedMemory)
-        }
-        MemoryObject::MemoryLink(object) => {
-            MemoryObjectRef::from_id_type(object.id, ObjectType::MemoryLink)
         }
     }
 }

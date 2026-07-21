@@ -417,14 +417,14 @@ mod tests {
 
         for object in fixtures.objects() {
             let triples = rdf_triples_for_object(&object).expect("current schema maps");
-            let (id, object_type) = object_identity(&object);
 
             assert!(triples
                 .iter()
-                .all(|triple| triple.subject == graph_uri(object_type, id)));
+                .all(|triple| triple.subject == graph_uri(object.object_type(), object.id())));
             assert!(triples.iter().any(|triple| {
                 triple.predicate == vocab::GRAPH_URI
-                    && triple.object == RdfObject::Literal(graph_uri(object_type, id))
+                    && triple.object
+                        == RdfObject::Literal(graph_uri(object.object_type(), object.id()))
             }));
         }
     }
@@ -591,17 +591,6 @@ mod tests {
             predicate == vocab::RAW_REF
                 || (!normalized.contains("raw") && !normalized.contains("transcript"))
         }));
-    }
-
-    fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-        match object {
-            MemoryObject::Episode(object) => (object.id, object.object_type),
-            MemoryObject::Observation(object) => (object.id, object.object_type),
-            MemoryObject::Entity(object) => (object.id, object.object_type),
-            MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-            MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-            MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-        }
     }
 
     fn set_schema_version(object: &mut MemoryObject, schema_version: &str) {

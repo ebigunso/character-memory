@@ -288,19 +288,10 @@ fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) 
 }
 
 fn more_restrictive_retention(left: RetentionState, right: RetentionState) -> RetentionState {
-    if retention_rank(right) > retention_rank(left) {
+    if right.restrictiveness_rank() > left.restrictiveness_rank() {
         right
     } else {
         left
-    }
-}
-
-fn retention_rank(retention_state: RetentionState) -> u8 {
-    match retention_state {
-        RetentionState::Active => 0,
-        RetentionState::Archived => 1,
-        RetentionState::Suppressed => 2,
-        RetentionState::Deleted => 3,
     }
 }
 

@@ -198,8 +198,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            let (object_id, object_type) = object_identity(object);
-            let owner_graph_uri = graph_uri(object_type, object_id);
+            let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
                 quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
@@ -238,8 +237,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            let (object_id, object_type) = object_identity(object);
-            let owner_graph_uri = graph_uri(object_type, object_id);
+            let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
                 quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,

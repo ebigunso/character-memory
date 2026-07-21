@@ -52,7 +52,7 @@ where
                 Ok(endpoint_objects) => {
                     let endpoint_objects = endpoint_objects
                         .into_iter()
-                        .filter(|object| endpoint_refs.contains(&memory_object_ref(object)))
+                        .filter(|object| endpoint_refs.contains(&object.object_ref()))
                         .collect();
                     (
                         stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
@@ -68,7 +68,7 @@ where
             }
         };
 
-        let attempted_object_ids = stats_objects.iter().map(memory_object_id).collect();
+        let attempted_object_ids = stats_objects.iter().map(MemoryObject::id).collect();
         if let Err(write_cause) = self.write_projection(&stats_objects, links).await {
             if cause.is_none() {
                 cause = Some(write_cause);
@@ -149,7 +149,7 @@ fn push_stats_endpoint_ref(
     if !object_type_has_stats_state(object_type)
         || objects
             .iter()
-            .any(|object| memory_object_ref(object) == object_ref)
+            .any(|object| object.object_ref() == object_ref)
         || refs.contains(&object_ref)
     {
         return;
@@ -165,7 +165,7 @@ fn stats_objects_with_endpoint_lifecycle(
     for endpoint_object in endpoint_objects {
         if !stats_objects
             .iter()
-            .any(|object| memory_object_ref(object) == memory_object_ref(&endpoint_object))
+            .any(|object| object.object_ref() == endpoint_object.object_ref())
         {
             stats_objects.push(endpoint_object);
         }
@@ -178,21 +178,6 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
         object_type,
         ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
     )
-}
-
-fn memory_object_id(object: &MemoryObject) -> MemoryId {
-    memory_object_ref(object).id
-}
-
-fn memory_object_ref(object: &MemoryObject) -> MemoryObjectRef {
-    match object {
-        MemoryObject::Episode(object) => MemoryObjectRef::new(object.object_type, object.id),
-        MemoryObject::Observation(object) => MemoryObjectRef::new(object.object_type, object.id),
-        MemoryObject::Entity(object) => MemoryObjectRef::new(object.object_type, object.id),
-        MemoryObject::MemoryThread(object) => MemoryObjectRef::new(object.object_type, object.id),
-        MemoryObject::DerivedMemory(object) => MemoryObjectRef::new(object.object_type, object.id),
-        MemoryObject::MemoryLink(object) => MemoryObjectRef::new(object.object_type, object.id),
-    }
 }
 
 #[cfg(test)]

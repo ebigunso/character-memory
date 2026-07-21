@@ -199,8 +199,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let mut stored = lock(&self.objects)?;
 
         for object in objects {
-            let (object_id, object_type) = object_identity(object);
-            stored.retain(|existing| object_identity(existing) != (object_id, object_type));
+            stored.retain(|existing| existing.object_ref() != object.object_ref());
             stored.push(object.clone());
         }
 
@@ -227,8 +226,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let mut stored_links = lock(&self.links)?;
 
         for object in objects {
-            let (object_id, object_type) = object_identity(object);
-            stored_objects.retain(|existing| object_identity(existing) != (object_id, object_type));
+            stored_objects.retain(|existing| existing.object_ref() != object.object_ref());
             stored_objects.push(object.clone());
         }
         for link in links {
@@ -246,7 +244,8 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let mut objects: Vec<_> = lock(&self.objects)?
             .iter()
             .filter(|object| {
-                let (object_id, object_type) = object_identity(object);
+                let object_id = object.id();
+                let object_type = object.object_type();
                 match query {
                     GraphObjectQuery::ByRefs(object_refs) => object_refs.iter().any(|object_ref| {
                         object_ref.id == object_id && object_ref.object_type == object_type
@@ -789,36 +788,8 @@ fn timestamp(value: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
 fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by(|left, right| {
-        stable_node_key(object_identity(left)).cmp(&stable_node_key(object_identity(right)))
-    });
-}
-
-fn stable_node_key(node: (MemoryId, ObjectType)) -> (MemoryId, u8) {
-    (node.0, object_type_rank(node.1))
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
+    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 #[cfg(test)]

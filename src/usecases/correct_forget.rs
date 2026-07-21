@@ -703,7 +703,7 @@ impl MutationPlan {
         let mut graph_mutated_object_ids = self
             .graph_objects
             .iter()
-            .map(memory_object_ref)
+            .map(MemoryObject::object_ref)
             .collect::<Vec<_>>();
         sort_refs(&mut graph_mutated_object_ids);
         LifecycleMutationOutcome {
@@ -1001,34 +1001,12 @@ fn apply_vector_result(outcome: &mut LifecycleMutationOutcome, result: VectorMai
     outcome.vector_maintenance_failure = result.failure;
 }
 
-fn memory_object_ref(object: &MemoryObject) -> MemoryObjectRef {
-    match object {
-        MemoryObject::Episode(object) => MemoryObjectRef::new(ObjectType::Episode, object.id),
-        MemoryObject::Observation(object) => {
-            MemoryObjectRef::new(ObjectType::Observation, object.id)
-        }
-        MemoryObject::Entity(object) => MemoryObjectRef::new(ObjectType::Entity, object.id),
-        MemoryObject::MemoryThread(object) => {
-            MemoryObjectRef::new(ObjectType::MemoryThread, object.id)
-        }
-        MemoryObject::DerivedMemory(object) => {
-            MemoryObjectRef::new(ObjectType::DerivedMemory, object.id)
-        }
-        MemoryObject::MemoryLink(object) => MemoryObjectRef::new(ObjectType::MemoryLink, object.id),
-    }
-}
-
-fn object_key(object: &MemoryObject) -> (MemoryId, u8) {
-    let object_ref = memory_object_ref(object);
-    (object_ref.id, object_type_rank(object_ref.object_type))
-}
-
 fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(object_key);
+    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 fn sort_refs(refs: &mut [MemoryObjectRef]) {
-    refs.sort_by_key(|object_ref| (object_ref.id, object_type_rank(object_ref.object_type)));
+    refs.sort_by_key(|object_ref| object_ref.stable_order_key());
 }
 
 fn sort_derived_memories(memories: &mut [DerivedMemory]) {
@@ -1042,8 +1020,8 @@ fn push_memory_unique(memories: &mut Vec<DerivedMemory>, memory: DerivedMemory) 
 }
 
 fn push_object_unique(objects: &mut Vec<MemoryObject>, object: MemoryObject) {
-    let object_ref = memory_object_ref(&object);
-    objects.retain(|existing| memory_object_ref(existing) != object_ref);
+    let object_ref = object.object_ref();
+    objects.retain(|existing| existing.object_ref() != object_ref);
     objects.push(object);
 }
 
@@ -1105,17 +1083,6 @@ fn missing_object_error(object_type: ObjectType, id: MemoryId) -> CustomError {
     CustomError::GraphExpansionRootNotFound {
         object_type,
         object_id: id,
-    }
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
     }
 }
 
@@ -2510,7 +2477,7 @@ mod tests {
         fn object_refs(&self) -> Vec<MemoryObjectRef> {
             let mut refs = lock(&self.objects)
                 .iter()
-                .map(memory_object_ref)
+                .map(MemoryObject::object_ref)
                 .collect::<Vec<_>>();
             sort_refs(&mut refs);
             refs
@@ -2521,18 +2488,15 @@ mod tests {
     impl GraphAuthorityStore for RecordingGraphStore {
         async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
-                objects
-                    .iter()
-                    .map(|object| memory_object_ref(object).id)
-                    .collect(),
+                objects.iter().map(MemoryObject::id).collect(),
             ));
             if self.fail_objects {
                 return Err(CustomError::DatabaseError("object write failed".to_owned()));
             }
             let mut stored = lock(&self.objects);
             for object in objects {
-                let object_ref = memory_object_ref(object);
-                stored.retain(|existing| memory_object_ref(existing) != object_ref);
+                let object_ref = object.object_ref();
+                stored.retain(|existing| existing.object_ref() != object_ref);
                 stored.push(object.clone());
             }
             Ok(())
@@ -2558,10 +2522,7 @@ mod tests {
             links: &[MemoryLink],
         ) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
-                objects
-                    .iter()
-                    .map(|object| memory_object_ref(object).id)
-                    .collect(),
+                objects.iter().map(MemoryObject::id).collect(),
             ));
             if self.fail_objects {
                 return Err(CustomError::DatabaseError("object write failed".to_owned()));
@@ -2577,8 +2538,8 @@ mod tests {
             }
             let mut stored = lock(&self.objects);
             for object in objects {
-                let object_ref = memory_object_ref(object);
-                stored.retain(|existing| memory_object_ref(existing) != object_ref);
+                let object_ref = object.object_ref();
+                stored.retain(|existing| existing.object_ref() != object_ref);
                 stored.push(object.clone());
             }
             lock(&self.links).extend_from_slice(links);
@@ -2600,7 +2561,7 @@ mod tests {
             Ok(lock(&self.objects)
                 .iter()
                 .filter(|object| {
-                    let object_ref = memory_object_ref(object);
+                    let object_ref = object.object_ref();
                     match query {
                         GraphObjectQuery::ByRefs(object_refs) => {
                             object_refs.iter().any(|query_ref| {

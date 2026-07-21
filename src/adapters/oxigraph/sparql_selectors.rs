@@ -233,9 +233,9 @@ impl<'a> SparqlGraphSelectors<'a> {
                 link_ref.to.id,
                 link_ref.from.id,
                 link_ref.link_id,
-                object_type_rank(link_ref.to.object_type),
-                object_type_rank(link_ref.from.object_type),
-                relation_type_rank(link_ref.relation),
+                link_ref.to.object_type.stable_rank(),
+                link_ref.from.object_type.stable_rank(),
+                link_ref.relation.stable_rank(),
             )
         });
         Ok(refs)
@@ -420,36 +420,6 @@ fn enum_value(value: impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
-}
-
-fn relation_type_rank(relation_type: RelationType) -> u8 {
-    match relation_type {
-        RelationType::HasObservation => 0,
-        RelationType::ObservedIn => 1,
-        RelationType::Mentions => 2,
-        RelationType::Involves => 3,
-        RelationType::About => 4,
-        RelationType::DerivedFrom => 5,
-        RelationType::PartOfThread => 6,
-        RelationType::Supports => 7,
-        RelationType::Contradicts => 8,
-        RelationType::Supersedes => 9,
-        RelationType::Resolves => 10,
-        RelationType::CreatesOpenLoop => 11,
-        RelationType::FulfillsCommitment => 12,
-        RelationType::AssociatedWith => 13,
-    }
-}
-
 fn oxigraph_sparql_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph SPARQL selector error: {error}"))
 }
@@ -592,10 +562,9 @@ mod tests {
         let store = Store::new().unwrap();
         let fixtures = representative_fixtures();
         for object in fixtures.objects() {
-            let (object_id, object_type) = object_identity(&object);
             insert_triples(
                 &store,
-                &graph_uri(object_type, object_id),
+                &graph_uri(object.object_type(), object.id()),
                 &rdf_triples_for_object(&object).unwrap(),
             );
         }
@@ -648,16 +617,5 @@ mod tests {
             object,
             GraphName::DefaultGraph,
         ))
-    }
-
-    fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-        match object {
-            MemoryObject::Episode(object) => (object.id, object.object_type),
-            MemoryObject::Observation(object) => (object.id, object.object_type),
-            MemoryObject::Entity(object) => (object.id, object.object_type),
-            MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-            MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-            MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-        }
     }
 }

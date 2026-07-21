@@ -32,6 +32,28 @@ where
     serde_json::from_str(&serialized).unwrap()
 }
 
+#[test]
+fn canonical_identity_and_order_ranks_are_stable() {
+    let episode = MemoryObject::Episode(representative_episode());
+
+    assert_eq!(
+        episode.id(),
+        memory_id("550e8400-e29b-41d4-a716-446655440000")
+    );
+    assert_eq!(episode.object_type(), ObjectType::Episode);
+    assert_eq!(
+        episode.object_ref(),
+        MemoryObjectRef::new(ObjectType::Episode, episode.id())
+    );
+    assert_eq!(episode.stable_order_key(), (episode.id(), 0));
+    assert_eq!(ObjectType::MemoryLink.stable_rank(), 5);
+    assert_eq!(RelationType::AssociatedWith.stable_rank(), 13);
+    assert_eq!(RetentionState::Active.restrictiveness_rank(), 0);
+    assert_eq!(RetentionState::Archived.restrictiveness_rank(), 1);
+    assert_eq!(RetentionState::Suppressed.restrictiveness_rank(), 2);
+    assert_eq!(RetentionState::Deleted.restrictiveness_rank(), 3);
+}
+
 fn representative_episode() -> Episode {
     Episode {
         id: memory_id("550e8400-e29b-41d4-a716-446655440000"),

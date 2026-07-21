@@ -75,7 +75,7 @@ pub(crate) fn bounded_expansion(
 
     let mut expanded_objects: Vec<_> = objects
         .into_iter()
-        .filter(|object| plan.visited.contains(&graph_object_ref(object)))
+        .filter(|object| plan.visited.contains(&object.object_ref()))
         .collect();
     sort_objects(&mut expanded_objects);
 
@@ -306,7 +306,8 @@ pub(crate) fn bounded_expansion_node_set(
                     || query.allowed_object_types.contains(neighbor_type)
             })
             .collect();
-        neighbors.sort_by_key(|node| stable_node_key(*node));
+        neighbors
+            .sort_by_key(|node| MemoryObjectRef::from_id_type(node.0, node.1).stable_order_key());
 
         for neighbor in neighbors {
             if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
@@ -334,7 +335,7 @@ fn bounded_expansion_plan<'a>(
     let links = links.into_iter().collect::<Vec<_>>();
     let object_refs = objects
         .iter()
-        .map(|object| graph_object_ref(object))
+        .map(|object| object.object_ref())
         .collect::<HashSet<_>>();
     let root = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
 
@@ -385,7 +386,7 @@ fn bounded_expansion_plan<'a>(
     let object_lifecycle = objects
         .iter()
         .map(|object| {
-            let object_ref = graph_object_ref(object);
+            let object_ref = object.object_ref();
             (
                 object_ref,
                 lifecycle_filter_reason(object, &superseded, query.lifecycle_policy),
@@ -525,12 +526,10 @@ fn bounded_expansion_plan<'a>(
         (
             relation.proximity,
             relation.link_id,
-            stable_node_key((relation.to.id, relation.to.object_type)),
+            relation.to.stable_order_key(),
         )
     });
-    filtered_nodes.sort_by_key(|filtered| {
-        stable_node_key((filtered.object_ref.id, filtered.object_ref.object_type))
-    });
+    filtered_nodes.sort_by_key(|filtered| filtered.object_ref.stable_order_key());
     filtered_nodes.dedup_by_key(|filtered| filtered.object_ref);
 
     Ok(BoundedExpansionPlan {
@@ -613,8 +612,8 @@ fn apply_fanout_limits_with_utilization_by_pair<T>(
         .collect::<Vec<_>>();
     utilization.sort_by_key(|entry| {
         (
-            relation_type_rank(entry.relation),
-            object_type_rank(entry.object_type),
+            entry.relation.stable_rank(),
+            entry.object_type.stable_rank(),
         )
     });
     utilization.retain(|entry| entry.retained_count > 0 || entry.omitted_by_fanout_count > 0);
@@ -831,24 +830,8 @@ fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> MemoryObjec
     }
 }
 
-fn graph_object_ref(object: &MemoryObject) -> MemoryObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    MemoryObjectRef::from_id_type(object_id, object_type)
-}
-
-fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
 fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(|object| stable_node_key(object_identity(object)));
+    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 fn stable_link_key(link: &MemoryLink) -> (MemoryId, MemoryId, MemoryId, u8, u8, u8) {
@@ -856,44 +839,10 @@ fn stable_link_key(link: &MemoryLink) -> (MemoryId, MemoryId, MemoryId, u8, u8, 
         link.to_id,
         link.from_id,
         link.id,
-        object_type_rank(link.to_type),
-        object_type_rank(link.from_type),
-        relation_type_rank(link.relation),
+        link.to_type.stable_rank(),
+        link.from_type.stable_rank(),
+        link.relation.stable_rank(),
     )
-}
-
-fn stable_node_key(node: (MemoryId, ObjectType)) -> (MemoryId, u8) {
-    (node.0, object_type_rank(node.1))
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
-}
-
-fn relation_type_rank(relation_type: RelationType) -> u8 {
-    match relation_type {
-        RelationType::HasObservation => 0,
-        RelationType::ObservedIn => 1,
-        RelationType::Mentions => 2,
-        RelationType::Involves => 3,
-        RelationType::About => 4,
-        RelationType::DerivedFrom => 5,
-        RelationType::PartOfThread => 6,
-        RelationType::Supports => 7,
-        RelationType::Contradicts => 8,
-        RelationType::Supersedes => 9,
-        RelationType::Resolves => 10,
-        RelationType::CreatesOpenLoop => 11,
-        RelationType::FulfillsCommitment => 12,
-        RelationType::AssociatedWith => 13,
-    }
 }
 
 // Pre-hydration link-ref flavor (see module comment). Adapters implement

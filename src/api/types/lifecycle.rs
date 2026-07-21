@@ -566,20 +566,9 @@ impl VectorMaintenanceFailure {
             .iter()
             .flat_map(|failure| failure.objects.iter().copied())
             .collect::<Vec<_>>();
-        objects.sort_by_key(|object| (object.id, object_type_rank(object.object_type)));
+        objects.sort_by_key(|object| (object.id, object.object_type.stable_rank()));
         objects.dedup();
         objects
-    }
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
     }
 }
 
