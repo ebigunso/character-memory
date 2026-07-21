@@ -2,7 +2,7 @@
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
     CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnosticCode,
-    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus, VectorIndexingFailure,
+    RememberDiagnostics, RememberOutcome, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
 use crate::domain::{
     CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
@@ -17,31 +17,6 @@ use crate::ports::vector_candidate::VectorCandidateStore;
 use crate::usecases::{
     StatsProjectionService, VectorIndexingService, WritePlanCommitValues, WritePlanValidator,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RememberPipelineOutcome {
-    pub(crate) persisted_object_ids: Vec<MemoryId>,
-    pub(crate) persisted_link_ids: Vec<MemoryId>,
-    pub(crate) vector_indexed_object_ids: Vec<MemoryId>,
-    pub(crate) vector_indexing_failure: Option<VectorIndexingFailure>,
-    pub(crate) stats_update_status: StatsUpdateStatus,
-    pub(crate) repair_needed: Vec<RepairMarker>,
-    pub(crate) diagnostics: RememberDiagnostics,
-}
-
-impl RememberPipelineOutcome {
-    fn graph_persisted(objects: &[MemoryObject], links: &[MemoryLink]) -> Self {
-        Self {
-            persisted_object_ids: objects.iter().map(memory_object_id).collect(),
-            persisted_link_ids: links.iter().map(|link| link.id).collect(),
-            vector_indexed_object_ids: Vec::new(),
-            vector_indexing_failure: None,
-            stats_update_status: StatsUpdateStatus::default(),
-            repair_needed: Vec::new(),
-            diagnostics: RememberDiagnostics::default(),
-        }
-    }
-}
 
 pub(crate) struct RememberPipeline<'a, G, V, E>
 where
@@ -89,7 +64,7 @@ where
         &self,
         plan: RememberWritePlan,
         options: CommitOptions,
-    ) -> Result<RememberPipelineOutcome, CustomError> {
+    ) -> Result<RememberOutcome, CustomError> {
         let validation = WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
@@ -142,11 +117,11 @@ where
         links: Vec<MemoryLink>,
         vector_intent: VectorWriteIntent,
         options: CommitOptions,
-    ) -> Result<RememberPipelineOutcome, CustomError> {
+    ) -> Result<RememberOutcome, CustomError> {
         self.graph_store.upsert_objects(&objects).await?;
         self.graph_store.upsert_links(&links).await?;
 
-        let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
+        let mut outcome = graph_persisted_outcome(&objects, &links);
         if options.update_vectors {
             let vector_records = match vector_intent {
                 VectorWriteIntent::PlanTargets(targets) => {
@@ -168,7 +143,7 @@ where
 
     async fn record_vector_outcome(
         &self,
-        outcome: &mut RememberPipelineOutcome,
+        outcome: &mut RememberOutcome,
         vector_records: &[VectorRecord],
     ) -> Result<(), CustomError> {
         if vector_records.is_empty() {
@@ -202,7 +177,7 @@ where
 
     async fn record_stats_outcome(
         &self,
-        outcome: &mut RememberPipelineOutcome,
+        outcome: &mut RememberOutcome,
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) {
@@ -324,6 +299,18 @@ fn validation_error(error: impl ToString) -> CustomError {
 
 fn memory_object_id(object: &MemoryObject) -> MemoryId {
     memory_object_identity(object).0
+}
+
+fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> RememberOutcome {
+    RememberOutcome {
+        persisted_object_ids: objects.iter().map(memory_object_id).collect(),
+        persisted_link_ids: links.iter().map(|link| link.id).collect(),
+        vector_indexed_object_ids: Vec::new(),
+        vector_indexing_failure: None,
+        stats_update_status: StatsUpdateStatus::default(),
+        repair_needed: Vec::new(),
+        diagnostics: RememberDiagnostics::default(),
+    }
 }
 
 fn memory_object_type(object: &MemoryObject) -> ObjectType {

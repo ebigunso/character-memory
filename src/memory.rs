@@ -74,8 +74,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
         );
-        let outcome = pipeline.commit(plan, options).await?;
-        Ok(outcome.into())
+        pipeline.commit(plan, options).await
     }
 
     /// Prepares, validates, and commits a remember input through the canonical write-plan path.

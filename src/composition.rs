@@ -4,7 +4,6 @@ use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
 use crate::adapters::{OpenAIEmbeddingProvider, QdrantVectorCandidateStore};
 use crate::api::embedding::EmbeddingProvider;
-use crate::api::types::RememberOutcome;
 use crate::config::{
     EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
@@ -18,7 +17,6 @@ use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::RememberPipelineOutcome;
 
 pub(crate) struct MemoryComposition {
     pub(crate) graph_store: Box<dyn GraphAuthorityStore>,
@@ -219,19 +217,5 @@ pub(crate) fn retrieval_stats_store(
             }
         }
         ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
-    }
-}
-
-impl From<RememberPipelineOutcome> for RememberOutcome {
-    fn from(value: RememberPipelineOutcome) -> Self {
-        Self {
-            persisted_object_ids: value.persisted_object_ids,
-            persisted_link_ids: value.persisted_link_ids,
-            vector_indexed_object_ids: value.vector_indexed_object_ids,
-            vector_indexing_failure: value.vector_indexing_failure,
-            stats_update_status: value.stats_update_status,
-            repair_needed: value.repair_needed,
-            diagnostics: value.diagnostics,
-        }
     }
 }
