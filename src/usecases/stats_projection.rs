@@ -71,14 +71,6 @@ where
             causes.push(write_cause);
         }
 
-        if let Some(primary_cause) = causes.first() {
-            if let Some(health_cause) = primary_cause.health_cause() {
-                if let Err(error) = self.stats_store.mark_unhealthy(health_cause).await {
-                    causes.push(StatsUpdateCause::HealthMark { error });
-                }
-            }
-        }
-
         match self.stats_store.health().await {
             Ok(health)
                 if causes.is_empty() && health.state == RetrievalStatsHealthState::Unhealthy =>
@@ -91,6 +83,14 @@ where
                 causes.push(StatsUpdateCause::HealthCheck { error });
             }
             _ => {}
+        }
+
+        if let Some(primary_cause) = causes.first() {
+            if let Some(health_cause) = primary_cause.health_cause() {
+                if let Err(error) = self.stats_store.mark_unhealthy(health_cause).await {
+                    causes.push(StatsUpdateCause::HealthMark { error });
+                }
+            }
         }
 
         StatsProjectionOutcome {
@@ -186,10 +186,97 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+    use async_trait::async_trait;
     use chrono::{TimeZone, Utc};
 
     use crate::domain::{RelationType, DEFAULT_SCHEMA_VERSION};
+    use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState,
+    };
+    use crate::test_support::FakeGraphAuthorityStore;
+
+    #[derive(Debug, Default)]
+    struct HealthCheckFailingStatsStore {
+        marked_causes: Mutex<Vec<RetrievalStatsHealthCause>>,
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for HealthCheckFailingStatsStore {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            Err(health_check_error())
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            self.marked_causes.lock().unwrap().push(cause);
+            Ok(())
+        }
+    }
+
+    fn health_check_error() -> RetrievalStatsStoreError {
+        RetrievalStatsStoreError::Sqlite {
+            detail: "health check failed".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_writes_then_health_failure_marks_store_with_retained_cause() {
+        let graph_store = FakeGraphAuthorityStore::new();
+        let stats_store = HealthCheckFailingStatsStore::default();
+
+        let outcome = StatsProjectionService::new(&graph_store, &stats_store)
+            .project(&[], &[])
+            .await;
+
+        assert_eq!(
+            outcome.causes,
+            vec![StatsUpdateCause::HealthCheck {
+                error: health_check_error(),
+            }]
+        );
+        assert_eq!(
+            *stats_store.marked_causes.lock().unwrap(),
+            vec![RetrievalStatsHealthCause::HealthCheck {
+                error: health_check_error(),
+            }]
+        );
+    }
 
     #[test]
     fn endpoint_refs_dedupe_self_referential_stats_endpoint() {
