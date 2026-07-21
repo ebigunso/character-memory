@@ -7,7 +7,12 @@ mod write_validation;
 pub use lifecycle::LifecycleDtoValidationError;
 pub use object_ref::MemoryObjectRef;
 pub use retrieval::{GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason};
-pub use write_validation::{CandidateValidation, CandidateValidationStatus, MemoryCandidateKind};
+pub use write_validation::{
+    CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
+    CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
+    CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind, MemoryLinkEndpoint,
+    PlanIdentityField,
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

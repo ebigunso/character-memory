@@ -23,12 +23,13 @@
 use character_memory::test_utils::load_test_settings;
 use character_memory::RememberPlanDefaults;
 use character_memory::{
-    CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateValidationStatus,
-    CharacterMemory, CommitOptions, CustomError, DerivedMemoryCandidate, DerivedMemoryDraft,
-    DerivedType, EntityDraft, EntityType, EpisodeDraft, ExternalSourceReference,
-    IncludedDerivedMemory, MemoryCandidate, MemoryId, MemoryLinkCandidate, MemoryLinkDraft,
-    ObjectType, PrepareOptions, RationaleOrigin, RelationType, RememberInput, RememberOptions,
-    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CandidateReferenceRole,
+    CandidateValidationIssue, CandidateValidationStatus, CharacterMemory, CommitOptions,
+    CustomError, DerivedMemoryCandidate, DerivedMemoryDraft, DerivedType, EntityDraft, EntityType,
+    EpisodeDraft, ExternalSourceReference, IncludedDerivedMemory, MemoryCandidate, MemoryId,
+    MemoryLinkCandidate, MemoryLinkDraft, MemoryObjectRef, ObjectType, PrepareOptions,
+    RationaleOrigin, RelationType, RememberInput, RememberOptions, RememberOutcome,
+    RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateStatus,
     DEFAULT_SCHEMA_VERSION,
 };
 use config::Config;
@@ -186,7 +187,7 @@ async fn ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and
         .expect("validate_plan returns validation records for invalid plans");
     assert_invalid_validation_contains(
         &validations,
-        "derived memory must reference at least one source episode or observation",
+        CandidateValidationIssue::MissingDerivedSource,
     );
 
     let error = memory
@@ -196,7 +197,7 @@ async fn ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and
     assert_validation_rejection_contains(
         error,
         character_memory::MemoryCandidateKind::DerivedMemory,
-        "derived memory must reference at least one source episode or observation",
+        CandidateValidationIssue::MissingDerivedSource,
     );
     base::cleanup_collection(&collection_name).await;
 }
@@ -213,7 +214,14 @@ async fn missing_memory_link_target_is_strictly_rejected() {
         .validate_plan(&plan)
         .await
         .expect("validate_plan returns validation records for invalid plans");
-    assert_invalid_validation_contains(&validations, "target does not exist");
+    let missing_target = CandidateValidationIssue::UnknownObjectRef {
+        role: CandidateReferenceRole::MemoryLinkTo,
+        referenced: MemoryObjectRef::new(
+            ObjectType::Entity,
+            id("550e8400-e29b-41d4-a716-446655613112"),
+        ),
+    };
+    assert_invalid_validation_contains(&validations, missing_target.clone());
 
     let error = memory
         .commit(plan, CommitOptions::default())
@@ -222,7 +230,7 @@ async fn missing_memory_link_target_is_strictly_rejected() {
     assert_validation_rejection_contains(
         error,
         character_memory::MemoryCandidateKind::MemoryLink,
-        "target does not exist",
+        missing_target,
     );
     base::cleanup_collection(&collection_name).await;
 }
@@ -525,9 +533,13 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .expect("equivalent outcomes should include the warning-bearing validation");
     assert_eq!(validation.status, CandidateValidationStatus::Valid);
     assert!(validation.errors.is_empty());
-    assert_eq!(validation.warnings.len(), 1);
-    assert!(validation.warnings[0].contains("echo-surface"));
-    assert!(validation.warnings[0].contains(&episode_id.to_string()));
+    assert_eq!(
+        validation.warnings,
+        vec![CandidateValidationIssue::DuplicateObservationEcho {
+            echo_surface: "Equivalent graph state observation".to_owned(),
+            matching_episode_ids: vec![episode_id],
+        }]
+    );
 
     let validation_warning = wrapper_outcome
         .diagnostics
@@ -1181,7 +1193,7 @@ fn provenance(candidate: &MemoryCandidate) -> &CandidateProvenance {
 fn assert_validation_rejection_contains(
     error: CustomError,
     expected_kind: character_memory::MemoryCandidateKind,
-    needle: &str,
+    expected: CandidateValidationIssue,
 ) {
     let CustomError::WritePlanValidationRejected { validations } = error else {
         panic!("expected structured write-plan validation rejection, got {error:?}");
@@ -1190,9 +1202,9 @@ fn assert_validation_rejection_contains(
         validations.iter().any(|validation| {
             validation.candidate_kind == expected_kind
                 && validation.status == CandidateValidationStatus::Invalid
-                && validation.errors.iter().any(|error| error.contains(needle))
+                && validation.errors.contains(&expected)
         }),
-        "expected invalid {expected_kind:?} validation containing {needle:?}, got {validations:?}"
+        "expected invalid {expected_kind:?} validation containing {expected:?}, got {validations:?}"
     );
 }
 
@@ -1206,14 +1218,14 @@ fn assert_error_contains(error: CustomError, needle: &str) {
 
 fn assert_invalid_validation_contains(
     validations: &[character_memory::CandidateValidation],
-    needle: &str,
+    expected: CandidateValidationIssue,
 ) {
     assert!(
         validations.iter().any(|validation| {
             validation.status == CandidateValidationStatus::Invalid
-                && validation.errors.iter().any(|error| error.contains(needle))
+                && validation.errors.contains(&expected)
         }),
-        "expected invalid validation containing {needle:?}, got {validations:?}"
+        "expected invalid validation containing {expected:?}, got {validations:?}"
     );
 }
 

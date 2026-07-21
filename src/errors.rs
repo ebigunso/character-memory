@@ -131,7 +131,7 @@ fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
     validations
         .iter()
         .flat_map(|validation| validation.errors.iter())
-        .cloned()
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -139,21 +139,26 @@ fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{CandidateValidationStatus, MemoryCandidateKind};
+    use crate::domain::{CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind};
 
     #[test]
-    fn write_plan_rejection_display_projects_validation_errors() {
+    fn write_plan_rejection_preserves_validation_issues() {
         let error = CustomError::WritePlanValidationRejected {
             validations: vec![CandidateValidation {
                 candidate_index: 2,
                 candidate_kind: MemoryCandidateKind::DerivedMemory,
                 status: CandidateValidationStatus::Invalid,
-                errors: vec!["derived source is missing".to_owned()],
+                errors: vec![CandidateValidationIssue::MissingDerivedSource],
                 warnings: Vec::new(),
             }],
         };
 
-        let message = error.to_string();
-        assert!(message.contains("derived source is missing"));
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected write-plan validation rejection");
+        };
+        assert_eq!(
+            validations[0].errors,
+            vec![CandidateValidationIssue::MissingDerivedSource]
+        );
     }
 }

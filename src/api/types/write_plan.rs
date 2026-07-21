@@ -676,7 +676,7 @@ impl RememberDiagnostics {
                 RememberDiagnostic::new(
                     DiagnosticSeverity::Warning,
                     VALIDATION_WARNING_CODE,
-                    warning.clone(),
+                    warning.to_string(),
                 )
             })
             .collect::<Vec<_>>();
@@ -901,8 +901,14 @@ mod tests {
 
     #[test]
     fn remember_diagnostics_preserves_structured_validation_and_projects_warnings() {
+        let matching_episode_id = memory_id("550e8400-e29b-41d4-a716-446655442009");
         let validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation)
-            .with_warning("echo-surface: source episode 550e8400-e29b-41d4-a716-446655442009");
+            .with_warning(
+                crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
+                    echo_surface: "the same episode text".to_owned(),
+                    matching_episode_ids: vec![matching_episode_id],
+                },
+            );
         let diagnostics = RememberDiagnostics::default().with_validation(validation.clone());
 
         assert_eq!(diagnostics.validations, vec![validation]);
@@ -915,10 +921,23 @@ mod tests {
             diagnostics.messages[0].code,
             "write_plan_validation_warning"
         );
+        assert!(matches!(
+            diagnostics.validations[0].warnings.as_slice(),
+            [crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
+                matching_episode_ids,
+                ..
+            }] if matching_episode_ids == &[matching_episode_id]
+        ));
 
         let serialized = serde_json::to_value(&diagnostics).unwrap();
         assert!(serialized.get("validations").is_some());
         assert!(serialized.get("validation_failures").is_none());
+        let warning = &serialized["validations"][0]["warnings"][0];
+        assert_eq!(warning["kind"], "duplicate_observation_echo");
+        assert_eq!(
+            warning["matching_episode_ids"][0],
+            matching_episode_id.to_string()
+        );
     }
 
     #[test]

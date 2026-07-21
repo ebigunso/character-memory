@@ -227,9 +227,13 @@ mod tests {
             .expect("remember outcome should preserve the warning-bearing validation");
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
         assert!(validation.errors.is_empty());
-        assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].contains("echo-surface"));
-        assert!(validation.warnings[0].contains(&episode_id.to_string()));
+        assert_eq!(
+            validation.warnings,
+            vec![CandidateValidationIssue::DuplicateObservationEcho {
+                echo_surface: "echoed source content".to_owned(),
+                matching_episode_ids: vec![episode_id],
+            }]
+        );
 
         let messages = outcome
             .diagnostics
@@ -279,10 +283,10 @@ mod tests {
             .await
             .expect_err("missing link target should reject during commit revalidation");
 
-        assert_validation_rejection_contains(
+        assert_validation_rejection_has_unknown_ref(
             error,
             MemoryCandidateKind::MemoryLink,
-            "target does not exist",
+            MemoryObjectRef::new(ObjectType::Entity, missing_entity_id),
         );
     }
 
@@ -299,10 +303,10 @@ mod tests {
             .await
             .expect_err("remember should return the structured commit rejection");
 
-        assert_validation_rejection_contains(
+        assert_validation_rejection_has_unknown_ref(
             error,
             MemoryCandidateKind::MemoryLink,
-            &missing_entity_id.to_string(),
+            MemoryObjectRef::new(ObjectType::Entity, missing_entity_id),
         );
     }
 
@@ -1072,10 +1076,10 @@ mod tests {
         }
     }
 
-    fn assert_validation_rejection_contains(
+    fn assert_validation_rejection_has_unknown_ref(
         error: CustomError,
         expected_kind: MemoryCandidateKind,
-        needle: &str,
+        expected_ref: MemoryObjectRef,
     ) {
         let CustomError::WritePlanValidationRejected { validations } = error else {
             panic!("expected structured write-plan validation rejection, got {error:?}");
@@ -1084,9 +1088,15 @@ mod tests {
             validations.iter().any(|validation| {
                 validation.candidate_kind == expected_kind
                     && validation.status == CandidateValidationStatus::Invalid
-                    && validation.errors.iter().any(|error| error.contains(needle))
+                    && validation.errors.iter().any(|error| {
+                        matches!(
+                            error,
+                            CandidateValidationIssue::UnknownObjectRef { referenced, .. }
+                                if *referenced == expected_ref
+                        )
+                    })
             }),
-            "expected invalid {expected_kind:?} validation containing {needle:?}, got {validations:?}"
+            "expected invalid {expected_kind:?} validation for {expected_ref:?}, got {validations:?}"
         );
     }
 

@@ -6,7 +6,7 @@ use crate::api::types::{
     CandidateProducerKind, CandidateProvenance, DerivedMemoryCandidate, EntityCandidate,
     EpisodeCandidate, MemoryCandidate, MemoryLinkCandidate, MemoryThreadCandidate,
     ObservationCandidate, RememberDiagnostics, RememberInput, RememberWritePlan, SourceSpan,
-    StatsUpdateCandidate, VectorIndexCandidate,
+    SourceSpanValidationError, StatsUpdateCandidate, VectorIndexCandidate,
 };
 use crate::api::types::{
     DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
@@ -627,7 +627,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{CandidateRationale, DraftDefaults};
 use crate::domain::{
-    CandidateValidation, CandidateValidationStatus, MemoryCandidateKind, MemoryLink, MemoryObject,
+    CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
+    CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
+    CandidateValidationIssue, CandidateValidationStatus, DomainValidationError,
+    MemoryCandidateKind, MemoryLink, MemoryLinkEndpoint, MemoryObject, PlanIdentityField,
     RetentionState,
 };
 use crate::errors::CustomError;
@@ -700,11 +703,15 @@ where
             .map(|(index, candidate)| context.validate_candidate(index, candidate))
             .collect::<Vec<_>>();
         if validations.is_empty() && !context.plan_errors.is_empty() {
-            validations.push(CandidateValidation::invalid(
+            let mut validation = CandidateValidation::invalid(
                 0,
                 MemoryCandidateKind::Episode,
-                format!("write plan is invalid: {}", context.plan_errors.join("; ")),
-            ));
+                context.plan_errors[0].clone(),
+            );
+            validation
+                .errors
+                .extend(context.plan_errors.iter().skip(1).cloned());
+            validations.push(validation);
         }
         let decision = if validations
             .iter()
@@ -728,7 +735,7 @@ struct PlanValidationContext {
     refs_requiring_graph: HashSet<MemoryObjectRef>,
     existing_refs: HashSet<MemoryObjectRef>,
     episode_content_by_id: HashMap<MemoryId, String>,
-    plan_errors: Vec<String>,
+    plan_errors: Vec<CandidateValidationIssue>,
 }
 
 impl PlanValidationContext {
@@ -872,7 +879,7 @@ impl PlanValidationContext {
                     .into_domain_with_defaults(&mut DraftDefaults::generated())
                 {
                     Ok(object) => errors.extend(validate_object(&MemoryObject::Episode(object))),
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::Observation(candidate) => {
@@ -894,7 +901,7 @@ impl PlanValidationContext {
                     Ok(object) => {
                         errors.extend(validate_object(&MemoryObject::Observation(object)))
                     }
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::Entity(candidate) => {
@@ -915,7 +922,7 @@ impl PlanValidationContext {
                     .into_domain_with_defaults(&mut DraftDefaults::generated())
                 {
                     Ok(object) => errors.extend(validate_object(&MemoryObject::Entity(object))),
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::MemoryThread(candidate) => {
@@ -934,7 +941,7 @@ impl PlanValidationContext {
                     Ok(object) => {
                         errors.extend(validate_object(&MemoryObject::MemoryThread(object)))
                     }
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::DerivedMemory(candidate) => {
@@ -961,7 +968,7 @@ impl PlanValidationContext {
                         errors.extend(validate_derived_memory_lifecycle(&object));
                         errors.extend(self.validate_derived_sources(&object));
                     }
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::MemoryLink(candidate) => {
@@ -981,48 +988,45 @@ impl PlanValidationContext {
                         errors.extend(validate_link(&link));
                         errors.extend(self.validate_link_targets(&link));
                     }
-                    Err(error) => errors.push(error.to_string()),
+                    Err(error) => errors.push(candidate_issue_from_domain_error(error)),
                 }
             }
             MemoryCandidate::VectorIndex(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
                 if candidate.embedding_text.trim().is_empty() {
-                    errors
-                        .push("vector index candidate embedding_text must not be empty".to_owned());
+                    errors.push(CandidateValidationIssue::EmptyVectorEmbeddingText);
                 }
                 errors.extend(self.validate_graph_authoritative_ref(
                     candidate.target.into(),
-                    "vector index candidate target",
+                    CandidateReferenceRole::VectorIndexTarget,
                 ));
                 errors.extend(self.validate_in_plan_ref(
                     candidate.target.into(),
-                    "vector index candidate target",
+                    CandidateReferenceRole::VectorIndexTarget,
                 ));
             }
             MemoryCandidate::StatsUpdate(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
                 if candidate.relation.is_some() != candidate.object.is_some() {
-                    errors.push(
-                        "stats update candidate relation and object must be supplied together"
-                            .to_owned(),
-                    );
+                    errors.push(CandidateValidationIssue::IncompleteStatsRelationObjectPair);
                 }
                 errors.extend(self.validate_graph_authoritative_ref(
                     candidate.subject.into(),
-                    "stats update candidate subject",
+                    CandidateReferenceRole::StatsUpdateSubject,
                 ));
                 errors.extend(self.validate_in_plan_ref(
                     candidate.subject.into(),
-                    "stats update candidate subject",
+                    CandidateReferenceRole::StatsUpdateSubject,
                 ));
                 if let Some(object) = candidate.object {
                     errors.extend(self.validate_graph_authoritative_ref(
                         object.into(),
-                        "stats update candidate object",
+                        CandidateReferenceRole::StatsUpdateObject,
                     ));
-                    errors.extend(
-                        self.validate_in_plan_ref(object.into(), "stats update candidate object"),
-                    );
+                    errors.extend(self.validate_in_plan_ref(
+                        object.into(),
+                        CandidateReferenceRole::StatsUpdateObject,
+                    ));
                 }
             }
         }
@@ -1041,7 +1045,10 @@ impl PlanValidationContext {
         validation
     }
 
-    fn echo_surface_warning(&self, candidate: &MemoryCandidate) -> Option<String> {
+    fn echo_surface_warning(
+        &self,
+        candidate: &MemoryCandidate,
+    ) -> Option<CandidateValidationIssue> {
         let (candidate_content, source_episode_ids) = match candidate {
             MemoryCandidate::Observation(candidate) => (
                 candidate.draft.text.as_str(),
@@ -1070,42 +1077,41 @@ impl PlanValidationContext {
             return None;
         }
 
-        Some(format!(
-            "echo-surface: candidate content is byte-identical to source episode candidate(s): {}",
-            matching_episode_ids
-                .iter()
-                .map(MemoryId::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ))
+        Some(CandidateValidationIssue::DuplicateObservationEcho {
+            echo_surface: candidate_content.to_owned(),
+            matching_episode_ids,
+        })
     }
 
-    fn validate_derived_sources(&self, object: &crate::domain::DerivedMemory) -> Vec<String> {
+    fn validate_derived_sources(
+        &self,
+        object: &crate::domain::DerivedMemory,
+    ) -> Vec<CandidateValidationIssue> {
         let mut errors = Vec::new();
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
                 MemoryObjectRef::from_id_type(*episode_id, ObjectType::Episode),
-                "derived memory source episode",
+                CandidateReferenceRole::DerivedSourceEpisode,
             ));
         }
         for observation_id in &object.derived_from_observation_ids {
             errors.extend(self.validate_graph_authoritative_ref(
                 MemoryObjectRef::from_id_type(*observation_id, ObjectType::Observation),
-                "derived memory source observation",
+                CandidateReferenceRole::DerivedSourceObservation,
             ));
         }
         errors
     }
 
-    fn validate_link_targets(&self, link: &MemoryLink) -> Vec<String> {
+    fn validate_link_targets(&self, link: &MemoryLink) -> Vec<CandidateValidationIssue> {
         let mut errors = Vec::new();
         errors.extend(self.validate_graph_authoritative_ref(
             MemoryObjectRef::from_id_type(link.from_id, link.from_type),
-            "memory link from target",
+            CandidateReferenceRole::MemoryLinkFrom,
         ));
         errors.extend(self.validate_graph_authoritative_ref(
             MemoryObjectRef::from_id_type(link.to_id, link.to_type),
-            "memory link to target",
+            CandidateReferenceRole::MemoryLinkTo,
         ));
         errors
     }
@@ -1113,37 +1119,45 @@ impl PlanValidationContext {
     fn validate_graph_authoritative_ref(
         &self,
         object_ref: MemoryObjectRef,
-        label: &str,
-    ) -> Vec<String> {
+        role: CandidateReferenceRole,
+    ) -> Vec<CandidateValidationIssue> {
         if self.plan_refs.contains(&object_ref) || self.existing_refs.contains(&object_ref) {
             return Vec::new();
         }
 
-        vec![format!(
-            "{label} does not exist in write plan or graph: {:?} {}",
-            object_ref.object_type, object_ref.id
-        )]
+        vec![CandidateValidationIssue::UnknownObjectRef {
+            role,
+            referenced: object_ref,
+        }]
     }
 
-    fn validate_in_plan_ref(&self, object_ref: MemoryObjectRef, label: &str) -> Vec<String> {
+    fn validate_in_plan_ref(
+        &self,
+        object_ref: MemoryObjectRef,
+        role: CandidateReferenceRole,
+    ) -> Vec<CandidateValidationIssue> {
         if self.plan_refs.contains(&object_ref) {
             return Vec::new();
         }
 
-        vec![format!(
-            "{label} must reference an object candidate in the write plan: {:?} {}",
-            object_ref.object_type, object_ref.id
-        )]
+        vec![CandidateValidationIssue::ReferenceNotInPlan {
+            role,
+            referenced: object_ref,
+        }]
     }
 }
 
-fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<String> {
+fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if plan.operation_id.is_nil() {
-        errors.push("write plan operation_id must be present".to_owned());
+        errors.push(CandidateValidationIssue::MissingPlanIdentity {
+            field: PlanIdentityField::OperationId,
+        });
     }
     if plan.idempotency_key.trim().is_empty() {
-        errors.push("write plan idempotency_key must be present".to_owned());
+        errors.push(CandidateValidationIssue::MissingPlanIdentity {
+            field: PlanIdentityField::IdempotencyKey,
+        });
     }
 
     errors
@@ -1317,37 +1331,36 @@ fn stable_memory_link_draft(draft: MemoryLinkDraft) -> Result<MemoryLinkDraft, C
     Ok(draft)
 }
 
-fn validate_episode_timestamps(draft: &EpisodeDraft) -> Vec<String> {
+fn validate_episode_timestamps(draft: &EpisodeDraft) -> Vec<CandidateValidationIssue> {
     validate_required_created_at("episode candidate", draft.created_at)
 }
 
-fn validate_memory_thread_timestamps(draft: &MemoryThreadDraft) -> Vec<String> {
+fn validate_memory_thread_timestamps(draft: &MemoryThreadDraft) -> Vec<CandidateValidationIssue> {
     let mut errors = validate_required_created_and_updated_at(
         "memory thread candidate",
         draft.created_at,
         draft.updated_at,
     );
     if draft.last_touched_at.is_none() {
-        errors.push(
-            "memory thread candidate last_touched_at must be present for deterministic commit"
-                .to_owned(),
-        );
+        errors.push(CandidateValidationIssue::MissingTimestamp {
+            field: CandidateTimestampField::LastTouchedAt,
+        });
     }
     errors
 }
 
-fn validate_memory_link_timestamps(draft: &MemoryLinkDraft) -> Vec<String> {
+fn validate_memory_link_timestamps(draft: &MemoryLinkDraft) -> Vec<CandidateValidationIssue> {
     validate_required_created_at("memory link candidate", draft.created_at)
 }
 
 fn validate_required_created_at(
-    label: &str,
+    _label: &str,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> Vec<String> {
+) -> Vec<CandidateValidationIssue> {
     if created_at.is_none() {
-        return vec![format!(
-            "{label} created_at must be present for deterministic commit"
-        )];
+        return vec![CandidateValidationIssue::MissingTimestamp {
+            field: CandidateTimestampField::CreatedAt,
+        }];
     }
     Vec::new()
 }
@@ -1356,73 +1369,77 @@ fn validate_required_created_and_updated_at(
     label: &str,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> Vec<String> {
+) -> Vec<CandidateValidationIssue> {
     let mut errors = validate_required_created_at(label, created_at);
     if updated_at.is_none() {
-        errors.push(format!(
-            "{label} updated_at must be present for deterministic commit"
-        ));
+        errors.push(CandidateValidationIssue::MissingTimestamp {
+            field: CandidateTimestampField::UpdatedAt,
+        });
     }
     errors
 }
 
-fn validate_object(object: &MemoryObject) -> Vec<String> {
+fn validate_object(object: &MemoryObject) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if let Err(error) = object.validate() {
-        errors.push(error.to_string());
+        errors.push(candidate_issue_from_domain_error(error));
     }
     if schema_version(object).trim().is_empty() {
-        errors.push("memory object schema_version must be present".to_owned());
+        errors.push(CandidateValidationIssue::MissingObjectSchemaVersion);
     }
     errors
 }
 
 fn validate_required_candidate_identity(
-    label: &str,
+    _label: &str,
     id: Option<MemoryId>,
     schema_version: Option<&str>,
-) -> Vec<String> {
+) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if id.is_none_or(|id| id.is_nil()) {
-        errors.push(format!("{label} id must be present"));
+        errors.push(CandidateValidationIssue::MissingCandidateId);
     }
     if schema_version.is_none_or(|value| value.trim().is_empty()) {
-        errors.push(format!("{label} schema_version must be present"));
+        errors.push(CandidateValidationIssue::MissingCandidateSchemaVersion);
     }
     errors
 }
 
-fn validate_link(link: &MemoryLink) -> Vec<String> {
+fn validate_link(link: &MemoryLink) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if let Err(error) = link.validate() {
-        errors.push(error.to_string());
+        errors.push(candidate_issue_from_domain_error(error));
     }
     if link.schema_version.trim().is_empty() {
-        errors.push("memory link schema_version must be present".to_owned());
+        errors.push(CandidateValidationIssue::MissingObjectSchemaVersion);
     }
     if admit_link(link, LinkAdmissionEvidence::ExplicitCallerIntent)
         == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
     {
-        errors.push("memory link rejected by link admission policy".to_owned());
+        errors.push(CandidateValidationIssue::MemoryLinkRejectedByAdmissionPolicy);
     }
     errors
 }
 
-fn validate_derived_memory_lifecycle(object: &crate::domain::DerivedMemory) -> Vec<String> {
+fn validate_derived_memory_lifecycle(
+    object: &crate::domain::DerivedMemory,
+) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if object.retention_state == RetentionState::Suppressed && object.is_current {
-        errors.push("suppressed memories are not current".to_owned());
+        errors.push(CandidateValidationIssue::SuppressedMemoryMarkedCurrent);
     }
     if !object.supersedes.is_empty()
         && object.is_current
         && object.retention_state != RetentionState::Archived
     {
-        errors.push("superseded memories are not current unless explicitly historical".to_owned());
+        errors.push(CandidateValidationIssue::SupersedingMemoryMarkedCurrent);
     }
     errors
 }
 
-fn validate_provenance(provenance: &crate::api::types::CandidateProvenance) -> Vec<String> {
+fn validate_provenance(
+    provenance: &crate::api::types::CandidateProvenance,
+) -> Vec<CandidateValidationIssue> {
     let mut errors = Vec::new();
     if provenance.producer_kind != CandidateProducerKind::Caller
         && matches!(
@@ -1430,26 +1447,96 @@ fn validate_provenance(provenance: &crate::api::types::CandidateProvenance) -> V
             CandidateRationale::ProvidedByCaller(_)
         )
     {
-        errors.push("non-caller candidate cannot claim caller-provided rationale".to_owned());
+        errors.push(CandidateValidationIssue::InvalidProvenance {
+            reason: CandidateProvenanceIssue::NonCallerClaimedCallerRationale,
+        });
     }
     if provenance
         .rationale
         .text()
         .is_some_and(|text| text.trim().is_empty())
     {
-        errors.push("candidate rationale text must not be empty".to_owned());
+        errors.push(CandidateValidationIssue::InvalidProvenance {
+            reason: CandidateProvenanceIssue::EmptyRationaleText,
+        });
     }
     for source_span in &provenance.source.source_spans {
         if let Err(error) = source_span.validate() {
-            errors.push(error.to_string());
+            errors.push(CandidateValidationIssue::InvalidSourceSpan {
+                reason: candidate_source_span_issue(error),
+            });
         }
     }
     for external_ref in &provenance.source.external_refs {
         if !external_ref.has_reference() {
-            errors.push("candidate external source reference must not be empty".to_owned());
+            errors.push(CandidateValidationIssue::InvalidProvenance {
+                reason: CandidateProvenanceIssue::EmptyExternalReference,
+            });
         }
     }
     errors
+}
+
+fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateValidationIssue {
+    match error {
+        DomainValidationError::ObjectTypeMismatch {
+            expected, actual, ..
+        } => CandidateValidationIssue::ObjectTypeMismatch { expected, actual },
+        DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
+        DomainValidationError::MissingEpisodeReference => {
+            CandidateValidationIssue::MissingEpisodeReference
+        }
+        DomainValidationError::MissingDerivedSource => {
+            CandidateValidationIssue::MissingDerivedSource
+        }
+        DomainValidationError::InvalidScore { field, value } => {
+            CandidateValidationIssue::InvalidScore {
+                field: candidate_score_field(field),
+                actual: value.to_string(),
+            }
+        }
+        DomainValidationError::UnsupportedMemoryLinkEndpoint { field } => {
+            CandidateValidationIssue::UnsupportedMemoryLinkEndpoint {
+                endpoint: match field {
+                    "MemoryLink.from_type" => MemoryLinkEndpoint::From,
+                    "MemoryLink.to_type" => MemoryLinkEndpoint::To,
+                    _ => unreachable!("unrecognized memory-link endpoint field: {field}"),
+                },
+            }
+        }
+        DomainValidationError::SelfLink { object_type, id } => CandidateValidationIssue::SelfLink {
+            referenced: MemoryObjectRef::new(object_type, id),
+        },
+    }
+}
+
+fn candidate_score_field(field: &'static str) -> CandidateScoreField {
+    match field {
+        "Episode.salience_score" => CandidateScoreField::EpisodeSalience,
+        "Observation.salience_score" => CandidateScoreField::ObservationSalience,
+        "MemoryThread.salience_score" => CandidateScoreField::MemoryThreadSalience,
+        "DerivedMemory.confidence" => CandidateScoreField::DerivedMemoryConfidence,
+        "DerivedMemory.salience_score" => CandidateScoreField::DerivedMemorySalience,
+        "MemoryLink.confidence" => CandidateScoreField::MemoryLinkConfidence,
+        _ => unreachable!("unrecognized candidate score field: {field}"),
+    }
+}
+
+fn candidate_source_span_issue(error: SourceSpanValidationError) -> CandidateSourceSpanIssue {
+    match error {
+        SourceSpanValidationError::EmptySourceRef => CandidateSourceSpanIssue::EmptySourceRef,
+        SourceSpanValidationError::EmptyRawRef => CandidateSourceSpanIssue::EmptyRawRef,
+        SourceSpanValidationError::EmptyMessageId => CandidateSourceSpanIssue::EmptyMessageId,
+        SourceSpanValidationError::EmptyTranscriptSegmentId => {
+            CandidateSourceSpanIssue::EmptyTranscriptSegmentId
+        }
+        SourceSpanValidationError::InvalidTurnRange => CandidateSourceSpanIssue::InvalidTurnRange,
+        SourceSpanValidationError::InvalidCharRange => CandidateSourceSpanIssue::InvalidCharRange,
+        SourceSpanValidationError::InvalidByteRange => CandidateSourceSpanIssue::InvalidByteRange,
+        SourceSpanValidationError::InvalidTimestampRange => {
+            CandidateSourceSpanIssue::InvalidTimestampRange
+        }
+    }
 }
 
 fn memory_object_ref(object: &MemoryObject) -> MemoryObjectRef {
@@ -1550,9 +1637,13 @@ mod tests {
             .find(|validation| validation.candidate_kind == MemoryCandidateKind::Observation)
             .unwrap();
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
-        assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].contains("echo-surface"));
-        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
+        assert_eq!(
+            validation.warnings,
+            vec![CandidateValidationIssue::DuplicateObservationEcho {
+                echo_surface: "valid minimal plan".to_owned(),
+                matching_episode_ids: vec![source_episode_id],
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1591,9 +1682,13 @@ mod tests {
             .find(|validation| validation.candidate_kind == MemoryCandidateKind::DerivedMemory)
             .unwrap();
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
-        assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].contains("echo-surface"));
-        assert!(validation.warnings[0].contains(&source_episode_id.to_string()));
+        assert_eq!(
+            validation.warnings,
+            vec![CandidateValidationIssue::DuplicateObservationEcho {
+                echo_surface: "source episode content".to_owned(),
+                matching_episode_ids: vec![source_episode_id],
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1671,7 +1766,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "idempotency_key must be present");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::MissingPlanIdentity {
+                field: PlanIdentityField::IdempotencyKey,
+            },
+        );
     }
 
     #[tokio::test]
@@ -1686,8 +1786,14 @@ mod tests {
             .unwrap();
 
         assert!(!verdict.validations.is_empty());
-        assert_rejected_with(&verdict, "write plan operation_id must be present");
-        assert_rejected_with(&verdict, "idempotency_key must be present");
+        let missing_operation_id = CandidateValidationIssue::MissingPlanIdentity {
+            field: PlanIdentityField::OperationId,
+        };
+        let missing_idempotency_key = CandidateValidationIssue::MissingPlanIdentity {
+            field: PlanIdentityField::IdempotencyKey,
+        };
+        assert_rejected_with(&verdict, missing_operation_id.clone());
+        assert_rejected_with(&verdict, missing_idempotency_key.clone());
         let error = verdict
             .into_result()
             .expect_err("invalid plan should return structured rejection rows");
@@ -1697,14 +1803,8 @@ mod tests {
         assert!(validations.iter().any(|validation| {
             validation.candidate_kind == MemoryCandidateKind::Episode
                 && validation.status == CandidateValidationStatus::Invalid
-                && validation
-                    .errors
-                    .iter()
-                    .any(|error| error.contains("write plan operation_id"))
-                && validation
-                    .errors
-                    .iter()
-                    .any(|error| error.contains("idempotency_key"))
+                && validation.errors.contains(&missing_operation_id)
+                && validation.errors.contains(&missing_idempotency_key)
         }));
     }
 
@@ -1726,7 +1826,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "schema_version must be present");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::MissingCandidateSchemaVersion,
+        );
     }
 
     #[tokio::test]
@@ -1747,7 +1850,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "episode candidate id must be present");
+        assert_rejected_with(&verdict, CandidateValidationIssue::MissingCandidateId);
     }
 
     #[tokio::test]
@@ -1767,7 +1870,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "derived memory source episode does not exist");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnknownObjectRef {
+                role: CandidateReferenceRole::DerivedSourceEpisode,
+                referenced: MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    id("550e8400-e29b-41d4-a716-446655445010"),
+                ),
+            },
+        );
     }
 
     #[tokio::test]
@@ -1810,8 +1922,26 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "memory link from target does not exist");
-        assert_rejected_with(&verdict, "memory link to target does not exist");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnknownObjectRef {
+                role: CandidateReferenceRole::MemoryLinkFrom,
+                referenced: MemoryObjectRef::new(
+                    ObjectType::Entity,
+                    id("550e8400-e29b-41d4-a716-446655445020"),
+                ),
+            },
+        );
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnknownObjectRef {
+                role: CandidateReferenceRole::MemoryLinkTo,
+                referenced: MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    id("550e8400-e29b-41d4-a716-446655445021"),
+                ),
+            },
+        );
     }
 
     #[tokio::test]
@@ -1840,7 +1970,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "cannot point from an object to itself");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::SelfLink {
+                referenced: MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+            },
+        );
     }
 
     #[tokio::test]
@@ -1868,7 +2003,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "cannot point at MemoryLink endpoints");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnsupportedMemoryLinkEndpoint {
+                endpoint: MemoryLinkEndpoint::From,
+            },
+        );
     }
 
     #[tokio::test]
@@ -1891,7 +2031,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "suppressed memories are not current");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::SuppressedMemoryMarkedCurrent,
+        );
     }
 
     #[tokio::test]
@@ -1917,7 +2060,7 @@ mod tests {
 
         assert_rejected_with(
             &verdict,
-            "superseded memories are not current unless explicitly historical",
+            CandidateValidationIssue::SupersedingMemoryMarkedCurrent,
         );
     }
 
@@ -1939,7 +2082,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "vector index candidate target does not exist");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnknownObjectRef {
+                role: CandidateReferenceRole::VectorIndexTarget,
+                referenced: MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    id("550e8400-e29b-41d4-a716-446655445050"),
+                ),
+            },
+        );
     }
 
     #[tokio::test]
@@ -1960,7 +2112,10 @@ mod tests {
 
         assert_rejected_with(
             &verdict,
-            "must reference an object candidate in the write plan",
+            CandidateValidationIssue::ReferenceNotInPlan {
+                role: CandidateReferenceRole::VectorIndexTarget,
+                referenced: MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+            },
         );
     }
 
@@ -1981,7 +2136,10 @@ mod tests {
 
         assert_rejected_with(
             &verdict,
-            "must reference an object candidate in the write plan",
+            CandidateValidationIssue::ReferenceNotInPlan {
+                role: CandidateReferenceRole::StatsUpdateSubject,
+                referenced: MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+            },
         );
     }
 
@@ -2003,8 +2161,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "entity candidate created_at must be present");
-        assert_rejected_with(&verdict, "entity candidate updated_at must be present");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::MissingTimestamp {
+                field: CandidateTimestampField::CreatedAt,
+            },
+        );
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::MissingTimestamp {
+                field: CandidateTimestampField::UpdatedAt,
+            },
+        );
     }
 
     #[test]
@@ -2050,7 +2218,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "stats update candidate subject does not exist");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::UnknownObjectRef {
+                role: CandidateReferenceRole::StatsUpdateSubject,
+                referenced: MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    id("550e8400-e29b-41d4-a716-446655445060"),
+                ),
+            },
+        );
     }
 
     #[tokio::test]
@@ -2071,7 +2248,9 @@ mod tests {
 
         assert_rejected_with(
             &verdict,
-            "character range start must be less than or equal to end",
+            CandidateValidationIssue::InvalidSourceSpan {
+                reason: CandidateSourceSpanIssue::InvalidCharRange,
+            },
         );
     }
 
@@ -2091,7 +2270,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(&verdict, "cannot claim caller-provided rationale");
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::InvalidProvenance {
+                reason: CandidateProvenanceIssue::NonCallerClaimedCallerRationale,
+            },
+        );
     }
 
     #[tokio::test]
@@ -2167,15 +2351,18 @@ mod tests {
         graph
     }
 
-    fn assert_rejected_with(verdict: &WritePlanValidationVerdict, expected: &str) {
+    fn assert_rejected_with(
+        verdict: &WritePlanValidationVerdict,
+        expected: CandidateValidationIssue,
+    ) {
         assert_eq!(verdict.decision, WritePlanValidationDecision::Rejected);
         assert!(
             verdict
                 .validations
                 .iter()
                 .flat_map(|validation| validation.errors.iter())
-                .any(|error| error.contains(expected)),
-            "expected error containing {expected:?}, got {:?}",
+                .any(|error| error == &expected),
+            "expected issue {expected:?}, got {:?}",
             verdict.validations
         );
     }
