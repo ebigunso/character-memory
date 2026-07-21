@@ -586,10 +586,10 @@ fn ensure_no_vector_indexing_failure(
     if let Some(failure) = &outcome.vector_indexing_failure {
         return Err(format!(
             "{context}: vector indexing failed for object ids {:?}; persisted object ids {:?}; indexed object ids {:?}; error: {}",
-            failure.unindexed_object_ids,
+            failure.unindexed_object_ids(),
             outcome.persisted_object_ids,
             outcome.vector_indexed_object_ids,
-            failure.error_message
+            failure.cause
         ));
     }
 

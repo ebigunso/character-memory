@@ -16,6 +16,7 @@ pub use lifecycle::{
     LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleTargetRef,
     ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget, SourceProvenanceReference,
     SupersededByEvidence, SuppressionPolicy, VectorMaintenanceFailure,
+    VectorMaintenanceFailureItem, VectorMaintenanceOperation,
 };
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,

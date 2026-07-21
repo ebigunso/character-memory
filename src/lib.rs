@@ -40,7 +40,8 @@ pub use crate::api::types::{
     StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
     StatsUpdateCandidate, StatsUpdateFailure, StatsUpdateStatus, SupersededByEvidence,
     SuppressionPolicy, VectorCandidateTrace, VectorIndexCandidate, VectorIndexingFailure,
-    VectorMaintenanceFailure, VectorSurface,
+    VectorMaintenanceFailure, VectorMaintenanceFailureItem, VectorMaintenanceOperation,
+    VectorSurface,
 };
 pub use crate::config::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
@@ -58,8 +59,8 @@ pub use crate::domain::{
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
-    ConfigValidationReason, CustomError, TransportStatus, VectorDatabaseError,
-    VectorDatabaseErrorKind,
+    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
+    TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
 };
 pub use crate::memory::CharacterMemory;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};

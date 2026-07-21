@@ -928,12 +928,12 @@ mod tests {
         assert!(matches!(
             error,
             CustomError::VectorDatabaseError(VectorDatabaseError {
-                backend: "qdrant",
+                backend,
                 kind: VectorDatabaseErrorKind::Response,
                 status: Some(TransportStatus::Unavailable),
                 message,
                 retry_after_seconds: None,
-            }) if message == "offline"
+            }) if backend == "qdrant" && message == "offline"
         ));
     }
 

@@ -688,8 +688,15 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
 
     assert!(!outcome.persisted_object_ids.is_empty());
     if let Some(failure) = &outcome.vector_indexing_failure {
-        assert!(!failure.unindexed_object_ids.is_empty());
-        assert!(!failure.error_message.is_empty());
+        assert!(!failure.unindexed_objects.is_empty());
+        assert_eq!(
+            failure.unindexed_object_ids(),
+            failure
+                .unindexed_objects
+                .iter()
+                .map(|object| object.id)
+                .collect::<Vec<_>>()
+        );
     }
     if let Some(failure) = &outcome.stats_update_status.failure {
         assert!(!failure.failed_object_ids.is_empty());

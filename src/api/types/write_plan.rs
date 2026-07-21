@@ -7,8 +7,10 @@ use super::draft::{
     ObservationDraft, VectorIndexingFailure,
 };
 use super::lifecycle::ExternalSourceReference;
-use crate::domain::MemoryObjectRef;
-use crate::domain::{CandidateValidation, MemoryCandidateKind, MemoryId, RelationType};
+use crate::domain::{
+    CandidateValidation, MemoryCandidateKind, MemoryId, MemoryObjectRef, RelationType,
+};
+use crate::errors::VectorIndexingCause;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {
@@ -737,8 +739,8 @@ pub enum DiagnosticSeverity {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RepairMarker {
     VectorIndex {
-        unindexed_object_ids: Vec<MemoryId>,
-        error_message: String,
+        unindexed_objects: Vec<MemoryObjectRef>,
+        cause: VectorIndexingCause,
     },
     StatsUpdate {
         object_ids: Vec<MemoryId>,
@@ -749,8 +751,8 @@ pub enum RepairMarker {
 impl From<VectorIndexingFailure> for RepairMarker {
     fn from(value: VectorIndexingFailure) -> Self {
         Self::VectorIndex {
-            unindexed_object_ids: value.unindexed_object_ids,
-            error_message: value.error_message,
+            unindexed_objects: value.unindexed_objects,
+            cause: value.cause,
         }
     }
 }

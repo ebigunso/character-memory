@@ -711,8 +711,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            CustomError::EmbeddingInitializationError(message)
-                if message.contains("8") && message.contains("1536")
+            CustomError::Embedding(EmbeddingError::ProviderVectorSizeMismatch {
+                expected: 1536,
+                actual: 8,
+            })
         ));
     }
 
@@ -748,12 +750,18 @@ mod tests {
             Ok(_) => panic!("constructor should reject the removed service endpoint"),
             Err(error) => error,
         };
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
-        assert!(message.contains("OXIGRAPH_PATH"));
-        assert!(message.contains("local filesystem path"));
+        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "a local filesystem path",
+                actual: "http://127.0.0.1:7878".to_owned(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -1056,9 +1064,12 @@ mod tests {
             &self,
             _records: &[VectorRecordEmbedding<'_>],
         ) -> Result<(), CustomError> {
-            Err(CustomError::EmbeddingGenerationError(
-                "vector store unavailable".to_owned(),
-            ))
+            Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                "test",
+                VectorDatabaseErrorKind::Response,
+                None,
+                "vector store unavailable",
+            )))
         }
 
         async fn search_candidates(

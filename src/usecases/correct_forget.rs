@@ -11,15 +11,15 @@ use crate::api::types::lifecycle::{
 use crate::api::types::{
     CorrectMemoryDraft, CorrectionTarget, ForgetMemoryDraft, LifecycleTargetRef,
     ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget, SourceProvenanceReference,
-    SupersededByEvidence, VectorMaintenanceFailure,
+    SupersededByEvidence, VectorMaintenanceFailure, VectorMaintenanceFailureItem,
+    VectorMaintenanceOperation,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, Episode, LifecyclePolicyKnob, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
     Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::CustomError;
-use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
+use crate::errors::{CustomError, VectorIndexingCause};
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
@@ -28,6 +28,7 @@ use crate::ports::graph_authority::{
 };
 use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
 use crate::ports::vector_candidate::VectorCandidateStore;
+use crate::usecases::VectorIndexingService;
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
 where
@@ -86,7 +87,7 @@ where
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
-            .await;
+            .await?;
         apply_vector_result(&mut outcome, vector_result);
         record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
@@ -103,7 +104,7 @@ where
         self.graph_store.upsert_objects(&plan.graph_objects).await?;
 
         let mut outcome = plan.outcome_after_graph_success();
-        let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await;
+        let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await?;
         apply_vector_result(&mut outcome, vector_result);
         record_stats_after_write(self.stats_store, &plan.graph_objects, &plan.graph_links).await;
         Ok(outcome)
@@ -612,10 +613,9 @@ where
         &self,
         delete_refs: &[MemoryObjectRef],
         upsert_objects: &[MemoryObject],
-    ) -> VectorMaintenanceResult {
+    ) -> Result<VectorMaintenanceResult, CustomError> {
         let mut maintained = Vec::new();
-        let mut unmaintained = Vec::new();
-        let mut errors = Vec::new();
+        let mut failures = Vec::new();
 
         if !delete_refs.is_empty() {
             let delete_ids = delete_refs
@@ -624,10 +624,14 @@ where
                 .collect::<Vec<_>>();
             match self.vector_store.delete_candidates(&delete_ids).await {
                 Ok(()) => maintained.extend_from_slice(delete_refs),
-                Err(error) => {
-                    unmaintained.extend_from_slice(delete_refs);
-                    errors.push(error.to_string());
+                Err(CustomError::VectorDatabaseError(error)) => {
+                    failures.push(VectorMaintenanceFailureItem {
+                        operation: VectorMaintenanceOperation::Delete,
+                        objects: delete_refs.to_vec(),
+                        cause: VectorIndexingCause::VectorDatabase(error),
+                    })
                 }
+                Err(error) => return Err(error),
             }
         }
 
@@ -636,69 +640,25 @@ where
             .filter_map(memory_object_vector_record)
             .collect::<Vec<_>>();
         if !vector_records.is_empty() {
-            match self.index_vector_records(&vector_records).await {
-                Ok(indexed_refs) => maintained.extend(indexed_refs),
-                Err(error) => {
-                    unmaintained.extend(
-                        vector_records.iter().map(|record| {
-                            MemoryObjectRef::new(record.object_type, record.object_id)
-                        }),
-                    );
-                    errors.push(error);
-                }
+            let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
+                .index(vector_records)
+                .await?;
+            maintained.extend(indexing.indexed_objects);
+            if let Some(failure) = indexing.failure {
+                failures.push(VectorMaintenanceFailureItem {
+                    operation: VectorMaintenanceOperation::Upsert,
+                    objects: failure.unindexed_objects,
+                    cause: failure.cause,
+                });
             }
         }
 
         sort_refs(&mut maintained);
         maintained.dedup();
-        sort_refs(&mut unmaintained);
-        unmaintained.dedup();
-
-        VectorMaintenanceResult {
+        Ok(VectorMaintenanceResult {
             maintained,
-            failure: (!errors.is_empty()).then(|| VectorMaintenanceFailure {
-                unmaintained_object_ids: unmaintained,
-                error_message: errors.join("; "),
-            }),
-        }
-    }
-
-    async fn index_vector_records(
-        &self,
-        vector_records: &[VectorRecord],
-    ) -> Result<Vec<MemoryObjectRef>, String> {
-        let embedding_inputs = vector_records
-            .iter()
-            .map(VectorRecord::embedding_input)
-            .collect::<Vec<_>>();
-        let embeddings = self
-            .embedder
-            .embed_batch(&embedding_inputs)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        if embeddings.len() != vector_records.len() {
-            return Err(format!(
-                "embedder returned {} embeddings for {} vector records",
-                embeddings.len(),
-                vector_records.len()
-            ));
-        }
-
-        let record_embeddings = vector_records
-            .iter()
-            .zip(embeddings.iter())
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding.as_slice()))
-            .collect::<Vec<_>>();
-        self.vector_store
-            .upsert_vector_records(&record_embeddings)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        Ok(vector_records
-            .iter()
-            .map(|record| MemoryObjectRef::new(record.object_type, record.object_id))
-            .collect())
+            failure: (!failures.is_empty()).then_some(VectorMaintenanceFailure { failures }),
+        })
     }
 }
 
@@ -1165,7 +1125,10 @@ mod tests {
         ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
     };
     use crate::domain::{Episode, Modality, Observation};
-    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind};
+    use crate::models::vector::{
+        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+    };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery};
     use crate::ports::retrieval_stats::{
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
@@ -1502,10 +1465,23 @@ mod tests {
             .vector_maintenance_failure
             .expect("delete failure should be explicit");
         assert_eq!(
-            failure.unmaintained_object_ids,
+            failure.unmaintained_object_ids(),
             vec![MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old)]
         );
-        assert!(failure.error_message.contains("vector delete failed"));
+        assert_eq!(failure.failures.len(), 1);
+        assert_eq!(
+            failure.failures[0].operation,
+            VectorMaintenanceOperation::Delete
+        );
+        assert!(matches!(
+            &failure.failures[0].cause,
+            VectorIndexingCause::VectorDatabase(VectorDatabaseError {
+                backend,
+                kind: VectorDatabaseErrorKind::Response,
+                message,
+                ..
+            }) if backend == "test" && message == "vector delete failed"
+        ));
     }
 
     #[tokio::test]
@@ -2726,9 +2702,12 @@ mod tests {
         async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::VectorDelete(object_ids.to_vec()));
             if self.fail_delete {
-                return Err(CustomError::DatabaseError(
-                    "vector delete failed".to_owned(),
-                ));
+                return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                    "test",
+                    VectorDatabaseErrorKind::Response,
+                    None,
+                    "vector delete failed",
+                )));
             }
             Ok(())
         }
@@ -2858,9 +2837,12 @@ mod tests {
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
-            Err(CustomError::DatabaseError(
-                "vector delete failed".to_owned(),
-            ))
+            Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                "test",
+                VectorDatabaseErrorKind::Response,
+                None,
+                "vector delete failed",
+            )))
         }
     }
 

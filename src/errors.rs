@@ -48,17 +48,85 @@ pub enum TransportStatus {
     Unrecognized(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[error(
     "{backend} error: kind={kind:?} status={status:?} message={message} retry_after_seconds={retry_after_seconds:?}"
 )]
 #[non_exhaustive]
 pub struct VectorDatabaseError {
-    pub backend: &'static str,
+    pub backend: String,
     pub kind: VectorDatabaseErrorKind,
     pub status: Option<TransportStatus>,
     pub message: String,
     pub retry_after_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EmbeddingError {
+    #[error("embedding API key is missing")]
+    MissingApiKey,
+    #[error("embedding provider vector size mismatch: expected {expected}, got {actual}")]
+    ProviderVectorSizeMismatch { expected: usize, actual: usize },
+    #[error("embedding input is blank at index {index:?}")]
+    BlankInput { index: Option<usize> },
+    #[error("embedding transport failed ({transport_kind:?}): {detail}")]
+    Transport {
+        transport_kind: EmbeddingTransportErrorKind,
+        detail: String,
+    },
+    #[error("embedding service returned HTTP {status}: {body}")]
+    HttpStatus { status: u16, body: String },
+    #[error("embedding response JSON is invalid: {detail}")]
+    InvalidJson { detail: String },
+    #[error("embedding response is missing data")]
+    MissingData,
+    #[error("embedding count mismatch: expected {expected}, got {actual}")]
+    CountMismatch { expected: usize, actual: usize },
+    #[error("embedding response item {item} is missing its index")]
+    MissingIndex { item: usize },
+    #[error("embedding index {index} is outside expected count {expected_count}")]
+    IndexOutOfRange { index: usize, expected_count: usize },
+    #[error("embedding response contains duplicate index {index}")]
+    DuplicateIndex { index: usize },
+    #[error("embedding response item {item} is missing its vector")]
+    MissingEmbedding { item: usize },
+    #[error("embedding dimension mismatch at index {index}: expected {expected}, got {actual}")]
+    DimensionMismatch {
+        index: usize,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("embedding value at index {index}, component {component} is not numeric")]
+    NonNumericValue { index: usize, component: usize },
+    #[error("embedding response is missing index {index}")]
+    MissingResponseIndex { index: usize },
+    #[error("unrecognized external embedding-provider error: {0}")]
+    Unrecognized(String),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EmbeddingTransportErrorKind {
+    Timeout,
+    Connect,
+    Request,
+    Body,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[serde(tag = "cause", content = "detail", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum VectorIndexingCause {
+    #[error("embedding failed: {0}")]
+    Embedding(#[source] EmbeddingError),
+    #[error("embedding cardinality mismatch: expected {expected}, got {actual}")]
+    CardinalityMismatch { expected: usize, actual: usize },
+    #[error("vector database failed: {0}")]
+    VectorDatabase(#[source] VectorDatabaseError),
 }
 
 impl VectorDatabaseError {
@@ -69,7 +137,7 @@ impl VectorDatabaseError {
         message: impl Into<String>,
     ) -> Self {
         Self {
-            backend,
+            backend: backend.to_owned(),
             kind,
             status,
             message: message.into(),
@@ -198,11 +266,8 @@ pub enum CustomError {
     #[error("Vector database error: {0}")]
     VectorDatabaseError(#[source] VectorDatabaseError),
 
-    #[error("Embedding initialization error: {0}")]
-    EmbeddingInitializationError(String),
-
-    #[error("Embedding generation error: {0}")]
-    EmbeddingGenerationError(String),
+    #[error(transparent)]
+    Embedding(#[from] EmbeddingError),
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),

@@ -2,13 +2,13 @@
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
     CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnosticCode,
-    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus,
+    RememberDiagnostics, RememberWritePlan, RepairMarker, StatsUpdateStatus, VectorIndexingFailure,
 };
 use crate::domain::{
     CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
 };
 use crate::errors::CustomError;
-use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
+use crate::models::vector::VectorRecord;
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
@@ -16,7 +16,7 @@ use crate::ports::retrieval_stats::{
     record_stats_after_write, RetrievalStatsHealthState, RetrievalStatsStore,
 };
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::{WritePlanCommitValues, WritePlanValidator};
+use crate::usecases::{VectorIndexingService, WritePlanCommitValues, WritePlanValidator};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RememberPipelineOutcome {
@@ -41,12 +41,6 @@ impl RememberPipelineOutcome {
             diagnostics: RememberDiagnostics::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct VectorIndexingFailure {
-    pub(crate) unindexed_object_ids: Vec<MemoryId>,
-    pub(crate) error_message: String,
 }
 
 pub(crate) struct RememberPipeline<'a, G, V, E>
@@ -161,7 +155,7 @@ where
                 VectorWriteIntent::None => Vec::new(),
             };
             self.record_vector_outcome(&mut outcome, &vector_records)
-                .await;
+                .await?;
         }
 
         if options.update_stats {
@@ -176,38 +170,34 @@ where
         &self,
         outcome: &mut RememberPipelineOutcome,
         vector_records: &[VectorRecord],
-    ) {
+    ) -> Result<(), CustomError> {
         if vector_records.is_empty() {
-            return;
+            return Ok(());
         }
 
-        match self.index_vector_records(vector_records).await {
-            Ok(indexed_ids) => {
-                outcome.vector_indexed_object_ids = indexed_ids;
-            }
-            Err(error_message) => {
-                let failure = VectorIndexingFailure {
-                    unindexed_object_ids: vector_records
-                        .iter()
-                        .map(|record| record.object_id)
-                        .collect(),
-                    error_message,
-                };
+        let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
+            .index(vector_records.to_vec())
+            .await?;
+        outcome.vector_indexed_object_ids = indexing
+            .indexed_objects
+            .iter()
+            .map(|object| object.id)
+            .collect();
+        if let Some(failure) = indexing.failure {
+            let message = failure.cause.to_string();
+            outcome.repair_needed.push(failure.clone().into());
+            outcome.diagnostics =
                 outcome
-                    .repair_needed
-                    .push(crate::api::types::VectorIndexingFailure::from(failure.clone()).into());
-                outcome.diagnostics =
-                    outcome
-                        .diagnostics
-                        .clone()
-                        .with_message(RememberDiagnostic::new(
-                            DiagnosticSeverity::Warning,
-                            RememberDiagnosticCode::VectorIndexingFailed,
-                            failure.error_message.clone(),
-                        ));
-                outcome.vector_indexing_failure = Some(failure);
-            }
+                    .diagnostics
+                    .clone()
+                    .with_message(RememberDiagnostic::new(
+                        DiagnosticSeverity::Warning,
+                        RememberDiagnosticCode::VectorIndexingFailed,
+                        message,
+                    ));
+            outcome.vector_indexing_failure = Some(failure);
         }
+        Ok(())
     }
 
     async fn record_stats_outcome(
@@ -348,44 +338,6 @@ where
 
         Ok(())
     }
-
-    async fn index_vector_records(
-        &self,
-        vector_records: &[VectorRecord],
-    ) -> Result<Vec<MemoryId>, String> {
-        let embedding_inputs = vector_records
-            .iter()
-            .map(VectorRecord::embedding_input)
-            .collect::<Vec<_>>();
-        let embeddings = self
-            .embedder
-            .embed_batch(&embedding_inputs)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        if embeddings.len() != vector_records.len() {
-            return Err(format!(
-                "embedder returned {} embeddings for {} vector records",
-                embeddings.len(),
-                vector_records.len()
-            ));
-        }
-
-        let record_embeddings = vector_records
-            .iter()
-            .zip(embeddings.iter())
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding.as_slice()))
-            .collect::<Vec<_>>();
-        self.vector_store
-            .upsert_vector_records(&record_embeddings)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        Ok(vector_records
-            .iter()
-            .map(|record| record.object_id)
-            .collect())
-    }
 }
 
 enum VectorWriteIntent {
@@ -501,7 +453,10 @@ mod tests {
         ObservationDraft, RememberInput,
     };
     use crate::domain::{DerivedType, EntityType, ObjectType, RelationType, RetentionState};
-    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause};
+    use crate::models::vector::{
+        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+    };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
     use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
@@ -670,8 +625,16 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("vector failure should be explicit");
-        assert_eq!(failure.unindexed_object_ids, outcome.persisted_object_ids);
-        assert!(failure.error_message.contains("vector write failed"));
+        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
+        assert!(matches!(
+            failure.cause,
+            VectorIndexingCause::VectorDatabase(VectorDatabaseError {
+                backend,
+                kind: VectorDatabaseErrorKind::Response,
+                message,
+                ..
+            }) if backend == "test" && message == "vector write failed"
+        ));
     }
 
     #[tokio::test]
@@ -691,10 +654,13 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("embedding mismatch should be explicit");
-        assert_eq!(failure.unindexed_object_ids, outcome.persisted_object_ids);
+        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
         assert_eq!(
-            failure.error_message,
-            "embedder returned 4 embeddings for 5 vector records"
+            failure.cause,
+            VectorIndexingCause::CardinalityMismatch {
+                expected: 5,
+                actual: 4,
+            }
         );
         assert!(vector.calls().is_empty());
     }
@@ -1149,7 +1115,12 @@ mod tests {
                     .collect(),
             ));
             if self.fail_upsert {
-                return Err(CustomError::DatabaseError("vector write failed".to_owned()));
+                return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                    "test",
+                    VectorDatabaseErrorKind::Response,
+                    None,
+                    "vector write failed",
+                )));
             }
             Ok(())
         }

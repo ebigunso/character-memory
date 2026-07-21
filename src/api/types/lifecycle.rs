@@ -2,6 +2,7 @@ use crate::domain::{
     DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType,
     RetentionState, Stability, ThreadStatus,
 };
+use crate::errors::VectorIndexingCause;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -555,13 +556,51 @@ pub enum LifecycleMutationWarningReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorMaintenanceFailure {
-    pub unmaintained_object_ids: Vec<MemoryObjectRef>,
-    pub error_message: String,
+    pub failures: Vec<VectorMaintenanceFailureItem>,
+}
+
+impl VectorMaintenanceFailure {
+    pub fn unmaintained_object_ids(&self) -> Vec<MemoryObjectRef> {
+        let mut objects = self
+            .failures
+            .iter()
+            .flat_map(|failure| failure.objects.iter().copied())
+            .collect::<Vec<_>>();
+        objects.sort_by_key(|object| (object.id, object_type_rank(object.object_type)));
+        objects.dedup();
+        objects
+    }
+}
+
+fn object_type_rank(object_type: ObjectType) -> u8 {
+    match object_type {
+        ObjectType::Episode => 0,
+        ObjectType::Observation => 1,
+        ObjectType::Entity => 2,
+        ObjectType::MemoryThread => 3,
+        ObjectType::DerivedMemory => 4,
+        ObjectType::MemoryLink => 5,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VectorMaintenanceFailureItem {
+    pub operation: VectorMaintenanceOperation,
+    pub objects: Vec<MemoryObjectRef>,
+    pub cause: VectorIndexingCause,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorMaintenanceOperation {
+    Delete,
+    Upsert,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind};
 
     use uuid::Uuid;
 
@@ -875,11 +914,19 @@ mod tests {
                 new_memory_id(),
             )],
             vector_maintenance_failure: Some(VectorMaintenanceFailure {
-                unmaintained_object_ids: vec![MemoryObjectRef::new(
-                    ObjectType::DerivedMemory,
-                    old_memory_id(),
-                )],
-                error_message: "vector maintenance timed out after graph mutation".to_owned(),
+                failures: vec![VectorMaintenanceFailureItem {
+                    operation: VectorMaintenanceOperation::Delete,
+                    objects: vec![MemoryObjectRef::new(
+                        ObjectType::DerivedMemory,
+                        old_memory_id(),
+                    )],
+                    cause: VectorIndexingCause::VectorDatabase(VectorDatabaseError::new(
+                        "test",
+                        VectorDatabaseErrorKind::HttpTimeout,
+                        None,
+                        "timed out after graph mutation",
+                    )),
+                }],
             }),
             trace: Some(LifecycleMutationTrace {
                 requested_targets: vec![LifecycleTargetRef::derived_memory(old_memory_id())],
