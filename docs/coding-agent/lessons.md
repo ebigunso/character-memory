@@ -793,3 +793,28 @@ Fix applied:
 
 Prevention:
 - Frame rules at the altitude of the failure mode, with observed instances as examples only; dispatch constraints must carry their own escape hatch; tripwire escalations are replan triggers with recorded rulings.
+
+## 2026-07-21 - Shared-Checkout Git Operations Are Orchestrator-Coordinated  [tags: delegation, workflow, tooling]
+
+Context:
+- Plan: structured-verdict-observability; Task_3/Task_4 parallel wave across the shared CM checkout
+
+Symptom:
+- Recurred twice in one phase: CME aggregate gates repeatedly compiled the sibling CM checkout mid-edit (spurious failures), and a Task_4 dispatch instructed the evals worker to check out a branch in that sibling — which is the CM worker's ACTIVE working tree (caught by the worker's tripwire discipline before mutation).
+
+Root cause:
+- Cross-repo coordination did not treat the sibling path dependency as someone's live working tree; dispatch prompts described it as a passive surface.
+
+Fix applied:
+- Standing protocol: shared-checkout git operations are exclusively orchestrator-coordinated; workers read cross-repo surfaces via git show at orchestrator-pinned SHAs; sibling-compiling validation (targeted or aggregate) is sequenced by the orchestrator around the other repo's settle points.
+
+Prevention:
+- Dispatches naming a sibling repo must state its role explicitly (active checkout vs pinned read surface) and the validation boundary (which crates compile it).
+
+## 2026-07-21 - Batch Notes From The Observability Phase  [tags: validation, tooling]
+
+- Equivalence/producer-vocabulary completeness: enumerate from the producer's full branch set, never from a finding's cited examples (SectionAssignmentReason missed a live branch; same class as the sealed-reader claim).
+- Cause-type refinements must be checked against the containing DTOs' derive obligations (serialized evidence needs Clone/serde/Eq; Box<CustomError> was unusable).
+- Run denied-warning clippy immediately after broad type-unification slices, not only at final gates (worker candidate).
+- Prefer apply_patch-style edits over PowerShell nested replacement maps for source edits (punctuation corruption risk; worker candidate).
+- agmsg send.sh takes exactly TEAM FROM TO MESSAGE; an extra positional argument silently displaces the body (reviewer candidate; symptom: bare one-word messages).
