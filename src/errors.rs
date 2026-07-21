@@ -65,7 +65,7 @@ pub enum IoErrorKind {
     UnexpectedEof,
     OutOfMemory,
     Other,
-    Unrecognized(String),
+    Unrecognized,
 }
 
 impl From<std::io::ErrorKind> for IoErrorKind {
@@ -110,7 +110,7 @@ impl From<std::io::ErrorKind> for IoErrorKind {
             std::io::ErrorKind::UnexpectedEof => Self::UnexpectedEof,
             std::io::ErrorKind::OutOfMemory => Self::OutOfMemory,
             std::io::ErrorKind::Other => Self::Other,
-            other => Self::Unrecognized(format!("{other:?}")),
+            _ => Self::Unrecognized,
         }
     }
 }
@@ -389,49 +389,65 @@ mod tests {
     use super::*;
     use crate::domain::{CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind};
 
+    macro_rules! exhaustive_embedding_error_fixtures {
+        ($( $pattern:pat => $fixture:expr ),+ $(,)?) => {{
+            fn assert_exhaustive(error: &EmbeddingError) {
+                match error {
+                    $( $pattern => {} ),+
+                }
+            }
+
+            let fixtures = vec![$($fixture),+];
+            for fixture in &fixtures {
+                assert_exhaustive(fixture);
+            }
+            fixtures
+        }};
+    }
+
     #[test]
     fn every_embedding_error_variant_round_trips_through_serde() {
-        let errors = vec![
-            EmbeddingError::MissingApiKey,
-            EmbeddingError::ProviderVectorSizeMismatch {
+        let errors = exhaustive_embedding_error_fixtures![
+            EmbeddingError::MissingApiKey => EmbeddingError::MissingApiKey,
+            EmbeddingError::ProviderVectorSizeMismatch { .. } => EmbeddingError::ProviderVectorSizeMismatch {
                 expected: 3,
                 actual: 2,
             },
-            EmbeddingError::BlankInput { index: Some(1) },
-            EmbeddingError::Transport {
+            EmbeddingError::BlankInput { .. } => EmbeddingError::BlankInput { index: Some(1) },
+            EmbeddingError::Transport { .. } => EmbeddingError::Transport {
                 transport_kind: EmbeddingTransportErrorKind::Connect,
                 detail: "connection refused".to_owned(),
             },
-            EmbeddingError::HttpStatus {
+            EmbeddingError::HttpStatus { .. } => EmbeddingError::HttpStatus {
                 status: 429,
                 body: "rate limited".to_owned(),
             },
-            EmbeddingError::InvalidJson {
+            EmbeddingError::InvalidJson { .. } => EmbeddingError::InvalidJson {
                 detail: "unexpected token".to_owned(),
             },
-            EmbeddingError::MissingData,
-            EmbeddingError::CountMismatch {
+            EmbeddingError::MissingData => EmbeddingError::MissingData,
+            EmbeddingError::CountMismatch { .. } => EmbeddingError::CountMismatch {
                 expected: 2,
                 actual: 1,
             },
-            EmbeddingError::MissingIndex { item: 0 },
-            EmbeddingError::IndexOutOfRange {
+            EmbeddingError::MissingIndex { .. } => EmbeddingError::MissingIndex { item: 0 },
+            EmbeddingError::IndexOutOfRange { .. } => EmbeddingError::IndexOutOfRange {
                 index: 2,
                 expected_count: 2,
             },
-            EmbeddingError::DuplicateIndex { index: 0 },
-            EmbeddingError::MissingEmbedding { item: 0 },
-            EmbeddingError::DimensionMismatch {
+            EmbeddingError::DuplicateIndex { .. } => EmbeddingError::DuplicateIndex { index: 0 },
+            EmbeddingError::MissingEmbedding { .. } => EmbeddingError::MissingEmbedding { item: 0 },
+            EmbeddingError::DimensionMismatch { .. } => EmbeddingError::DimensionMismatch {
                 index: 0,
                 expected: 3,
                 actual: 2,
             },
-            EmbeddingError::NonNumericValue {
+            EmbeddingError::NonNumericValue { .. } => EmbeddingError::NonNumericValue {
                 index: 0,
                 component: 1,
             },
-            EmbeddingError::MissingResponseIndex { index: 1 },
-            EmbeddingError::Unrecognized {
+            EmbeddingError::MissingResponseIndex { .. } => EmbeddingError::MissingResponseIndex { index: 1 },
+            EmbeddingError::Unrecognized { .. } => EmbeddingError::Unrecognized {
                 detail: "custom provider failure".to_owned(),
             },
         ];
@@ -457,6 +473,17 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<IoErrorKind>(&serialized).unwrap(),
             kind
+        );
+    }
+
+    #[test]
+    fn unrecognized_io_error_kind_is_an_opaque_marker() {
+        let serialized = serde_json::to_value(IoErrorKind::Unrecognized).unwrap();
+
+        assert_eq!(serialized, serde_json::json!({ "kind": "unrecognized" }));
+        assert!(
+            serialized.get("value").is_none(),
+            "the fallback must not expose a Debug-derived carrier"
         );
     }
 

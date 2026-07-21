@@ -222,19 +222,4 @@ mod tests {
             vec![MemoryObjectRef::new(ObjectType::Observation, object_id)]
         );
     }
-
-    #[test]
-    fn attempted_ids_include_link_only_endpoints_when_hydration_fails() {
-        let from_id = MemoryId::from_u128(1);
-        let to_id = MemoryId::from_u128(2);
-        let endpoint_refs = vec![
-            MemoryObjectRef::new(ObjectType::Observation, from_id),
-            MemoryObjectRef::new(ObjectType::Episode, to_id),
-        ];
-
-        assert_eq!(
-            attempted_stats_object_ids(&[], &endpoint_refs),
-            vec![from_id, to_id]
-        );
-    }
 }

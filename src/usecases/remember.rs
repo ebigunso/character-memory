@@ -314,13 +314,16 @@ mod tests {
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
-        DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
-        ObservationDraft, RememberInput,
+        CandidateProvenance, DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryCandidate,
+        MemoryLinkCandidate, MemoryLinkDraft, MemoryThreadDraft, ObservationDraft, RememberInput,
     };
     use crate::domain::{
         DerivedType, EntityType, MemoryId, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
     };
-    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause};
+    use crate::errors::{
+        StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
+    };
     use crate::models::vector::{
         CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
@@ -744,6 +747,64 @@ mod tests {
         )));
     }
 
+    #[tokio::test]
+    async fn link_only_hydration_failure_reports_endpoint_ids_for_stats_repair() {
+        let fixtures = representative_fixtures();
+        let episode_id = fixtures.episode.id;
+        let observation_id = fixtures.salient_observation.id;
+        let graph = RecordingGraphStore::default()
+            .with_query_objects(vec![
+                MemoryObject::Episode(fixtures.episode),
+                MemoryObject::Observation(fixtures.salient_observation),
+            ])
+            .fail_id_queries();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut link = typed_link_draft(
+            id("550e8400-e29b-41d4-a716-446655443010"),
+            ObjectType::Episode,
+            episode_id,
+            RelationType::Mentions,
+            ObjectType::Observation,
+            observation_id,
+        );
+        link.created_at = Some(timestamp());
+        link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655443011"),
+            "link-only-stats-hydration-failure",
+        )
+        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+            link,
+            CandidateProvenance::caller("exercise link-only stats hydration"),
+        )));
+
+        let outcome = pipeline
+            .commit(plan, CommitOptions::default())
+            .await
+            .expect("stats hydration failure should remain a repairable graph success");
+        let expected_ids = vec![episode_id, observation_id];
+        let failure = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("endpoint hydration failure should be published");
+
+        assert_eq!(failure.failed_object_ids, expected_ids);
+        assert!(matches!(
+            failure.cause,
+            StatsUpdateCause::EndpointHydration { .. }
+        ));
+        assert!(outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { object_ids, cause }
+                if object_ids == &expected_ids
+                    && matches!(cause, StatsUpdateCause::EndpointHydration { .. })
+        )));
+    }
+
     #[derive(Debug, Clone, Copy)]
     struct FixedIds {
         entity: MemoryId,
@@ -892,6 +953,8 @@ mod tests {
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_objects: bool,
         fail_links: bool,
+        query_objects: Vec<MemoryObject>,
+        fail_id_queries: bool,
     }
 
     impl RecordingGraphStore {
@@ -902,6 +965,16 @@ mod tests {
 
         fn fail_links(mut self) -> Self {
             self.fail_links = true;
+            self
+        }
+
+        fn with_query_objects(mut self, objects: Vec<MemoryObject>) -> Self {
+            self.query_objects = objects;
+            self
+        }
+
+        fn fail_id_queries(mut self) -> Self {
+            self.fail_id_queries = true;
             self
         }
 
@@ -943,9 +1016,26 @@ mod tests {
 
         async fn query_objects(
             &self,
-            _query: &GraphObjectQuery,
+            query: &GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
+            if self.fail_id_queries && matches!(query, GraphObjectQuery::ByIds(_)) {
+                return Err(CustomError::DatabaseError(
+                    "endpoint lifecycle lookup failed".to_owned(),
+                ));
+            }
+
+            Ok(self
+                .query_objects
+                .iter()
+                .filter(|object| match query {
+                    GraphObjectQuery::ByRefs(refs) => refs.contains(&object.object_ref()),
+                    GraphObjectQuery::ByIds(ids) => ids.contains(&object.id()),
+                    GraphObjectQuery::ByTypes { object_types, .. } => {
+                        object_types.contains(&object.object_type())
+                    }
+                })
+                .cloned()
+                .collect())
         }
 
         async fn query_links_by_ids(
