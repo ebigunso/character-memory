@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "common"
-last_updated: "2026-07-21"
+last_updated: "2026-07-22"
 ---
 
 # Common Repository Rules
@@ -34,6 +34,12 @@ last_updated: "2026-07-21"
 - Recognizable symptoms include, non-exhaustively: structured data flattened into prose; a parallel channel or path duplicating an existing one; tests that parse message strings or pin incidental values to verify behavior; call sites compensating for what the callee should own; logic duplicated to avoid a refactor; shims or adapters absorbing a design mismatch instead of the design being aligned; special-case branches accumulating around an abstraction that no longer fits; "for now"/"workaround" markers.
 - On hitting the tripwire: stop the affected chunk and escalate the design alternative with its cost delta to the role that owns the decision; do not implement through it. In this pre-consumer codebase, design changes are cheap, so the cheapness of the alternative raises the obligation to alert.
 - An alert is an obligation to surface, not a license to redesign: the alerting agent waits for a ruling rather than unilaterally expanding scope.
+
+## Artifact Placement And Disposition
+
+- Agents must not write task artifacts (probe outputs, scratch scripts, logs, captures, temporary fixtures) to machine-global locations such as `C:\tmp` or the user profile; every artifact lives inside the repository under the gitignored `.agent-work/` directory, in a per-role subdirectory (`.agent-work/worker/`, `.agent-work/reviewer/`, ...) (user-directed 2026-07-22).
+- The producing agent owns each artifact's disposition and states it in the task report: DELETE after use (the default — clean up before reporting done), or PROMOTE as evidence worth committing (move it to a tracked location and hand it to the normal commit/review flow with the reason stated).
+- Out-of-repo paths are permitted only when the purpose requires leaving the repository (for example a clean-room reproduction proving environment independence), with the purpose and exact path stated in the report and the artifact removed afterward.
 
 ## Compatibility Policy
 

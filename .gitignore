@@ -26,3 +26,6 @@ target/
 
 # Local runtime/test artifacts written by default config paths
 /data/
+
+# Agent task artifacts (repo-local scratch; disposition owned by the producing agent)
+.agent-work/
