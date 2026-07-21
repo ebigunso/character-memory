@@ -89,9 +89,10 @@ where
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await?;
         apply_vector_result(&mut outcome, vector_result);
-        StatsProjectionService::new(self.graph_store, self.stats_store)
+        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&plan.graph_objects, &plan.graph_links)
             .await;
+        outcome.stats_update_status = projection.into_status();
         Ok(outcome)
     }
 
@@ -108,9 +109,10 @@ where
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await?;
         apply_vector_result(&mut outcome, vector_result);
-        StatsProjectionService::new(self.graph_store, self.stats_store)
+        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&plan.graph_objects, &plan.graph_links)
             .await;
+        outcome.stats_update_status = projection.into_status();
         Ok(outcome)
     }
 
@@ -711,6 +713,7 @@ impl MutationPlan {
             graph_mutated_link_ids: self.graph_links.iter().map(|link| link.id).collect(),
             vector_maintained_object_ids: Vec::new(),
             vector_maintenance_failure: None,
+            stats_update_status: crate::api::types::StatsUpdateStatus::default(),
             trace: self.trace.clone(),
             diagnostics: self.diagnostics.clone(),
         }
@@ -1097,7 +1100,7 @@ mod tests {
     };
     use crate::domain::{Episode, Modality, Observation};
     use crate::errors::{
-        RetrievalStatsHealthCause, RetrievalStatsStoreError, VectorDatabaseError,
+        RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
         VectorDatabaseErrorKind,
     };
     use crate::models::vector::{
@@ -1164,7 +1167,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn correction_stats_failure_runs_after_vector_and_preserves_outcome() {
+    async fn correction_outcome_preserves_all_stats_failures() {
         let ids = fixed_ids();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let graph = RecordingGraphStore {
@@ -1182,6 +1185,7 @@ mod tests {
         let stats = RecordingStatsStore {
             calls: calls.clone(),
             fail_edges: true,
+            fail_object_states: true,
         };
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
@@ -1191,6 +1195,7 @@ mod tests {
             .expect("stats failure should not change lifecycle outcome");
 
         assert!(outcome.vector_maintenance_failure.is_none());
+        assert_stats_failures(&outcome.stats_update_status, &[ids.old, ids.replacement]);
         assert_eq!(
             lock(&calls).clone(),
             vec![
@@ -1226,6 +1231,7 @@ mod tests {
         let stats = RecordingStatsStore {
             calls: calls.clone(),
             fail_edges: false,
+            fail_object_states: false,
         };
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
@@ -1239,6 +1245,11 @@ mod tests {
 
         assert!(outcome.vector_maintenance_failure.is_none());
         assert_eq!(
+            outcome.stats_update_status.updated_object_ids,
+            vec![ids.old]
+        );
+        assert!(outcome.stats_update_status.failure.is_none());
+        assert_eq!(
             lock(&calls).clone(),
             vec![
                 StoreCall::GraphQuery(vec![ids.old]),
@@ -1248,6 +1259,49 @@ mod tests {
                 StoreCall::StatsObjectStates(1),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn forget_outcome_preserves_all_stats_failures() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = RecordingStatsStore {
+            fail_edges: true,
+            fail_object_states: true,
+            ..RecordingStatsStore::default()
+        };
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        let outcome = pipeline
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::DerivedMemory(ids.old),
+                "Suppress stale derived memory.",
+            ))
+            .await
+            .expect("stats degradation should remain a repairable lifecycle outcome");
+
+        assert_stats_failures(&outcome.stats_update_status, &[ids.old]);
+    }
+
+    fn assert_stats_failures(
+        status: &crate::api::types::StatsUpdateStatus,
+        expected_object_ids: &[MemoryId],
+    ) {
+        assert!(status.updated_object_ids.is_empty());
+        let failure = status
+            .failure
+            .as_ref()
+            .expect("stats failure must be visible");
+        assert_eq!(failure.failed_object_ids, expected_object_ids);
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EdgeWrite { .. },
+                StatsUpdateCause::ObjectStateWrite { .. }
+            ]
+        ));
     }
 
     #[tokio::test]
@@ -2714,6 +2768,7 @@ mod tests {
     struct RecordingStatsStore {
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_edges: bool,
+        fail_object_states: bool,
     }
 
     #[async_trait]
@@ -2736,6 +2791,11 @@ mod tests {
             states: &[RetrievalStatsObjectState],
         ) -> Result<(), RetrievalStatsStoreError> {
             lock(&self.calls).push(StoreCall::StatsObjectStates(states.len()));
+            if self.fail_object_states {
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "stats object-state write failed".to_owned(),
+                });
+            }
             Ok(())
         }
 

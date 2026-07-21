@@ -523,6 +523,13 @@ impl TryFrom<MemoryLinkDraft> for MemoryLink {
     }
 }
 
+/// Result of a graph-authoritative link write and its repairable stats projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LinkOutcome {
+    pub link: MemoryLink,
+    pub stats_update_status: StatsUpdateStatus,
+}
+
 /// Result of a remember write.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberOutcome {

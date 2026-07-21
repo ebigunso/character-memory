@@ -1,3 +1,4 @@
+use crate::api::types::StatsUpdateStatus;
 use crate::domain::{MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType};
 use crate::errors::StatsUpdateCause;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
@@ -10,6 +11,16 @@ use crate::ports::retrieval_stats::{
 pub(crate) struct StatsProjectionOutcome {
     pub(crate) attempted_object_ids: Vec<MemoryId>,
     pub(crate) causes: Vec<StatsUpdateCause>,
+}
+
+impl StatsProjectionOutcome {
+    pub(crate) fn into_status(self) -> StatsUpdateStatus {
+        if self.causes.is_empty() {
+            StatsUpdateStatus::succeeded(self.attempted_object_ids)
+        } else {
+            StatsUpdateStatus::failed([], self.attempted_object_ids, self.causes)
+        }
+    }
 }
 
 pub(crate) struct StatsProjectionService<'a, G>

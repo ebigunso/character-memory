@@ -5,7 +5,7 @@ pub mod write_plan;
 mod draft;
 
 pub use draft::{
-    DerivedMemoryDraft, DraftDefaults, EntityDraft, EpisodeDraft, MemoryLinkDraft,
+    DerivedMemoryDraft, DraftDefaults, EntityDraft, EpisodeDraft, LinkOutcome, MemoryLinkDraft,
     MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberOutcome, VectorIndexingFailure,
 };
 pub use lifecycle::{

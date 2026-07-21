@@ -5,6 +5,8 @@ use crate::domain::{
 use crate::errors::VectorIndexingCause;
 use serde::{Deserialize, Serialize};
 
+use super::write_plan::StatsUpdateStatus;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "object_type", content = "id", rename_all = "snake_case")]
 pub enum LifecycleTargetRef {
@@ -520,6 +522,7 @@ pub struct LifecycleMutationOutcome {
     pub graph_mutated_link_ids: Vec<MemoryId>,
     pub vector_maintained_object_ids: Vec<MemoryObjectRef>,
     pub vector_maintenance_failure: Option<VectorMaintenanceFailure>,
+    pub stats_update_status: StatsUpdateStatus,
     pub trace: Option<LifecycleMutationTrace>,
     pub diagnostics: LifecycleMutationDiagnostics,
 }
@@ -531,6 +534,7 @@ impl LifecycleMutationOutcome {
             graph_mutated_link_ids: Vec::new(),
             vector_maintained_object_ids: Vec::new(),
             vector_maintenance_failure: None,
+            stats_update_status: StatsUpdateStatus::default(),
             trace: None,
             diagnostics: LifecycleMutationDiagnostics::default(),
         }
@@ -589,7 +593,9 @@ pub enum VectorMaintenanceOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::{VectorDatabaseError, VectorDatabaseErrorKind};
+    use crate::errors::{
+        RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind,
+    };
 
     use uuid::Uuid;
 
@@ -917,6 +923,15 @@ mod tests {
                     )),
                 }],
             }),
+            stats_update_status: StatsUpdateStatus::failed(
+                [],
+                [old_memory_id()],
+                vec![StatsUpdateCause::EdgeWrite {
+                    error: RetrievalStatsStoreError::Sqlite {
+                        detail: "stats edge write failed".to_owned(),
+                    },
+                }],
+            ),
             trace: Some(LifecycleMutationTrace {
                 requested_targets: vec![LifecycleTargetRef::derived_memory(old_memory_id())],
                 superseded_by: vec![SupersededByEvidence {

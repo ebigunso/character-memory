@@ -1,10 +1,10 @@
 use crate::api::types::{
-    CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft, LifecycleMutationOutcome,
+    CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft, LifecycleMutationOutcome, LinkOutcome,
     MemoryLinkDraft, PrepareOptions, RememberInput, RememberOptions, RememberOutcome,
     RememberWritePlan, RetrievalContext, RetrieveOutcome,
 };
 use crate::composition::MemoryComposition;
-use crate::domain::{CandidateValidation, MemoryLink};
+use crate::domain::CandidateValidation;
 use crate::errors::CustomError;
 use crate::usecases::{
     CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RetrievePipeline, WritePlanValidator,
@@ -88,8 +88,8 @@ impl CharacterMemory {
         self.commit(plan, options.commit).await
     }
 
-    /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
-    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+    /// Persists a canonical typed relationship and reports its repairable stats projection.
+    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let parts = self.memory_composition();
         LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
             .link(draft)
@@ -418,14 +418,15 @@ mod tests {
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445012"));
 
-        let link = memory
+        let outcome = memory
             .link(draft)
             .await
             .expect("link facade should persist through injected graph store");
 
-        assert_eq!(link.from_id, from_id);
-        assert_eq!(link.to_id, to_id);
-        assert_eq!(link.relation, RelationType::Mentions);
+        assert_eq!(outcome.link.from_id, from_id);
+        assert_eq!(outcome.link.to_id, to_id);
+        assert_eq!(outcome.link.relation, RelationType::Mentions);
+        assert!(outcome.stats_update_status.failure.is_none());
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{DraftDefaults, MemoryLinkDraft};
+use crate::api::types::{DraftDefaults, LinkOutcome, MemoryLinkDraft};
 use crate::domain::{MemoryLink, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::GraphAuthorityStore;
@@ -50,7 +50,7 @@ where
         }
     }
 
-    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let mut defaults = DraftDefaults::generated();
         self.link_with_defaults(draft, &mut defaults).await
     }
@@ -59,7 +59,7 @@ where
         &self,
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
-    ) -> Result<MemoryLink, CustomError> {
+    ) -> Result<LinkOutcome, CustomError> {
         self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
             .await
     }
@@ -69,7 +69,7 @@ where
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
         evidence: LinkAdmissionEvidence,
-    ) -> Result<MemoryLink, CustomError> {
+    ) -> Result<LinkOutcome, CustomError> {
         let link = draft
             .into_domain_with_defaults(defaults)
             .map_err(validation_error)?;
@@ -82,10 +82,13 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
-        StatsProjectionService::new(self.graph_store, self.stats_store)
+        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&[], std::slice::from_ref(&link))
             .await;
-        Ok(link)
+        Ok(LinkOutcome {
+            link,
+            stats_update_status: projection.into_status(),
+        })
     }
 }
 
@@ -122,11 +125,15 @@ mod tests {
         DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
+    use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause};
     use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
         GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
     };
-    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState, RetrievalStatsStore,
+    };
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
@@ -150,7 +157,8 @@ mod tests {
         let persisted = pipeline
             .link_with_defaults(draft, &mut defaults)
             .await
-            .expect("valid typed link should persist");
+            .expect("valid typed link should persist")
+            .link;
 
         assert_eq!(persisted.id, id("550e8400-e29b-41d4-a716-446655444001"));
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
@@ -238,7 +246,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         let pipeline = LinkPipeline::new(&graph);
 
-        let persisted = pipeline.link(valid_link_draft()).await.unwrap();
+        let persisted = pipeline.link(valid_link_draft()).await.unwrap().link;
 
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
     }
@@ -251,7 +259,7 @@ mod tests {
         let draft = valid_link_draft();
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -290,7 +298,7 @@ mod tests {
             suppressed_episode.id,
         );
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -339,7 +347,11 @@ mod tests {
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
 
-        let persisted = pipeline.link(associated_with_link_draft()).await.unwrap();
+        let persisted = pipeline
+            .link(associated_with_link_draft())
+            .await
+            .unwrap()
+            .link;
 
         assert_eq!(persisted.relation, RelationType::AssociatedWith);
     }
@@ -379,7 +391,7 @@ mod tests {
         let draft = valid_link_draft();
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -397,6 +409,104 @@ mod tests {
             stats.health().await.unwrap().state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
+    }
+
+    #[tokio::test]
+    async fn link_outcome_preserves_all_stats_failures() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        graph
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::Episode(fixtures.episode.clone()),
+            ])
+            .await
+            .unwrap();
+        let stats = DualFailingStatsStore;
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = MemoryLinkDraft::new(
+            ObjectType::Entity,
+            fixtures.hub_entity.id,
+            RelationType::Involves,
+            ObjectType::Episode,
+            fixtures.episode.id,
+        );
+
+        let outcome = pipeline
+            .link(draft)
+            .await
+            .expect("stats degradation should remain a repairable link outcome");
+
+        assert_eq!(outcome.link.from_id, fixtures.hub_entity.id);
+        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
+        let failure = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("stats failure must be visible");
+        assert_eq!(failure.failed_object_ids, vec![fixtures.episode.id]);
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EdgeWrite { .. },
+                StatsUpdateCause::ObjectStateWrite { .. }
+            ]
+        ));
+
+        let serialized = serde_json::to_string(&outcome).unwrap();
+        assert_eq!(
+            serde_json::from_str::<LinkOutcome>(&serialized).unwrap(),
+            outcome
+        );
+    }
+
+    struct DualFailingStatsStore;
+
+    #[async_trait]
+    impl RetrievalStatsStore for DualFailingStatsStore {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats edge write failed".to_owned(),
+            })
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats object-state write failed".to_owned(),
+            })
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            Ok(RetrievalStatsHealth::default())
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
