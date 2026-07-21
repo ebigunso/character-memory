@@ -40,15 +40,25 @@ where
         let (stats_objects, mut cause) = if endpoint_refs.is_empty() {
             (objects.to_vec(), None)
         } else {
+            let endpoint_ids = endpoint_refs
+                .iter()
+                .map(|object_ref| object_ref.id)
+                .collect();
             match self
                 .graph_store
-                .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
+                .query_objects(&GraphObjectQuery::by_ids(endpoint_ids))
                 .await
             {
-                Ok(endpoint_objects) => (
-                    stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
-                    None,
-                ),
+                Ok(endpoint_objects) => {
+                    let endpoint_objects = endpoint_objects
+                        .into_iter()
+                        .filter(|object| endpoint_refs.contains(&memory_object_ref(object)))
+                        .collect();
+                    (
+                        stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
+                        None,
+                    )
+                }
                 Err(error) => (
                     objects.to_vec(),
                     Some(StatsUpdateCause::EndpointHydration {

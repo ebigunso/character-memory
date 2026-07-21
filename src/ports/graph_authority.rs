@@ -11,11 +11,17 @@ use crate::domain::{
 use crate::errors::CustomError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphObjectQuery {
-    pub(crate) object_refs: Vec<MemoryObjectRef>,
-    pub(crate) object_ids: Vec<MemoryId>,
-    pub(crate) object_types: Vec<ObjectType>,
-    pub(crate) limit: Option<usize>,
+#[expect(
+    clippy::enum_variant_names,
+    reason = "the design names the three closed query forms ByRefs, ByIds, and ByTypes"
+)]
+pub(crate) enum GraphObjectQuery {
+    ByRefs(Vec<MemoryObjectRef>),
+    ByIds(Vec<MemoryId>),
+    ByTypes {
+        object_types: Vec<ObjectType>,
+        limit: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,14 +29,12 @@ pub(crate) struct GraphDerivedMemoryProvenanceQuery {
     pub(crate) episode_ids: Vec<MemoryId>,
     pub(crate) observation_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    pub(crate) limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphDerivedMemoryThreadQuery {
     pub(crate) thread_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    pub(crate) limit: Option<usize>,
 }
 
 impl GraphDerivedMemoryProvenanceQuery {
@@ -39,7 +43,6 @@ impl GraphDerivedMemoryProvenanceQuery {
             episode_ids,
             observation_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            limit: None,
         }
     }
 
@@ -48,13 +51,6 @@ impl GraphDerivedMemoryProvenanceQuery {
         lifecycle_policy: GraphExpansionLifecyclePolicy,
     ) -> Self {
         self.lifecycle_policy = lifecycle_policy;
-        self
-    }
-
-    // Provenance queries reserve limit support for governance diagnostics; remove if that surface drops limits.
-    #[allow(dead_code)]
-    pub(crate) fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
         self
     }
 }
@@ -64,7 +60,6 @@ impl GraphDerivedMemoryThreadQuery {
         Self {
             thread_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            limit: None,
         }
     }
 
@@ -75,40 +70,19 @@ impl GraphDerivedMemoryThreadQuery {
         self.lifecycle_policy = lifecycle_policy;
         self
     }
-
-    // Thread queries reserve limit support for governance diagnostics; remove if that surface drops limits.
-    #[allow(dead_code)]
-    pub(crate) fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
-        self
-    }
 }
 
 impl GraphObjectQuery {
-    // Diagnostics and fakes need ID-only graph lookup; remove when all callers use typed refs.
-    #[allow(dead_code)]
     pub(crate) fn by_ids(object_ids: Vec<MemoryId>) -> Self {
-        Self {
-            object_refs: Vec::new(),
-            object_ids,
-            object_types: Vec::new(),
-            limit: None,
-        }
+        Self::ByIds(object_ids)
     }
 
     pub(crate) fn by_refs(object_refs: Vec<MemoryObjectRef>) -> Self {
-        Self {
-            object_refs,
-            object_ids: Vec::new(),
-            object_types: Vec::new(),
-            limit: None,
-        }
+        Self::ByRefs(object_refs)
     }
 
     pub(crate) fn by_types(object_types: Vec<ObjectType>, limit: Option<usize>) -> Self {
-        Self {
-            object_refs: Vec::new(),
-            object_ids: Vec::new(),
+        Self::ByTypes {
             object_types,
             limit,
         }
@@ -457,12 +431,21 @@ mod tests {
         )]);
         let by_types = GraphObjectQuery::by_types(vec![ObjectType::Episode], Some(5));
 
-        assert_eq!(by_ids.object_ids, vec![episode_id]);
-        assert_eq!(by_ids.object_types, Vec::<ObjectType>::new());
-        assert_eq!(by_refs.object_refs[0].id, episode_id);
-        assert_eq!(by_refs.object_refs[0].object_type, ObjectType::Episode);
-        assert_eq!(by_types.object_types, vec![ObjectType::Episode]);
-        assert_eq!(by_types.limit, Some(5));
+        assert_eq!(by_ids, GraphObjectQuery::ByIds(vec![episode_id]));
+        assert_eq!(
+            by_refs,
+            GraphObjectQuery::ByRefs(vec![MemoryObjectRef::from_id_type(
+                episode_id,
+                ObjectType::Episode,
+            )])
+        );
+        assert_eq!(
+            by_types,
+            GraphObjectQuery::ByTypes {
+                object_types: vec![ObjectType::Episode],
+                limit: Some(5),
+            }
+        );
     }
 
     #[test]

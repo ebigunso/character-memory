@@ -2589,26 +2589,30 @@ mod tests {
             &self,
             query: &GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
-            lock(&self.calls).push(StoreCall::GraphQuery(
-                query
-                    .object_refs
-                    .iter()
-                    .map(|object_ref| object_ref.id)
-                    .collect(),
-            ));
+            let queried_ids = match query {
+                GraphObjectQuery::ByRefs(object_refs) => {
+                    object_refs.iter().map(|object_ref| object_ref.id).collect()
+                }
+                GraphObjectQuery::ByIds(object_ids) => object_ids.clone(),
+                GraphObjectQuery::ByTypes { .. } => Vec::new(),
+            };
+            lock(&self.calls).push(StoreCall::GraphQuery(queried_ids));
             Ok(lock(&self.objects)
                 .iter()
                 .filter(|object| {
                     let object_ref = memory_object_ref(object);
-                    (query.object_refs.is_empty()
-                        || query.object_refs.iter().any(|query_ref| {
-                            query_ref.id == object_ref.id
-                                && query_ref.object_type == object_ref.object_type
-                        }))
-                        && (query.object_ids.is_empty()
-                            || query.object_ids.contains(&object_ref.id))
-                        && (query.object_types.is_empty()
-                            || query.object_types.contains(&object_ref.object_type))
+                    match query {
+                        GraphObjectQuery::ByRefs(object_refs) => {
+                            object_refs.iter().any(|query_ref| {
+                                query_ref.id == object_ref.id
+                                    && query_ref.object_type == object_ref.object_type
+                            })
+                        }
+                        GraphObjectQuery::ByIds(object_ids) => object_ids.contains(&object_ref.id),
+                        GraphObjectQuery::ByTypes { object_types, .. } => {
+                            object_types.contains(&object_ref.object_type)
+                        }
+                    }
                 })
                 .cloned()
                 .collect())

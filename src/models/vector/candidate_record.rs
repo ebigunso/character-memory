@@ -4,9 +4,9 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use chrono::{DateTime, Utc};
 
-use crate::api::types::default_retrieval_object_types;
 use crate::domain::{MemoryId, ObjectType, RetentionState};
 
+#[cfg(test)]
 use super::{VectorPayloadHints, VectorRelationshipHints};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +43,7 @@ impl EmbeddingInput {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-// Test fakes and diagnostics use candidate records selectively; remove when all vector stores expose diagnostics.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) struct VectorCandidateRecord {
     pub(crate) object_id: MemoryId,
     pub(crate) object_type: ObjectType,
@@ -56,9 +55,8 @@ pub(crate) struct VectorCandidateRecord {
     pub(crate) payload_hints: VectorPayloadHints,
 }
 
+#[cfg(test)]
 impl VectorCandidateRecord {
-    // Deterministic fakes build candidate records directly; remove when fakes use VectorRecord only.
-    #[allow(dead_code)]
     pub(crate) fn new(
         object_id: MemoryId,
         object_type: ObjectType,
@@ -77,8 +75,6 @@ impl VectorCandidateRecord {
         }
     }
 
-    // Payload-filter fixtures use explicit hints; remove when fixture construction moves to VectorRecord.
-    #[allow(dead_code)]
     pub(crate) fn with_filter_hints(
         mut self,
         retention_state: Option<RetentionState>,
@@ -117,23 +113,10 @@ impl VectorCandidateSearch {
         self
     }
 
-    // Default recall scope is a convenience for tests and future callers; remove if all callers pass explicit types.
-    #[allow(dead_code)]
-    pub(crate) fn with_default_object_types(mut self) -> Self {
-        self.object_types = default_vector_candidate_object_types();
-        self
-    }
-
     pub(crate) fn with_filters(mut self, filters: VectorCandidateFilters) -> Self {
         self.filters = filters;
         self
     }
-}
-
-// Default recall scope is retained for query-builder callers; remove if query builders stop exposing defaults.
-#[allow(dead_code)]
-pub(crate) fn default_vector_candidate_object_types() -> Vec<ObjectType> {
-    default_retrieval_object_types()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -152,15 +135,13 @@ impl VectorCandidateFilters {
         Self::default()
     }
 
-    // Lifecycle prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn with_retention_states(mut self, retention_states: Vec<RetentionState>) -> Self {
         self.retention_states = retention_states;
         self
     }
 
-    // Lifecycle prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn current_only(mut self) -> Self {
         self.is_current = Some(true);
         self.is_superseded = Some(false);
@@ -171,29 +152,25 @@ impl VectorCandidateFilters {
         self.is_current.is_some() || self.is_superseded.is_some()
     }
 
-    // Relationship prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn with_thread_ids(mut self, thread_ids: Vec<MemoryId>) -> Self {
         self.thread_ids = thread_ids;
         self
     }
 
-    // Relationship prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn with_entity_ids(mut self, entity_ids: Vec<MemoryId>) -> Self {
         self.entity_ids = entity_ids;
         self
     }
 
-    // Relationship prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn with_episode_ids(mut self, episode_ids: Vec<MemoryId>) -> Self {
         self.episode_ids = episode_ids;
         self
     }
 
-    // Time prefilter builders are used by adapter and fixture subsets; remove when all callers build filters directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn with_time_range(mut self, time_range: VectorTimeRangeFilter) -> Self {
         self.time_ranges.push(time_range);
         self
@@ -208,8 +185,7 @@ pub(crate) struct VectorTimeRangeFilter {
 }
 
 impl VectorTimeRangeFilter {
-    // Time prefilter builders are used by adapter and fixture subsets; remove when all callers build ranges directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new(
         field: VectorTimeField,
         after: Option<DateTime<Utc>>,
@@ -343,6 +319,7 @@ fn vector_surface_rank(surface: VectorSurface) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::types::default_retrieval_object_types;
 
     #[test]
     fn vector_candidate_record_keeps_domain_identity_and_embedding_surface() {
@@ -416,11 +393,10 @@ mod tests {
                 None,
             ));
         let search = VectorCandidateSearch::new(vec![1.0, 0.0], 12)
-            .with_default_object_types()
+            .with_object_types(default_retrieval_object_types())
             .with_filters(filters.clone());
 
         assert_eq!(search.object_types, default_retrieval_object_types());
-        assert_eq!(default_vector_candidate_object_types(), search.object_types);
         assert_eq!(search.filters, filters);
         assert!(search.filters.has_currentness_filters());
     }

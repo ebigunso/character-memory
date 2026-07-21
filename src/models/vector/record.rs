@@ -7,7 +7,9 @@ use crate::domain::{
     ThreadStatus,
 };
 
-use super::{EmbeddingInput, VectorCandidateRecord, VectorSurface};
+#[cfg(test)]
+use super::VectorCandidateRecord;
+use super::{EmbeddingInput, VectorSurface};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VectorRecordEmbedding<'a> {
@@ -118,8 +120,7 @@ impl VectorRecord {
         )
     }
 
-    // Diagnostic/fake stores need candidate conversion; remove when vector stores no longer expose candidate diagnostics.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn to_candidate_record(&self, embedding: Vec<f32>) -> VectorCandidateRecord {
         VectorCandidateRecord::new(self.object_id, self.object_type, self.surface, embedding)
             .with_filter_hints(

@@ -37,20 +37,36 @@ impl<'a> SparqlGraphSelectors<'a> {
         &self,
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObjectRef>, CustomError> {
-        let id_values =
-            sparql_literal_values("id", query.object_ids.iter().map(|id| id.to_string()));
-        let type_values = sparql_literal_values(
-            "objectType",
-            query
-                .object_types
-                .iter()
-                .map(|object_type| enum_value(*object_type)),
-        );
-        let ref_values = sparql_object_ref_values(&query.object_refs);
-        let limit_clause = query
-            .limit
-            .map(|limit| format!("LIMIT {limit}"))
-            .unwrap_or_default();
+        let (id_values, type_values, ref_values, limit_clause) = match query {
+            GraphObjectQuery::ByRefs(object_refs) => (
+                String::new(),
+                String::new(),
+                sparql_object_ref_values(object_refs),
+                String::new(),
+            ),
+            GraphObjectQuery::ByIds(object_ids) => (
+                sparql_literal_values("id", object_ids.iter().map(|id| id.to_string())),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+            GraphObjectQuery::ByTypes {
+                object_types,
+                limit,
+            } => (
+                String::new(),
+                sparql_literal_values(
+                    "objectType",
+                    object_types
+                        .iter()
+                        .map(|object_type| enum_value(*object_type)),
+                ),
+                String::new(),
+                limit
+                    .map(|limit| format!("LIMIT {limit}"))
+                    .unwrap_or_default(),
+            ),
+        };
         let select_query = format!(
             r#"
             SELECT DISTINCT ?id ?objectType WHERE {{
@@ -126,7 +142,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             derived_from_relation = vocab::relation_predicate("derived_from"),
         );
 
-        self.select_memory_ids(&query_text, query.limit)
+        self.select_memory_ids(&query_text, None)
     }
 
     pub(crate) fn select_derived_memories_by_thread(
@@ -146,7 +162,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_derived_memories_by_resource_predicate(
             vocab::PART_OF_THREAD,
             threads.iter().map(String::as_str),
-            query.limit,
+            None,
         )
     }
 
@@ -456,12 +472,10 @@ mod tests {
         let selectors = SparqlGraphSelectors::new(&store);
 
         let selected = selectors
-            .select_objects(&GraphObjectQuery {
-                object_refs: Vec::new(),
-                object_ids: vec![fixtures.episode.id, fixtures.correction.id],
-                object_types: vec![ObjectType::Episode, ObjectType::DerivedMemory],
-                limit: None,
-            })
+            .select_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(fixtures.correction.id, ObjectType::DerivedMemory),
+            ]))
             .unwrap();
 
         assert_eq!(
@@ -492,12 +506,10 @@ mod tests {
         );
 
         let selected = SparqlGraphSelectors::new(&store)
-            .select_objects(&GraphObjectQuery {
-                object_refs: Vec::new(),
-                object_ids: vec![fixtures.episode.id],
-                object_types: vec![ObjectType::Episode, ObjectType::Entity],
-                limit: Some(1),
-            })
+            .select_objects(&GraphObjectQuery::by_types(
+                vec![ObjectType::Episode, ObjectType::Entity],
+                Some(1),
+            ))
             .unwrap();
 
         assert_eq!(

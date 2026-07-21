@@ -280,10 +280,8 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         query: &GraphDerivedMemoryProvenanceQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let mut selector_query = query.clone();
-        selector_query.limit = None;
         let selected_ids = SparqlGraphSelectors::new(&self.store)
-            .select_derived_memories_by_provenance(&selector_query)?
+            .select_derived_memories_by_provenance(query)?
             .into_iter()
             .collect::<HashSet<_>>();
 
@@ -309,10 +307,8 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let mut selector_query = query.clone();
-        selector_query.limit = None;
         let selected_ids = SparqlGraphSelectors::new(&self.store)
-            .select_derived_memories_by_thread(&selector_query)?
+            .select_derived_memories_by_thread(query)?
             .into_iter()
             .collect::<HashSet<_>>();
 

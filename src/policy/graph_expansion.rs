@@ -146,9 +146,6 @@ pub(crate) fn derived_memories_by_provenance(
         .collect::<Vec<_>>();
 
     memories.sort_by_key(|memory| memory.id);
-    if let Some(limit) = query.limit {
-        memories.truncate(limit);
-    }
     memories
 }
 
@@ -181,9 +178,6 @@ pub(crate) fn derived_memories_by_thread(
         .collect::<Vec<_>>();
 
     memories.sort_by_key(|memory| memory.id);
-    if let Some(limit) = query.limit {
-        memories.truncate(limit);
-    }
     memories
 }
 

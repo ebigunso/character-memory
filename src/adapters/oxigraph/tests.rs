@@ -1077,13 +1077,10 @@ mod tests {
             .unwrap();
 
         let default_matches = store
-            .query_derived_memories_by_provenance(
-                &GraphDerivedMemoryProvenanceQuery::by_sources(
-                    vec![fixtures.episode.id],
-                    vec![fixtures.salient_observation.id],
-                )
-                .with_limit(10),
-            )
+            .query_derived_memories_by_provenance(&GraphDerivedMemoryProvenanceQuery::by_sources(
+                vec![fixtures.episode.id],
+                vec![fixtures.salient_observation.id],
+            ))
             .await
             .unwrap();
         assert!(default_matches
@@ -1174,10 +1171,9 @@ mod tests {
         }));
 
         let default_thread_matches = store
-            .query_derived_memories_by_thread(
-                &GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id])
-                    .with_limit(10),
-            )
+            .query_derived_memories_by_thread(&GraphDerivedMemoryThreadQuery::by_threads(vec![
+                fixtures.soft_thread.id,
+            ]))
             .await
             .unwrap();
         assert!(!default_thread_matches

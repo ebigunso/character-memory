@@ -5,14 +5,13 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::api::types::default_retrieval_object_types;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
@@ -32,7 +31,6 @@ use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
     GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
-use crate::ports::source_reference::{ResolvedSourceReference, SourceReferenceResolver};
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Default)]
@@ -249,19 +247,25 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
             .iter()
             .filter(|object| {
                 let (object_id, object_type) = object_identity(object);
-                (query.object_refs.is_empty()
-                    || query.object_refs.iter().any(|object_ref| {
+                match query {
+                    GraphObjectQuery::ByRefs(object_refs) => object_refs.iter().any(|object_ref| {
                         object_ref.id == object_id && object_ref.object_type == object_type
-                    }))
-                    && (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
-                    && (query.object_types.is_empty() || query.object_types.contains(&object_type))
+                    }),
+                    GraphObjectQuery::ByIds(object_ids) => object_ids.contains(&object_id),
+                    GraphObjectQuery::ByTypes { object_types, .. } => {
+                        object_types.contains(&object_type)
+                    }
+                }
             })
             .cloned()
             .collect();
 
         sort_objects(&mut objects);
-        if let Some(limit) = query.limit {
-            objects.truncate(limit);
+        if let GraphObjectQuery::ByTypes {
+            limit: Some(limit), ..
+        } = query
+        {
+            objects.truncate(*limit);
         }
 
         Ok(objects)
@@ -333,52 +337,6 @@ impl MemoryEmbedder for DeterministicMemoryEmbedder {
             .collect();
 
         Ok(embeddings)
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct FixtureSourceReferenceResolver {
-    entries: Mutex<Vec<ResolvedSourceReference>>,
-}
-
-impl FixtureSourceReferenceResolver {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn insert(
-        &self,
-        reference: impl Into<String>,
-        text: impl Into<String>,
-    ) -> Result<(), CustomError> {
-        let source_reference = ResolvedSourceReference::new(reference, text);
-        let mut entries = lock(&self.entries)?;
-        entries.retain(|entry| entry.reference != source_reference.reference);
-        entries.push(source_reference);
-        Ok(())
-    }
-
-    pub(crate) fn insert_file(
-        &self,
-        reference: impl Into<String>,
-        path: &Path,
-    ) -> Result<(), CustomError> {
-        let text = fs::read_to_string(path)
-            .map_err(|error| CustomError::DatabaseError(error.to_string()))?;
-        self.insert(reference, text)
-    }
-}
-
-#[async_trait]
-impl SourceReferenceResolver for FixtureSourceReferenceResolver {
-    async fn resolve(
-        &self,
-        reference: &str,
-    ) -> Result<Option<ResolvedSourceReference>, CustomError> {
-        Ok(lock(&self.entries)?
-            .iter()
-            .find(|entry| entry.reference == reference)
-            .cloned())
     }
 }
 
@@ -1035,13 +993,10 @@ mod lifecycle_tests {
             .unwrap();
 
         let default_matches = graph
-            .query_derived_memories_by_provenance(
-                &GraphDerivedMemoryProvenanceQuery::by_sources(
-                    vec![fixtures.episode.id],
-                    vec![fixtures.salient_observation.id],
-                )
-                .with_limit(10),
-            )
+            .query_derived_memories_by_provenance(&GraphDerivedMemoryProvenanceQuery::by_sources(
+                vec![fixtures.episode.id],
+                vec![fixtures.salient_observation.id],
+            ))
             .await
             .unwrap();
         assert!(default_matches
@@ -1256,7 +1211,7 @@ mod tests {
             .unwrap();
 
         let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_default_object_types()
+            .with_object_types(default_retrieval_object_types())
             .with_filters(
                 VectorCandidateFilters::new()
                     .with_retention_states(vec![RetentionState::Active])
@@ -1321,7 +1276,7 @@ mod tests {
             .unwrap();
 
         let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_default_object_types()
+            .with_object_types(default_retrieval_object_types())
             .with_filters(VectorCandidateFilters::new().current_only());
 
         let matches = store.search_candidates(&query).await.unwrap();
@@ -1649,85 +1604,6 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, different);
         assert_eq!(first.len(), 8);
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_resolves_in_memory_fixture_content() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
-            .unwrap();
-        let resolved = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.resolved_text, "raw fixture text");
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_reports_unavailable_reference_as_none() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
-            .unwrap();
-        let resolved = resolver
-            .resolve("raw://fixture/conversation#turn=2")
-            .await
-            .unwrap();
-
-        assert_eq!(resolved, None);
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_overwrites_duplicate_references_deterministically() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "first fixture text")
-            .unwrap();
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "updated fixture text")
-            .unwrap();
-
-        let first = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap();
-        let second = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap();
-
-        assert_eq!(first, second);
-        let resolved = first.unwrap();
-        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.resolved_text, "updated fixture text");
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_uses_fixture_backed_file_content() {
-        let resolver = FixtureSourceReferenceResolver::new();
-        let path = std::env::temp_dir().join(format!("cmem-source-ref-{}.txt", Uuid::new_v4()));
-        fs::write(&path, "raw fixture text").unwrap();
-
-        resolver
-            .insert_file("file:fixture/raw-reference.txt", &path)
-            .unwrap();
-        let resolved = resolver
-            .resolve("file:fixture/raw-reference.txt")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(resolved.reference, "file:fixture/raw-reference.txt");
-        assert_eq!(resolved.resolved_text, "raw fixture text");
-
-        fs::remove_file(path).unwrap();
     }
 
     #[test]
