@@ -28,17 +28,6 @@ pub(crate) struct SparqlLinkRef {
     pub(crate) relation: RelationType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
-#[allow(dead_code)]
-pub(crate) struct LifecycleCurrentnessPredicates {
-    pub(crate) retention_state: &'static str,
-    pub(crate) is_current: &'static str,
-    pub(crate) thread_status: &'static str,
-    pub(crate) supersedes: &'static str,
-    pub(crate) supersedes_relation: &'static str,
-}
-
 impl<'a> SparqlGraphSelectors<'a> {
     pub(crate) fn new(store: &'a Store) -> Self {
         Self { store }
@@ -159,71 +148,6 @@ impl<'a> SparqlGraphSelectors<'a> {
             threads.iter().map(String::as_str),
             query.limit,
         )
-    }
-
-    // Entity-scoped derived-memory selectors are reserved for governance diagnostics; remove if that surface drops entity filters.
-    #[allow(dead_code)]
-    pub(crate) fn select_derived_memories_by_entity(
-        &self,
-        entity_ids: &[MemoryId],
-        limit: Option<usize>,
-    ) -> Result<Vec<MemoryId>, CustomError> {
-        let entities = entity_ids
-            .iter()
-            .map(|id| graph_uri(ObjectType::Entity, *id))
-            .collect::<Vec<_>>();
-
-        if entities.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        self.select_derived_memories_by_resource_predicate(
-            vocab::ABOUT_ENTITY,
-            entities.iter().map(String::as_str),
-            limit,
-        )
-    }
-
-    // Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
-    #[allow(dead_code)]
-    pub(crate) const fn lifecycle_currentness_predicates() -> LifecycleCurrentnessPredicates {
-        LifecycleCurrentnessPredicates {
-            retention_state: vocab::RETENTION_STATE,
-            is_current: vocab::IS_CURRENT,
-            thread_status: vocab::THREAD_STATUS,
-            supersedes: vocab::SUPERSEDES,
-            supersedes_relation: vocab::RELATION_SUPERSEDES,
-        }
-    }
-
-    // Supersession selectors are reserved for governance diagnostics; remove if lifecycle reconciliation stops using SPARQL.
-    #[allow(dead_code)]
-    pub(crate) fn select_superseded_derived_memory_ids(
-        &self,
-    ) -> Result<Vec<MemoryId>, CustomError> {
-        let query_text = format!(
-            r#"
-            SELECT DISTINCT ?id WHERE {{
-              GRAPH ?memoryGraph {{
-                ?memory a <{derived_class}> ;
-                        <{object_id}> ?id .
-              }}
-              GRAPH ?supersessionGraph {{
-                {{
-                  ?replacement <{supersedes}> ?memory .
-                }} UNION {{
-                  ?replacement <{supersedes_relation}> ?memory .
-                }}
-              }}
-            }}
-            "#,
-            derived_class = vocab::CLASS_DERIVED_MEMORY,
-            object_id = vocab::OBJECT_ID,
-            supersedes = vocab::SUPERSEDES,
-            supersedes_relation = vocab::RELATION_SUPERSEDES,
-        );
-
-        self.select_memory_ids(&query_text, None)
     }
 
     pub(crate) fn select_links_touching(
@@ -604,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn sparql_selectors_find_derived_memories_by_provenance_thread_and_entity() {
+    fn sparql_selectors_find_derived_memories_by_provenance_and_thread() {
         let store = store_with_representative_fixture();
         let fixtures = representative_fixtures();
         let selectors = SparqlGraphSelectors::new(&store);
@@ -620,14 +544,9 @@ mod tests {
                 fixtures.soft_thread.id,
             ]))
             .unwrap();
-        let by_entity = selectors
-            .select_derived_memories_by_entity(&[fixtures.user_entity.id], None)
-            .unwrap();
-
         assert!(by_provenance.contains(&fixtures.correction.id));
         assert!(by_provenance.contains(&fixtures.derived_reflection.id));
         assert!(by_thread.contains(&fixtures.correction.id));
-        assert!(by_entity.contains(&fixtures.correction.id));
     }
 
     #[test]
@@ -655,24 +574,6 @@ mod tests {
                 || link_ref.to
                     == MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity)
         }));
-    }
-
-    #[test]
-    fn sparql_selectors_expose_lifecycle_predicates_and_superseded_ids() {
-        let store = store_with_representative_fixture();
-        let fixtures = representative_fixtures();
-        let selectors = SparqlGraphSelectors::new(&store);
-        let predicates = SparqlGraphSelectors::lifecycle_currentness_predicates();
-
-        assert_eq!(predicates.retention_state, vocab::RETENTION_STATE);
-        assert_eq!(predicates.is_current, vocab::IS_CURRENT);
-        assert_eq!(predicates.thread_status, vocab::THREAD_STATUS);
-        assert_eq!(predicates.supersedes, vocab::SUPERSEDES);
-        assert_eq!(predicates.supersedes_relation, vocab::RELATION_SUPERSEDES);
-        assert!(selectors
-            .select_superseded_derived_memory_ids()
-            .unwrap()
-            .contains(&fixtures.suppressed_seed.id));
     }
 
     fn store_with_representative_fixture() -> Store {

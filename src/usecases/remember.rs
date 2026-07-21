@@ -653,10 +653,6 @@ mod tests {
             .contains(&StoreCall::GraphLinks(vec![ids.extra_link])));
         assert!(!embedder.calls().is_empty());
         assert!(!vector.calls().is_empty());
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            0
-        );
     }
 
     #[tokio::test]
@@ -1001,14 +997,6 @@ mod tests {
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
         }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(Vec::new())
-        }
     }
 
     #[derive(Debug, Default)]
@@ -1056,13 +1044,6 @@ mod tests {
             _query: &VectorCandidateSearch,
         ) -> Result<CanonicalCandidates, CustomError> {
             Ok(CanonicalCandidates::new([]))
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

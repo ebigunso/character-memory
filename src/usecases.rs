@@ -1,6 +1,5 @@
 pub(crate) mod correct_forget;
 pub(crate) mod link;
-pub(crate) mod reconciliation;
 pub(crate) mod remember;
 pub(crate) mod retrieve;
 pub(crate) mod stats_projection;

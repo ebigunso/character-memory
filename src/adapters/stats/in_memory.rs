@@ -40,7 +40,6 @@ pub(crate) struct InMemoryState {
     pub(crate) global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
     pub(crate) counters_dirty: bool,
     pub(crate) health: RetrievalStatsHealth,
-    pub(crate) rejected_low_information_link_count: u64,
 }
 
 #[async_trait]
@@ -107,15 +106,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             last_error_message: Some(message),
         };
         Ok(())
-    }
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        let mut state = self.state.lock().await;
-        state.rejected_low_information_link_count += 1;
-        Ok(())
-    }
-
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-        Ok(self.state.lock().await.rejected_low_information_link_count)
     }
 }
 

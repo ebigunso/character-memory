@@ -159,7 +159,7 @@ mod tests {
     use crate::composition::retrieval_stats_store;
     use crate::config::Settings;
     use crate::ports::embedder::MemoryEmbedder;
-    use crate::ports::graph_authority::GraphAuthorityStore;
+    use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
     use crate::ports::vector_candidate::VectorCandidateStore;
     use crate::*;
     use async_trait::async_trait;
@@ -265,8 +265,20 @@ mod tests {
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid));
         let graph = memory.memory_composition.graph_store.as_ref();
-        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 0);
-        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![
+                    ObjectType::Episode,
+                    ObjectType::Observation,
+                    ObjectType::Entity,
+                    ObjectType::MemoryThread,
+                    ObjectType::DerivedMemory,
+                ],
+                None,
+            ))
+            .await
+            .unwrap();
+        assert!(objects.is_empty());
     }
 
     #[tokio::test]
@@ -376,8 +388,20 @@ mod tests {
             1
         );
         let graph = memory.memory_composition.graph_store.as_ref();
-        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 2);
-        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![
+                    ObjectType::Episode,
+                    ObjectType::Observation,
+                    ObjectType::Entity,
+                    ObjectType::MemoryThread,
+                    ObjectType::DerivedMemory,
+                ],
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(objects.len(), 2);
     }
 
     #[tokio::test]
@@ -1040,13 +1064,6 @@ mod tests {
             Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
-        }
-
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
             Ok(())
         }
@@ -1074,13 +1091,6 @@ mod tests {
             _query: &VectorCandidateSearch,
         ) -> Result<CanonicalCandidates, CustomError> {
             Ok(CanonicalCandidates::new([]))
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

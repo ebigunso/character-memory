@@ -20,9 +20,9 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    CanonicalCandidates, EmbeddingInput, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
-    VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding,
-    VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
+    VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
+    VectorTimeField, VectorTimeRangeFilter,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -38,7 +38,6 @@ use crate::ports::vector_candidate::VectorCandidateStore;
 #[derive(Debug, Default)]
 pub(crate) struct FakeVectorCandidateStore {
     records: Mutex<Vec<VectorCandidateRecord>>,
-    diagnostics: Mutex<Vec<VectorCandidateDiagnosticRecord>>,
 }
 
 impl FakeVectorCandidateStore {
@@ -50,39 +49,11 @@ impl FakeVectorCandidateStore {
         &self,
         candidates: &[VectorCandidateRecord],
     ) -> Result<(), CustomError> {
-        self.replace_candidates(candidates)?;
-        let diagnostics = candidates
-            .iter()
-            .map(default_diagnostic_record)
-            .collect::<Vec<_>>();
-        self.replace_diagnostic_records(&diagnostics)
-    }
-
-    pub(crate) async fn upsert_diagnostic_records(
-        &self,
-        records: &[VectorCandidateDiagnosticRecord],
-    ) -> Result<(), CustomError> {
-        self.replace_diagnostic_records(records)
+        self.replace_candidates(candidates)
     }
 
     fn replace_candidates(&self, candidates: &[VectorCandidateRecord]) -> Result<(), CustomError> {
         let mut records = lock(&self.records)?;
-
-        for candidate in candidates {
-            records.retain(|record| {
-                record.object_id != candidate.object_id || record.surface != candidate.surface
-            });
-            records.push(candidate.clone());
-        }
-
-        Ok(())
-    }
-
-    fn replace_diagnostic_records(
-        &self,
-        candidates: &[VectorCandidateDiagnosticRecord],
-    ) -> Result<(), CustomError> {
-        let mut records = lock(&self.diagnostics)?;
 
         for candidate in candidates {
             records.retain(|record| {
@@ -105,12 +76,7 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             .iter()
             .map(|record| record.to_candidate_record())
             .collect::<Vec<_>>();
-        self.replace_candidates(&candidates)?;
-        let diagnostics = records
-            .iter()
-            .map(|record| VectorCandidateDiagnosticRecord::from_vector_record(record.record))
-            .collect::<Vec<_>>();
-        self.replace_diagnostic_records(&diagnostics)
+        self.replace_candidates(&candidates)
     }
 
     async fn search_candidates(
@@ -140,32 +106,7 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
         let delete_ids: HashSet<_> = object_ids.iter().copied().collect();
         lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
-        lock(&self.diagnostics)?.retain(|record| !delete_ids.contains(&record.object_id));
         Ok(())
-    }
-
-    async fn list_candidate_diagnostics(
-        &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
-        let mut records = lock(&self.diagnostics)?.clone();
-        records.sort_by_key(|record| (record.object_id, object_type_rank(record.object_type)));
-        Ok(records)
-    }
-}
-
-fn default_diagnostic_record(record: &VectorCandidateRecord) -> VectorCandidateDiagnosticRecord {
-    VectorCandidateDiagnosticRecord {
-        object_id: record.object_id,
-        object_type: record.object_type,
-        graph_uri: crate::domain::graph_uri(record.object_type, record.object_id),
-        surface: record.surface,
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-        retention_state: record.retention_state,
-        is_current: record.is_current,
-        is_superseded: record
-            .payload_hints
-            .is_superseded
-            .or_else(|| record.is_current.map(|value| !value)),
     }
 }
 
@@ -365,18 +306,6 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let objects = lock(&self.objects)?.clone();
         let links = lock(&self.links)?.clone();
         bounded_expansion(query, objects, links)
-    }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        let mut objects = lock(&self.objects)?.clone();
-        sort_objects(&mut objects);
-        Ok(objects)
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        let mut links = lock(&self.links)?.clone();
-        links.sort_by_key(|link| link.id);
-        Ok(links)
     }
 }
 

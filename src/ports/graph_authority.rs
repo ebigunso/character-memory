@@ -387,12 +387,6 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
-
-    // Governance reconciliation is dormant; remove when diagnostic object listing is no longer part of the port.
-    #[allow(dead_code)]
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError>;
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError>;
 }
 
 #[async_trait]
@@ -446,14 +440,6 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
         (**self).expand_bounded(query).await
-    }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        (**self).list_diagnostic_objects().await
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        (**self).list_diagnostic_links().await
     }
 }
 

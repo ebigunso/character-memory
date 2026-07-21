@@ -4,10 +4,7 @@ use async_trait::async_trait;
 
 use crate::domain::MemoryId;
 use crate::errors::CustomError;
-use crate::models::vector::{
-    CanonicalCandidates, VectorCandidateDiagnosticRecord, VectorCandidateSearch,
-    VectorRecordEmbedding,
-};
+use crate::models::vector::{CanonicalCandidates, VectorCandidateSearch, VectorRecordEmbedding};
 
 #[async_trait]
 pub(crate) trait VectorCandidateStore: Send + Sync {
@@ -24,12 +21,6 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<CanonicalCandidates, CustomError>;
-
-    // Reconciliation diagnostics are dormant; remove when vector candidate diagnostics are retired.
-    #[allow(dead_code)]
-    async fn list_candidate_diagnostics(
-        &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError>;
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError>;
 }
@@ -48,12 +39,6 @@ impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
         query: &VectorCandidateSearch,
     ) -> Result<CanonicalCandidates, CustomError> {
         (**self).search_candidates(query).await
-    }
-
-    async fn list_candidate_diagnostics(
-        &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
-        (**self).list_candidate_diagnostics().await
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {

@@ -2903,13 +2903,6 @@ mod tests {
             Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
-        }
-
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
             Ok(())
         }
@@ -2982,16 +2975,6 @@ mod tests {
             _query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
             Err(CustomError::MemoryValidation(self.message.clone()))
-        }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(
-            &self,
-        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
-            Ok(Vec::new())
         }
     }
 

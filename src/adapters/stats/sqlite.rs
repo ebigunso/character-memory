@@ -143,35 +143,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         )?;
         transaction.commit().map_err(sqlite_error)
     }
-
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        let mut connection = lock(&self.connection)?;
-        let transaction = connection.transaction().map_err(sqlite_error)?;
-        transaction
-            .execute(
-                "INSERT INTO link_guard_diagnostics (reason, rejected_count)
-                 VALUES ('low_information_co_occurrence', 1)
-                 ON CONFLICT(reason) DO UPDATE SET rejected_count = rejected_count + 1",
-                [],
-            )
-            .map_err(sqlite_error)?;
-        transaction.commit().map_err(sqlite_error)
-    }
-
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-        let connection = lock(&self.connection)?;
-        let count = connection
-            .query_row(
-                "SELECT rejected_count FROM link_guard_diagnostics
-                 WHERE reason = 'low_information_co_occurrence'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?
-            .unwrap_or_default();
-        non_negative_count(0, count).map_err(sqlite_error)
-    }
 }
 
 fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
@@ -217,10 +188,6 @@ fn initialize_schema(connection: &Connection) -> Result<(), CustomError> {
                 value TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS link_guard_diagnostics (
-                reason TEXT PRIMARY KEY,
-                rejected_count INTEGER NOT NULL DEFAULT 0
-            );
             ",
         )
         .map_err(sqlite_error)?;
@@ -835,30 +802,6 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
-    }
-
-    #[tokio::test]
-    async fn sqlite_store_counts_rejected_low_information_links() {
-        let dir = tempdir().unwrap();
-        let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
-        store
-            .mark_unhealthy("transient stats failure".to_owned())
-            .await
-            .unwrap();
-
-        store.record_rejected_low_information_link().await.unwrap();
-        store.record_rejected_low_information_link().await.unwrap();
-
-        assert_eq!(
-            store.rejected_low_information_link_count().await.unwrap(),
-            2
-        );
-        let health = store.health().await.unwrap();
-        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert_eq!(
-            health.last_error_message.as_deref(),
-            Some("transient stats failure")
-        );
     }
 
     #[tokio::test]

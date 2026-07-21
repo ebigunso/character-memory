@@ -54,14 +54,6 @@ impl RetrievalStatsStore for NoopRetrievalStatsStore {
     async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
         Ok(())
     }
-
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-        Ok(())
-    }
-
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-        Ok(0)
-    }
 }
 
 #[cfg(test)]

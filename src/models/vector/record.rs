@@ -15,47 +15,12 @@ pub(crate) struct VectorRecordEmbedding<'a> {
     pub(crate) embedding: &'a [f32],
 }
 
-#[derive(Debug, Clone, PartialEq)]
-// Diagnostic records back the vector-store diagnostics port; remove when that port is retired or called in production.
-#[allow(dead_code)]
-pub(crate) struct VectorCandidateDiagnosticRecord {
-    pub(crate) object_id: MemoryId,
-    pub(crate) object_type: ObjectType,
-    pub(crate) graph_uri: String,
-    pub(crate) surface: VectorSurface,
-    pub(crate) schema_version: String,
-    pub(crate) retention_state: Option<RetentionState>,
-    pub(crate) is_current: Option<bool>,
-    pub(crate) is_superseded: Option<bool>,
-}
-
-impl VectorCandidateDiagnosticRecord {
-    // Diagnostic adapters convert full records for tests/admin reads; remove when diagnostics no longer use VectorRecord.
-    #[allow(dead_code)]
-    pub(crate) fn from_vector_record(record: &VectorRecord) -> Self {
-        Self {
-            object_id: record.object_id,
-            object_type: record.object_type,
-            graph_uri: record.graph_uri.clone(),
-            surface: record.surface,
-            schema_version: record.schema_version.clone(),
-            retention_state: record.retention_state,
-            is_current: record.is_current,
-            is_superseded: record
-                .payload_hints
-                .is_superseded
-                .or_else(|| record.is_current.map(|value| !value)),
-        }
-    }
-}
-
 impl<'a> VectorRecordEmbedding<'a> {
     pub(crate) fn new(record: &'a VectorRecord, embedding: &'a [f32]) -> Self {
         Self { record, embedding }
     }
 
-    // Deterministic fakes use this conversion path; remove when fakes store VectorRecord directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn to_candidate_record(self) -> VectorCandidateRecord {
         self.record.to_candidate_record(self.embedding.to_vec())
     }

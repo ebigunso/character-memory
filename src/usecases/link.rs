@@ -75,13 +75,6 @@ where
             .map_err(validation_error)?;
         if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         {
-            if let Err(error) = self
-                .stats_store
-                .record_rejected_low_information_link()
-                .await
-            {
-                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
-            }
             return Err(validation_error(
                 "low-information co-occurrence link rejected",
             ));
@@ -332,11 +325,12 @@ mod tests {
         assert!(error
             .to_string()
             .contains("low-information co-occurrence link rejected"));
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            1
-        );
-        assert!(graph.list_diagnostic_links().await.unwrap().is_empty());
+        let rejected_link_id = id("550e8400-e29b-41d4-a716-446655444042");
+        assert!(graph
+            .query_links_by_ids(&[rejected_link_id])
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -348,10 +342,6 @@ mod tests {
         let persisted = pipeline.link(associated_with_link_draft()).await.unwrap();
 
         assert_eq!(persisted.relation, RelationType::AssociatedWith);
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            0
-        );
     }
 
     #[tokio::test]
@@ -468,14 +458,6 @@ mod tests {
             _query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
-        }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(self.links.lock().unwrap().clone())
         }
     }
 

@@ -369,21 +369,4 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         }
         Ok(expansion)
     }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        let object_types = [
-            ObjectType::Episode,
-            ObjectType::Observation,
-            ObjectType::Entity,
-            ObjectType::MemoryThread,
-            ObjectType::DerivedMemory,
-        ];
-        let object_refs = SparqlGraphSelectors::new(&self.store)
-            .select_objects(&GraphObjectQuery::by_types(object_types.to_vec(), None))?;
-        hydrate_objects_by_refs_from_store(&self.store, &object_refs)
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        hydrate_all_links_from_store(&self.store)
-    }
 }

@@ -1610,8 +1610,26 @@ mod tests {
             .unwrap();
 
         assert!(verdict.is_valid());
-        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 13);
-        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 5);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![
+                    ObjectType::Episode,
+                    ObjectType::Observation,
+                    ObjectType::Entity,
+                    ObjectType::MemoryThread,
+                    ObjectType::DerivedMemory,
+                ],
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(objects.len(), 13);
+        let link_ids = fixtures
+            .links()
+            .iter()
+            .map(|link| link.id)
+            .collect::<Vec<_>>();
+        assert_eq!(graph.query_links_by_ids(&link_ids).await.unwrap().len(), 5);
     }
 
     #[tokio::test]

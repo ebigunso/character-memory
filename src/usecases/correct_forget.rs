@@ -2658,14 +2658,6 @@ mod tests {
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
         }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(lock(&self.objects).clone())
-        }
-
-        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(lock(&self.links).clone())
-        }
     }
 
     #[derive(Debug, Default)]
@@ -2705,13 +2697,6 @@ mod tests {
             _query: &VectorCandidateSearch,
         ) -> Result<CanonicalCandidates, CustomError> {
             Ok(CanonicalCandidates::new([]))
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
         }
 
         async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -2805,14 +2790,6 @@ mod tests {
             lock(&self.calls).push(StoreCall::StatsUnhealthy);
             Ok(())
         }
-
-        async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-            Ok(0)
-        }
     }
 
     #[derive(Debug)]
@@ -2842,13 +2819,6 @@ mod tests {
             query: &VectorCandidateSearch,
         ) -> Result<CanonicalCandidates, CustomError> {
             self.inner.search_candidates(query).await
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            self.inner.list_candidate_diagnostics().await
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

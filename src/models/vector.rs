@@ -15,6 +15,5 @@ pub(crate) use embedding_model::EmbeddingModel;
 // Diagnostic/vector-record helpers are used by adapter/test subsets; remove when all callers import concrete modules.
 #[allow(unused_imports)]
 pub(crate) use record::{
-    VectorCandidateDiagnosticRecord, VectorPayloadHints, VectorRecord, VectorRecordEmbedding,
-    VectorRelationshipHints,
+    VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
 };
