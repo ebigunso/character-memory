@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::MemoryObjectRef;
 
@@ -10,7 +11,8 @@ pub enum GraphExpansionBoundedReason {
     HubLimit,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
+#[error("{reason:?} at {at:?}")]
 pub struct GraphExpansionBoundedFailureTrace {
     pub reason: GraphExpansionBoundedReason,
     pub at: Option<MemoryObjectRef>,

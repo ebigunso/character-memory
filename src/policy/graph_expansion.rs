@@ -20,8 +20,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::domain::{
-    DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
-    RetentionState, ThreadStatus,
+    DerivedMemory, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, MemoryId,
+    MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType, RetentionState,
+    ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
@@ -687,37 +688,19 @@ fn fanout_limit_for_pair_with_override_mode(
 }
 
 pub(crate) fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded {
-        reason: bounded_failure_reason_name(failure.reason).to_owned(),
-        location: failure
-            .at
-            .map(|object_ref| {
-                format!(
-                    " at object_type={} object_id={}",
-                    graph_object_type_name(object_ref.object_type),
-                    object_ref.id
-                )
-            })
-            .unwrap_or_default(),
-    }
+    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
 }
 
-fn bounded_failure_reason_name(reason: GraphExpansionBoundedFailureReason) -> &'static str {
-    match reason {
-        GraphExpansionBoundedFailureReason::NodeLimit => "node_limit",
-        GraphExpansionBoundedFailureReason::Timeout => "timeout",
-        GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
-    }
-}
-
-fn graph_object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::Episode => "episode",
-        ObjectType::Observation => "observation",
-        ObjectType::Entity => "entity",
-        ObjectType::MemoryThread => "memory_thread",
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::MemoryLink => "memory_link",
+pub(crate) fn graph_expansion_bounded_failure_trace(
+    failure: GraphExpansionBoundedFailure,
+) -> GraphExpansionBoundedFailureTrace {
+    GraphExpansionBoundedFailureTrace {
+        reason: match failure.reason {
+            GraphExpansionBoundedFailureReason::NodeLimit => GraphExpansionBoundedReason::NodeLimit,
+            GraphExpansionBoundedFailureReason::Timeout => GraphExpansionBoundedReason::Timeout,
+            GraphExpansionBoundedFailureReason::HubLimit => GraphExpansionBoundedReason::HubLimit,
+        },
+        at: failure.at,
     }
 }
 
@@ -1070,7 +1053,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            CustomError::GraphExpansionBounded { reason, .. } if reason == "node_limit"
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == GraphExpansionBoundedReason::NodeLimit
         ));
     }
 

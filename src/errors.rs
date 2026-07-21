@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::domain::{CandidateValidation, MemoryId, ObjectType};
+use crate::domain::{
+    CandidateValidation, GraphExpansionBoundedFailureTrace, LifecycleDtoValidationError,
+    LifecyclePolicyKnob, MemoryId, ObjectType,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -111,8 +114,14 @@ pub enum CustomError {
         object_id: MemoryId,
     },
 
-    #[error("Graph expansion bounded by retrieval policy: reason={reason}{location}")]
-    GraphExpansionBounded { reason: String, location: String },
+    #[error("graph expansion bounded by retrieval policy: {0}")]
+    GraphExpansionBounded(GraphExpansionBoundedFailureTrace),
+
+    #[error(transparent)]
+    LifecycleDraftInvalid(#[from] LifecycleDtoValidationError),
+
+    #[error("lifecycle policy knob is unsupported in this release: {knob:?}")]
+    LifecyclePolicyUnsupported { knob: LifecyclePolicyKnob },
 
     #[error("Vector database error: {0}")]
     VectorDatabaseError(#[source] VectorDatabaseError),

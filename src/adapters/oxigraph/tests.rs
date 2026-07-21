@@ -842,7 +842,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == crate::domain::GraphExpansionBoundedReason::HubLimit
         ));
     }
 

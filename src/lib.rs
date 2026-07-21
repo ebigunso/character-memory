@@ -49,10 +49,11 @@ pub use crate::domain::{
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
     CandidateValidationIssue, CandidateValidationStatus, DerivedMemory, DerivedType,
     DomainValidationError, Entity, EntityType, Episode, GraphExpansionBoundedFailureTrace,
-    GraphExpansionBoundedReason, LifecycleDtoValidationError, MemoryCandidateKind, MemoryId,
-    MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef, MemoryThread, Modality,
-    ObjectType, Observation, PlanIdentityField, RelationType, RetentionState, Stability,
-    ThreadStatus, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    GraphExpansionBoundedReason, LifecycleDtoValidationError, LifecyclePolicyKnob,
+    MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef,
+    MemoryThread, Modality, ObjectType, Observation, PlanIdentityField, RelationType,
+    RetentionState, Stability, ThreadStatus, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION,
+    EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::errors::{CustomError, VectorDatabaseError};
 pub use crate::memory::CharacterMemory;

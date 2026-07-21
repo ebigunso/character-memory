@@ -119,6 +119,7 @@ impl CharacterMemory {
         &self,
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
+        draft.validate()?;
         let parts = self.memory_composition();
         CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
@@ -135,6 +136,7 @@ impl CharacterMemory {
         &self,
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
+        draft.validate()?;
         let parts = self.memory_composition();
         CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),

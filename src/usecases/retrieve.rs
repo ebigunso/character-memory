@@ -12,15 +12,15 @@ use crate::api::types::{
     StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
-    MemoryId, MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, RelationType,
-    RetentionState, ThreadStatus,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
+    MemoryObjectRef, MemoryThread, ObjectType, RelationType, RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
     canonicalize_vector_candidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
     VectorCandidateSearch, VectorSurface,
 };
+use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
@@ -1103,21 +1103,7 @@ fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &Selecti
 }
 
 fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    let location = failure
-        .at
-        .map(|object_ref| {
-            format!(
-                " at object_type={} object_id={}",
-                object_type_name(object_ref.object_type),
-                object_ref.id
-            )
-        })
-        .unwrap_or_default();
-
-    CustomError::GraphExpansionBounded {
-        reason: bounded_failure_reason_name(failure.reason).to_owned(),
-        location,
-    }
+    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
 }
 
 fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
@@ -1194,17 +1180,6 @@ fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpans
     }
 }
 
-fn graph_expansion_bounded_failure_trace(
-    failure: GraphExpansionBoundedFailure,
-) -> GraphExpansionBoundedFailureTrace {
-    GraphExpansionBoundedFailureTrace {
-        reason: public_bounded_failure_reason(failure.reason),
-        at: failure
-            .at
-            .map(|object_ref| memory_object_ref(object_ref.object_type, object_ref.id)),
-    }
-}
-
 fn public_bounded_failure_reason(
     reason: GraphExpansionBoundedFailureReason,
 ) -> GraphExpansionBoundedReason {
@@ -1212,18 +1187,6 @@ fn public_bounded_failure_reason(
         GraphExpansionBoundedFailureReason::NodeLimit => GraphExpansionBoundedReason::NodeLimit,
         GraphExpansionBoundedFailureReason::Timeout => GraphExpansionBoundedReason::Timeout,
         GraphExpansionBoundedFailureReason::HubLimit => GraphExpansionBoundedReason::HubLimit,
-    }
-}
-
-fn bounded_failure_reason_name(
-    reason: crate::ports::graph_authority::GraphExpansionBoundedFailureReason,
-) -> &'static str {
-    match reason {
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::NodeLimit => {
-            "node_limit"
-        }
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::Timeout => "timeout",
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
     }
 }
 
@@ -1528,17 +1491,6 @@ fn object_type_rank(object_type: ObjectType) -> u8 {
         ObjectType::MemoryThread => 3,
         ObjectType::DerivedMemory => 4,
         ObjectType::MemoryLink => 5,
-    }
-}
-
-fn object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::Episode => "episode",
-        ObjectType::Observation => "observation",
-        ObjectType::Entity => "entity",
-        ObjectType::MemoryThread => "memory_thread",
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::MemoryLink => "memory_link",
     }
 }
 
@@ -2587,10 +2539,12 @@ mod tests {
 
         assert!(matches!(
             error,
-            CustomError::GraphExpansionBounded { reason, location }
-                if reason == "timeout"
-                    && location.contains("object_type=derived_memory")
-                    && location.contains(&fixtures.user_preference.id.to_string())
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == GraphExpansionBoundedReason::Timeout
+                    && trace.at == Some(MemoryObjectRef::new(
+                        ObjectType::DerivedMemory,
+                        fixtures.user_preference.id,
+                    ))
         ));
     }
 

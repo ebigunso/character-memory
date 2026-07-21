@@ -1573,7 +1573,8 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             fail_closed,
-            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == crate::domain::GraphExpansionBoundedReason::HubLimit
         ));
     }
 

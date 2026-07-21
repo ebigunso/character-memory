@@ -14,9 +14,9 @@ use crate::api::types::{
     SupersededByEvidence, VectorMaintenanceFailure,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
-    MemoryThread, ObjectType, Observation, RelationType, RetentionState, Stability, ThreadStatus,
-    DEFAULT_SCHEMA_VERSION,
+    DerivedMemory, DerivedType, Episode, LifecyclePolicyKnob, MemoryId, MemoryLink, MemoryObject,
+    MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
+    Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
@@ -75,7 +75,8 @@ where
         &self,
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
-        validate_correction_request(&draft)?;
+        draft.validate()?;
+        validate_correction_policy(&draft)?;
         let plan = self.correction_plan(draft).await?;
 
         self.graph_store
@@ -95,7 +96,8 @@ where
         &self,
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
-        validate_forget_request(&draft)?;
+        draft.validate()?;
+        validate_forget_policy(&draft)?;
         let plan = self.forget_plan(draft).await?;
 
         self.graph_store.upsert_objects(&plan.graph_objects).await?;
@@ -757,61 +759,39 @@ struct VectorMaintenanceResult {
     failure: Option<VectorMaintenanceFailure>,
 }
 
-fn validate_correction_request(draft: &CorrectMemoryDraft) -> Result<(), CustomError> {
-    if draft.targets.is_empty() {
-        return Err(validation_error("correction requires at least one target"));
-    }
-    if draft.rationale.trim().is_empty() {
-        return Err(validation_error("correction rationale must not be empty"));
-    }
-    if !draft.correction_origin.has_reference() {
-        return Err(validation_error("correction origin provenance is required"));
-    }
+fn validate_correction_policy(draft: &CorrectMemoryDraft) -> Result<(), CustomError> {
     if !draft.lifecycle_policy.retain_original_source_objects {
-        return Err(validation_error(
-            "correction cannot rewrite or remove original source objects in this lifecycle chunk",
-        ));
+        return Err(CustomError::LifecyclePolicyUnsupported {
+            knob: LifecyclePolicyKnob::CorrectionRetainOriginalSourceObjects,
+        });
     }
     if !draft.cascade_policy.require_original_source_match {
-        return Err(validation_error(
-            "correction cascade requires original source provenance matching in this lifecycle chunk",
-        ));
+        return Err(CustomError::LifecyclePolicyUnsupported {
+            knob: LifecyclePolicyKnob::CorrectionRequireOriginalSourceMatch,
+        });
     }
     if draft.cascade_policy.cascade_to_threads {
-        return Err(validation_error(
-            "correction cascade to threads is not supported in this lifecycle chunk",
-        ));
-    }
-    for replacement in &draft.replacement_derived_memories {
-        if replacement.text.trim().is_empty() {
-            return Err(validation_error(
-                "replacement derived memory text must not be empty",
-            ));
-        }
-        if !replacement.correction_origin_provenance.has_reference() {
-            return Err(validation_error(
-                "replacement correction origin provenance is required",
-            ));
-        }
+        return Err(CustomError::LifecyclePolicyUnsupported {
+            knob: LifecyclePolicyKnob::CorrectionCascadeToThreads,
+        });
     }
     Ok(())
 }
 
-fn validate_forget_request(draft: &ForgetMemoryDraft) -> Result<(), CustomError> {
-    draft.validate().map_err(validation_error)?;
+fn validate_forget_policy(draft: &ForgetMemoryDraft) -> Result<(), CustomError> {
     if !draft
         .lifecycle_policy
         .suppression
         .preserve_original_raw_refs
     {
-        return Err(validation_error(
-            "forget cannot remove original raw/source references in this lifecycle chunk",
-        ));
+        return Err(CustomError::LifecyclePolicyUnsupported {
+            knob: LifecyclePolicyKnob::ForgetPreserveOriginalRawRefs,
+        });
     }
     if !draft.lifecycle_policy.archive.preserve_original_raw_refs {
-        return Err(validation_error(
-            "thread archive cannot remove original raw/source references in this lifecycle chunk",
-        ));
+        return Err(CustomError::LifecyclePolicyUnsupported {
+            knob: LifecyclePolicyKnob::ForgetArchivePreserveOriginalRawRefs,
+        });
     }
     Ok(())
 }
@@ -1344,7 +1324,12 @@ mod tests {
 
         let error = pipeline.correct(draft).await.unwrap_err();
 
-        assert!(error.to_string().contains("rationale"));
+        assert!(matches!(
+            error,
+            CustomError::LifecycleDraftInvalid(
+                crate::domain::LifecycleDtoValidationError::EmptyRationale
+            )
+        ));
         assert!(graph.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
@@ -1352,22 +1337,31 @@ mod tests {
     #[tokio::test]
     async fn unsupported_correction_policy_knobs_fail_before_writes() {
         let ids = fixed_ids();
-        for mut draft in [
-            {
-                let mut draft = correction_draft(&ids);
-                draft.lifecycle_policy.retain_original_source_objects = false;
-                draft
-            },
-            {
-                let mut draft = correction_draft(&ids);
-                draft.cascade_policy.require_original_source_match = false;
-                draft
-            },
-            {
-                let mut draft = correction_draft(&ids);
-                draft.cascade_policy.cascade_to_threads = true;
-                draft
-            },
+        for (mut draft, expected_knob) in [
+            (
+                {
+                    let mut draft = correction_draft(&ids);
+                    draft.lifecycle_policy.retain_original_source_objects = false;
+                    draft
+                },
+                LifecyclePolicyKnob::CorrectionRetainOriginalSourceObjects,
+            ),
+            (
+                {
+                    let mut draft = correction_draft(&ids);
+                    draft.cascade_policy.require_original_source_match = false;
+                    draft
+                },
+                LifecyclePolicyKnob::CorrectionRequireOriginalSourceMatch,
+            ),
+            (
+                {
+                    let mut draft = correction_draft(&ids);
+                    draft.cascade_policy.cascade_to_threads = true;
+                    draft
+                },
+                LifecyclePolicyKnob::CorrectionCascadeToThreads,
+            ),
         ] {
             draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
             let graph =
@@ -1378,7 +1372,10 @@ mod tests {
 
             let error = pipeline.correct(draft).await.unwrap_err();
 
-            assert!(error.to_string().contains("lifecycle chunk"));
+            assert!(matches!(
+                error,
+                CustomError::LifecyclePolicyUnsupported { knob } if knob == expected_knob
+            ));
             assert!(graph.calls().is_empty());
             assert!(vector.calls().is_empty());
         }
@@ -1387,24 +1384,32 @@ mod tests {
     #[tokio::test]
     async fn unsupported_forget_policy_knobs_fail_before_writes() {
         let ids = fixed_ids();
-        for mut draft in [
-            {
-                let mut draft = ForgetMemoryDraft::suppress(
-                    LifecycleTargetRef::DerivedMemory(ids.old),
-                    "Suppress without dropping refs.",
-                );
-                draft
-                    .lifecycle_policy
-                    .suppression
-                    .preserve_original_raw_refs = false;
-                draft
-            },
-            {
-                let mut draft =
-                    ForgetMemoryDraft::archive_thread(ids.thread, "Archive without dropping refs.");
-                draft.lifecycle_policy.archive.preserve_original_raw_refs = false;
-                draft
-            },
+        for (mut draft, expected_knob) in [
+            (
+                {
+                    let mut draft = ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::DerivedMemory(ids.old),
+                        "Suppress without dropping refs.",
+                    );
+                    draft
+                        .lifecycle_policy
+                        .suppression
+                        .preserve_original_raw_refs = false;
+                    draft
+                },
+                LifecyclePolicyKnob::ForgetPreserveOriginalRawRefs,
+            ),
+            (
+                {
+                    let mut draft = ForgetMemoryDraft::archive_thread(
+                        ids.thread,
+                        "Archive without dropping refs.",
+                    );
+                    draft.lifecycle_policy.archive.preserve_original_raw_refs = false;
+                    draft
+                },
+                LifecyclePolicyKnob::ForgetArchivePreserveOriginalRawRefs,
+            ),
         ] {
             draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
             let graph =
@@ -1415,7 +1420,10 @@ mod tests {
 
             let error = pipeline.forget(draft).await.unwrap_err();
 
-            assert!(error.to_string().contains("lifecycle chunk"));
+            assert!(matches!(
+                error,
+                CustomError::LifecyclePolicyUnsupported { knob } if knob == expected_knob
+            ));
             assert!(graph.calls().is_empty());
             assert!(vector.calls().is_empty());
         }
