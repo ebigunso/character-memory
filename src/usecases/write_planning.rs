@@ -472,7 +472,7 @@ fn complete_link_draft(
     draft
 }
 
-fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {
+pub(crate) fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {
     let mut label = Vec::new();
     for part in parts {
         label.extend_from_slice(&(part.len() as u64).to_be_bytes());
