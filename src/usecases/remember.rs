@@ -440,7 +440,7 @@ mod tests {
             .await
             .expect_err("divergent content under an existing link ID must reject");
 
-        assert!(error.to_string().contains("divergent link content"));
+        assert!(matches!(error, CustomError::MemoryValidation(_)));
     }
 
     #[tokio::test]
