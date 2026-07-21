@@ -94,7 +94,7 @@ pub struct VectorMaintenanceFailureItem {
 }
 ```
 
-`unmaintained_object_ids` becomes a derived accessor (union over failure items), not a stored second copy.
+`unmaintained_objects` becomes a derived accessor (refs, not bare IDs) (union over failure items), not a stored second copy.
 Outcome-embedded-record convention: outcome fields such as `VectorMaintenanceFailure`/`VectorMaintenanceFailureItem` live in `api` (the outcome layer) and may reference `domain`/`errors` types, since api-to-errors is an allowed dependency direction; only payloads embedded in `CustomError` variants must themselves be `domain`/`errors`-resident.
 F12: `ConfigValidationError { keys: Vec<&'static str>, reason: ConfigValidationReason }` where the reason enum covers the producer vocabulary in `app_settings.rs` (missing value, out-of-domain value with expected/actual, paired-key violation naming both keys); config tests assert keys and reason variants, never message tokens.
 F11: `CollectionCompatibilityError { collection: String, mismatch: CollectionMismatch }` with `CollectionMismatch::{VectorSize { expected, actual }, Distance { expected, actual }, MissingNamedVector { name }, ...}` enumerated from the qdrant compatibility checks.
