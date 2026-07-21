@@ -826,12 +826,12 @@ impl PlanValidationContext {
                 ));
             }
             MemoryCandidate::VectorIndex(candidate) => {
-                self.add_ref_to_check(candidate.target.into());
+                self.add_ref_to_check(candidate.target);
             }
             MemoryCandidate::StatsUpdate(candidate) => {
-                self.add_ref_to_check(candidate.subject.into());
+                self.add_ref_to_check(candidate.subject);
                 if let Some(object) = candidate.object {
-                    self.add_ref_to_check(object.into());
+                    self.add_ref_to_check(object);
                 }
             }
             _ => {}
@@ -997,11 +997,11 @@ impl PlanValidationContext {
                     errors.push(CandidateValidationIssue::EmptyVectorEmbeddingText);
                 }
                 errors.extend(self.validate_graph_authoritative_ref(
-                    candidate.target.into(),
+                    candidate.target,
                     CandidateReferenceRole::VectorIndexTarget,
                 ));
                 errors.extend(self.validate_in_plan_ref(
-                    candidate.target.into(),
+                    candidate.target,
                     CandidateReferenceRole::VectorIndexTarget,
                 ));
             }
@@ -1011,22 +1011,24 @@ impl PlanValidationContext {
                     errors.push(CandidateValidationIssue::IncompleteStatsRelationObjectPair);
                 }
                 errors.extend(self.validate_graph_authoritative_ref(
-                    candidate.subject.into(),
+                    candidate.subject,
                     CandidateReferenceRole::StatsUpdateSubject,
                 ));
                 errors.extend(self.validate_in_plan_ref(
-                    candidate.subject.into(),
+                    candidate.subject,
                     CandidateReferenceRole::StatsUpdateSubject,
                 ));
                 if let Some(object) = candidate.object {
                     errors.extend(self.validate_graph_authoritative_ref(
-                        object.into(),
+                        object,
                         CandidateReferenceRole::StatsUpdateObject,
                     ));
-                    errors.extend(self.validate_in_plan_ref(
-                        object.into(),
-                        CandidateReferenceRole::StatsUpdateObject,
-                    ));
+                    errors.extend(
+                        self.validate_in_plan_ref(
+                            object,
+                            CandidateReferenceRole::StatsUpdateObject,
+                        ),
+                    );
                 }
             }
         }
