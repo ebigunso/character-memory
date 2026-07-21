@@ -344,11 +344,8 @@ fn qdrant_error(error: QdrantError) -> CustomError {
     let vector_error = match error {
         QdrantError::ResponseError { status } => {
             let status_kind = transport_status(status.code() as i32);
-            // qdrant-client currently erases the tonic transport source when channel
-            // establishment fails. Normalize its adapter-owned marker here so callers
-            // and skip gates never depend on the rendered message.
-            let erased_connect_source = status_kind == TransportStatus::Internal
-                && status.message().starts_with(QDRANT_CONNECT_FAILURE_PREFIX);
+            let erased_connect_source =
+                is_erased_qdrant_connect_failure(&status_kind, status.message());
             let kind = if let Some(io_kind) = find_io_error_kind(&status) {
                 VectorDatabaseErrorKind::Io { io_kind }
             } else if erased_connect_source {
@@ -423,6 +420,15 @@ fn qdrant_error(error: QdrantError) -> CustomError {
     };
 
     CustomError::VectorDatabaseError(vector_error)
+}
+
+fn is_erased_qdrant_connect_failure(status: &TransportStatus, message: &str) -> bool {
+    // Ruled external-contract exception: qdrant-client 1.17.0 erases the tonic transport
+    // source in src/channel_pool.rs with
+    // `Status::internal(format!("Failed to connect to {}: {:?}", self.uri, e))`.
+    // Recheck this on every qdrant-client bump; retire the prefix coupling once upstream
+    // preserves a downcastable source.
+    *status == TransportStatus::Internal && message.starts_with(QDRANT_CONNECT_FAILURE_PREFIX)
 }
 
 fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<IoErrorKind> {
@@ -694,7 +700,9 @@ mod tests {
     }
 
     #[test]
-    fn qdrant_response_error_normalizes_erased_channel_connect_source() {
+    fn qdrant_client_1_17_erased_connect_prefix_canary() {
+        // Failure means qdrant-client's erased-source message contract drifted. Reinspect
+        // channel_pool.rs before changing the adapter exception or its HttpConnect mapping.
         let error = qdrant_error(QdrantError::ResponseError {
             status: tonic::Status::internal(
                 "Failed to connect to http://127.0.0.1:65534/: tonic transport failure",
