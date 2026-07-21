@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use character_memory::{
-    CustomError, EmbeddingProvider, Settings, TransportStatus, VectorDatabaseError,
-    VectorDatabaseErrorKind,
+    CustomError, EmbeddingError, EmbeddingProvider, IoErrorKind, Settings, TransportStatus,
+    VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use config::Config;
 use qdrant_client::Qdrant;
@@ -109,14 +109,14 @@ impl EmbeddingProvider for DeterministicEmbeddingProvider {
         self.vector_size
     }
 
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
         Ok(self.vector_for_text(text))
     }
 
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, CustomError> {
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         Ok(texts
             .iter()
             .map(|text| self.vector_for_text(text))
@@ -135,11 +135,7 @@ pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
         return false;
     }
 
-    let message = error.message.to_ascii_lowercase();
     error.status == Some(TransportStatus::Unavailable)
-        || (error.kind == VectorDatabaseErrorKind::Response
-            && message.contains("failed to connect")
-            && message.contains("tcp connect error"))
         || matches!(
             error.kind,
             VectorDatabaseErrorKind::HttpConnect | VectorDatabaseErrorKind::HttpTimeout
@@ -148,12 +144,12 @@ pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
             &error.kind,
             VectorDatabaseErrorKind::Io { io_kind }
                 if matches!(
-                    io_kind.as_str(),
-                    "ConnectionRefused"
-                        | "ConnectionReset"
-                        | "ConnectionAborted"
-                        | "NotConnected"
-                        | "TimedOut"
+                    io_kind,
+                    IoErrorKind::ConnectionRefused
+                        | IoErrorKind::ConnectionReset
+                        | IoErrorKind::ConnectionAborted
+                        | IoErrorKind::NotConnected
+                        | IoErrorKind::TimedOut
                 )
         )
 }

@@ -818,3 +818,21 @@ Prevention:
 - Run denied-warning clippy immediately after broad type-unification slices, not only at final gates (worker candidate).
 - Prefer apply_patch-style edits over PowerShell nested replacement maps for source edits (punctuation corruption risk; worker candidate).
 - agmsg send.sh takes exactly TEAM FROM TO MESSAGE; an extra positional argument silently displaces the body (reviewer candidate; symptom: bare one-word messages).
+
+## 2026-07-21 - Typed Error Contracts Must Survive Producers, Serde, And Test Gates  [tags: review, validation, errors]
+
+Context:
+- Plan: structured-verdict-observability; PR #65 review fixes
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Closed error vocabularies were flattened or made unserializable at three different boundaries: a public provider trait accepted broad `CustomError`, graph-mode validation passed through serde prose, and a primitive newtype variant could not serialize under an internal tag. Separately, the Qdrant skip gate recovered transport meaning by matching rendered error text.
+
+Root cause:
+- Type design was checked at enum declarations but not end to end through producer signatures, adapter normalization, serde representation, and control-flow consumers. Representative tests constructed only a subset of variants and the service-down control had not been run after removing prose matching.
+
+Fix applied:
+- Retyped the provider boundary to `EmbeddingError`, preserved graph-mode validation before serde flattening, made every internally tagged variant structurally serializable, normalized Qdrant connection failures inside the adapter, and made skip gating consume typed transport classifications only. Exhaustive per-variant serde coverage and both service-down/service-up controls now enforce the contract.
+
+Prevention:
+- For every closed error vocabulary, audit four surfaces together: producer return type, adapter conversion, serialization of every variant, and downstream branching. Any skip/retry/fallback predicate must consume typed classification, and its verification must include both a forced-failure control and a successful exercised path.

@@ -1000,14 +1000,14 @@ mod tests {
             self.vector_size
         }
 
-        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, CustomError> {
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
             Ok(vec![0.0; self.vector_size])
         }
 
         async fn bulk_generate_embeddings<'a>(
             &self,
             texts: &'a [&'a str],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
+        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
             Ok(vec![vec![0.0; self.vector_size]; texts.len()])
         }
     }

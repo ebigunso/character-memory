@@ -1,4 +1,4 @@
-use character_memory::CustomError;
+use character_memory::{CustomError, VectorDatabaseError};
 
 #[path = "support/mod.rs"]
 pub mod test_support;
@@ -23,4 +23,27 @@ async fn test_character_memory_initialization() {
     // Cleanup
     cleanup_collection(&collection_name).await;
     test_result.expect("live initialization test should pass");
+}
+
+#[test]
+fn qdrant_skip_gate_uses_typed_transport_classification() {
+    let typed_unavailable: VectorDatabaseError = serde_json::from_value(serde_json::json!({
+        "backend": "qdrant",
+        "kind": { "kind": "response" },
+        "status": { "kind": "unavailable" },
+        "message": "opaque transport detail",
+        "retry_after_seconds": null
+    }))
+    .unwrap();
+    let prose_only: VectorDatabaseError = serde_json::from_value(serde_json::json!({
+        "backend": "qdrant",
+        "kind": { "kind": "response" },
+        "status": null,
+        "message": "failed to connect: tcp connect error",
+        "retry_after_seconds": null
+    }))
+    .unwrap();
+
+    assert!(is_qdrant_unavailable_error(&typed_unavailable));
+    assert!(!is_qdrant_unavailable_error(&prose_only));
 }

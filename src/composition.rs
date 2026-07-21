@@ -42,7 +42,7 @@ impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
         self.provider
             .generate_embedding(&input.text)
             .await
-            .map_err(normalize_embedding_error)
+            .map_err(CustomError::from)
     }
 
     async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
@@ -50,14 +50,7 @@ impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
         self.provider
             .bulk_generate_embeddings(&texts)
             .await
-            .map_err(normalize_embedding_error)
-    }
-}
-
-fn normalize_embedding_error(error: CustomError) -> CustomError {
-    match error {
-        CustomError::Embedding(_) => error,
-        error => EmbeddingError::Unrecognized(error.to_string()).into(),
+            .map_err(CustomError::from)
     }
 }
 

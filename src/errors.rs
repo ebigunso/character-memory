@@ -14,13 +14,105 @@ pub enum VectorDatabaseErrorKind {
     Conversion,
     InvalidUri,
     NoSnapshotFound,
-    Io { io_kind: String },
+    Io { io_kind: IoErrorKind },
     HttpTimeout,
     HttpConnect,
     HttpStatus,
     Http,
     JsonToPayload,
     PayloadDeserialization,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum IoErrorKind {
+    NotFound,
+    PermissionDenied,
+    ConnectionRefused,
+    ConnectionReset,
+    HostUnreachable,
+    NetworkUnreachable,
+    ConnectionAborted,
+    NotConnected,
+    AddrInUse,
+    AddrNotAvailable,
+    NetworkDown,
+    BrokenPipe,
+    AlreadyExists,
+    WouldBlock,
+    NotADirectory,
+    IsADirectory,
+    DirectoryNotEmpty,
+    ReadOnlyFilesystem,
+    StaleNetworkFileHandle,
+    InvalidInput,
+    InvalidData,
+    TimedOut,
+    WriteZero,
+    StorageFull,
+    NotSeekable,
+    QuotaExceeded,
+    FileTooLarge,
+    ResourceBusy,
+    ExecutableFileBusy,
+    Deadlock,
+    CrossesDevices,
+    TooManyLinks,
+    InvalidFilename,
+    ArgumentListTooLong,
+    Interrupted,
+    Unsupported,
+    UnexpectedEof,
+    OutOfMemory,
+    Other,
+    Unrecognized(String),
+}
+
+impl From<std::io::ErrorKind> for IoErrorKind {
+    fn from(kind: std::io::ErrorKind) -> Self {
+        match kind {
+            std::io::ErrorKind::NotFound => Self::NotFound,
+            std::io::ErrorKind::PermissionDenied => Self::PermissionDenied,
+            std::io::ErrorKind::ConnectionRefused => Self::ConnectionRefused,
+            std::io::ErrorKind::ConnectionReset => Self::ConnectionReset,
+            std::io::ErrorKind::HostUnreachable => Self::HostUnreachable,
+            std::io::ErrorKind::NetworkUnreachable => Self::NetworkUnreachable,
+            std::io::ErrorKind::ConnectionAborted => Self::ConnectionAborted,
+            std::io::ErrorKind::NotConnected => Self::NotConnected,
+            std::io::ErrorKind::AddrInUse => Self::AddrInUse,
+            std::io::ErrorKind::AddrNotAvailable => Self::AddrNotAvailable,
+            std::io::ErrorKind::NetworkDown => Self::NetworkDown,
+            std::io::ErrorKind::BrokenPipe => Self::BrokenPipe,
+            std::io::ErrorKind::AlreadyExists => Self::AlreadyExists,
+            std::io::ErrorKind::WouldBlock => Self::WouldBlock,
+            std::io::ErrorKind::NotADirectory => Self::NotADirectory,
+            std::io::ErrorKind::IsADirectory => Self::IsADirectory,
+            std::io::ErrorKind::DirectoryNotEmpty => Self::DirectoryNotEmpty,
+            std::io::ErrorKind::ReadOnlyFilesystem => Self::ReadOnlyFilesystem,
+            std::io::ErrorKind::StaleNetworkFileHandle => Self::StaleNetworkFileHandle,
+            std::io::ErrorKind::InvalidInput => Self::InvalidInput,
+            std::io::ErrorKind::InvalidData => Self::InvalidData,
+            std::io::ErrorKind::TimedOut => Self::TimedOut,
+            std::io::ErrorKind::WriteZero => Self::WriteZero,
+            std::io::ErrorKind::StorageFull => Self::StorageFull,
+            std::io::ErrorKind::NotSeekable => Self::NotSeekable,
+            std::io::ErrorKind::QuotaExceeded => Self::QuotaExceeded,
+            std::io::ErrorKind::FileTooLarge => Self::FileTooLarge,
+            std::io::ErrorKind::ResourceBusy => Self::ResourceBusy,
+            std::io::ErrorKind::ExecutableFileBusy => Self::ExecutableFileBusy,
+            std::io::ErrorKind::Deadlock => Self::Deadlock,
+            std::io::ErrorKind::CrossesDevices => Self::CrossesDevices,
+            std::io::ErrorKind::TooManyLinks => Self::TooManyLinks,
+            std::io::ErrorKind::InvalidFilename => Self::InvalidFilename,
+            std::io::ErrorKind::ArgumentListTooLong => Self::ArgumentListTooLong,
+            std::io::ErrorKind::Interrupted => Self::Interrupted,
+            std::io::ErrorKind::Unsupported => Self::Unsupported,
+            std::io::ErrorKind::UnexpectedEof => Self::UnexpectedEof,
+            std::io::ErrorKind::OutOfMemory => Self::OutOfMemory,
+            std::io::ErrorKind::Other => Self::Other,
+            other => Self::Unrecognized(format!("{other:?}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,8 +191,8 @@ pub enum EmbeddingError {
     NonNumericValue { index: usize, component: usize },
     #[error("embedding response is missing index {index}")]
     MissingResponseIndex { index: usize },
-    #[error("unrecognized external embedding-provider error: {0}")]
-    Unrecognized(String),
+    #[error("unrecognized external embedding-provider error: {detail}")]
+    Unrecognized { detail: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -296,6 +388,77 @@ fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
 mod tests {
     use super::*;
     use crate::domain::{CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind};
+
+    #[test]
+    fn every_embedding_error_variant_round_trips_through_serde() {
+        let errors = vec![
+            EmbeddingError::MissingApiKey,
+            EmbeddingError::ProviderVectorSizeMismatch {
+                expected: 3,
+                actual: 2,
+            },
+            EmbeddingError::BlankInput { index: Some(1) },
+            EmbeddingError::Transport {
+                transport_kind: EmbeddingTransportErrorKind::Connect,
+                detail: "connection refused".to_owned(),
+            },
+            EmbeddingError::HttpStatus {
+                status: 429,
+                body: "rate limited".to_owned(),
+            },
+            EmbeddingError::InvalidJson {
+                detail: "unexpected token".to_owned(),
+            },
+            EmbeddingError::MissingData,
+            EmbeddingError::CountMismatch {
+                expected: 2,
+                actual: 1,
+            },
+            EmbeddingError::MissingIndex { item: 0 },
+            EmbeddingError::IndexOutOfRange {
+                index: 2,
+                expected_count: 2,
+            },
+            EmbeddingError::DuplicateIndex { index: 0 },
+            EmbeddingError::MissingEmbedding { item: 0 },
+            EmbeddingError::DimensionMismatch {
+                index: 0,
+                expected: 3,
+                actual: 2,
+            },
+            EmbeddingError::NonNumericValue {
+                index: 0,
+                component: 1,
+            },
+            EmbeddingError::MissingResponseIndex { index: 1 },
+            EmbeddingError::Unrecognized {
+                detail: "custom provider failure".to_owned(),
+            },
+        ];
+
+        for error in errors {
+            let serialized = serde_json::to_value(&error).unwrap();
+            let deserialized = serde_json::from_value(serialized.clone()).unwrap();
+            assert_eq!(error, deserialized);
+
+            if matches!(error, EmbeddingError::Unrecognized { .. }) {
+                assert_eq!(serialized["kind"], "unrecognized");
+                assert_eq!(serialized["detail"], "custom provider failure");
+            }
+        }
+    }
+
+    #[test]
+    fn io_error_kind_preserves_transport_classification_and_round_trips() {
+        let kind = IoErrorKind::from(std::io::ErrorKind::ConnectionRefused);
+
+        assert_eq!(kind, IoErrorKind::ConnectionRefused);
+        let serialized = serde_json::to_string(&kind).unwrap();
+        assert_eq!(
+            serde_json::from_str::<IoErrorKind>(&serialized).unwrap(),
+            kind
+        );
+    }
 
     #[test]
     fn write_plan_rejection_preserves_validation_issues() {

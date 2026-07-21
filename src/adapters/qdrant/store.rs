@@ -14,7 +14,7 @@ use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
 use crate::domain::{MemoryId, ObjectType};
 use crate::errors::{
-    CollectionCompatibilityError, CollectionMismatch, CustomError, TransportStatus,
+    CollectionCompatibilityError, CollectionMismatch, CustomError, IoErrorKind, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use crate::models::vector::{
@@ -30,6 +30,7 @@ use super::payload::{
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
 const QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES: usize = 4_096;
 const QDRANT_TIE_COHORT_LIMIT_MULTIPLIER: usize = 16;
+const QDRANT_CONNECT_FAILURE_PREFIX: &str = "Failed to connect to ";
 
 pub(crate) struct QdrantVectorCandidateStore {
     client: Qdrant,
@@ -341,12 +342,27 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
 
 fn qdrant_error(error: QdrantError) -> CustomError {
     let vector_error = match error {
-        QdrantError::ResponseError { status } => VectorDatabaseError::new(
-            "qdrant",
-            VectorDatabaseErrorKind::Response,
-            Some(transport_status(status.code() as i32)),
-            status.message().to_owned(),
-        ),
+        QdrantError::ResponseError { status } => {
+            let status_kind = transport_status(status.code() as i32);
+            // qdrant-client currently erases the tonic transport source when channel
+            // establishment fails. Normalize its adapter-owned marker here so callers
+            // and skip gates never depend on the rendered message.
+            let erased_connect_source = status_kind == TransportStatus::Internal
+                && status.message().starts_with(QDRANT_CONNECT_FAILURE_PREFIX);
+            let kind = if let Some(io_kind) = find_io_error_kind(&status) {
+                VectorDatabaseErrorKind::Io { io_kind }
+            } else if erased_connect_source {
+                VectorDatabaseErrorKind::HttpConnect
+            } else {
+                VectorDatabaseErrorKind::Response
+            };
+            VectorDatabaseError::new(
+                "qdrant",
+                kind,
+                Some(status_kind),
+                status.message().to_owned(),
+            )
+        }
         QdrantError::ResourceExhaustedError {
             status,
             retry_after_seconds,
@@ -375,7 +391,7 @@ fn qdrant_error(error: QdrantError) -> CustomError {
         QdrantError::Io(error) => VectorDatabaseError::new(
             "qdrant",
             VectorDatabaseErrorKind::Io {
-                io_kind: format!("{:?}", error.kind()),
+                io_kind: IoErrorKind::from(error.kind()),
             },
             None,
             error.to_string(),
@@ -407,6 +423,17 @@ fn qdrant_error(error: QdrantError) -> CustomError {
     };
 
     CustomError::VectorDatabaseError(vector_error)
+}
+
+fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<IoErrorKind> {
+    let mut current = Some(error);
+    while let Some(source) = current {
+        if let Some(io_error) = source.downcast_ref::<std::io::Error>() {
+            return Some(IoErrorKind::from(io_error.kind()));
+        }
+        current = source.source();
+    }
+    None
 }
 
 fn transport_status(code: i32) -> TransportStatus {
@@ -645,6 +672,41 @@ mod tests {
                 message,
                 retry_after_seconds: None,
             }) if backend == "qdrant" && message == "offline"
+        ));
+    }
+
+    #[test]
+    fn qdrant_response_error_promotes_nested_io_classification() {
+        let status = tonic::Status::from_error(Box::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionRefused,
+        )));
+        let error = qdrant_error(QdrantError::ResponseError { status });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::Io {
+                    io_kind: IoErrorKind::ConnectionRefused,
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn qdrant_response_error_normalizes_erased_channel_connect_source() {
+        let error = qdrant_error(QdrantError::ResponseError {
+            status: tonic::Status::internal(
+                "Failed to connect to http://127.0.0.1:65534/: tonic transport failure",
+            ),
+        });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::HttpConnect,
+                ..
+            })
         ));
     }
 

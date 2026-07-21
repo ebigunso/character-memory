@@ -142,6 +142,17 @@ impl Settings {
     /// - `Ok`: A new `Settings` instance with the provided configuration
     /// - `Err`: A `CustomError` if any required settings are missing or invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
+        match config.get_string("graph_store_mode") {
+            Ok(graph_store_mode) => {
+                GraphStoreMode::parse(&graph_store_mode)?;
+            }
+            Err(config::ConfigError::NotFound(_)) => {}
+            Err(error) => {
+                return Err(CustomError::ConfigParseError(format!(
+                    "Failed to parse GRAPH_STORE_MODE: {error}"
+                )));
+            }
+        }
         let settings: Self = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
         })?;
@@ -535,13 +546,18 @@ mod tests {
             .unwrap();
 
         let error = Settings::new(external_config).unwrap_err();
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
-        assert!(message.contains("GRAPH_STORE_MODE"));
-        assert!(message.contains("persistent"));
-        assert!(message.contains("in_memory"));
+        assert_eq!(keys, vec!["GRAPH_STORE_MODE"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "persistent or in_memory",
+                actual: "service".to_owned(),
+            }
+        );
     }
 
     #[test]

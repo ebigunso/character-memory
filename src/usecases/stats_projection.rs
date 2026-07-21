@@ -37,6 +37,7 @@ where
         links: &[MemoryLink],
     ) -> StatsProjectionOutcome {
         let endpoint_refs = stats_endpoint_refs(objects, links);
+        let attempted_object_ids = attempted_stats_object_ids(objects, &endpoint_refs);
         let (stats_objects, mut cause) = if endpoint_refs.is_empty() {
             (objects.to_vec(), None)
         } else {
@@ -68,7 +69,6 @@ where
             }
         };
 
-        let attempted_object_ids = stats_objects.iter().map(MemoryObject::id).collect();
         if let Err(write_cause) = self.write_projection(&stats_objects, links).await {
             if cause.is_none() {
                 cause = Some(write_cause);
@@ -128,6 +128,19 @@ where
         }
         Ok(())
     }
+}
+
+fn attempted_stats_object_ids(
+    objects: &[MemoryObject],
+    endpoint_refs: &[MemoryObjectRef],
+) -> Vec<MemoryId> {
+    let mut ids = objects.iter().map(MemoryObject::id).collect::<Vec<_>>();
+    for endpoint_ref in endpoint_refs {
+        if !ids.contains(&endpoint_ref.id) {
+            ids.push(endpoint_ref.id);
+        }
+    }
+    ids
 }
 
 fn stats_endpoint_refs(objects: &[MemoryObject], links: &[MemoryLink]) -> Vec<MemoryObjectRef> {
@@ -207,6 +220,21 @@ mod tests {
         assert_eq!(
             stats_endpoint_refs(&[], &[link]),
             vec![MemoryObjectRef::new(ObjectType::Observation, object_id)]
+        );
+    }
+
+    #[test]
+    fn attempted_ids_include_link_only_endpoints_when_hydration_fails() {
+        let from_id = MemoryId::from_u128(1);
+        let to_id = MemoryId::from_u128(2);
+        let endpoint_refs = vec![
+            MemoryObjectRef::new(ObjectType::Observation, from_id),
+            MemoryObjectRef::new(ObjectType::Episode, to_id),
+        ];
+
+        assert_eq!(
+            attempted_stats_object_ids(&[], &endpoint_refs),
+            vec![from_id, to_id]
         );
     }
 }

@@ -59,7 +59,7 @@ pub use crate::domain::{
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
-    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
+    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind, IoErrorKind,
     StatsUpdateCause, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
     VectorIndexingCause,
 };

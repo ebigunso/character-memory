@@ -64,7 +64,7 @@ trait OpenAIEmbeddingTransport: Send + Sync {
         &self,
         api_key: &str,
         payload: serde_json::Value,
-    ) -> Result<OpenAIEmbeddingHttpResponse, CustomError>;
+    ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError>;
 }
 
 struct OpenAIEmbeddingHttpResponse {
@@ -82,7 +82,7 @@ impl OpenAIEmbeddingTransport for ReqwestOpenAIEmbeddingTransport {
         &self,
         api_key: &str,
         payload: serde_json::Value,
-    ) -> Result<OpenAIEmbeddingHttpResponse, CustomError> {
+    ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError> {
         let response = self
             .client
             .post(OPENAI_EMBEDDING_ENDPOINT)
@@ -103,17 +103,16 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
         self.vector_size
     }
 
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
         if text.trim().is_empty() {
-            return Err(EmbeddingError::BlankInput { index: None }.into());
+            return Err(EmbeddingError::BlankInput { index: None });
         }
         let mut embeddings = self.request_embedding_batch(&[text]).await?;
         if embeddings.len() != 1 {
             return Err(EmbeddingError::CountMismatch {
                 expected: 1,
                 actual: embeddings.len(),
-            }
-            .into());
+            });
         }
         Ok(embeddings.remove(0))
     }
@@ -121,7 +120,7 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, CustomError> {
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         validate_embedding_texts(texts)?;
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -136,7 +135,10 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
 }
 
 impl OpenAIEmbeddingProvider {
-    async fn request_embedding_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
+    async fn request_embedding_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         validate_embedding_texts(texts)?;
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -151,8 +153,7 @@ impl OpenAIEmbeddingProvider {
             return Err(EmbeddingError::HttpStatus {
                 status: response.status.as_u16(),
                 body: response.body,
-            }
-            .into());
+            });
         }
         let resp_json: serde_json::Value =
             serde_json::from_str(&response.body).map_err(|error| EmbeddingError::InvalidJson {
@@ -162,9 +163,9 @@ impl OpenAIEmbeddingProvider {
     }
 }
 
-fn validate_embedding_texts(texts: &[&str]) -> Result<(), CustomError> {
+fn validate_embedding_texts(texts: &[&str]) -> Result<(), EmbeddingError> {
     if let Some(index) = texts.iter().position(|text| text.trim().is_empty()) {
-        return Err(EmbeddingError::BlankInput { index: Some(index) }.into());
+        return Err(EmbeddingError::BlankInput { index: Some(index) });
     }
     Ok(())
 }
@@ -180,7 +181,7 @@ fn parse_embedding_response(
     response: serde_json::Value,
     expected_count: usize,
     vector_size: usize,
-) -> Result<Vec<Vec<f32>>, CustomError> {
+) -> Result<Vec<Vec<f32>>, EmbeddingError> {
     let data = response
         .get("data")
         .and_then(|data| data.as_array())
@@ -189,8 +190,7 @@ fn parse_embedding_response(
         return Err(EmbeddingError::CountMismatch {
             expected: expected_count,
             actual: data.len(),
-        }
-        .into());
+        });
     }
 
     let mut embeddings = vec![None; expected_count];
@@ -204,11 +204,10 @@ fn parse_embedding_response(
             return Err(EmbeddingError::IndexOutOfRange {
                 index,
                 expected_count,
-            }
-            .into());
+            });
         }
         if embeddings[index].is_some() {
-            return Err(EmbeddingError::DuplicateIndex { index }.into());
+            return Err(EmbeddingError::DuplicateIndex { index });
         }
         let embedding = item
             .get("embedding")
@@ -221,8 +220,7 @@ fn parse_embedding_response(
                 index,
                 expected: vector_size,
                 actual: embedding.len(),
-            }
-            .into());
+            });
         }
         let vec_embedding = embedding
             .iter()
@@ -240,13 +238,11 @@ fn parse_embedding_response(
     embeddings
         .into_iter()
         .enumerate()
-        .map(|(index, embedding)| {
-            embedding.ok_or(EmbeddingError::MissingResponseIndex { index }.into())
-        })
+        .map(|(index, embedding)| embedding.ok_or(EmbeddingError::MissingResponseIndex { index }))
         .collect()
 }
 
-fn embedding_transport_error(error: reqwest::Error) -> CustomError {
+fn embedding_transport_error(error: reqwest::Error) -> EmbeddingError {
     let kind = if error.is_timeout() {
         EmbeddingTransportErrorKind::Timeout
     } else if error.is_connect() {
@@ -262,7 +258,6 @@ fn embedding_transport_error(error: reqwest::Error) -> CustomError {
         transport_kind: kind,
         detail: error.to_string(),
     }
-    .into()
 }
 
 #[cfg(test)]
@@ -316,10 +311,7 @@ mod tests {
         let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
         let error = provider.generate_embedding("  ").await.unwrap_err();
 
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::BlankInput { index: None })
-        ));
+        assert_eq!(error, EmbeddingError::BlankInput { index: None });
     }
 
     #[test]
@@ -340,10 +332,7 @@ mod tests {
     fn validate_embedding_texts_rejects_blank_entries() {
         let error = validate_embedding_texts(&["first", "  "]).unwrap_err();
 
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::BlankInput { index: Some(1) })
-        ));
+        assert_eq!(error, EmbeddingError::BlankInput { index: Some(1) });
     }
 
     #[test]
@@ -370,13 +359,13 @@ mod tests {
 
         let error = parse_embedding_response(response, 2, 2).unwrap_err();
 
-        assert!(matches!(
+        assert_eq!(
             error,
-            CustomError::Embedding(EmbeddingError::CountMismatch {
+            EmbeddingError::CountMismatch {
                 expected: 2,
                 actual: 1,
-            })
-        ));
+            }
+        );
     }
 
     #[test]
@@ -389,14 +378,14 @@ mod tests {
 
         let error = parse_embedding_response(response, 1, 2).unwrap_err();
 
-        assert!(matches!(
+        assert_eq!(
             error,
-            CustomError::Embedding(EmbeddingError::DimensionMismatch {
+            EmbeddingError::DimensionMismatch {
                 index: 0,
                 expected: 2,
                 actual: 1,
-            })
-        ));
+            }
+        );
     }
 
     #[test]
@@ -410,10 +399,7 @@ mod tests {
 
         let error = parse_embedding_response(response, 2, 2).unwrap_err();
 
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::DuplicateIndex { index: 0 })
-        ));
+        assert_eq!(error, EmbeddingError::DuplicateIndex { index: 0 });
     }
 
     #[test]
@@ -426,13 +412,13 @@ mod tests {
 
         let error = parse_embedding_response(response, 1, 2).unwrap_err();
 
-        assert!(matches!(
+        assert_eq!(
             error,
-            CustomError::Embedding(EmbeddingError::NonNumericValue {
+            EmbeddingError::NonNumericValue {
                 index: 0,
                 component: 1,
-            })
-        ));
+            }
+        );
     }
 
     #[tokio::test]
@@ -497,10 +483,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::BlankInput { index: Some(1) })
-        ));
+        assert_eq!(error, EmbeddingError::BlankInput { index: Some(1) });
         assert!(transport.requests().is_empty());
     }
 
@@ -543,7 +526,7 @@ mod tests {
             &self,
             _api_key: &str,
             payload: serde_json::Value,
-        ) -> Result<OpenAIEmbeddingHttpResponse, CustomError> {
+        ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError> {
             self.requests
                 .lock()
                 .expect("requests mutex poisoned")
