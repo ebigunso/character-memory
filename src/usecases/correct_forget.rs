@@ -1201,6 +1201,7 @@ mod tests {
                 StoreCall::EmbedBatch(vec![ids.replacement]),
                 StoreCall::VectorUpsert(vec![ids.replacement]),
                 StoreCall::StatsEdges(0),
+                StoreCall::StatsObjectStates(2),
                 StoreCall::StatsUnhealthy,
             ]
         );

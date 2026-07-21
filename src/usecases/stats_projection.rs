@@ -67,14 +67,10 @@ where
             }
         };
 
-        if let Err(write_cause) = self.write_projection(&stats_objects, links).await {
-            causes.push(write_cause);
-        }
+        causes.extend(self.write_projection(&stats_objects, links).await);
 
         match self.stats_store.health().await {
-            Ok(health)
-                if causes.is_empty() && health.state == RetrievalStatsHealthState::Unhealthy =>
-            {
+            Ok(health) if health.state == RetrievalStatsHealthState::Unhealthy => {
                 causes.push(StatsUpdateCause::StoreUnhealthy {
                     health_cause: health.last_error_cause,
                 });
@@ -103,21 +99,20 @@ where
         &self,
         objects: &[MemoryObject],
         links: &[MemoryLink],
-    ) -> Result<(), StatsUpdateCause> {
+    ) -> Vec<StatsUpdateCause> {
         let states = retrieval_stats_object_states(objects);
         let edges = retrieval_stats_edges(objects, links);
-        self.stats_store
-            .record_edges(&edges)
-            .await
-            .map_err(|error| StatsUpdateCause::EdgeWrite { error })?;
+        let mut causes = Vec::new();
+        if let Err(error) = self.stats_store.record_edges(&edges).await {
+            causes.push(StatsUpdateCause::EdgeWrite { error });
+        }
 
         if !states.is_empty() {
-            self.stats_store
-                .record_object_states(&states)
-                .await
-                .map_err(|error| StatsUpdateCause::ObjectStateWrite { error })?;
+            if let Err(error) = self.stats_store.record_object_states(&states).await {
+                causes.push(StatsUpdateCause::ObjectStateWrite { error });
+            }
         }
-        Ok(())
+        causes
     }
 }
 
@@ -198,27 +193,47 @@ mod tests {
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState,
     };
-    use crate::test_support::FakeGraphAuthorityStore;
+    use crate::test_support::{simple_episode, FakeGraphAuthorityStore};
 
-    #[derive(Debug, Default)]
-    struct HealthCheckFailingStatsStore {
+    #[derive(Debug)]
+    struct RecordingStatsStore {
+        edge_error: Option<RetrievalStatsStoreError>,
+        object_state_error: Option<RetrievalStatsStoreError>,
+        health_result: Result<RetrievalStatsHealth, RetrievalStatsStoreError>,
         marked_causes: Mutex<Vec<RetrievalStatsHealthCause>>,
     }
 
+    impl Default for RecordingStatsStore {
+        fn default() -> Self {
+            Self {
+                edge_error: None,
+                object_state_error: None,
+                health_result: Ok(RetrievalStatsHealth::default()),
+                marked_causes: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
     #[async_trait]
-    impl RetrievalStatsStore for HealthCheckFailingStatsStore {
+    impl RetrievalStatsStore for RecordingStatsStore {
         async fn record_edges(
             &self,
             _edges: &[RetrievalStatsEdge],
         ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
+            match &self.edge_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(()),
+            }
         }
 
         async fn record_object_states(
             &self,
             _states: &[RetrievalStatsObjectState],
         ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
+            match &self.object_state_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(()),
+            }
         }
 
         async fn counter(
@@ -237,7 +252,7 @@ mod tests {
         }
 
         async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Err(health_check_error())
+            self.health_result.clone()
         }
 
         async fn mark_unhealthy(
@@ -255,10 +270,25 @@ mod tests {
         }
     }
 
+    fn edge_write_error() -> RetrievalStatsStoreError {
+        RetrievalStatsStoreError::Sqlite {
+            detail: "edge write failed".to_owned(),
+        }
+    }
+
+    fn object_state_write_error() -> RetrievalStatsStoreError {
+        RetrievalStatsStoreError::Sqlite {
+            detail: "object-state write failed".to_owned(),
+        }
+    }
+
     #[tokio::test]
     async fn successful_writes_then_health_failure_marks_store_with_retained_cause() {
         let graph_store = FakeGraphAuthorityStore::new();
-        let stats_store = HealthCheckFailingStatsStore::default();
+        let stats_store = RecordingStatsStore {
+            health_result: Err(health_check_error()),
+            ..RecordingStatsStore::default()
+        };
 
         let outcome = StatsProjectionService::new(&graph_store, &stats_store)
             .project(&[], &[])
@@ -275,6 +305,64 @@ mod tests {
             vec![RetrievalStatsHealthCause::HealthCheck {
                 error: health_check_error(),
             }]
+        );
+    }
+
+    #[tokio::test]
+    async fn edge_and_object_state_failures_are_both_retained() {
+        let graph_store = FakeGraphAuthorityStore::new();
+        let stats_store = RecordingStatsStore {
+            edge_error: Some(edge_write_error()),
+            object_state_error: Some(object_state_write_error()),
+            ..RecordingStatsStore::default()
+        };
+
+        let outcome = StatsProjectionService::new(&graph_store, &stats_store)
+            .project(&[MemoryObject::Episode(simple_episode())], &[])
+            .await;
+
+        assert_eq!(
+            outcome.causes,
+            vec![
+                StatsUpdateCause::EdgeWrite {
+                    error: edge_write_error(),
+                },
+                StatsUpdateCause::ObjectStateWrite {
+                    error: object_state_write_error(),
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn preexisting_unhealthy_state_is_retained_with_write_failure() {
+        let graph_store = FakeGraphAuthorityStore::new();
+        let stored_health_cause = RetrievalStatsHealthCause::CounterRead {
+            error: health_check_error(),
+        };
+        let stats_store = RecordingStatsStore {
+            edge_error: Some(edge_write_error()),
+            health_result: Ok(RetrievalStatsHealth {
+                state: RetrievalStatsHealthState::Unhealthy,
+                last_error_cause: Some(stored_health_cause.clone()),
+            }),
+            ..RecordingStatsStore::default()
+        };
+
+        let outcome = StatsProjectionService::new(&graph_store, &stats_store)
+            .project(&[], &[])
+            .await;
+
+        assert_eq!(
+            outcome.causes,
+            vec![
+                StatsUpdateCause::EdgeWrite {
+                    error: edge_write_error(),
+                },
+                StatsUpdateCause::StoreUnhealthy {
+                    health_cause: Some(stored_health_cause),
+                },
+            ]
         );
     }
 
