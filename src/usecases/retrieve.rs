@@ -8,8 +8,9 @@ use crate::api::types::{
     LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory,
     RetrievalContext, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
     SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
-    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, VectorCandidateTrace, VectorSurface as PublicVectorSurface,
+    SectionVectorScoreSource, SelectivityTelemetry, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    VectorSurface as PublicVectorSurface,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
@@ -350,6 +351,13 @@ impl RetrieveAssembly {
                 candidate.score * 0.75
             };
             let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
+            let vector_score_source = if candidate_score.is_some() {
+                SectionVectorScoreSource::DirectMatch
+            } else {
+                SectionVectorScoreSource::DerivedFromRoot {
+                    root_score: candidate.score,
+                }
+            };
             let graph_rationale = graph_rationale_by_ref
                 .as_ref()
                 .and_then(|rationale_by_ref| rationale_by_ref.get(&object_ref))
@@ -358,7 +366,7 @@ impl RetrieveAssembly {
             self.objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
-                    ranked.vector_component = ranked.vector_component.max(inherited_vector);
+                    ranked.merge_vector_component(inherited_vector, vector_score_source);
                     ranked.graph_component = ranked.graph_component.max(graph_component);
                     ranked.graph_rationale.merge(graph_rationale);
                     if let Some(candidate_score) = candidate_score {
@@ -374,6 +382,7 @@ impl RetrieveAssembly {
                     RankedObject::new(
                         object,
                         inherited_vector,
+                        Some(vector_score_source),
                         graph_component,
                         candidate_score,
                         graph_rationale,
@@ -485,6 +494,7 @@ impl RetrieveAssembly {
 struct RankedObject {
     object: MemoryObject,
     vector_component: f32,
+    vector_score_source: Option<SectionVectorScoreSource>,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     graph_rationale: GraphRationaleSignals,
@@ -495,6 +505,7 @@ impl RankedObject {
     fn new(
         object: MemoryObject,
         vector_component: f32,
+        vector_score_source: Option<SectionVectorScoreSource>,
         graph_component: f32,
         vector_candidate_score: Option<f32>,
         graph_rationale: GraphRationaleSignals,
@@ -503,6 +514,7 @@ impl RankedObject {
         Self {
             object,
             vector_component,
+            vector_score_source,
             vector_candidate_score,
             graph_component,
             graph_rationale,
@@ -514,6 +526,20 @@ impl RankedObject {
         (self.vector_component * 0.65)
             + (self.graph_component * 0.25)
             + (self.salience_component * 0.10)
+    }
+
+    fn merge_vector_component(&mut self, value: f32, source: SectionVectorScoreSource) {
+        let replace = value > self.vector_component
+            || (value == self.vector_component
+                && matches!(source, SectionVectorScoreSource::DirectMatch)
+                && !matches!(
+                    self.vector_score_source,
+                    Some(SectionVectorScoreSource::DirectMatch)
+                ));
+        if replace {
+            self.vector_component = value;
+            self.vector_score_source = Some(source);
+        }
     }
 
     fn rank_key(&self) -> RankKey {
@@ -529,7 +555,8 @@ impl RankedObject {
     fn section_score_components(&self) -> SectionScoreComponents {
         SectionScoreComponents {
             final_score: self.final_score(),
-            vector_score: self.vector_candidate_score.map(|_| self.vector_component),
+            vector_score: self.vector_score_source.map(|_| self.vector_component),
+            vector_score_source: self.vector_score_source,
             graph_score: (self.graph_component > 0.0).then_some(self.graph_component),
             salience_score: (self.salience_component > 0.0).then_some(self.salience_component),
         }
@@ -1456,6 +1483,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn section_scores_reconstruct_direct_and_derived_rankings() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let root_score = 0.92;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixtures.episode.id,
+            ObjectType::Episode,
+            root_score,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("score reconstruction").with_trace())
+            .await
+            .unwrap();
+        let trace = outcome.trace.unwrap();
+        let mut saw_direct = false;
+        let mut saw_derived = false;
+
+        for assignment in trace.section_assignments {
+            let scores = match assignment.reason {
+                SectionAssignmentReason::Selected { scores }
+                | SectionAssignmentReason::OmittedByLimit { scores, .. } => scores,
+                SectionAssignmentReason::OmittedNonActiveThread { .. }
+                | SectionAssignmentReason::OmittedNoPromptSection { .. } => continue,
+            };
+            let reconstructed = scores.vector_score.unwrap_or(0.0) * 0.65
+                + scores.graph_score.unwrap_or(0.0) * 0.25
+                + scores.salience_score.unwrap_or(0.0) * 0.10;
+            assert!(
+                (reconstructed - scores.final_score).abs() < 1.0e-6,
+                "published score components must reconstruct the final score"
+            );
+
+            match scores.vector_score_source {
+                Some(SectionVectorScoreSource::DirectMatch) => {
+                    saw_direct = true;
+                    assert_eq!(scores.vector_score, Some(root_score));
+                }
+                Some(SectionVectorScoreSource::DerivedFromRoot {
+                    root_score: source_root_score,
+                }) => {
+                    saw_derived = true;
+                    assert_eq!(source_root_score, root_score);
+                    assert_eq!(scores.vector_score, Some(root_score * 0.75));
+                }
+                None => panic!("ranked row must publish its vector-score provenance"),
+            }
+        }
+
+        assert!(saw_direct, "expected a directly matched ranked row");
+        assert!(saw_derived, "expected a graph-derived ranked row");
+    }
+
+    #[test]
+    fn vector_score_provenance_tracks_the_winning_component() {
+        let fixtures = representative_fixtures();
+        let derived_source = SectionVectorScoreSource::DerivedFromRoot { root_score: 1.0 };
+        let mut ranked = RankedObject::new(
+            MemoryObject::DerivedMemory(fixtures.user_preference),
+            0.75,
+            Some(derived_source),
+            0.0,
+            None,
+            GraphRationaleSignals::default(),
+        );
+
+        ranked.merge_vector_component(0.70, SectionVectorScoreSource::DirectMatch);
+        assert_eq!(ranked.vector_score_source, Some(derived_source));
+
+        ranked.merge_vector_component(0.75, SectionVectorScoreSource::DirectMatch);
+        assert_eq!(
+            ranked.vector_score_source,
+            Some(SectionVectorScoreSource::DirectMatch)
+        );
+    }
+
+    #[tokio::test]
     async fn trace_collection_does_not_change_retrieval_results() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
@@ -2065,6 +2171,7 @@ mod tests {
         let ranked = RankedObject::new(
             MemoryObject::DerivedMemory(fixtures.user_preference),
             0.9,
+            Some(SectionVectorScoreSource::DirectMatch),
             0.8,
             Some(0.9),
             GraphRationaleSignals {
@@ -2107,6 +2214,7 @@ mod tests {
             let categories = RankedObject::new(
                 MemoryObject::DerivedMemory(object),
                 0.0,
+                None,
                 0.0,
                 None,
                 GraphRationaleSignals::default(),

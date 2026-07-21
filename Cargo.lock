@@ -270,6 +270,7 @@ dependencies = [
  "mockall",
  "oxigraph",
  "qdrant-client",
+ "reqwest 0.12.23",
  "reqwest 0.13.3",
  "rusqlite",
  "secrecy",

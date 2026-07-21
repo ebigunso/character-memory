@@ -394,6 +394,9 @@ fn qdrant_error(error: QdrantError) -> CustomError {
             error.to_string(),
         ),
         QdrantError::Reqwest(error) => {
+            let status = error
+                .status()
+                .map(|status| http_transport_status(status.as_u16()));
             let kind = if error.is_timeout() {
                 VectorDatabaseErrorKind::HttpTimeout
             } else if error.is_connect() {
@@ -403,7 +406,7 @@ fn qdrant_error(error: QdrantError) -> CustomError {
             } else {
                 VectorDatabaseErrorKind::Http
             };
-            VectorDatabaseError::new("qdrant", kind, None, error.to_string())
+            VectorDatabaseError::new("qdrant", kind, status, error.to_string())
         }
         QdrantError::JsonToPayload(value) => VectorDatabaseError::new(
             "qdrant",
@@ -429,6 +432,26 @@ fn is_erased_qdrant_connect_failure(status: &TransportStatus, message: &str) -> 
     // Recheck this on every qdrant-client bump; retire the prefix coupling once upstream
     // preserves a downcastable source.
     *status == TransportStatus::Internal && message.starts_with(QDRANT_CONNECT_FAILURE_PREFIX)
+}
+
+fn http_transport_status(status: u16) -> TransportStatus {
+    match status {
+        200 => TransportStatus::Ok,
+        400 => TransportStatus::InvalidArgument,
+        401 => TransportStatus::Unauthenticated,
+        403 => TransportStatus::PermissionDenied,
+        404 => TransportStatus::NotFound,
+        408 | 504 => TransportStatus::DeadlineExceeded,
+        409 => TransportStatus::Aborted,
+        412 => TransportStatus::FailedPrecondition,
+        416 => TransportStatus::OutOfRange,
+        429 => TransportStatus::ResourceExhausted,
+        499 => TransportStatus::Cancelled,
+        500 => TransportStatus::Internal,
+        501 => TransportStatus::Unimplemented,
+        503 => TransportStatus::Unavailable,
+        other => TransportStatus::Unrecognized(other.to_string()),
+    }
 }
 
 fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<IoErrorKind> {
@@ -635,6 +658,7 @@ mod tests {
     };
     use std::env;
     use std::time::Instant;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use uuid::Uuid;
 
     #[test]
@@ -697,6 +721,45 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn qdrant_http_status_error_preserves_typed_status() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let response = reqwest_012::get(format!("http://{address}/status"))
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let status_error = response.error_for_status().unwrap_err();
+        let classified = qdrant_error(QdrantError::Reqwest(status_error));
+
+        assert!(matches!(
+            classified,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::HttpStatus,
+                status: Some(TransportStatus::ResourceExhausted),
+                ..
+            })
+        ));
+        assert_eq!(
+            http_transport_status(418),
+            TransportStatus::Unrecognized("418".to_owned())
+        );
     }
 
     #[test]

@@ -512,8 +512,16 @@ pub enum SectionAssignmentReason {
 pub struct SectionScoreComponents {
     pub final_score: f32,
     pub vector_score: Option<f32>,
+    pub vector_score_source: Option<SectionVectorScoreSource>,
     pub graph_score: Option<f32>,
     pub salience_score: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SectionVectorScoreSource {
+    DirectMatch,
+    DerivedFromRoot { root_score: f32 },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -742,6 +750,7 @@ mod tests {
                 scores: SectionScoreComponents {
                     final_score: 0.75,
                     vector_score: Some(0.8),
+                    vector_score_source: Some(SectionVectorScoreSource::DirectMatch),
                     graph_score: Some(0.5),
                     salience_score: None,
                 },
@@ -755,6 +764,10 @@ mod tests {
         assert_eq!(encoded["rank"], 2);
         assert_eq!(encoded["reason"]["kind"], "selected");
         assert_eq!(encoded["reason"]["scores"]["final_score"], 0.75);
+        assert_eq!(
+            encoded["reason"]["scores"]["vector_score_source"]["kind"],
+            "direct_match"
+        );
         assert_eq!(encoded["rationale_categories"][0], "scope");
     }
 
@@ -878,6 +891,7 @@ mod tests {
                     scores: SectionScoreComponents {
                         final_score: 0.82,
                         vector_score: Some(0.82),
+                        vector_score_source: Some(SectionVectorScoreSource::DirectMatch),
                         graph_score: None,
                         salience_score: None,
                     },

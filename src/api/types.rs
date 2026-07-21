@@ -26,9 +26,10 @@ pub use retrieval::{
     LifecycleOmissionSummary, RationaleCategory, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
     RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionAssignmentReason,
-    SectionPressureSummary, SectionScoreComponents, SelectivityCountScope, SelectivityDecision,
-    SelectivityTelemetry, SelectivityTrace, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, VectorCandidateTrace, VectorSurface,
+    SectionPressureSummary, SectionScoreComponents, SectionVectorScoreSource,
+    SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    VectorCandidateTrace, VectorSurface,
 };
 pub use write_plan::{
     CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
