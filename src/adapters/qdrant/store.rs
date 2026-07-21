@@ -25,11 +25,11 @@ use crate::models::vector::{
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 use super::payload::{
-    qdrant_payload_index_fields, qdrant_payload_map, CREATED_AT_FIELD, ENDED_AT_FIELD,
-    ENTITY_IDS_FIELD, EPISODE_IDS_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD,
-    LAST_TOUCHED_AT_FIELD, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, OBSERVED_AT_FIELD,
-    PARTICIPANT_ENTITY_IDS_FIELD, RETENTION_STATE_FIELD, SPEAKER_ENTITY_ID_FIELD, STARTED_AT_FIELD,
-    SURFACE_FIELD, THREAD_IDS_FIELD, UPDATED_AT_FIELD,
+    qdrant_payload_map, QdrantPayloadSchema, CREATED_AT_FIELD, ENDED_AT_FIELD, ENTITY_IDS_FIELD,
+    EPISODE_IDS_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD, LAST_TOUCHED_AT_FIELD,
+    OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, OBSERVED_AT_FIELD, PARTICIPANT_ENTITY_IDS_FIELD,
+    RETENTION_STATE_FIELD, SPEAKER_ENTITY_ID_FIELD, STARTED_AT_FIELD, SURFACE_FIELD,
+    THREAD_IDS_FIELD, UPDATED_AT_FIELD,
 };
 
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
@@ -113,16 +113,16 @@ impl QdrantVectorCandidateStore {
             &collection_info.payload_schema
         };
 
-        for field in qdrant_payload_index_fields() {
-            if payload_schema.contains_key(field.name) {
+        for field in QdrantPayloadSchema::indexed_fields() {
+            if payload_schema.contains_key(field.field.name()) {
                 continue;
             }
 
             self.client
                 .create_field_index(CreateFieldIndexCollectionBuilder::new(
                     &self.collection_name,
-                    field.name,
-                    field.field_type,
+                    field.field.name(),
+                    field.kind.field_type(),
                 ))
                 .await
                 .map_err(qdrant_error)?;
