@@ -1599,7 +1599,7 @@ mod tests {
                     .with_max_hub_edges(2)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(250),
-                        mode: crate::api::types::GraphFailureMode::FailClosed,
+                        mode: crate::domain::GraphFailureMode::FailClosed,
                     }),
             )
             .await
@@ -1682,7 +1682,7 @@ mod tests {
                 &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(0),
-                        mode: crate::api::types::GraphFailureMode::AllowPartialResults,
+                        mode: crate::domain::GraphFailureMode::AllowPartialResults,
                     }),
             )
             .await

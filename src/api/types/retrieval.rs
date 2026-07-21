@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{
     DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
-    MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
-    ThreadStatus,
+    GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
+    RelationType, RetentionState, ThreadStatus,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,14 +100,6 @@ impl Default for RetrievalGraphLimits {
             allowed_relation_types: Vec::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum GraphFailureMode {
-    #[default]
-    AllowPartialResults,
-    FailClosed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

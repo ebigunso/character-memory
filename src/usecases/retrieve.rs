@@ -4,17 +4,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
     ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace, GraphExpansionOutcome,
-    GraphExpansionTelemetry, GraphExpansionTrace, GraphFailureMode, IncludedDerivedMemory,
-    LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
-    LifecycleOmissionSummary, RationaleCategory, RetrievalContext, RetrievalRationale,
-    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace, VectorSurface as PublicVectorSurface,
+    GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory,
+    RetrievalContext, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
+    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
+    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, VectorCandidateTrace, VectorSurface as PublicVectorSurface,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
-    MemoryObjectRef, ObjectType, RelationType, ThreadStatus,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
+    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{

@@ -6,10 +6,9 @@ use oxigraph::model::{GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankN
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
-use crate::api::types::GraphFailureMode;
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
-    MemoryThread, ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, Entity, Episode, GraphFailureMode, MemoryId, MemoryLink,
+    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{

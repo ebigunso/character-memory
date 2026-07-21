@@ -6,7 +6,9 @@ mod write_validation;
 
 pub use lifecycle::{LifecycleDtoValidationError, LifecyclePolicyKnob};
 pub use object_ref::MemoryObjectRef;
-pub use retrieval::{GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason};
+pub use retrieval::{
+    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
+};
 pub use write_validation::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,

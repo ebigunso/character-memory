@@ -19,11 +19,10 @@
 // construction (`graph_expansion_bounded_error`).
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::api::types::GraphFailureMode;
 use crate::domain::{
-    DerivedMemory, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, MemoryId,
-    MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType, RetentionState,
-    ThreadStatus,
+    DerivedMemory, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
+    GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+    RelationType, RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
 #[cfg(test)]
