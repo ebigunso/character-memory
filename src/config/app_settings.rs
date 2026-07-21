@@ -1,26 +1,41 @@
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{ObjectType, RelationType};
 use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::EmbeddingModel;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_path: SecretString,
     openai_api_key: SecretString,
     embedding_model: SecretString,
-    #[serde(default)]
     graph_store_mode: GraphStoreMode,
-    #[serde(default)]
     retrieval_stats_store_mode: RetrievalStatsStoreMode,
+    retrieval_stats_path: PathBuf,
+    retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode,
+    selectivity_smoothing_alpha: f64,
+    selectivity_gamma: f64,
+    retrieval: RetrievalSettings,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSettings {
+    qdrant_connection_string: SecretString,
+    oxigraph_path: SecretString,
+    openai_api_key: SecretString,
+    embedding_model: SecretString,
+    #[serde(default = "default_graph_store_mode")]
+    graph_store_mode: String,
+    #[serde(default = "default_retrieval_stats_store_mode")]
+    retrieval_stats_store_mode: String,
     #[serde(default = "default_retrieval_stats_path")]
     retrieval_stats_path: PathBuf,
-    #[serde(default)]
-    retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode,
+    #[serde(default = "default_retrieval_stats_health_fail_mode")]
+    retrieval_stats_health_fail_mode: String,
     #[serde(default = "default_selectivity_smoothing_alpha")]
     selectivity_smoothing_alpha: f64,
     #[serde(default = "default_selectivity_gamma")]
@@ -95,29 +110,77 @@ impl GraphStoreMode {
     }
 }
 
-impl<'de> Deserialize<'de> for GraphStoreMode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RetrievalStatsStoreMode {
     #[default]
     Sqlite,
     InMemory,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+impl RetrievalStatsStoreMode {
+    fn parse(value: &str) -> Result<Self, CustomError> {
+        match value {
+            "sqlite" => Ok(Self::Sqlite),
+            "in_memory" => Ok(Self::InMemory),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "sqlite or in_memory",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RetrievalStatsHealthFailMode {
     #[default]
     Conservative,
+}
+
+impl RetrievalStatsHealthFailMode {
+    fn parse(value: &str) -> Result<Self, CustomError> {
+        match value {
+            "conservative" => Ok(Self::Conservative),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_HEALTH_FAIL_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "conservative",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
+        }
+    }
+}
+
+impl TryFrom<RawSettings> for Settings {
+    type Error = CustomError;
+
+    fn try_from(raw: RawSettings) -> Result<Self, Self::Error> {
+        let settings = Self {
+            qdrant_connection_string: raw.qdrant_connection_string,
+            oxigraph_path: raw.oxigraph_path,
+            openai_api_key: raw.openai_api_key,
+            embedding_model: raw.embedding_model,
+            graph_store_mode: GraphStoreMode::parse(&raw.graph_store_mode)?,
+            retrieval_stats_store_mode: RetrievalStatsStoreMode::parse(
+                &raw.retrieval_stats_store_mode,
+            )?,
+            retrieval_stats_path: raw.retrieval_stats_path,
+            retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode::parse(
+                &raw.retrieval_stats_health_fail_mode,
+            )?,
+            selectivity_smoothing_alpha: raw.selectivity_smoothing_alpha,
+            selectivity_gamma: raw.selectivity_gamma,
+            retrieval: raw.retrieval,
+        };
+        settings.validate_selectivity_settings()?;
+        settings.validate_fanout_settings()?;
+        Ok(settings)
+    }
 }
 
 impl Settings {
@@ -142,23 +205,10 @@ impl Settings {
     /// - `Ok`: A new `Settings` instance with the provided configuration
     /// - `Err`: A `CustomError` if any required settings are missing or invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
-        match config.get_string("graph_store_mode") {
-            Ok(graph_store_mode) => {
-                GraphStoreMode::parse(&graph_store_mode)?;
-            }
-            Err(config::ConfigError::NotFound(_)) => {}
-            Err(error) => {
-                return Err(CustomError::ConfigParseError(format!(
-                    "Failed to parse GRAPH_STORE_MODE: {error}"
-                )));
-            }
-        }
-        let settings: Self = config.try_deserialize().map_err(|e| {
+        let raw: RawSettings = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
         })?;
-        settings.validate_selectivity_settings()?;
-        settings.validate_fanout_settings()?;
-        Ok(settings)
+        raw.try_into()
     }
 
     pub fn get_qdrant_connection(&self) -> &str {
@@ -334,6 +384,18 @@ impl Settings {
             retrieval: RetrievalSettings::default(),
         }
     }
+}
+
+fn default_graph_store_mode() -> String {
+    "persistent".to_owned()
+}
+
+fn default_retrieval_stats_store_mode() -> String {
+    "sqlite".to_owned()
+}
+
+fn default_retrieval_stats_health_fail_mode() -> String {
+    "conservative".to_owned()
 }
 
 fn default_retrieval_stats_path() -> PathBuf {
@@ -627,6 +689,51 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
         assert_eq!(settings.get_selectivity_gamma(), 0.5);
+    }
+
+    #[test]
+    fn test_settings_new_rejects_unknown_retrieval_stats_modes_structurally() {
+        for (config_key, validation_key, expected) in [
+            (
+                "retrieval_stats_store_mode",
+                "RETRIEVAL_STATS_STORE_MODE",
+                "sqlite or in_memory",
+            ),
+            (
+                "retrieval_stats_health_fail_mode",
+                "RETRIEVAL_STATS_HEALTH_FAIL_MODE",
+                "conservative",
+            ),
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_path", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override(config_key, "unsupported")
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let error = Settings::new(external_config).unwrap_err();
+            let CustomError::ConfigValidation(error) = error else {
+                panic!("expected configuration validation error for {config_key}");
+            };
+            assert_eq!(
+                error,
+                ConfigValidationError {
+                    keys: vec![validation_key],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected,
+                        actual: "unsupported".to_owned(),
+                    },
+                }
+            );
+        }
     }
 
     #[test]
