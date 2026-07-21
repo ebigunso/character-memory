@@ -700,9 +700,9 @@ mod tests {
     }
 
     #[test]
-    fn qdrant_client_1_17_erased_connect_prefix_canary() {
-        // Failure means qdrant-client's erased-source message contract drifted. Reinspect
-        // channel_pool.rs before changing the adapter exception or its HttpConnect mapping.
+    fn qdrant_connect_prefix_parser_fixture() {
+        // This isolates our sanctioned parser behavior; the dependency-bound canary below
+        // verifies that qdrant-client still emits the parsed shape.
         let error = qdrant_error(QdrantError::ResponseError {
             status: tonic::Status::internal(
                 "Failed to connect to http://127.0.0.1:65534/: tonic transport failure",
@@ -716,6 +716,38 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn qdrant_client_1_17_erased_connect_contract_canary() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let unreachable_address = listener.local_addr().unwrap();
+        drop(listener);
+
+        let client = Qdrant::new(
+            QdrantConfig::from_url(&format!("http://{unreachable_address}"))
+                .connect_timeout(Duration::from_millis(250))
+                .timeout(Duration::from_millis(500)),
+        )
+        .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), client.list_collections())
+            .await
+            .expect("qdrant-client unreachable-endpoint request must remain bounded");
+        let Err(upstream_error) = result else {
+            panic!("closed loopback endpoint unexpectedly accepted a Qdrant request");
+        };
+
+        let classified = qdrant_error(upstream_error);
+        assert!(
+            matches!(
+                classified,
+                CustomError::VectorDatabaseError(VectorDatabaseError {
+                    kind: VectorDatabaseErrorKind::HttpConnect,
+                    ..
+                })
+            ),
+            "qdrant-client connection-error contract drifted; inspect channel_pool.rs and retire or update the ruled adapter exception"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
