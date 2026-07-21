@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::{DateTime, Utc};
-use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+use oxigraph::model::{GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
@@ -183,6 +183,24 @@ pub(super) fn hydrate_all_links_from_store(store: &Store) -> Result<Vec<MemoryLi
     Ok(links)
 }
 
+pub(super) fn hydrate_links_by_ids_from_store(
+    store: &Store,
+    link_ids: &[MemoryId],
+) -> Result<Vec<MemoryLink>, CustomError> {
+    let mut ids = link_ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+
+    let mut links = Vec::new();
+    for link_id in ids {
+        let subject = graph_uri(ObjectType::MemoryLink, link_id);
+        if let Some(values) = rdf_subject_values_for_named_graph(store, &subject)? {
+            links.push(memory_link_from_rdf(&subject, &values)?);
+        }
+    }
+    Ok(links)
+}
+
 pub(super) fn hydrate_links_by_id_sets_from_store(
     store: &Store,
     graph_link_ids: &HashSet<MemoryId>,
@@ -228,6 +246,41 @@ pub(super) fn rdf_subject_values(
         }
     }
     Ok(subjects)
+}
+
+fn rdf_subject_values_for_named_graph(
+    store: &Store,
+    graph_uri: &str,
+) -> Result<Option<RdfSubjectValues>, CustomError> {
+    let graph_name = NamedNode::new(graph_uri)?;
+    let mut values = RdfSubjectValues::default();
+    let mut found = false;
+    for quad in store.quads_for_pattern(
+        None,
+        None,
+        None,
+        Some(GraphNameRef::NamedNode(graph_name.as_ref())),
+    ) {
+        let quad = quad.map_err(oxigraph_error)?;
+        let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
+            continue;
+        };
+        if subject != graph_name {
+            continue;
+        }
+        found = true;
+        match quad.object {
+            Term::NamedNode(value) => values.push_resource(
+                quad.predicate.as_str().to_owned(),
+                value.as_str().to_owned(),
+            ),
+            Term::Literal(value) => {
+                values.push_literal(quad.predicate.as_str().to_owned(), value.value().to_owned())
+            }
+            Term::BlankNode(_) => {}
+        }
+    }
+    Ok(found.then_some(values))
 }
 
 pub(super) fn memory_object_from_rdf(

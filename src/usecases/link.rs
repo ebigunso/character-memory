@@ -442,6 +442,13 @@ mod tests {
             ))
         }
 
+        async fn query_links_by_ids(
+            &self,
+            _link_ids: &[MemoryId],
+        ) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(Vec::new())
+        }
+
         async fn query_derived_memories_by_provenance(
             &self,
             _query: &GraphDerivedMemoryProvenanceQuery,

@@ -10,7 +10,7 @@ use oxigraph::model::{Literal, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
 
 use crate::domain::{
-    graph_uri, DerivedMemory, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+    graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
@@ -267,6 +267,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     ) -> Result<Vec<MemoryObject>, CustomError> {
         let selected_refs = SparqlGraphSelectors::new(&self.store).select_objects(query)?;
         hydrate_objects_by_refs_from_store(&self.store, &selected_refs)
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        hydrate_links_by_ids_from_store(&self.store, link_ids)
     }
 
     async fn query_derived_memories_by_provenance(

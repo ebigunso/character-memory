@@ -2614,6 +2614,17 @@ mod tests {
                 .collect())
         }
 
+        async fn query_links_by_ids(
+            &self,
+            link_ids: &[MemoryId],
+        ) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(lock(&self.links)
+                .iter()
+                .filter(|link| link_ids.contains(&link.id))
+                .cloned()
+                .collect())
+        }
+
         async fn query_derived_memories_by_provenance(
             &self,
             _query: &GraphDerivedMemoryProvenanceQuery,

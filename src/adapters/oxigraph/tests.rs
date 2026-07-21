@@ -79,6 +79,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oxigraph_store_queries_only_requested_link_ids_in_canonical_order() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let links = fixtures.links();
+        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+
+        let mut expected = vec![links[0].clone(), links[2].clone()];
+        expected.sort_by_key(|link| link.id);
+        let queried = store
+            .query_links_by_ids(&[
+                links[2].id,
+                MemoryId::from_u128(u128::MAX),
+                links[0].id,
+                links[2].id,
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(queried, expected);
+    }
+
+    #[tokio::test]
     async fn oxigraph_upsert_objects_rejects_unsupported_schema_before_mutation() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

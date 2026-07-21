@@ -368,6 +368,11 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError>;
 
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError>;
+
     async fn query_derived_memories_by_provenance(
         &self,
         query: &GraphDerivedMemoryProvenanceQuery,
@@ -413,6 +418,13 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError> {
         (**self).query_objects(query).await
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        (**self).query_links_by_ids(link_ids).await
     }
 
     async fn query_derived_memories_by_provenance(

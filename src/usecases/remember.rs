@@ -249,8 +249,8 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Result<(), CustomError> {
-        // Known scale consideration: this checks planned IDs against current graph state without
-        // a persisted operation ledger, which is acceptable for current write volumes.
+        // These bounded reads still leave a TOCTOU window before the graph upsert. An atomic
+        // conditional upsert or persisted operation ledger belongs in a future write-path design.
         let refs = objects
             .iter()
             .map(|object| {
@@ -279,7 +279,8 @@ where
         }
 
         if !links.is_empty() {
-            for existing in self.graph_store.list_diagnostic_links().await? {
+            let link_ids = links.iter().map(|link| link.id).collect::<Vec<_>>();
+            for existing in self.graph_store.query_links_by_ids(&link_ids).await? {
                 if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
                     if planned != &existing {
                         return Err(validation_error(format!(
@@ -419,6 +420,27 @@ mod tests {
                 ids.derived,
             ])]
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_link_collision_query_rejects_divergent_existing_content() {
+        let graph = FakeGraphAuthorityStore::new();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let existing = representative_fixtures().links()[0].clone();
+        graph
+            .upsert_links(std::slice::from_ref(&existing))
+            .await
+            .unwrap();
+        let mut divergent = existing.clone();
+        divergent.confidence = 0.1;
+
+        let error = RememberPipeline::new(&graph, &vector, &embedder)
+            .reject_divergent_existing_writes(&[], &[divergent])
+            .await
+            .expect_err("divergent content under an existing link ID must reject");
+
+        assert!(error.to_string().contains("divergent link content"));
     }
 
     #[tokio::test]
@@ -962,6 +984,13 @@ mod tests {
             &self,
             _query: &GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, CustomError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_links_by_ids(
+            &self,
+            _link_ids: &[MemoryId],
+        ) -> Result<Vec<MemoryLink>, CustomError> {
             Ok(Vec::new())
         }
 

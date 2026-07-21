@@ -326,6 +326,20 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         Ok(objects)
     }
 
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        let mut links = lock(&self.links)?
+            .iter()
+            .filter(|link| link_ids.contains(&link.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        links.sort_by_key(|link| link.id);
+        links.dedup_by_key(|link| link.id);
+        Ok(links)
+    }
+
     async fn query_derived_memories_by_provenance(
         &self,
         query: &GraphDerivedMemoryProvenanceQuery,
@@ -1466,6 +1480,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(queried, vec![MemoryObject::Episode(fixtures.episode)]);
+    }
+
+    #[tokio::test]
+    async fn graph_fake_queries_only_requested_link_ids_in_canonical_order() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let links = fixtures.links();
+        store.upsert_links(&links).await.unwrap();
+
+        let mut expected = vec![links[0].clone(), links[2].clone()];
+        expected.sort_by_key(|link| link.id);
+        let queried = store
+            .query_links_by_ids(&[
+                links[2].id,
+                MemoryId::from_u128(u128::MAX),
+                links[0].id,
+                links[2].id,
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(queried, expected);
     }
 
     #[tokio::test]
