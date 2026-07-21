@@ -87,6 +87,14 @@ impl GraphObjectQuery {
             limit,
         }
     }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::ByRefs(object_refs) => object_refs.is_empty(),
+            Self::ByIds(object_ids) => object_ids.is_empty(),
+            Self::ByTypes { object_types, .. } => object_types.is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,8 +298,7 @@ pub(crate) struct GraphExpansionFanoutUtilization {
 }
 
 impl GraphExpansion {
-    // Tests and future diagnostics need a minimal expansion constructor; remove when from_plan covers all callers.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self {
             objects,

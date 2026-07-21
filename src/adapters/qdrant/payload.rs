@@ -279,6 +279,13 @@ impl QdrantPayloadSchema {
     pub(crate) fn indexed_fields() -> impl Iterator<Item = &'static QdrantPayloadFieldSchema> {
         Self::FIELDS.iter().filter(|field| field.indexed)
     }
+
+    fn field_schema(field: QdrantPayloadField) -> &'static QdrantPayloadFieldSchema {
+        Self::FIELDS
+            .iter()
+            .find(|schema| schema.field == field)
+            .expect("every writable Qdrant payload field must be declared in the schema")
+    }
 }
 
 const fn schema(
@@ -528,7 +535,11 @@ fn insert_value(
     field: QdrantPayloadField,
     value: impl Serialize,
 ) -> Result<(), CustomError> {
-    payload.insert(field.name().to_owned(), serde_json::to_value(value)?);
+    let field_schema = QdrantPayloadSchema::field_schema(field);
+    payload.insert(
+        field_schema.field.name().to_owned(),
+        serde_json::to_value(value)?,
+    );
     Ok(())
 }
 
@@ -583,7 +594,8 @@ fn vector_surface(surface: VectorSurface) -> &'static str {
 mod tests {
     use super::*;
     use crate::domain::{
-        graph_uri, DerivedType, ObjectType, RetentionState, Stability, DEFAULT_SCHEMA_VERSION,
+        graph_uri, DerivedType, EntityType, Modality, ObjectType, RetentionState, Stability,
+        ThreadStatus, DEFAULT_SCHEMA_VERSION,
     };
     use crate::models::vector::{
         VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
@@ -693,10 +705,17 @@ mod tests {
 
     #[test]
     fn schema_manifest_drives_payload_keys_and_indexes() {
-        let payload = qdrant_payload_map(&derived_memory_record(id(40))).expect("payload maps");
+        let payloads = [
+            qdrant_payload_map(&derived_memory_record(id(40))).expect("derived payload maps"),
+            qdrant_payload_map(&fully_populated_record()).expect("complete payload maps"),
+        ];
         let schema_names = QdrantPayloadSchema::FIELDS
             .iter()
             .map(|field| field.field.name())
+            .collect::<std::collections::HashSet<_>>();
+        let emitted_names = payloads
+            .iter()
+            .flat_map(|payload| payload.keys().map(String::as_str))
             .collect::<std::collections::HashSet<_>>();
         let indexed_fields = QdrantPayloadSchema::indexed_fields().collect::<Vec<_>>();
         let indexed_names = indexed_fields
@@ -705,9 +724,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(schema_names.len(), QdrantPayloadSchema::FIELDS.len());
-        assert!(payload
-            .keys()
-            .all(|key| schema_names.contains(key.as_str())));
+        assert_eq!(emitted_names, schema_names);
         assert!(!schema_names.contains("record_type"));
 
         for expected in [
@@ -771,6 +788,48 @@ mod tests {
             stability: Some(Stability::Medium),
             is_superseded: Some(true),
             ..VectorPayloadHints::default()
+        })
+    }
+
+    fn fully_populated_record() -> VectorRecord {
+        VectorRecord::new(
+            id(200),
+            ObjectType::DerivedMemory,
+            graph_uri(ObjectType::DerivedMemory, id(200)),
+            VectorSurface::DerivedText,
+            "Fully populated embedding text",
+            "Fully populated content text",
+            DEFAULT_SCHEMA_VERSION,
+            Some(RetentionState::Active),
+            Some(false),
+            VectorRelationshipHints {
+                episode_ids: vec![id(201)],
+                observation_ids: vec![id(202)],
+                thread_ids: vec![id(203)],
+                entity_ids: vec![id(204)],
+                participant_entity_ids: vec![id(205)],
+                speaker_entity_id: Some(id(206)),
+                supersedes: vec![id(207)],
+            },
+            Some("raw://fully-populated".to_owned()),
+        )
+        .with_payload_hints(VectorPayloadHints {
+            modality: Some(Modality::Chat),
+            derived_type: Some(DerivedType::Reflection),
+            entity_type: Some(EntityType::Concept),
+            thread_status: Some(ThreadStatus::Active),
+            source_conversation_id: Some("conversation-1".to_owned()),
+            canonical_key: Some("canonical-1".to_owned()),
+            created_at: Some(timestamp_fixture()),
+            updated_at: Some(timestamp_fixture()),
+            started_at: Some(timestamp_fixture()),
+            ended_at: Some(timestamp_fixture()),
+            observed_at: Some(timestamp_fixture()),
+            last_touched_at: Some(timestamp_fixture()),
+            salience_score: Some(0.91),
+            confidence: Some(0.82),
+            stability: Some(Stability::Medium),
+            is_superseded: Some(true),
         })
     }
 

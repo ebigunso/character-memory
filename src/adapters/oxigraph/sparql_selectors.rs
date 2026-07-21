@@ -37,6 +37,10 @@ impl<'a> SparqlGraphSelectors<'a> {
         &self,
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObjectRef>, CustomError> {
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let (id_values, type_values, ref_values, limit_clause) = match query {
             GraphObjectQuery::ByRefs(object_refs) => (
                 String::new(),

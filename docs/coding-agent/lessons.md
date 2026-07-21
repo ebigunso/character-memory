@@ -758,6 +758,24 @@ Fix applied:
 Prevention:
 - For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
 
+## 2026-07-21 - Pruning Completion Needs Totality And Cross-Adapter Parity  [tags: review, validation, deletion-first]
+
+Context:
+- Plan: structured-verdict-observability, Task_3 pruning/hygiene wave
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Task_3 passed its worker gates while five stale `allow(dead_code)` attributes remained in touched modules, Qdrant serialization did not actually resolve fields through its manifest, and empty `GraphObjectQuery` variants diverged between fake and Oxigraph adapters.
+
+Root cause:
+- Completion audits emphasized deleted-name absence and representative happy-path tests, but did not enumerate every touched suppression, prove both directions of a claimed single-source contract, or exercise empty/non-empty semantics for every closed query variant across adapters.
+
+Fix applied:
+- Removed or test-scoped all five suppressions, routed every Qdrant payload write through the manifest with exhaustive emitted-key equality coverage, and added fake/Oxigraph parity tests for empty and non-empty forms of all three query variants.
+
+Prevention:
+- For pruning and closed-contract tasks, the worker closeout checklist must include: a touched-file suppression census, bidirectional totality assertions for every single-source manifest, and per-variant empty/non-empty parity tests for each adapter implementing the same port.
+
 ## 2026-07-21 - Constraint-Induced Workarounds Need A Tripwire, Not Hindsight  [tags: delegation, planning, review]
 
 Context:

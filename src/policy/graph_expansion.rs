@@ -25,14 +25,14 @@ use crate::domain::{
     RelationType, RetentionState, ThreadStatus,
 };
 use crate::errors::CustomError;
-#[cfg(test)]
-use crate::ports::graph_authority::TraceMode;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansion,
-    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
+    GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
     GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
     GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphExpansionRelation,
 };
+#[cfg(test)]
+use crate::ports::graph_authority::{GraphExpansionFailurePolicy, TraceMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RootFanoutMode {
@@ -240,8 +240,7 @@ fn provenance_linked_derived_memory_id(
     }
 }
 
-// Node-set expansion is reserved for diagnostics/tests; remove if callers never need object IDs only.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn bounded_expansion_node_set(
     query: &GraphExpansionQuery,
     root_exists: bool,

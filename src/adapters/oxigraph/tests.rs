@@ -79,6 +79,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn graph_object_query_variants_have_fake_oxigraph_empty_and_non_empty_parity() {
+        let oxigraph = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fake = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let episode = MemoryObject::Episode(fixtures.episode.clone());
+        let observation = MemoryObject::Observation(fixtures.salient_observation.clone());
+        let entity = MemoryObject::Entity(fixtures.user_entity.clone());
+        let objects = vec![episode.clone(), observation, entity];
+
+        oxigraph.upsert_objects(&objects).await.unwrap();
+        fake.upsert_objects(&objects).await.unwrap();
+
+        let cases = vec![
+            (
+                "empty refs",
+                GraphObjectQuery::by_refs(Vec::new()),
+                Vec::new(),
+            ),
+            (
+                "non-empty refs",
+                GraphObjectQuery::by_refs(vec![episode.object_ref()]),
+                vec![episode.clone()],
+            ),
+            (
+                "empty ids",
+                GraphObjectQuery::by_ids(Vec::new()),
+                Vec::new(),
+            ),
+            (
+                "non-empty ids",
+                GraphObjectQuery::by_ids(vec![episode.id()]),
+                vec![episode.clone()],
+            ),
+            (
+                "empty types",
+                GraphObjectQuery::by_types(Vec::new(), Some(1)),
+                Vec::new(),
+            ),
+            (
+                "non-empty types",
+                GraphObjectQuery::by_types(vec![ObjectType::Episode], Some(1)),
+                vec![episode],
+            ),
+        ];
+
+        for (label, query, expected) in cases {
+            let oxigraph_objects = oxigraph.query_objects(&query).await.unwrap();
+            let fake_objects = fake.query_objects(&query).await.unwrap();
+
+            assert_eq!(oxigraph_objects, expected, "Oxigraph {label}");
+            assert_eq!(fake_objects, expected, "fake {label}");
+        }
+    }
+
+    #[tokio::test]
     async fn oxigraph_store_queries_only_requested_link_ids_in_canonical_order() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

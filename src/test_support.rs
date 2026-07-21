@@ -161,6 +161,10 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         &self,
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, CustomError> {
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut objects: Vec<_> = lock(&self.objects)?
             .iter()
             .filter(|object| {

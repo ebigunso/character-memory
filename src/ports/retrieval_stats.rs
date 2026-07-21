@@ -59,8 +59,6 @@ pub(crate) struct RetrievalStatsObjectState {
     pub(crate) observed_at: DateTime<Utc>,
 }
 
-// Counter keys are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RetrievalStatsCounterKey {
     pub(crate) entity_id: MemoryId,
@@ -68,8 +66,6 @@ pub(crate) struct RetrievalStatsCounterKey {
     pub(crate) object_type: ObjectType,
 }
 
-// Counter snapshots are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
-#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetrievalStatsCounter {
     pub(crate) total_count: u64,
@@ -98,8 +94,6 @@ impl Default for RetrievalStatsHealth {
     }
 }
 
-// Reconciliation diagnostics and stats projection share raw edge derivation.
-#[allow(dead_code)]
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],
     links: &[MemoryLink],
