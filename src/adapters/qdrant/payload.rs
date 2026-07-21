@@ -302,26 +302,31 @@ pub(crate) const DERIVED_TYPE_FIELD: &str = QdrantPayloadField::DerivedType.name
 #[cfg(test)]
 pub(crate) const SCHEMA_VERSION_FIELD: &str = QdrantPayloadField::SchemaVersion.name();
 pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
+#[cfg(test)]
 pub(crate) const RETENTION_STATE_FIELD: &str = QdrantPayloadField::RetentionState.name();
+#[cfg(test)]
 pub(crate) const IS_CURRENT_FIELD: &str = QdrantPayloadField::IsCurrent.name();
+#[cfg(test)]
 pub(crate) const IS_SUPERSEDED_FIELD: &str = QdrantPayloadField::IsSuperseded.name();
+#[cfg(test)]
 pub(crate) const EPISODE_IDS_FIELD: &str = QdrantPayloadField::EpisodeIds.name();
 #[cfg(test)]
 pub(crate) const OBSERVATION_IDS_FIELD: &str = QdrantPayloadField::ObservationIds.name();
+#[cfg(test)]
 pub(crate) const THREAD_IDS_FIELD: &str = QdrantPayloadField::ThreadIds.name();
+#[cfg(test)]
 pub(crate) const ENTITY_IDS_FIELD: &str = QdrantPayloadField::EntityIds.name();
-pub(crate) const PARTICIPANT_ENTITY_IDS_FIELD: &str =
-    QdrantPayloadField::ParticipantEntityIds.name();
-pub(crate) const SPEAKER_ENTITY_ID_FIELD: &str = QdrantPayloadField::SpeakerEntityId.name();
 #[cfg(test)]
 pub(crate) const SUPERSEDES_FIELD: &str = QdrantPayloadField::Supersedes.name();
 #[cfg(test)]
 pub(crate) const MODALITY_FIELD: &str = QdrantPayloadField::Modality.name();
+#[cfg(test)]
 pub(crate) const CREATED_AT_FIELD: &str = QdrantPayloadField::CreatedAt.name();
+#[cfg(test)]
 pub(crate) const UPDATED_AT_FIELD: &str = QdrantPayloadField::UpdatedAt.name();
-pub(crate) const STARTED_AT_FIELD: &str = QdrantPayloadField::StartedAt.name();
-pub(crate) const ENDED_AT_FIELD: &str = QdrantPayloadField::EndedAt.name();
+#[cfg(test)]
 pub(crate) const OBSERVED_AT_FIELD: &str = QdrantPayloadField::ObservedAt.name();
+#[cfg(test)]
 pub(crate) const LAST_TOUCHED_AT_FIELD: &str = QdrantPayloadField::LastTouchedAt.name();
 #[cfg(test)]
 pub(crate) const SALIENCE_SCORE_FIELD: &str = QdrantPayloadField::SalienceScore.name();

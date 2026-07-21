@@ -1,8 +1,4 @@
-// Deterministic test harness shared by pipeline, adapter, and facade
-// tests.
-// Shared fakes and fixtures are intentionally broader than any single test module;
-// remove this module-level allow once the harness is split by fixture family.
-#![allow(dead_code)]
+// Deterministic test harness shared by pipeline, adapter, and facade tests.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, MutexGuard};
@@ -11,7 +7,6 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::api::types::default_retrieval_object_types;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
@@ -19,9 +14,8 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    CanonicalCandidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateRecord, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-    VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord,
+    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -87,7 +81,6 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             .filter(|record| {
                 query.object_types.is_empty() || query.object_types.contains(&record.object_type)
             })
-            .filter(|record| candidate_matches_filters(record, &query.filters))
             .map(|record| {
                 VectorCandidateMatch::new(
                     record.object_id,
@@ -106,79 +99,6 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
         lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
         Ok(())
     }
-}
-
-fn candidate_matches_filters(
-    record: &VectorCandidateRecord,
-    filters: &VectorCandidateFilters,
-) -> bool {
-    (filters.retention_states.is_empty()
-        || record
-            .retention_state
-            .is_some_and(|retention_state| filters.retention_states.contains(&retention_state)))
-        && currentness_filters_match(record, filters)
-        && ids_overlap(&filters.thread_ids, &record.relationship_hints.thread_ids)
-        && ids_overlap(&filters.episode_ids, &record.relationship_hints.episode_ids)
-        && entity_filter_matches(record, &filters.entity_ids)
-        && filters
-            .time_ranges
-            .iter()
-            .all(|time_range| time_range_matches(record, time_range))
-}
-
-fn currentness_filters_match(
-    record: &VectorCandidateRecord,
-    filters: &VectorCandidateFilters,
-) -> bool {
-    if !filters.has_currentness_filters() || record.object_type != ObjectType::DerivedMemory {
-        return true;
-    }
-
-    filters
-        .is_current
-        .is_none_or(|is_current| record.is_current.is_none_or(|actual| actual == is_current))
-        && filters.is_superseded.is_none_or(|is_superseded| {
-            record_is_superseded(record).is_none_or(|actual| actual == is_superseded)
-        })
-}
-
-fn record_is_superseded(record: &VectorCandidateRecord) -> Option<bool> {
-    record
-        .payload_hints
-        .is_superseded
-        .or_else(|| record.is_current.map(|is_current| !is_current))
-}
-
-fn ids_overlap(filters: &[MemoryId], values: &[MemoryId]) -> bool {
-    filters.is_empty() || filters.iter().any(|filter| values.contains(filter))
-}
-
-fn entity_filter_matches(record: &VectorCandidateRecord, entity_ids: &[MemoryId]) -> bool {
-    entity_ids.is_empty()
-        || entity_ids.iter().any(|entity_id| {
-            record.relationship_hints.entity_ids.contains(entity_id)
-                || record
-                    .relationship_hints
-                    .participant_entity_ids
-                    .contains(entity_id)
-                || record.relationship_hints.speaker_entity_id == Some(*entity_id)
-        })
-}
-
-fn time_range_matches(record: &VectorCandidateRecord, time_range: &VectorTimeRangeFilter) -> bool {
-    let value = match time_range.field {
-        VectorTimeField::Created => record.payload_hints.created_at,
-        VectorTimeField::Updated => record.payload_hints.updated_at,
-        VectorTimeField::Started => record.payload_hints.started_at,
-        VectorTimeField::Ended => record.payload_hints.ended_at,
-        VectorTimeField::Observed => record.payload_hints.observed_at,
-        VectorTimeField::LastTouched => record.payload_hints.last_touched_at,
-    };
-
-    value.is_some_and(|value| {
-        time_range.after.is_none_or(|after| value >= after)
-            && time_range.before.is_none_or(|before| value <= before)
-    })
 }
 
 #[derive(Debug, Default)]
@@ -1049,7 +969,6 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
     use crate::ports::graph_authority::{
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
@@ -1162,106 +1081,6 @@ mod tests {
         assert_eq!(matches[0].object_id, fixtures.episode.id);
         assert_eq!(matches[0].object_type, ObjectType::Episode);
         assert_eq!(matches[0].surface, VectorSurface::Summary);
-    }
-
-    #[tokio::test]
-    async fn vector_fake_applies_payload_hint_prefilters_and_preserves_candidate_ordering() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-        let reflection = crate::policy::derived_memory_vector_record(&fixtures.derived_reflection);
-        let preference = crate::policy::derived_memory_vector_record(&fixtures.user_preference);
-        let suppressed = crate::policy::derived_memory_vector_record(&fixtures.suppressed_seed);
-
-        store
-            .upsert_vector_records(&[
-                VectorRecordEmbedding::new(&reflection, &[0.8, 0.2]),
-                VectorRecordEmbedding::new(&preference, &[1.0, 0.0]),
-                VectorRecordEmbedding::new(&suppressed, &[1.0, 0.0]),
-            ])
-            .await
-            .unwrap();
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(default_retrieval_object_types())
-            .with_filters(
-                VectorCandidateFilters::new()
-                    .with_retention_states(vec![RetentionState::Active])
-                    .current_only()
-                    .with_thread_ids(vec![fixtures.soft_thread.id])
-                    .with_entity_ids(vec![fixtures.user_entity.id])
-                    .with_episode_ids(vec![fixtures.episode.id])
-                    .with_time_range(VectorTimeRangeFilter::new(
-                        VectorTimeField::Updated,
-                        Some(timestamp("2026-04-27T10:11:05Z")),
-                        Some(timestamp("2026-04-27T10:11:07Z")),
-                    )),
-            );
-
-        let matches = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].object_id, fixtures.user_preference.id);
-        assert_eq!(matches[1].object_id, fixtures.derived_reflection.id);
-        assert!(!matches
-            .iter()
-            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
-    }
-
-    #[tokio::test]
-    async fn vector_fake_currentness_prefilter_keeps_non_derived_candidates() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-        let missing_hint_id = fixture_id(360);
-
-        store
-            .upsert_candidates(&[
-                VectorCandidateRecord::new(
-                    fixtures.episode.id,
-                    ObjectType::Episode,
-                    VectorSurface::Summary,
-                    vec![1.0, 0.0],
-                ),
-                VectorCandidateRecord::new(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::DerivedText,
-                    vec![1.0, 0.0],
-                )
-                .with_filter_hints(
-                    Some(RetentionState::Suppressed),
-                    Some(false),
-                    VectorRelationshipHints::default(),
-                    VectorPayloadHints {
-                        is_superseded: Some(true),
-                        ..VectorPayloadHints::default()
-                    },
-                ),
-                VectorCandidateRecord::new(
-                    missing_hint_id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::DerivedText,
-                    vec![1.0, 0.0],
-                ),
-            ])
-            .await
-            .unwrap();
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(default_retrieval_object_types())
-            .with_filters(VectorCandidateFilters::new().current_only());
-
-        let matches = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(matches.len(), 2);
-        assert!(matches.iter().any(|matched| {
-            matched.object_id == fixtures.episode.id && matched.object_type == ObjectType::Episode
-        }));
-        assert!(matches.iter().any(|matched| {
-            matched.object_id == missing_hint_id && matched.object_type == ObjectType::DerivedMemory
-        }));
-        assert!(!matches
-            .iter()
-            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
     }
 
     #[tokio::test]

@@ -17,7 +17,7 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch, VectorCandidateSearch,
+    EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
     VectorSurface as InternalVectorSurface,
 };
 use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
@@ -90,8 +90,7 @@ where
             query_embedding,
             context.candidate_limits.max_vector_candidates,
         )
-        .with_object_types(context.object_type_defaults.clone())
-        .with_filters(VectorCandidateFilters::new());
+        .with_object_types(context.object_type_defaults.clone());
         let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
 
@@ -1334,9 +1333,7 @@ mod tests {
         ContinuitySectionLimits, RetrievalCandidateLimits, RetrievalLifecyclePolicy,
     };
     use crate::domain::RetentionState;
-    use crate::models::vector::{
-        CanonicalCandidates, VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
-    };
+    use crate::models::vector::{CanonicalCandidates, VectorCandidateRecord};
     use crate::policy::RetrievalSelectivityPolicy;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
@@ -1367,7 +1364,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(embedder.inputs()[0].surface, InternalVectorSurface::Query);
-        assert_eq!(vector.searches()[0].filters, VectorCandidateFilters::new());
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
         assert_eq!(
             outcome.pack.salient_observations[0].id,
@@ -2444,7 +2440,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_authority_overrides_stale_vector_payload_hints() {
+    async fn graph_authority_filters_lifecycle_state_after_vector_recall() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
         let vector = FakeVectorCandidateStore::new();
@@ -2454,15 +2450,6 @@ mod tests {
                 ObjectType::DerivedMemory,
                 InternalVectorSurface::DerivedText,
                 vec![1.0, 0.0],
-            )
-            .with_filter_hints(
-                Some(RetentionState::Suppressed),
-                Some(false),
-                VectorRelationshipHints::default(),
-                VectorPayloadHints {
-                    is_superseded: Some(true),
-                    ..VectorPayloadHints::default()
-                },
             )])
             .await
             .unwrap();
@@ -2834,19 +2821,11 @@ mod tests {
     #[derive(Debug)]
     struct RecordingVectorStore {
         candidates: Vec<VectorCandidateMatch>,
-        searches: Arc<Mutex<Vec<VectorCandidateSearch>>>,
     }
 
     impl RecordingVectorStore {
         fn new(candidates: Vec<VectorCandidateMatch>) -> Self {
-            Self {
-                candidates,
-                searches: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn searches(&self) -> Vec<VectorCandidateSearch> {
-            lock(&self.searches).unwrap().clone()
+            Self { candidates }
         }
     }
 
@@ -2863,7 +2842,6 @@ mod tests {
             &self,
             query: &VectorCandidateSearch,
         ) -> Result<CanonicalCandidates, CustomError> {
-            lock(&self.searches)?.push(query.clone());
             Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 

@@ -2,19 +2,12 @@ mod candidate_record;
 mod embedding_model;
 mod record;
 
-// Provider-neutral vector model surface. Adapters, pipelines, and test
-// support intentionally consume different subsets of these helpers.
-// Candidate query builders are used by adapter/test subsets; remove when all callers import concrete modules.
 #[cfg(test)]
 pub(crate) use candidate_record::VectorCandidateRecord;
-#[allow(unused_imports)]
 pub(crate) use candidate_record::{
-    CanonicalCandidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateSearch, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorSurface,
 };
 pub(crate) use embedding_model::EmbeddingModel;
-// Diagnostic/vector-record helpers are used by adapter/test subsets; remove when all callers import concrete modules.
-#[allow(unused_imports)]
 pub(crate) use record::{
     VectorPayloadHints, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
 };
