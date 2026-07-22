@@ -3,24 +3,25 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace,
-    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphExpansionOutcome,
+    ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace, GraphExpansionOutcome,
     GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryObjectRef,
-    RationaleCategory, RetrievalContext, RetrievalLifecyclePolicy, RetrievalRationale,
-    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionPressureSummary,
-    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, VectorCandidateTrace,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory,
+    RetrievalContext, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
+    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
+    SectionVectorScoreSource, SelectivityTelemetry, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    VectorSurface as PublicVectorSurface,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryThread, ObjectType, RelationType,
-    RetentionState, ThreadStatus,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
+    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
-    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateFilters, VectorCandidateMatch,
-    VectorCandidateSearch, VectorSurface,
+    EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
+    VectorSurface as InternalVectorSurface,
 };
+use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
@@ -29,7 +30,7 @@ use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
     GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, GraphObjectRef,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
@@ -90,22 +91,19 @@ where
             query_embedding,
             context.candidate_limits.max_vector_candidates,
         )
-        .with_object_types(context.object_type_defaults.clone())
-        .with_filters(VectorCandidateFilters::new());
-        let vector_candidates = canonicalize_vector_candidates(
-            self.vector_store.search_candidates(&vector_search).await?,
-        );
-        let include_trace = context.include_trace;
+        .with_object_types(context.object_type_defaults.clone());
+        let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
+        let trace_mode = TraceMode::from_enabled(context.include_trace);
 
         let root_selection =
             select_candidate_roots(&vector_candidates, context.candidate_limits.max_graph_roots);
         let candidate_roots = root_selection.roots;
-        let mut assembly = RetrieveAssembly::new(include_trace);
+        let mut assembly = RetrieveAssembly::new(trace_mode);
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
-        let mut graph_expansion_traces = include_trace.then(Vec::new);
-        let mut fanout_utilization_traces = include_trace.then(Vec::new);
-        let mut selectivity_traces = include_trace.then(Vec::new);
+        let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
+        let mut fanout_utilization_traces = trace_mode.is_enabled().then(Vec::new);
+        let mut selectivity_traces = trace_mode.is_enabled().then(Vec::new);
         let selectivity_stats_context = if candidate_roots
             .iter()
             .any(|candidate| candidate.object_type == ObjectType::Entity)
@@ -131,7 +129,7 @@ where
                     self.selectivity_policy,
                     stats_context,
                     context.lifecycle_policy,
-                    include_trace,
+                    trace_mode,
                 )
                 .await?
             } else {
@@ -143,7 +141,7 @@ where
             }
             let query =
                 graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides)
-                    .with_fanout_utilization_recording(include_trace);
+                    .with_fanout_utilization_recording(trace_mode);
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
@@ -156,7 +154,7 @@ where
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
-                        if !context.graph_limits.allow_degraded_results {
+                        if context.graph_limits.failure_mode == GraphFailureMode::FailClosed {
                             return Err(bounded_failure_error(failure));
                         }
                     }
@@ -173,7 +171,7 @@ where
             }
         }
 
-        let ranked_objects = assembly.ranked_objects(&context.lifecycle_policy);
+        let ranked_objects = assembly.ranked_objects();
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -216,6 +214,8 @@ where
             configured_candidate_limits: context.candidate_limits,
             configured_graph_limits: context.graph_limits.clone(),
             configured_section_limits: context.section_limits,
+            configured_object_types: context.object_type_defaults.clone(),
+            configured_lifecycle_policy: context.lifecycle_policy,
             query_embedding_dimension,
             returned_vector_candidate_count: vector_candidates.len(),
             unique_graph_root_candidate_count: root_selection.unique_count,
@@ -225,12 +225,13 @@ where
             selectivity: selectivity_telemetry,
             section_pressure,
         };
-        let trace = include_trace.then(|| RetrievalTrace {
+        let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
                 .map(|(index, candidate)| VectorCandidateTrace {
-                    object: memory_object_ref(candidate.object_type, candidate.object_id),
+                    object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                    surface: public_vector_surface(candidate.surface),
                     score: candidate.score,
                     rank: index + 1,
                 })
@@ -258,7 +259,7 @@ where
             }
             _ => context.query_text.trim().to_owned(),
         };
-        let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
+        let input = EmbeddingInput::new(None, None, InternalVectorSurface::Query, text);
         self.embedder.embed(&input).await
     }
 }
@@ -272,9 +273,7 @@ struct RetrievalDetails {
 
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
-    objects: HashMap<GraphObjectRef, RankedObject>,
-    candidate_scores: HashMap<GraphObjectRef, f32>,
-    candidate_refs: HashSet<GraphObjectRef>,
+    objects: HashMap<MemoryObjectRef, RankedObject>,
     superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
@@ -282,21 +281,17 @@ struct RetrieveAssembly {
 }
 
 impl RetrieveAssembly {
-    fn new(collect_trace: bool) -> Self {
+    fn new(trace_mode: TraceMode) -> Self {
         Self {
-            graph_relations: collect_trace.then(Vec::new),
+            graph_relations: trace_mode.is_enabled().then(Vec::new),
             ..Self::default()
         }
     }
 
     fn absorb_expansion(&mut self, candidate: &VectorCandidateMatch, expansion: GraphExpansion) {
         let bounded_failure = expansion.bounded_failure;
-        let candidate_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
-        self.candidate_refs.insert(candidate_ref);
-        self.candidate_scores
-            .entry(candidate_ref)
-            .and_modify(|score| *score = score.max(candidate.score))
-            .or_insert(candidate.score);
+        let candidate_ref =
+            MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
 
         for relation in &expansion.relations {
             if relation.relation == RelationType::Supersedes
@@ -304,17 +299,18 @@ impl RetrieveAssembly {
                 && relation.to.object_type == ObjectType::DerivedMemory
             {
                 self.superseded_by
-                    .entry(relation.to.object_id)
+                    .entry(relation.to.id)
                     .or_default()
-                    .push(relation.from.object_id);
+                    .push(relation.from.id);
             }
         }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
                 graph_relations.push(crate::api::types::GraphRelationTrace {
-                    from: memory_object_ref(relation.from.object_type, relation.from.object_id),
-                    to: memory_object_ref(relation.to.object_type, relation.to.object_id),
+                    link_id: relation.link_id,
+                    from: MemoryObjectRef::new(relation.from.object_type, relation.from.id),
+                    to: MemoryObjectRef::new(relation.to.object_type, relation.to.id),
                     relation: relation.relation,
                     proximity: relation.proximity,
                 });
@@ -340,7 +336,7 @@ impl RetrieveAssembly {
 
         let mut root_verified = false;
         for object in expansion.objects {
-            let object_ref = graph_object_ref(&object);
+            let object_ref = object.object_ref();
             if object_ref == candidate_ref {
                 root_verified = true;
             }
@@ -355,6 +351,13 @@ impl RetrieveAssembly {
                 candidate.score * 0.75
             };
             let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
+            let vector_score_source = if candidate_score.is_some() {
+                SectionVectorScoreSource::DirectMatch
+            } else {
+                SectionVectorScoreSource::DerivedFromRoot {
+                    root_score: candidate.score,
+                }
+            };
             let graph_rationale = graph_rationale_by_ref
                 .as_ref()
                 .and_then(|rationale_by_ref| rationale_by_ref.get(&object_ref))
@@ -363,7 +366,7 @@ impl RetrieveAssembly {
             self.objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
-                    ranked.vector_component = ranked.vector_component.max(inherited_vector);
+                    ranked.merge_vector_component(inherited_vector, vector_score_source);
                     ranked.graph_component = ranked.graph_component.max(graph_component);
                     ranked.graph_rationale.merge(graph_rationale);
                     if let Some(candidate_score) = candidate_score {
@@ -379,6 +382,7 @@ impl RetrieveAssembly {
                     RankedObject::new(
                         object,
                         inherited_vector,
+                        Some(vector_score_source),
                         graph_component,
                         candidate_score,
                         graph_rationale,
@@ -390,7 +394,7 @@ impl RetrieveAssembly {
         for filtered in expansion.filtered_nodes {
             let superseded_by = self
                 .superseded_by
-                .get(&filtered.object_ref.object_id)
+                .get(&filtered.object_ref.id)
                 .cloned()
                 .unwrap_or_default();
             let decision =
@@ -399,7 +403,7 @@ impl RetrieveAssembly {
                 root_filtered = true;
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+                    candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                     vector_score: Some(candidate.score),
                     reason: stale_reason,
                     rationale_categories: rationale_categories_for_stale_reason(stale_reason),
@@ -419,7 +423,7 @@ impl RetrieveAssembly {
 
     fn omit_bounded_candidate(&mut self, candidate: &VectorCandidateMatch) {
         self.stale_omissions.push(StaleCandidateOmission {
-            candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphExpansionBounded,
             rationale_categories: rationale_categories_for_stale_reason(
@@ -427,7 +431,7 @@ impl RetrieveAssembly {
             ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: memory_object_ref(candidate.object_type, candidate.object_id),
+            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
             is_current: None,
             superseded_by: Vec::new(),
@@ -438,7 +442,7 @@ impl RetrieveAssembly {
 
     fn omit_missing_candidate(&mut self, candidate: &VectorCandidateMatch) {
         self.stale_omissions.push(StaleCandidateOmission {
-            candidate: memory_object_ref(candidate.object_type, candidate.object_id),
+            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             vector_score: Some(candidate.score),
             reason: StaleCandidateReason::GraphObjectMissing,
             rationale_categories: rationale_categories_for_stale_reason(
@@ -446,7 +450,7 @@ impl RetrieveAssembly {
             ),
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: memory_object_ref(candidate.object_type, candidate.object_id),
+            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
             is_current: None,
             superseded_by: Vec::new(),
@@ -455,72 +459,22 @@ impl RetrieveAssembly {
         });
     }
 
-    fn ranked_objects(&mut self, policy: &RetrievalLifecyclePolicy) -> Vec<RankedObject> {
+    fn ranked_objects(&mut self) -> Vec<RankedObject> {
         for superseded in self.superseded_by.values_mut() {
             superseded.sort();
             superseded.dedup();
         }
 
         let mut ranked_objects = Vec::new();
-        for (object_ref, mut ranked) in std::mem::take(&mut self.objects) {
-            let superseded_by = self
-                .superseded_by
-                .get(&object_ref.object_id)
-                .cloned()
-                .unwrap_or_default();
-            let decision = lifecycle_decision(&ranked.object, &superseded_by, *policy);
-            if decision.action == LifecycleFilterAction::Included {
-                ranked.superseded_by = superseded_by;
-                ranked_objects.push(ranked);
-            } else if self.candidate_refs.contains(&object_ref) {
-                let stale_reason = stale_reason_from_decision(decision.reason);
-                self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: memory_object_ref(object_ref.object_type, object_ref.object_id),
-                    vector_score: self.candidate_scores.get(&object_ref).copied(),
-                    reason: stale_reason,
-                    rationale_categories: rationale_categories_for_stale_reason(stale_reason),
-                });
-            }
-            self.lifecycle_decisions.push(decision);
+        for (_, ranked) in std::mem::take(&mut self.objects) {
+            ranked_objects.push(ranked);
         }
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
-        let included_refs = ranked_objects
-            .iter()
-            .map(|ranked| graph_object_ref(&ranked.object))
-            .collect::<HashSet<_>>();
-        self.lifecycle_decisions.retain(|decision| {
-            decision.action != LifecycleFilterAction::Omitted
-                || !included_refs.contains(&GraphObjectRef::new(
-                    decision.object.id,
-                    decision.object.object_type,
-                ))
-        });
-        self.stale_omissions.retain(|omission| {
-            !included_refs.contains(&GraphObjectRef::new(
-                omission.candidate.id,
-                omission.candidate.object_type,
-            ))
-        });
-        self.lifecycle_decisions.sort_by_key(|decision| {
-            (
-                decision.object.id,
-                object_type_rank(decision.object.object_type),
-                lifecycle_action_rank(decision.action),
-                lifecycle_reason_rank(decision.reason),
-            )
-        });
-        self.lifecycle_decisions.dedup_by_key(|decision| {
-            (
-                decision.object.object_type,
-                decision.object.id,
-                decision.action,
-            )
-        });
         self.stale_omissions.sort_by_key(|omission| {
             (
                 omission.candidate.id,
-                object_type_rank(omission.candidate.object_type),
+                omission.candidate.object_type.stable_rank(),
                 stale_reason_rank(omission.reason),
             )
         });
@@ -540,17 +494,18 @@ impl RetrieveAssembly {
 struct RankedObject {
     object: MemoryObject,
     vector_component: f32,
+    vector_score_source: Option<SectionVectorScoreSource>,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     graph_rationale: GraphRationaleSignals,
     salience_component: f32,
-    superseded_by: Vec<MemoryId>,
 }
 
 impl RankedObject {
     fn new(
         object: MemoryObject,
         vector_component: f32,
+        vector_score_source: Option<SectionVectorScoreSource>,
         graph_component: f32,
         vector_candidate_score: Option<f32>,
         graph_rationale: GraphRationaleSignals,
@@ -559,11 +514,11 @@ impl RankedObject {
         Self {
             object,
             vector_component,
+            vector_score_source,
             vector_candidate_score,
             graph_component,
             graph_rationale,
             salience_component,
-            superseded_by: Vec::new(),
         }
     }
 
@@ -573,23 +528,38 @@ impl RankedObject {
             + (self.salience_component * 0.10)
     }
 
+    fn merge_vector_component(&mut self, value: f32, source: SectionVectorScoreSource) {
+        let replace = value > self.vector_component
+            || (value == self.vector_component
+                && matches!(source, SectionVectorScoreSource::DirectMatch)
+                && !matches!(
+                    self.vector_score_source,
+                    Some(SectionVectorScoreSource::DirectMatch)
+                ));
+        if replace {
+            self.vector_component = value;
+            self.vector_score_source = Some(source);
+        }
+    }
+
     fn rank_key(&self) -> RankKey {
-        let (object_id, object_type) = object_identity(&self.object);
+        let object_id = self.object.id();
+        let object_type = self.object.object_type();
         RankKey {
             score: SortableScore(self.final_score()),
-            object_type_rank: object_type_rank(object_type),
+            object_type_rank: object_type.stable_rank(),
             object_id,
         }
     }
 
-    fn assignment_reason(&self) -> String {
-        format!(
-            "score={:.6}; vector={:.6}; graph={:.6}; salience={:.6}",
-            self.final_score(),
-            self.vector_component,
-            self.graph_component,
-            self.salience_component
-        )
+    fn section_score_components(&self) -> SectionScoreComponents {
+        SectionScoreComponents {
+            final_score: self.final_score(),
+            vector_score: self.vector_score_source.map(|_| self.vector_component),
+            vector_score_source: self.vector_score_source,
+            graph_score: (self.graph_component > 0.0).then_some(self.graph_component),
+            salience_score: (self.salience_component > 0.0).then_some(self.salience_component),
+        }
     }
 
     fn rationale_categories(&self) -> Vec<RationaleCategory> {
@@ -635,7 +605,7 @@ struct GraphPathSignals {
 }
 
 impl GraphPathSignals {
-    fn root(candidate_ref: GraphObjectRef) -> Self {
+    fn root(candidate_ref: MemoryObjectRef) -> Self {
         Self {
             entity: candidate_ref.object_type == ObjectType::Entity,
             thread: false,
@@ -645,8 +615,8 @@ impl GraphPathSignals {
     fn through(
         self,
         relation: RelationType,
-        source: GraphObjectRef,
-        target: GraphObjectRef,
+        source: MemoryObjectRef,
+        target: MemoryObjectRef,
     ) -> Self {
         let mut signals = self;
         match relation_rationale(relation, source, target) {
@@ -667,8 +637,8 @@ enum RelationRationale {
 
 fn relation_rationale(
     relation: RelationType,
-    source: GraphObjectRef,
-    target: GraphObjectRef,
+    source: MemoryObjectRef,
+    target: MemoryObjectRef,
 ) -> RelationRationale {
     match relation {
         RelationType::PartOfThread
@@ -706,9 +676,9 @@ fn relation_rationale(
 /// - Results are independent of same-depth relation iteration order: each BFS depth is built from the prior depth's snapshot, and same-depth path states union without mutating parent state.
 /// - Across multiple candidates admitting the same object, signals OR-merge.
 fn graph_provenance(
-    candidate_ref: GraphObjectRef,
+    candidate_ref: MemoryObjectRef,
     relations: &[crate::ports::graph_authority::GraphExpansionRelation],
-) -> HashMap<GraphObjectRef, GraphRationaleSignals> {
+) -> HashMap<MemoryObjectRef, GraphRationaleSignals> {
     let mut depth_by_ref = HashMap::from([(candidate_ref, 0_u8)]);
     let mut paths_by_ref = HashMap::from([(
         candidate_ref,
@@ -724,7 +694,7 @@ fn graph_provenance(
     // cannot leak signals into one another through relation iteration order.
     for proximity in 1..=max_proximity {
         let parent_depth = proximity - 1;
-        let mut next_paths: HashMap<GraphObjectRef, HashSet<GraphPathSignals>> = HashMap::new();
+        let mut next_paths: HashMap<MemoryObjectRef, HashSet<GraphPathSignals>> = HashMap::new();
         for relation in relations
             .iter()
             .filter(|relation| relation.proximity == proximity)
@@ -811,10 +781,10 @@ fn build_pack(
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked.object) else {
             details.section_assignments.push(SectionAssignment {
-                object: memory_object_ref_from_object(&ranked.object),
+                object: ranked.object.object_ref(),
                 section: ContextPackSection::Omitted,
                 rank: None,
-                reason: Some(section_omission_reason(&ranked.object)),
+                reason: section_omission_reason(&ranked.object),
                 rationale_categories: rationale_categories_for_section_omission(),
             });
             continue;
@@ -826,7 +796,7 @@ fn build_pack(
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
-                    candidate: memory_object_ref_from_object(&ranked.object),
+                    candidate: ranked.object.object_ref(),
                     vector_score: ranked.vector_candidate_score,
                     reason: StaleCandidateReason::SectionLimit,
                     rationale_categories: rationale_categories_for_stale_reason(
@@ -834,13 +804,13 @@ fn build_pack(
                     ),
                 });
             details.section_assignments.push(SectionAssignment {
-                object: memory_object_ref_from_object(&ranked.object),
+                object: ranked.object.object_ref(),
                 section: ContextPackSection::Omitted,
                 rank: None,
-                reason: Some(format!(
-                    "section limit reached for {}",
-                    context_pack_section_name(section)
-                )),
+                reason: SectionAssignmentReason::OmittedByLimit {
+                    intended_section: section,
+                    scores: ranked.section_score_components(),
+                },
                 rationale_categories: rationale_categories_for_section_limit(),
             });
             continue;
@@ -850,10 +820,12 @@ fn build_pack(
         increment_section_included(section_pressure, section);
         let rank = *count;
         details.section_assignments.push(SectionAssignment {
-            object: memory_object_ref_from_object(&ranked.object),
+            object: ranked.object.object_ref(),
             section,
             rank: Some(rank),
-            reason: Some(ranked.assignment_reason()),
+            reason: SectionAssignmentReason::Selected {
+                scores: ranked.section_score_components(),
+            },
             rationale_categories: ranked.rationale_categories(),
         });
 
@@ -1032,9 +1004,9 @@ fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
     max_graph_roots: usize,
 ) -> CandidateRootSelection {
-    let mut by_ref: HashMap<GraphObjectRef, VectorCandidateMatch> = HashMap::new();
+    let mut by_ref: HashMap<MemoryObjectRef, VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
-        let object_ref = GraphObjectRef::new(candidate.object_id, candidate.object_type);
+        let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
         by_ref
             .entry(object_ref)
             .and_modify(|existing| {
@@ -1051,7 +1023,9 @@ fn select_candidate_roots(
             .score
             .total_cmp(&left.score)
             .then_with(|| {
-                object_type_rank(left.object_type).cmp(&object_type_rank(right.object_type))
+                left.object_type
+                    .stable_rank()
+                    .cmp(&right.object_type.stable_rank())
             })
             .then_with(|| left.object_id.cmp(&right.object_id))
     });
@@ -1089,7 +1063,7 @@ fn graph_query_for_candidate(
     })
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
-        allow_partial_results: context.graph_limits.allow_degraded_results,
+        mode: context.graph_limits.failure_mode,
     })
 }
 
@@ -1102,21 +1076,7 @@ fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &Selecti
 }
 
 fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    let location = failure
-        .at
-        .map(|object_ref| {
-            format!(
-                " at object_type={} object_id={}",
-                object_type_name(object_ref.object_type),
-                object_ref.object_id
-            )
-        })
-        .unwrap_or_default();
-
-    CustomError::GraphExpansionBounded {
-        reason: bounded_failure_reason_name(failure.reason).to_owned(),
-        location,
-    }
+    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
 }
 
 fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
@@ -1149,7 +1109,7 @@ fn graph_expansion_trace(
     expansion: &GraphExpansion,
 ) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        root: memory_object_ref(candidate.object_type, candidate.object_id),
+        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: expansion.objects.len(),
         relation_count: expansion.relations.len(),
         filtered_node_count: expansion.filtered_nodes.len(),
@@ -1171,7 +1131,7 @@ fn fanout_utilization_traces_for_expansion(
         .fanout_utilization
         .iter()
         .map(|entry| FanoutUtilizationTrace {
-            root: memory_object_ref(entry.root.object_type, entry.root.object_id),
+            root: MemoryObjectRef::new(entry.root.object_type, entry.root.id),
             relation: entry.relation,
             object_type: entry.object_type,
             configured_cap: entry.configured_cap,
@@ -1184,23 +1144,12 @@ fn fanout_utilization_traces_for_expansion(
 
 fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        root: memory_object_ref(candidate.object_type, candidate.object_id),
+        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: 0,
         relation_count: 0,
         filtered_node_count: 0,
         bounded_failure: None,
         outcome: GraphExpansionOutcome::MissingRoot,
-    }
-}
-
-fn graph_expansion_bounded_failure_trace(
-    failure: GraphExpansionBoundedFailure,
-) -> GraphExpansionBoundedFailureTrace {
-    GraphExpansionBoundedFailureTrace {
-        reason: public_bounded_failure_reason(failure.reason),
-        at: failure
-            .at
-            .map(|object_ref| memory_object_ref(object_ref.object_type, object_ref.object_id)),
     }
 }
 
@@ -1214,130 +1163,13 @@ fn public_bounded_failure_reason(
     }
 }
 
-fn bounded_failure_reason_name(
-    reason: crate::ports::graph_authority::GraphExpansionBoundedFailureReason,
-) -> &'static str {
-    match reason {
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::NodeLimit => {
-            "node_limit"
-        }
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::Timeout => "timeout",
-        crate::ports::graph_authority::GraphExpansionBoundedFailureReason::HubLimit => "hub_limit",
-    }
-}
-
-fn lifecycle_decision(
-    object: &MemoryObject,
-    superseded_by: &[MemoryId],
-    policy: RetrievalLifecyclePolicy,
-) -> LifecycleFilterDecision {
-    let (object_id, object_type) = object_identity(object);
-    let (retention_state, is_current) = object_lifecycle_fields(object);
-    let reason = match object {
-        MemoryObject::Episode(object) => retention_reason(object.retention_state, policy),
-        MemoryObject::Observation(object) => retention_reason(object.retention_state, policy),
-        MemoryObject::MemoryThread(object) => thread_reason(object, policy),
-        MemoryObject::DerivedMemory(object) => retention_reason(object.retention_state, policy)
-            .or_else(|| currentness_reason(object.is_current, policy))
-            .or_else(|| supersession_reason(superseded_by, policy)),
-        MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
-    };
-    let action = if reason.is_some_and(omission_reason) {
-        LifecycleFilterAction::Omitted
-    } else {
-        LifecycleFilterAction::Included
-    };
-
-    LifecycleFilterDecision {
-        object: memory_object_ref(object_type, object_id),
-        retention_state,
-        is_current,
-        superseded_by: superseded_by.to_vec(),
-        action,
-        reason: reason.unwrap_or(LifecycleFilterReason::Active),
-    }
-}
-
-fn retention_reason(
-    retention_state: RetentionState,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    match retention_state {
-        RetentionState::Active => None,
-        RetentionState::Archived if policy.include_archived => {
-            Some(LifecycleFilterReason::ArchivedIncludedByPolicy)
-        }
-        RetentionState::Archived => Some(LifecycleFilterReason::ArchivedOmitted),
-        RetentionState::Suppressed if policy.include_suppressed => {
-            Some(LifecycleFilterReason::SuppressedIncludedByPolicy)
-        }
-        RetentionState::Suppressed => Some(LifecycleFilterReason::SuppressedOmitted),
-        RetentionState::Deleted if policy.include_deleted => {
-            Some(LifecycleFilterReason::DeletedIncludedByPolicy)
-        }
-        RetentionState::Deleted => Some(LifecycleFilterReason::DeletedOmitted),
-    }
-}
-
-fn thread_reason(
-    thread: &MemoryThread,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if thread.status == ThreadStatus::Archived && !policy.include_archived {
-        Some(LifecycleFilterReason::ArchivedOmitted)
-    } else if thread.status == ThreadStatus::Archived {
-        Some(LifecycleFilterReason::ArchivedIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn currentness_reason(
-    is_current: bool,
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if !is_current && !policy.include_non_current {
-        Some(LifecycleFilterReason::NonCurrentOmitted)
-    } else if !is_current {
-        Some(LifecycleFilterReason::NonCurrentIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn supersession_reason(
-    superseded_by: &[MemoryId],
-    policy: RetrievalLifecyclePolicy,
-) -> Option<LifecycleFilterReason> {
-    if !superseded_by.is_empty() && !policy.include_superseded {
-        Some(LifecycleFilterReason::SupersededOmitted)
-    } else if !superseded_by.is_empty() {
-        Some(LifecycleFilterReason::SupersededIncludedByPolicy)
-    } else {
-        None
-    }
-}
-
-fn omission_reason(reason: LifecycleFilterReason) -> bool {
-    matches!(
-        reason,
-        LifecycleFilterReason::ArchivedOmitted
-            | LifecycleFilterReason::SuppressedOmitted
-            | LifecycleFilterReason::DeletedOmitted
-            | LifecycleFilterReason::NonCurrentOmitted
-            | LifecycleFilterReason::SupersededOmitted
-            | LifecycleFilterReason::GraphObjectMissing
-            | LifecycleFilterReason::GraphExpansionBounded
-    )
-}
-
 fn filtered_lifecycle_decision(
-    object_ref: GraphObjectRef,
+    object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
     superseded_by: &[MemoryId],
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
-        object: memory_object_ref(object_ref.object_type, object_ref.object_id),
+        object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
         retention_state: None,
         is_current: None,
         superseded_by: superseded_by.to_vec(),
@@ -1359,16 +1191,6 @@ fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCand
         | GraphExpansionFilteredReason::Deleted => StaleCandidateReason::LifecycleMismatch,
         GraphExpansionFilteredReason::NonCurrent => StaleCandidateReason::CurrentnessMismatch,
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
-    }
-}
-
-fn stale_reason_from_decision(reason: LifecycleFilterReason) -> StaleCandidateReason {
-    match reason {
-        LifecycleFilterReason::NonCurrentOmitted => StaleCandidateReason::CurrentnessMismatch,
-        LifecycleFilterReason::SupersededOmitted => StaleCandidateReason::Superseded,
-        LifecycleFilterReason::GraphObjectMissing => StaleCandidateReason::GraphObjectMissing,
-        LifecycleFilterReason::GraphExpansionBounded => StaleCandidateReason::GraphExpansionBounded,
-        _ => StaleCandidateReason::LifecycleMismatch,
     }
 }
 
@@ -1397,19 +1219,6 @@ fn push_unique_category(categories: &mut Vec<RationaleCategory>, category: Ratio
     }
 }
 
-fn object_lifecycle_fields(object: &MemoryObject) -> (Option<RetentionState>, Option<bool>) {
-    match object {
-        MemoryObject::Episode(object) => (Some(object.retention_state), None),
-        MemoryObject::Observation(object) => (Some(object.retention_state), None),
-        MemoryObject::DerivedMemory(object) => {
-            (Some(object.retention_state), Some(object.is_current))
-        }
-        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
-            (None, None)
-        }
-    }
-}
-
 fn section_for_object(object: &MemoryObject) -> Option<ContextPackSection> {
     match object {
         MemoryObject::Episode(_) => Some(ContextPackSection::RelevantEpisodes),
@@ -1435,30 +1244,31 @@ fn section_for_object(object: &MemoryObject) -> Option<ContextPackSection> {
     }
 }
 
-fn section_omission_reason(object: &MemoryObject) -> String {
+fn section_omission_reason(object: &MemoryObject) -> SectionAssignmentReason {
     match object {
-        MemoryObject::MemoryThread(thread) => format!(
-            "memory_thread status {} is not included in active_threads",
-            thread_status_name(thread.status)
-        ),
-        MemoryObject::Entity(_) => "entity has no prompt-ready context-pack section".to_owned(),
-        MemoryObject::MemoryLink(_) => {
-            "memory_link is graph-only and has no prompt-ready context-pack section".to_owned()
+        MemoryObject::MemoryThread(thread) => SectionAssignmentReason::OmittedNonActiveThread {
+            thread_status: thread.status,
+        },
+        MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {
+            SectionAssignmentReason::OmittedNoPromptSection {
+                object_type: object.object_type(),
+            }
         }
         MemoryObject::Episode(_)
         | MemoryObject::Observation(_)
         | MemoryObject::DerivedMemory(_) => {
-            "object has no prompt-ready context-pack section".to_owned()
+            unreachable!("prompt-ready object must have a context-pack section")
         }
     }
 }
 
-fn thread_status_name(status: ThreadStatus) -> &'static str {
-    match status {
-        ThreadStatus::Active => "active",
-        ThreadStatus::Dormant => "dormant",
-        ThreadStatus::Resolved => "resolved",
-        ThreadStatus::Archived => "archived",
+fn public_vector_surface(surface: InternalVectorSurface) -> PublicVectorSurface {
+    match surface {
+        InternalVectorSurface::Summary => PublicVectorSurface::Summary,
+        InternalVectorSurface::Text => PublicVectorSurface::Text,
+        InternalVectorSurface::Name => PublicVectorSurface::Name,
+        InternalVectorSurface::DerivedText => PublicVectorSurface::DerivedText,
+        InternalVectorSurface::Query => PublicVectorSurface::Query,
     }
 }
 
@@ -1491,75 +1301,6 @@ fn salience_component(object: &MemoryObject) -> f32 {
         MemoryObject::MemoryThread(object) => object.salience_score,
         MemoryObject::DerivedMemory(object) => object.salience_score,
         MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => 0.0,
-    }
-}
-
-fn memory_object_ref(object_type: ObjectType, object_id: MemoryId) -> MemoryObjectRef {
-    MemoryObjectRef::new(object_type, object_id)
-}
-
-fn memory_object_ref_from_object(object: &MemoryObject) -> MemoryObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    memory_object_ref(object_type, object_id)
-}
-
-fn graph_object_ref(object: &MemoryObject) -> GraphObjectRef {
-    let (object_id, object_type) = object_identity(object);
-    GraphObjectRef::new(object_id, object_type)
-}
-
-fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
-}
-
-fn object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::Episode => "episode",
-        ObjectType::Observation => "observation",
-        ObjectType::Entity => "entity",
-        ObjectType::MemoryThread => "memory_thread",
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::MemoryLink => "memory_link",
-    }
-}
-
-fn context_pack_section_name(section: ContextPackSection) -> &'static str {
-    match section {
-        ContextPackSection::ActiveThreads => "active_threads",
-        ContextPackSection::RelevantEpisodes => "relevant_episodes",
-        ContextPackSection::SalientObservations => "salient_observations",
-        ContextPackSection::DerivedMemories => "derived_memories",
-        ContextPackSection::Preferences => "preferences",
-        ContextPackSection::RelationshipNotes => "relationship_notes",
-        ContextPackSection::OpenLoops => "open_loops",
-        ContextPackSection::Commitments => "commitments",
-        ContextPackSection::CharacterSignals => "character_signals",
-        ContextPackSection::Omitted => "omitted",
-    }
-}
-
-fn lifecycle_action_rank(action: LifecycleFilterAction) -> u8 {
-    match action {
-        LifecycleFilterAction::Included => 0,
-        LifecycleFilterAction::Omitted => 1,
     }
 }
 
@@ -1615,10 +1356,11 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::api::types::{ContinuitySectionLimits, RetrievalCandidateLimits};
-    use crate::models::vector::{
-        VectorCandidateRecord, VectorPayloadHints, VectorRelationshipHints,
+    use crate::api::types::{
+        ContinuitySectionLimits, RetrievalCandidateLimits, RetrievalLifecyclePolicy,
     };
+    use crate::domain::RetentionState;
+    use crate::models::vector::{CanonicalCandidates, VectorCandidateRecord};
     use crate::policy::RetrievalSelectivityPolicy;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
@@ -1648,8 +1390,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(embedder.inputs()[0].surface, VectorSurface::Query);
-        assert_eq!(vector.searches()[0].filters, VectorCandidateFilters::new());
+        assert_eq!(embedder.inputs()[0].surface, InternalVectorSurface::Query);
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
         assert_eq!(
             outcome.pack.salient_observations[0].id,
@@ -1684,6 +1425,14 @@ mod tests {
         assert_eq!(outcome.rationale.telemetry.selected_graph_root_count, 4);
         assert_eq!(outcome.rationale.telemetry.graph_root_omission_count, 0);
         assert_eq!(
+            outcome.rationale.telemetry.configured_object_types,
+            crate::api::types::default_retrieval_object_types()
+        );
+        assert_eq!(
+            outcome.rationale.telemetry.configured_lifecycle_policy,
+            RetrievalLifecyclePolicy::default()
+        );
+        assert_eq!(
             outcome
                 .rationale
                 .telemetry
@@ -1692,10 +1441,9 @@ mod tests {
             4
         );
         let trace = outcome.trace.as_ref().unwrap();
-        assert!(trace
-            .section_assignments
-            .iter()
-            .all(|assignment| assignment.reason.is_some()));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
+        }));
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.episode.id
                 && assignment
@@ -1715,7 +1463,102 @@ mod tests {
                     .contains(&RationaleCategory::Scope)
         }));
         assert_eq!(trace.vector_candidates.len(), 4);
+        assert!(trace
+            .vector_candidates
+            .iter()
+            .all(|candidate| candidate.surface == PublicVectorSurface::Summary));
+        assert!(!trace.graph_relations.is_empty());
+        assert!(trace.graph_relations.iter().all(|relation| fixtures
+            .links()
+            .iter()
+            .any(|link| link.id == relation.link_id)));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.object_type == ObjectType::Entity
+                && assignment.reason
+                    == SectionAssignmentReason::OmittedNoPromptSection {
+                        object_type: ObjectType::Entity,
+                    }
+        }));
         assert_eq!(trace.graph_expansions.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn section_scores_reconstruct_direct_and_derived_rankings() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let root_score = 0.92;
+        let vector = RecordingVectorStore::new(vec![candidate(
+            fixtures.episode.id,
+            ObjectType::Episode,
+            root_score,
+        )]);
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("score reconstruction").with_trace())
+            .await
+            .unwrap();
+        let trace = outcome.trace.unwrap();
+        let mut saw_direct = false;
+        let mut saw_derived = false;
+
+        for assignment in trace.section_assignments {
+            let scores = match assignment.reason {
+                SectionAssignmentReason::Selected { scores }
+                | SectionAssignmentReason::OmittedByLimit { scores, .. } => scores,
+                SectionAssignmentReason::OmittedNonActiveThread { .. }
+                | SectionAssignmentReason::OmittedNoPromptSection { .. } => continue,
+            };
+            let reconstructed = scores.vector_score.unwrap_or(0.0) * 0.65
+                + scores.graph_score.unwrap_or(0.0) * 0.25
+                + scores.salience_score.unwrap_or(0.0) * 0.10;
+            assert!(
+                (reconstructed - scores.final_score).abs() < 1.0e-6,
+                "published score components must reconstruct the final score"
+            );
+
+            match scores.vector_score_source {
+                Some(SectionVectorScoreSource::DirectMatch) => {
+                    saw_direct = true;
+                    assert_eq!(scores.vector_score, Some(root_score));
+                }
+                Some(SectionVectorScoreSource::DerivedFromRoot {
+                    root_score: source_root_score,
+                }) => {
+                    saw_derived = true;
+                    assert_eq!(source_root_score, root_score);
+                    assert_eq!(scores.vector_score, Some(root_score * 0.75));
+                }
+                None => panic!("ranked row must publish its vector-score provenance"),
+            }
+        }
+
+        assert!(saw_direct, "expected a directly matched ranked row");
+        assert!(saw_derived, "expected a graph-derived ranked row");
+    }
+
+    #[test]
+    fn vector_score_provenance_tracks_the_winning_component() {
+        let fixtures = representative_fixtures();
+        let derived_source = SectionVectorScoreSource::DerivedFromRoot { root_score: 1.0 };
+        let mut ranked = RankedObject::new(
+            MemoryObject::DerivedMemory(fixtures.user_preference),
+            0.75,
+            Some(derived_source),
+            0.0,
+            None,
+            GraphRationaleSignals::default(),
+        );
+
+        ranked.merge_vector_component(0.70, SectionVectorScoreSource::DirectMatch);
+        assert_eq!(ranked.vector_score_source, Some(derived_source));
+
+        ranked.merge_vector_component(0.75, SectionVectorScoreSource::DirectMatch);
+        assert_eq!(
+            ranked.vector_score_source,
+            Some(SectionVectorScoreSource::DirectMatch)
+        );
     }
 
     #[tokio::test]
@@ -1863,11 +1706,11 @@ mod tests {
         assert!(!expansion.relations.is_empty());
 
         let candidate = candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.95);
-        let mut without_trace = RetrieveAssembly::new(false);
+        let mut without_trace = RetrieveAssembly::new(TraceMode::Disabled);
         without_trace.absorb_expansion(&candidate, expansion.clone());
         assert!(without_trace.graph_relations.is_none());
 
-        let mut with_trace = RetrieveAssembly::new(true);
+        let mut with_trace = RetrieveAssembly::new(TraceMode::Enabled);
         with_trace.absorb_expansion(&candidate, expansion);
         assert!(!with_trace.graph_relations.unwrap().is_empty());
     }
@@ -1877,7 +1720,8 @@ mod tests {
         let fixtures = representative_fixtures();
         let mut preference = fixtures.user_preference.clone();
         preference.salience_score = 0.0;
-        let preference_ref = GraphObjectRef::new(preference.id, ObjectType::DerivedMemory);
+        let preference_ref =
+            MemoryObjectRef::from_id_type(preference.id, ObjectType::DerivedMemory);
         let preference_candidate = candidate(preference.id, ObjectType::DerivedMemory, 0.95);
         let hub_candidate = candidate(fixtures.hub_entity.id, ObjectType::Entity, 0.90);
         let episode_candidate = candidate(fixtures.episode.id, ObjectType::Episode, 0.89);
@@ -1893,7 +1737,7 @@ mod tests {
                 .relations
                 .push(crate::ports::graph_authority::GraphExpansionRelation {
                     link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0210),
-                    from: GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+                    from: MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity),
                     to: preference_ref,
                     relation: RelationType::About,
                     proximity: 1,
@@ -1913,35 +1757,35 @@ mod tests {
                 .push(crate::ports::graph_authority::GraphExpansionRelation {
                     link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0211),
                     from: preference_ref,
-                    to: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                    to: MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
                     relation: RelationType::DerivedFrom,
                     proximity: 1,
                 });
             expansion
         };
 
-        let mut pure_vector = RetrieveAssembly::new(true);
+        let mut pure_vector = RetrieveAssembly::new(TraceMode::Enabled);
         pure_vector.absorb_expansion(&preference_candidate, non_entity_linked_expansion());
         let pure_vector_ranked = pure_vector
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let pure_vector_categories = pure_vector_ranked.rationale_categories();
         assert_eq!(pure_vector_categories, vec![RationaleCategory::Semantic]);
 
         let mut episode = fixtures.episode.clone();
         episode.salience_score = 0.0;
-        let episode_ref = GraphObjectRef::new(episode.id, ObjectType::Episode);
-        let mut semantic_episode = RetrieveAssembly::new(true);
+        let episode_ref = MemoryObjectRef::from_id_type(episode.id, ObjectType::Episode);
+        let mut semantic_episode = RetrieveAssembly::new(TraceMode::Enabled);
         semantic_episode.absorb_expansion(
             &candidate(episode.id, ObjectType::Episode, 0.94),
             GraphExpansion::new(vec![MemoryObject::Episode(episode)], Vec::new()),
         );
         let episode_categories = semantic_episode
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == episode_ref)
+            .find(|ranked| ranked.object.object_ref() == episode_ref)
             .unwrap()
             .rationale_categories();
         assert_eq!(episode_categories, vec![RationaleCategory::Semantic]);
@@ -1949,56 +1793,56 @@ mod tests {
 
         let mut thread = fixtures.soft_thread.clone();
         thread.salience_score = 0.0;
-        let thread_ref = GraphObjectRef::new(thread.id, ObjectType::MemoryThread);
-        let mut semantic_thread = RetrieveAssembly::new(true);
+        let thread_ref = MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread);
+        let mut semantic_thread = RetrieveAssembly::new(TraceMode::Enabled);
         semantic_thread.absorb_expansion(
             &candidate(thread.id, ObjectType::MemoryThread, 0.93),
             GraphExpansion::new(vec![MemoryObject::MemoryThread(thread)], Vec::new()),
         );
         let thread_categories = semantic_thread
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == thread_ref)
+            .find(|ranked| ranked.object.object_ref() == thread_ref)
             .unwrap()
             .rationale_categories();
         assert_eq!(thread_categories, vec![RationaleCategory::Semantic]);
         assert!(!thread_categories.contains(&RationaleCategory::Thread));
 
-        let mut non_entity_graph_expanded = RetrieveAssembly::new(true);
+        let mut non_entity_graph_expanded = RetrieveAssembly::new(TraceMode::Enabled);
         non_entity_graph_expanded
             .absorb_expansion(&episode_candidate, non_entity_linked_expansion());
         let non_entity_graph_expanded_ranked = non_entity_graph_expanded
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let non_entity_graph_categories = non_entity_graph_expanded_ranked.rationale_categories();
         assert!(!non_entity_graph_categories.contains(&RationaleCategory::Semantic));
         assert!(!non_entity_graph_categories.contains(&RationaleCategory::Entity));
         assert!(non_entity_graph_categories.contains(&RationaleCategory::GraphBound));
 
-        let mut entity_graph_expanded = RetrieveAssembly::new(true);
+        let mut entity_graph_expanded = RetrieveAssembly::new(TraceMode::Enabled);
         entity_graph_expanded.absorb_expansion(&hub_candidate, entity_linked_expansion());
         let entity_graph_expanded_ranked = entity_graph_expanded
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let entity_graph_categories = entity_graph_expanded_ranked.rationale_categories();
         assert!(!entity_graph_categories.contains(&RationaleCategory::Semantic));
         assert!(entity_graph_categories.contains(&RationaleCategory::Entity));
         assert!(!entity_graph_categories.contains(&RationaleCategory::GraphBound));
 
-        let mut both = RetrieveAssembly::new(true);
+        let mut both = RetrieveAssembly::new(TraceMode::Enabled);
         both.absorb_expansion(&hub_candidate, entity_linked_expansion());
         both.absorb_expansion(
             &preference_candidate,
             GraphExpansion::new(vec![MemoryObject::DerivedMemory(preference)], Vec::new()),
         );
         let both_ranked = both
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == preference_ref)
+            .find(|ranked| ranked.object.object_ref() == preference_ref)
             .unwrap();
         let both_categories = both_ranked.rationale_categories();
         assert!(both_categories.contains(&RationaleCategory::Semantic));
@@ -2008,12 +1852,14 @@ mod tests {
     #[test]
     fn entity_side_branch_does_not_affect_target_and_is_order_independent() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
-        let bridge_ref =
-            GraphObjectRef::new(fixtures.derived_reflection.id, ObjectType::DerivedMemory);
-        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
+        let bridge_ref = MemoryObjectRef::from_id_type(
+            fixtures.derived_reflection.id,
+            ObjectType::DerivedMemory,
+        );
+        let entity_ref = MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let categories_with_ids = |entity_link_id: u128, target_link_id: u128| {
             let mut expansion = GraphExpansion::new(
                 vec![
@@ -2051,15 +1897,15 @@ mod tests {
                 .relations
                 .sort_by_key(|relation| (relation.proximity, relation.link_id));
 
-            let mut assembly = RetrieveAssembly::new(true);
+            let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
             assembly.absorb_expansion(
                 &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
                 expansion,
             );
             assembly
-                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .ranked_objects()
                 .into_iter()
-                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .find(|ranked| ranked.object.object_ref() == target_ref)
                 .unwrap()
                 .rationale_categories()
         };
@@ -2082,8 +1928,8 @@ mod tests {
     fn mentions_path_uses_entity_nodes_not_relation_name_for_entity_rationale() {
         let fixtures = representative_fixtures();
         let target_ref =
-            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
-        let categories_for_root = |root_ref: GraphObjectRef, root: MemoryObject| {
+            MemoryObjectRef::from_id_type(fixtures.salient_observation.id, ObjectType::Observation);
+        let categories_for_root = |root_ref: MemoryObjectRef, root: MemoryObject| {
             let mut expansion = GraphExpansion::new(
                 vec![
                     root,
@@ -2100,25 +1946,25 @@ mod tests {
                     relation: RelationType::Mentions,
                     proximity: 1,
                 });
-            let mut assembly = RetrieveAssembly::new(true);
+            let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
             assembly.absorb_expansion(
-                &candidate(root_ref.object_id, root_ref.object_type, 0.90),
+                &candidate(root_ref.id, root_ref.object_type, 0.90),
                 expansion,
             );
             assembly
-                .ranked_objects(&RetrievalLifecyclePolicy::default())
+                .ranked_objects()
                 .into_iter()
-                .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+                .find(|ranked| ranked.object.object_ref() == target_ref)
                 .unwrap()
                 .rationale_categories()
         };
 
         let entityless = categories_for_root(
-            GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+            MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
             MemoryObject::Episode(fixtures.episode.clone()),
         );
         let entity_backed = categories_for_root(
-            GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity),
+            MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity),
             MemoryObject::Entity(fixtures.hub_entity.clone()),
         );
 
@@ -2131,9 +1977,10 @@ mod tests {
     #[test]
     fn part_of_thread_path_emits_thread_without_graph_bound() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread);
+        let root_ref =
+            MemoryObjectRef::from_id_type(fixtures.soft_thread.id, ObjectType::MemoryThread);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
@@ -2151,15 +1998,15 @@ mod tests {
                 proximity: 1,
             });
 
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
         assembly.absorb_expansion(
             &candidate(fixtures.soft_thread.id, ObjectType::MemoryThread, 0.90),
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2171,9 +2018,9 @@ mod tests {
     #[test]
     fn part_of_thread_without_thread_endpoint_falls_back_to_graph_bound() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
         let target_ref =
-            GraphObjectRef::new(fixtures.salient_observation.id, ObjectType::Observation);
+            MemoryObjectRef::from_id_type(fixtures.salient_observation.id, ObjectType::Observation);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2191,15 +2038,15 @@ mod tests {
                 proximity: 1,
             });
 
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
         assembly.absorb_expansion(
             &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2212,7 +2059,7 @@ mod tests {
     fn graph_categories_union_across_distinct_candidate_paths() {
         let fixtures = representative_fixtures();
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut generic_expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2224,7 +2071,7 @@ mod tests {
             .relations
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0231),
-                from: GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
+                from: MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
                 to: target_ref,
                 relation: RelationType::DerivedFrom,
                 proximity: 1,
@@ -2241,12 +2088,15 @@ mod tests {
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0232),
                 from: target_ref,
-                to: GraphObjectRef::new(fixtures.soft_thread.id, ObjectType::MemoryThread),
+                to: MemoryObjectRef::from_id_type(
+                    fixtures.soft_thread.id,
+                    ObjectType::MemoryThread,
+                ),
                 relation: RelationType::PartOfThread,
                 proximity: 1,
             });
 
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
         assembly.absorb_expansion(
             &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
             generic_expansion,
@@ -2256,9 +2106,9 @@ mod tests {
             thread_expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2270,10 +2120,10 @@ mod tests {
     #[test]
     fn entity_on_admitting_path_emits_entity_for_target() {
         let fixtures = representative_fixtures();
-        let root_ref = GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode);
-        let entity_ref = GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity);
+        let root_ref = MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode);
+        let entity_ref = MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity);
         let target_ref =
-            GraphObjectRef::new(fixtures.user_preference.id, ObjectType::DerivedMemory);
+            MemoryObjectRef::from_id_type(fixtures.user_preference.id, ObjectType::DerivedMemory);
         let mut expansion = GraphExpansion::new(
             vec![
                 MemoryObject::Episode(fixtures.episode.clone()),
@@ -2299,15 +2149,15 @@ mod tests {
             },
         ];
 
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
         assembly.absorb_expansion(
             &candidate(fixtures.episode.id, ObjectType::Episode, 0.90),
             expansion,
         );
         let categories = assembly
-            .ranked_objects(&RetrievalLifecyclePolicy::default())
+            .ranked_objects()
             .into_iter()
-            .find(|ranked| graph_object_ref(&ranked.object) == target_ref)
+            .find(|ranked| ranked.object.object_ref() == target_ref)
             .unwrap()
             .rationale_categories();
 
@@ -2321,6 +2171,7 @@ mod tests {
         let ranked = RankedObject::new(
             MemoryObject::DerivedMemory(fixtures.user_preference),
             0.9,
+            Some(SectionVectorScoreSource::DirectMatch),
             0.8,
             Some(0.9),
             GraphRationaleSignals {
@@ -2363,6 +2214,7 @@ mod tests {
             let categories = RankedObject::new(
                 MemoryObject::DerivedMemory(object),
                 0.0,
+                None,
                 0.0,
                 None,
                 GraphRationaleSignals::default(),
@@ -2484,10 +2336,10 @@ mod tests {
     }
 
     #[test]
-    fn included_objects_prune_prior_stale_omission_trace_details() {
+    fn assembly_does_not_repair_contradictory_port_outputs() {
         let fixtures = representative_fixtures();
         let candidate = candidate(fixtures.user_preference.id, ObjectType::DerivedMemory, 0.99);
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
         assembly.omit_bounded_candidate(&candidate);
         assembly.absorb_expansion(
             &candidate,
@@ -2499,18 +2351,15 @@ mod tests {
             ),
         );
 
-        let ranked = assembly.ranked_objects(&RetrievalLifecyclePolicy::default());
+        let ranked = assembly.ranked_objects();
 
         assert_eq!(ranked.len(), 1);
-        assert_eq!(
-            object_identity(&ranked[0].object).0,
-            fixtures.user_preference.id
-        );
-        assert!(!assembly
+        assert_eq!(ranked[0].object.id(), fixtures.user_preference.id);
+        assert!(assembly
             .stale_omissions
             .iter()
             .any(|omission| omission.candidate.id == fixtures.user_preference.id));
-        assert!(!assembly.lifecycle_decisions.iter().any(|decision| {
+        assert!(assembly.lifecycle_decisions.iter().any(|decision| {
             decision.object.id == fixtures.user_preference.id
                 && decision.action == LifecycleFilterAction::Omitted
         }));
@@ -2525,21 +2374,27 @@ mod tests {
             .relations
             .push(crate::ports::graph_authority::GraphExpansionRelation {
                 link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
-                from: GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
-                to: GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory),
+                from: MemoryObjectRef::from_id_type(
+                    fixtures.correction.id,
+                    ObjectType::DerivedMemory,
+                ),
+                to: MemoryObjectRef::from_id_type(
+                    fixtures.suppressed_seed.id,
+                    ObjectType::DerivedMemory,
+                ),
                 relation: RelationType::Supersedes,
                 proximity: 1,
             });
         expansion
             .filtered_nodes
             .push(crate::ports::graph_authority::GraphExpansionFilteredNode {
-                object_ref: GraphObjectRef::new(
+                object_ref: MemoryObjectRef::from_id_type(
                     fixtures.suppressed_seed.id,
                     ObjectType::DerivedMemory,
                 ),
                 reason: GraphExpansionFilteredReason::Superseded,
             });
-        let mut assembly = RetrieveAssembly::new(true);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
 
         assembly.absorb_expansion(&candidate, expansion);
 
@@ -2567,16 +2422,18 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("fail closed");
         context.graph_limits.timeout_ms = Some(0);
-        context.graph_limits.allow_degraded_results = false;
+        context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
 
         let error = pipeline.retrieve(context).await.unwrap_err();
 
         assert!(matches!(
             error,
-            CustomError::GraphExpansionBounded { reason, location }
-                if reason == "timeout"
-                    && location.contains("object_type=derived_memory")
-                    && location.contains(&fixtures.user_preference.id.to_string())
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == GraphExpansionBoundedReason::Timeout
+                    && trace.at == Some(MemoryObjectRef::new(
+                        ObjectType::DerivedMemory,
+                        fixtures.user_preference.id,
+                    ))
         ));
     }
 
@@ -2585,16 +2442,19 @@ mod tests {
         let object_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0110);
         let candidate = candidate(object_id, ObjectType::DerivedMemory, 0.99);
         let mut context = RetrievalContext::new("fail closed query");
-        context.graph_limits.allow_degraded_results = false;
+        context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
 
         let query = graph_query_for_candidate(&candidate, &context, Vec::new());
 
-        assert!(!query.failure_policy.allow_partial_results);
+        assert_eq!(query.failure_policy.mode, GraphFailureMode::FailClosed);
 
-        context.graph_limits.allow_degraded_results = true;
+        context.graph_limits.failure_mode = GraphFailureMode::AllowPartialResults;
         let query = graph_query_for_candidate(&candidate, &context, Vec::new());
 
-        assert!(query.failure_policy.allow_partial_results);
+        assert_eq!(
+            query.failure_policy.mode,
+            GraphFailureMode::AllowPartialResults
+        );
     }
 
     #[tokio::test]
@@ -2610,7 +2470,7 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("bounded graph limits");
         context.graph_limits.max_nodes = 0;
-        context.graph_limits.allow_degraded_results = true;
+        context.graph_limits.failure_mode = GraphFailureMode::AllowPartialResults;
         context.include_trace = true;
 
         let outcome = pipeline.retrieve(context).await.unwrap();
@@ -2688,7 +2548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_authority_overrides_stale_vector_payload_hints() {
+    async fn graph_authority_filters_lifecycle_state_after_vector_recall() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
         let vector = FakeVectorCandidateStore::new();
@@ -2696,17 +2556,8 @@ mod tests {
             .upsert_candidates(&[VectorCandidateRecord::new(
                 fixtures.user_preference.id,
                 ObjectType::DerivedMemory,
-                VectorSurface::DerivedText,
+                InternalVectorSurface::DerivedText,
                 vec![1.0, 0.0],
-            )
-            .with_filter_hints(
-                Some(RetentionState::Suppressed),
-                Some(false),
-                VectorRelationshipHints::default(),
-                VectorPayloadHints {
-                    is_superseded: Some(true),
-                    ..VectorPayloadHints::default()
-                },
             )])
             .await
             .unwrap();
@@ -2812,7 +2663,13 @@ mod tests {
             .iter()
             .any(|assignment| assignment.object.id == second_preference.id
                 && assignment.section == ContextPackSection::Omitted
-                && assignment.reason.as_deref() == Some("section limit reached for preferences")
+                && matches!(
+                    assignment.reason,
+                    SectionAssignmentReason::OmittedByLimit {
+                        intended_section: ContextPackSection::Preferences,
+                        ..
+                    }
+                )
                 && assignment.rationale_categories == vec![RationaleCategory::Scope]));
         let preference_pressure = first
             .rationale
@@ -2858,8 +2715,13 @@ mod tests {
             .iter()
             .any(|assignment| assignment.object.id == fixtures.episode.id
                 && assignment.section == ContextPackSection::Omitted
-                && assignment.reason.as_deref()
-                    == Some("section limit reached for relevant_episodes")));
+                && matches!(
+                    assignment.reason,
+                    SectionAssignmentReason::OmittedByLimit {
+                        intended_section: ContextPackSection::RelevantEpisodes,
+                        ..
+                    }
+                )));
     }
 
     #[tokio::test]
@@ -2958,8 +2820,10 @@ mod tests {
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == archived_thread.id
                 && assignment.section == ContextPackSection::Omitted
-                && assignment.reason.as_deref()
-                    == Some("memory_thread status archived is not included in active_threads")
+                && assignment.reason
+                    == SectionAssignmentReason::OmittedNonActiveThread {
+                        thread_status: ThreadStatus::Archived,
+                    }
         }));
     }
 
@@ -3019,7 +2883,12 @@ mod tests {
     }
 
     fn candidate(object_id: MemoryId, object_type: ObjectType, score: f32) -> VectorCandidateMatch {
-        VectorCandidateMatch::new(object_id, object_type, VectorSurface::Summary, score)
+        VectorCandidateMatch::new(
+            object_id,
+            object_type,
+            InternalVectorSurface::Summary,
+            score,
+        )
     }
 
     #[derive(Debug)]
@@ -3060,19 +2929,11 @@ mod tests {
     #[derive(Debug)]
     struct RecordingVectorStore {
         candidates: Vec<VectorCandidateMatch>,
-        searches: Arc<Mutex<Vec<VectorCandidateSearch>>>,
     }
 
     impl RecordingVectorStore {
         fn new(candidates: Vec<VectorCandidateMatch>) -> Self {
-            Self {
-                candidates,
-                searches: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn searches(&self) -> Vec<VectorCandidateSearch> {
-            lock(&self.searches).unwrap().clone()
+            Self { candidates }
         }
     }
 
@@ -3088,18 +2949,8 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            lock(&self.searches)?.push(query.clone());
-            let mut candidates = self.candidates.clone();
-            candidates.truncate(query.limit);
-            Ok(candidates)
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -3144,7 +2995,14 @@ mod tests {
         async fn query_objects(
             &self,
             _query: &crate::ports::graph_authority::GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_links_by_ids(
+            &self,
+            _link_ids: &[crate::domain::MemoryId],
+        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
             Ok(Vec::new())
         }
 
@@ -3167,16 +3025,6 @@ mod tests {
             _query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
             Err(CustomError::MemoryValidation(self.message.clone()))
-        }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(
-            &self,
-        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
-            Ok(Vec::new())
         }
     }
 

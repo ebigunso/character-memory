@@ -4,13 +4,12 @@ use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
 use crate::adapters::{OpenAIEmbeddingProvider, QdrantVectorCandidateStore};
 use crate::api::embedding::EmbeddingProvider;
-use crate::api::types::{RememberOutcome, VectorIndexingFailure};
 use crate::config::{
     EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
     Settings,
 };
-use crate::errors::CustomError;
+use crate::errors::{CustomError, EmbeddingError, RetrievalStatsHealthCause};
 use crate::memory::CharacterMemory;
 use crate::models::vector::EmbeddingInput;
 use crate::policy::RetrievalSelectivityPolicy;
@@ -18,9 +17,6 @@ use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::{
-    RememberPipelineOutcome, VectorIndexingFailure as InternalVectorIndexingFailure,
-};
 
 pub(crate) struct MemoryComposition {
     pub(crate) graph_store: Box<dyn GraphAuthorityStore>,
@@ -43,12 +39,18 @@ impl EmbeddingProviderMemoryEmbedder {
 #[async_trait]
 impl MemoryEmbedder for EmbeddingProviderMemoryEmbedder {
     async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-        self.provider.generate_embedding(&input.text).await
+        self.provider
+            .generate_embedding(&input.text)
+            .await
+            .map_err(CustomError::from)
     }
 
     async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
         let texts: Vec<&str> = inputs.iter().map(|input| input.text.as_str()).collect();
-        self.provider.bulk_generate_embeddings(&texts).await
+        self.provider
+            .bulk_generate_embeddings(&texts)
+            .await
+            .map_err(CustomError::from)
     }
 }
 
@@ -124,9 +126,11 @@ impl CharacterMemory {
         let expected_vector_size = settings.get_embedding_vector_size()?;
         let provider_vector_size = embed_provider.vector_size();
         if provider_vector_size != expected_vector_size {
-            return Err(CustomError::EmbeddingInitializationError(format!(
-                "Embedding provider vector size ({provider_vector_size}) does not match configured embedding model vector size ({expected_vector_size})."
-            )));
+            return Err(EmbeddingError::ProviderVectorSizeMismatch {
+                expected: expected_vector_size,
+                actual: provider_vector_size,
+            }
+            .into());
         }
 
         let persistent_graph_path = match settings.get_graph_store_mode() {
@@ -198,40 +202,13 @@ pub(crate) fn retrieval_stats_store(
                 Ok(store) => Ok(Box::new(store)),
                 Err(error) => match settings.get_retrieval_stats_health_fail_mode() {
                     RetrievalStatsHealthFailMode::Conservative => {
-                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(format!(
-                            "sqlite retrieval stats unavailable; using in-memory fallback: {error}"
-                        ))))
+                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(
+                            RetrievalStatsHealthCause::StoreInitialization { error },
+                        )))
                     }
                 },
             }
         }
         ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
-    }
-}
-
-impl From<RememberPipelineOutcome> for RememberOutcome {
-    fn from(value: RememberPipelineOutcome) -> Self {
-        let vector_indexing_failure = value
-            .vector_indexing_failure
-            .map(VectorIndexingFailure::from);
-
-        Self {
-            persisted_object_ids: value.persisted_object_ids,
-            persisted_link_ids: value.persisted_link_ids,
-            vector_indexed_object_ids: value.vector_indexed_object_ids,
-            vector_indexing_failure,
-            stats_update_status: value.stats_update_status,
-            repair_needed: value.repair_needed,
-            diagnostics: value.diagnostics,
-        }
-    }
-}
-
-impl From<InternalVectorIndexingFailure> for VectorIndexingFailure {
-    fn from(value: InternalVectorIndexingFailure) -> Self {
-        Self {
-            unindexed_object_ids: value.unindexed_object_ids,
-            error_message: value.error_message,
-        }
     }
 }

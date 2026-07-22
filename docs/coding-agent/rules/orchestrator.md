@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "orchestrator"
-last_updated: "2026-07-21"
+last_updated: "2026-07-23"
 ---
 
 # Orchestrator Repository Rules
@@ -22,11 +22,34 @@ last_updated: "2026-07-21"
 - Implementation prefers Codex workers; give creative-design subtasks a Claude design pass first and hand the implementing worker a spec.
 - ADRs and other design-decision records are drafted by the Orchestrator (or a Claude design agent) that holds the decision context; implementation workers may be asked to fact-check file:line claims in a draft, never to author the decision record (user-directed 2026-07-18).
 
+## Push Sequencing (internal review before external review)
+
+- A push that triggers external review (opening a PR, or pushing commits to a branch with an open PR) is the promotion step from internally-approved to externally-visible: it happens only AFTER the internal Tier D verdict covering those commits is APPROVED (user-directed 2026-07-22).
+- Workers commit locally and do not push; internal reviewers pin worktrees from the local repository, so review never requires the remote. Dispatch prompts must not pair "push" with "reviewer bounce follows".
+- Exceptions, each explicit per instance: docs-only commits with no review obligation; a CI-environment behavior that genuinely cannot be reproduced locally (orchestrator-ruled, with the reason recorded).
+- Rationale: external reviewers (Copilot) should spend their rounds on internally-approved code, not re-discover defects the internal pass was already catching; overlapping the two layers wastes external rounds and creates thread churn.
+
+## Value-Audit Triggers (design-value review scheduling)
+
+- The design-value audit is a named review type (user-directed 2026-07-22): a Claude Tier A agent judges each structure against roadmap deliverables and the philosophy — does it serve a meaningful purpose NOW — with verdicts EARNS ITS PLACE / OVERSIZED / DELETE; over-engineering for what "might" happen marks structure as better deleted, per the deletion-first precedent.
+- Trigger 1, design review: every structure a design doc proposes must name its concrete consumer — a current caller or a NAMED next-phase deliverable; "future callers" is not a consumer. Apply the same existence question to new structure that reviews apply to inherited code.
+- Trigger 2, fix-chain depth: a third bounce on the same seam automatically raises the proportionality question — is the accumulated apparatus still cheaper than stepping back to the simpler contract? — answered explicitly in the Decision Log before round four proceeds (sunk-cost grows with each verified round; the question must be forced from outside the chain).
+- Trigger 3, pre-merge after fix churn: a milestone-gate value audit runs alongside the detail-coherence audit before merge — the last moment deletion is cheap, and fix pressure adds structure nobody planned.
+- Trigger 4, next-phase planning: audit which prior-phase structures the new plan actually consumes; structures no phase inherits are deletion candidates, and every deferral parked on a then-unwritten phase doc is re-confirmed when that doc is authored, or its "named consumer" is a label.
+- Deliberate non-trigger: not at every bounce or ruling — the question needs altitude and accumulated context; asked continuously it degrades into ritual answered reflexively.
+
+## Design-Consult Threshold (coordination/advice separation)
+
+- Escalation rulings split into two tiers (user-directed 2026-07-22, from the project-manager/product-manager analysis): routine escalations (naming, single-variant additions, test shapes, mechanical sequencing) are ruled fast-path WITH the blast-radius checklist; contract-shape escalations — public API surfaces, serialization schemas, cross-repo obligations, deferral-boundary questions — additionally require a design consult BEFORE ruling.
+- The design consult is a dispatched Claude design/Tier-A agent holding the design doc and its amendments as resident context, asked what the proposed shape implies for the whole contract; when genuine urgency forbids the round trip, the orchestrator runs the full blast-radius checklist itself and records in the ruling that the consult was skipped and why.
+- Rationale: coordination runs at interrupt tempo and biases rulings toward the proposal's local elegance; the phase's defective rulings were all contract-shape decisions made at coordination tempo, while every altitude decision routed through a dedicated design agent held up.
+
 ## Workaround Tripwire Obligations
 
 - Treat Worker or Reviewer tripwire escalations (see common.md) as replan triggers: record the ruling in the plan Decision Log before the affected chunk resumes (user-directed 2026-07-21).
 - When framing dispatches, do not attach surface-minimizing constraints ("minimal diff", "no new public types", "keep the signature") to contract, diagnostics, or schema work without also stating that preserving existing structure outranks the constraint; a constraint that forces a workaround is the Orchestrator's framing defect, not the Worker's implementation choice.
 - Before dispatching a fix for a reported finding, check the proposed fix shape against the owning types and design record; a fix that works around a type it could change is itself a tripwire.
+- Ruling scope is the blast radius, not the patch (user-directed 2026-07-22): workers and reviewers legitimately see only the local code they are working on; the Orchestrator's assessment of every escalation is what the change implies for the entirety of what it affects — every consumer (both repos), serialization/schema surfaces, deferred or coordinated scopes, and existing owned contracts. When the Orchestrator's own verification cannot cover that radius quickly, dispatch a researcher subagent (Codex forensic for consumer/call-site censuses, Claude for design-implication surveys) BEFORE ruling, not after the break.
 
 ## Repo-Specific Integration / Git Policy
 

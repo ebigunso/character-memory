@@ -4,7 +4,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 use crate::config::EmbeddingProviderSettings;
-use crate::errors::CustomError;
+use crate::errors::{CustomError, EmbeddingError, EmbeddingTransportErrorKind};
 use crate::EmbeddingProvider;
 
 const OPENAI_EMBEDDING_ENDPOINT: &str = "https://api.openai.com/v1/embeddings";
@@ -41,9 +41,7 @@ impl OpenAIEmbeddingProvider {
     /// - `Err`: A `CustomError` if initialization fails (e.g., missing API key)
     pub fn new(settings: EmbeddingProviderSettings) -> Result<Self, CustomError> {
         if settings.api_key.trim().is_empty() {
-            return Err(CustomError::EmbeddingInitializationError(
-                "OpenAI API key is not provided.".into(),
-            ));
+            return Err(EmbeddingError::MissingApiKey.into());
         }
         println!(
             "OpenAI Embedding Provider: Initialized with {} model.",
@@ -66,7 +64,7 @@ trait OpenAIEmbeddingTransport: Send + Sync {
         &self,
         api_key: &str,
         payload: serde_json::Value,
-    ) -> Result<OpenAIEmbeddingHttpResponse, CustomError>;
+    ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError>;
 }
 
 struct OpenAIEmbeddingHttpResponse {
@@ -84,7 +82,7 @@ impl OpenAIEmbeddingTransport for ReqwestOpenAIEmbeddingTransport {
         &self,
         api_key: &str,
         payload: serde_json::Value,
-    ) -> Result<OpenAIEmbeddingHttpResponse, CustomError> {
+    ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError> {
         let response = self
             .client
             .post(OPENAI_EMBEDDING_ENDPOINT)
@@ -92,12 +90,9 @@ impl OpenAIEmbeddingTransport for ReqwestOpenAIEmbeddingTransport {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| embedding_generation_error(e.to_string()))?;
+            .map_err(embedding_transport_error)?;
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| embedding_generation_error(e.to_string()))?;
+        let body = response.text().await.map_err(embedding_transport_error)?;
         Ok(OpenAIEmbeddingHttpResponse { status, body })
     }
 }
@@ -108,18 +103,16 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
         self.vector_size
     }
 
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
         if text.trim().is_empty() {
-            return Err(CustomError::EmbeddingGenerationError(
-                "Input text is empty.".into(),
-            ));
+            return Err(EmbeddingError::BlankInput { index: None });
         }
         let mut embeddings = self.request_embedding_batch(&[text]).await?;
         if embeddings.len() != 1 {
-            return Err(embedding_generation_error(format!(
-                "OpenAI API returned {} embeddings for 1 input",
-                embeddings.len()
-            )));
+            return Err(EmbeddingError::CountMismatch {
+                expected: 1,
+                actual: embeddings.len(),
+            });
         }
         Ok(embeddings.remove(0))
     }
@@ -127,7 +120,7 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, CustomError> {
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         validate_embedding_texts(texts)?;
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -142,7 +135,10 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
 }
 
 impl OpenAIEmbeddingProvider {
-    async fn request_embedding_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, CustomError> {
+    async fn request_embedding_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         validate_embedding_texts(texts)?;
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -154,25 +150,22 @@ impl OpenAIEmbeddingProvider {
             .send_embeddings_request(&self.api_key, payload)
             .await?;
         if !response.status.is_success() {
-            let status = response.status;
-            let detail = if response.body.trim().is_empty() {
-                status.to_string()
-            } else {
-                format!("{status}: {}", response.body)
-            };
-            return Err(embedding_generation_error(format!(
-                "OpenAI API error: {detail}"
-            )));
+            return Err(EmbeddingError::HttpStatus {
+                status: response.status.as_u16(),
+                body: response.body,
+            });
         }
-        let resp_json: serde_json::Value = serde_json::from_str(&response.body)
-            .map_err(|e| embedding_generation_error(e.to_string()))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&response.body).map_err(|error| EmbeddingError::InvalidJson {
+                detail: error.to_string(),
+            })?;
         parse_embedding_response(resp_json, texts.len(), self.vector_size)
     }
 }
 
-fn validate_embedding_texts(texts: &[&str]) -> Result<(), CustomError> {
-    if texts.iter().any(|text| text.trim().is_empty()) {
-        return Err(embedding_generation_error("Input text is empty."));
+fn validate_embedding_texts(texts: &[&str]) -> Result<(), EmbeddingError> {
+    if let Some(index) = texts.iter().position(|text| text.trim().is_empty()) {
+        return Err(EmbeddingError::BlankInput { index: Some(index) });
     }
     Ok(())
 }
@@ -188,63 +181,55 @@ fn parse_embedding_response(
     response: serde_json::Value,
     expected_count: usize,
     vector_size: usize,
-) -> Result<Vec<Vec<f32>>, CustomError> {
+) -> Result<Vec<Vec<f32>>, EmbeddingError> {
     let data = response
         .get("data")
         .and_then(|data| data.as_array())
-        .ok_or_else(|| {
-            embedding_generation_error("Failed to parse embeddings from API response: missing data")
-        })?;
+        .ok_or(EmbeddingError::MissingData)?;
     if data.len() != expected_count {
-        return Err(embedding_generation_error(format!(
-            "OpenAI API returned {} embeddings for {} inputs",
-            data.len(),
-            expected_count
-        )));
+        return Err(EmbeddingError::CountMismatch {
+            expected: expected_count,
+            actual: data.len(),
+        });
     }
 
     let mut embeddings = vec![None; expected_count];
-    for item in data {
-        let index = item
-            .get("index")
-            .and_then(|index| index.as_u64())
-            .ok_or_else(|| {
-                embedding_generation_error(
-                    "Failed to parse embeddings from API response: missing index",
-                )
-            })? as usize;
+    for (item_position, item) in data.iter().enumerate() {
+        let index = item.get("index").and_then(|index| index.as_u64()).ok_or(
+            EmbeddingError::MissingIndex {
+                item: item_position,
+            },
+        )? as usize;
         if index >= expected_count {
-            return Err(embedding_generation_error(format!(
-                "OpenAI API returned embedding index {index} outside expected range 0..{expected_count}"
-            )));
+            return Err(EmbeddingError::IndexOutOfRange {
+                index,
+                expected_count,
+            });
         }
         if embeddings[index].is_some() {
-            return Err(embedding_generation_error(format!(
-                "OpenAI API returned duplicate embedding index {index}"
-            )));
+            return Err(EmbeddingError::DuplicateIndex { index });
         }
         let embedding = item
             .get("embedding")
             .and_then(|embedding| embedding.as_array())
-            .ok_or_else(|| {
-                embedding_generation_error(
-                    "Failed to parse embeddings from API response: missing embedding",
-                )
+            .ok_or(EmbeddingError::MissingEmbedding {
+                item: item_position,
             })?;
         if embedding.len() != vector_size {
-            return Err(embedding_generation_error(format!(
-                "OpenAI API returned embedding dimension {} but expected {vector_size}",
-                embedding.len()
-            )));
+            return Err(EmbeddingError::DimensionMismatch {
+                index,
+                expected: vector_size,
+                actual: embedding.len(),
+            });
         }
         let vec_embedding = embedding
             .iter()
-            .map(|value| {
-                value.as_f64().map(|value| value as f32).ok_or_else(|| {
-                    embedding_generation_error(
-                        "Failed to parse embeddings from API response: non-numeric embedding value",
-                    )
-                })
+            .enumerate()
+            .map(|(component, value)| {
+                value
+                    .as_f64()
+                    .map(|value| value as f32)
+                    .ok_or(EmbeddingError::NonNumericValue { index, component })
             })
             .collect::<Result<Vec<_>, _>>()?;
         embeddings[index] = Some(vec_embedding);
@@ -253,18 +238,26 @@ fn parse_embedding_response(
     embeddings
         .into_iter()
         .enumerate()
-        .map(|(index, embedding)| {
-            embedding.ok_or_else(|| {
-                embedding_generation_error(format!(
-                    "OpenAI API response is missing embedding index {index}"
-                ))
-            })
-        })
+        .map(|(index, embedding)| embedding.ok_or(EmbeddingError::MissingResponseIndex { index }))
         .collect()
 }
 
-fn embedding_generation_error(message: impl Into<String>) -> CustomError {
-    CustomError::EmbeddingGenerationError(message.into())
+fn embedding_transport_error(error: reqwest::Error) -> EmbeddingError {
+    let kind = if error.is_timeout() {
+        EmbeddingTransportErrorKind::Timeout
+    } else if error.is_connect() {
+        EmbeddingTransportErrorKind::Connect
+    } else if error.is_request() {
+        EmbeddingTransportErrorKind::Request
+    } else if error.is_body() {
+        EmbeddingTransportErrorKind::Body
+    } else {
+        EmbeddingTransportErrorKind::Other
+    };
+    EmbeddingError::Transport {
+        transport_kind: kind,
+        detail: error.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -301,19 +294,24 @@ mod tests {
     #[test]
     fn test_new_with_empty_api() {
         let settings = create_test_settings("");
-        let provider = OpenAIEmbeddingProvider::new(settings);
-        assert!(
-            provider.is_err(),
-            "OpenAIEmbeddingProvider initialization should fail with empty API key."
-        );
+        let error = match OpenAIEmbeddingProvider::new(settings) {
+            Ok(_) => panic!("empty API key should be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            CustomError::Embedding(EmbeddingError::MissingApiKey)
+        ));
     }
 
     #[tokio::test]
     async fn test_generate_embedding_with_empty_text() {
         let settings = create_test_settings("valid_key");
         let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
-        let result = provider.generate_embedding("  ").await;
-        assert!(result.is_err(), "Empty text should return an error.");
+        let error = provider.generate_embedding("  ").await.unwrap_err();
+
+        assert_eq!(error, EmbeddingError::BlankInput { index: None });
     }
 
     #[test]
@@ -332,9 +330,9 @@ mod tests {
 
     #[test]
     fn validate_embedding_texts_rejects_blank_entries() {
-        let result = validate_embedding_texts(&["first", "  "]);
+        let error = validate_embedding_texts(&["first", "  "]).unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(error, EmbeddingError::BlankInput { index: Some(1) });
     }
 
     #[test]
@@ -359,9 +357,15 @@ mod tests {
             ]
         });
 
-        let result = parse_embedding_response(response, 2, 2);
+        let error = parse_embedding_response(response, 2, 2).unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(
+            error,
+            EmbeddingError::CountMismatch {
+                expected: 2,
+                actual: 1,
+            }
+        );
     }
 
     #[test]
@@ -372,9 +376,16 @@ mod tests {
             ]
         });
 
-        let result = parse_embedding_response(response, 1, 2);
+        let error = parse_embedding_response(response, 1, 2).unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(
+            error,
+            EmbeddingError::DimensionMismatch {
+                index: 0,
+                expected: 2,
+                actual: 1,
+            }
+        );
     }
 
     #[test]
@@ -386,9 +397,9 @@ mod tests {
             ]
         });
 
-        let result = parse_embedding_response(response, 2, 2);
+        let error = parse_embedding_response(response, 2, 2).unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(error, EmbeddingError::DuplicateIndex { index: 0 });
     }
 
     #[test]
@@ -399,9 +410,15 @@ mod tests {
             ]
         });
 
-        let result = parse_embedding_response(response, 1, 2);
+        let error = parse_embedding_response(response, 1, 2).unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(
+            error,
+            EmbeddingError::NonNumericValue {
+                index: 0,
+                component: 1,
+            }
+        );
     }
 
     #[tokio::test]
@@ -461,9 +478,12 @@ mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let provider = create_test_provider(transport.clone());
 
-        let result = provider.bulk_generate_embeddings(&["first", " "]).await;
+        let error = provider
+            .bulk_generate_embeddings(&["first", " "])
+            .await
+            .unwrap_err();
 
-        assert!(result.is_err());
+        assert_eq!(error, EmbeddingError::BlankInput { index: Some(1) });
         assert!(transport.requests().is_empty());
     }
 
@@ -506,7 +526,7 @@ mod tests {
             &self,
             _api_key: &str,
             payload: serde_json::Value,
-        ) -> Result<OpenAIEmbeddingHttpResponse, CustomError> {
+        ) -> Result<OpenAIEmbeddingHttpResponse, EmbeddingError> {
             self.requests
                 .lock()
                 .expect("requests mutex poisoned")

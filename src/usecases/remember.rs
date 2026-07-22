@@ -1,51 +1,20 @@
 // Remember pipeline used by the public facade and internal tests. Some
 // builders remain available for focused test and validation paths.
 use crate::api::types::{
-    CommitOptions, DiagnosticSeverity, MemoryObjectRef, RememberDiagnostic, RememberDiagnostics,
-    RememberWritePlan, RepairMarker, StatsUpdateStatus,
+    CommitOptions, DiagnosticSeverity, RememberDiagnostic, RememberDiagnosticCode,
+    RememberDiagnostics, RememberOutcome, RememberWritePlan, RepairMarker, StatsUpdateStatus,
 };
-use crate::domain::{CandidateValidationStatus, MemoryId, MemoryLink, MemoryObject, ObjectType};
+use crate::domain::{CandidateValidationStatus, MemoryLink, MemoryObject, MemoryObjectRef};
 use crate::errors::CustomError;
-use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
+use crate::models::vector::VectorRecord;
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
-use crate::ports::retrieval_stats::{
-    record_stats_after_write, RetrievalStatsHealthState, RetrievalStatsStore,
-};
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
+use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::{WritePlanCommitValues, WritePlanValidator};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RememberPipelineOutcome {
-    pub(crate) persisted_object_ids: Vec<MemoryId>,
-    pub(crate) persisted_link_ids: Vec<MemoryId>,
-    pub(crate) vector_indexed_object_ids: Vec<MemoryId>,
-    pub(crate) vector_indexing_failure: Option<VectorIndexingFailure>,
-    pub(crate) stats_update_status: StatsUpdateStatus,
-    pub(crate) repair_needed: Vec<RepairMarker>,
-    pub(crate) diagnostics: RememberDiagnostics,
-}
-
-impl RememberPipelineOutcome {
-    fn graph_persisted(objects: &[MemoryObject], links: &[MemoryLink]) -> Self {
-        Self {
-            persisted_object_ids: objects.iter().map(memory_object_id).collect(),
-            persisted_link_ids: links.iter().map(|link| link.id).collect(),
-            vector_indexed_object_ids: Vec::new(),
-            vector_indexing_failure: None,
-            stats_update_status: StatsUpdateStatus::default(),
-            repair_needed: Vec::new(),
-            diagnostics: RememberDiagnostics::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct VectorIndexingFailure {
-    pub(crate) unindexed_object_ids: Vec<MemoryId>,
-    pub(crate) error_message: String,
-}
+use crate::usecases::{
+    StatsProjectionService, VectorIndexingService, WritePlanCommitValues, WritePlanValidator,
+};
 
 pub(crate) struct RememberPipeline<'a, G, V, E>
 where
@@ -93,7 +62,7 @@ where
         &self,
         plan: RememberWritePlan,
         options: CommitOptions,
-    ) -> Result<RememberPipelineOutcome, CustomError> {
+    ) -> Result<RememberOutcome, CustomError> {
         let validation = WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
@@ -146,11 +115,11 @@ where
         links: Vec<MemoryLink>,
         vector_intent: VectorWriteIntent,
         options: CommitOptions,
-    ) -> Result<RememberPipelineOutcome, CustomError> {
+    ) -> Result<RememberOutcome, CustomError> {
         self.graph_store.upsert_objects(&objects).await?;
         self.graph_store.upsert_links(&links).await?;
 
-        let mut outcome = RememberPipelineOutcome::graph_persisted(&objects, &links);
+        let mut outcome = graph_persisted_outcome(&objects, &links);
         if options.update_vectors {
             let vector_records = match vector_intent {
                 VectorWriteIntent::PlanTargets(targets) => {
@@ -159,7 +128,7 @@ where
                 VectorWriteIntent::None => Vec::new(),
             };
             self.record_vector_outcome(&mut outcome, &vector_records)
-                .await;
+                .await?;
         }
 
         if options.update_stats {
@@ -172,62 +141,69 @@ where
 
     async fn record_vector_outcome(
         &self,
-        outcome: &mut RememberPipelineOutcome,
+        outcome: &mut RememberOutcome,
         vector_records: &[VectorRecord],
-    ) {
+    ) -> Result<(), CustomError> {
         if vector_records.is_empty() {
-            return;
+            return Ok(());
         }
 
-        match self.index_vector_records(vector_records).await {
-            Ok(indexed_ids) => {
-                outcome.vector_indexed_object_ids = indexed_ids;
-            }
-            Err(error_message) => {
-                let failure = VectorIndexingFailure {
-                    unindexed_object_ids: vector_records
-                        .iter()
-                        .map(|record| record.object_id)
-                        .collect(),
-                    error_message,
-                };
+        let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
+            .index(vector_records.to_vec())
+            .await?;
+        outcome.vector_indexed_object_ids = indexing
+            .indexed_objects
+            .iter()
+            .map(|object| object.id)
+            .collect();
+        if let Some(failure) = indexing.failure {
+            let message = failure.cause.to_string();
+            outcome.repair_needed.push(failure.clone().into());
+            outcome.diagnostics =
                 outcome
-                    .repair_needed
-                    .push(crate::api::types::VectorIndexingFailure::from(failure.clone()).into());
-                outcome.diagnostics =
-                    outcome
-                        .diagnostics
-                        .clone()
-                        .with_message(RememberDiagnostic::new(
-                            DiagnosticSeverity::Warning,
-                            "vector_indexing_failed",
-                            failure.error_message.clone(),
-                        ));
-                outcome.vector_indexing_failure = Some(failure);
-            }
+                    .diagnostics
+                    .clone()
+                    .with_message(RememberDiagnostic::new(
+                        DiagnosticSeverity::Warning,
+                        RememberDiagnosticCode::VectorIndexingFailed,
+                        message,
+                    ));
+            outcome.vector_indexing_failure = Some(failure);
         }
+        Ok(())
     }
 
     async fn record_stats_outcome(
         &self,
-        outcome: &mut RememberPipelineOutcome,
+        outcome: &mut RememberOutcome,
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) {
-        let updated_ids = self.record_remember_stats_after_write(objects, links).await;
-        match self.stats_store.health().await {
-            Ok(health) if health.state == RetrievalStatsHealthState::Unhealthy => {
-                let error_message = health
-                    .last_error_message
-                    .unwrap_or_else(|| "retrieval stats store is unhealthy".to_owned());
+        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
+            .project(objects, links)
+            .await;
+        match projection.causes.as_slice() {
+            causes @ [_, ..] => {
+                let diagnostic_code = if causes.iter().any(|cause| {
+                    matches!(cause, crate::errors::StatsUpdateCause::HealthCheck { .. })
+                }) {
+                    RememberDiagnosticCode::StatsUpdateHealthCheckFailed
+                } else {
+                    RememberDiagnosticCode::StatsUpdateFailed
+                };
+                let message = causes
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 outcome.stats_update_status = StatsUpdateStatus::failed(
                     Vec::new(),
-                    updated_ids.clone(),
-                    error_message.clone(),
+                    projection.attempted_object_ids.clone(),
+                    causes.to_vec(),
                 );
                 outcome.repair_needed.push(RepairMarker::StatsUpdate {
-                    object_ids: updated_ids,
-                    error_message: error_message.clone(),
+                    object_ids: projection.attempted_object_ids,
+                    causes: causes.to_vec(),
                 });
                 outcome.diagnostics =
                     outcome
@@ -235,64 +211,13 @@ where
                         .clone()
                         .with_message(RememberDiagnostic::new(
                             DiagnosticSeverity::Warning,
-                            "stats_update_failed",
-                            error_message,
+                            diagnostic_code,
+                            message,
                         ));
             }
-            Err(error) => {
-                let error_message = error.to_string();
-                outcome.stats_update_status = StatsUpdateStatus::failed(
-                    Vec::new(),
-                    updated_ids.clone(),
-                    error_message.clone(),
-                );
-                outcome.repair_needed.push(RepairMarker::StatsUpdate {
-                    object_ids: updated_ids,
-                    error_message: error_message.clone(),
-                });
-                outcome.diagnostics =
-                    outcome
-                        .diagnostics
-                        .clone()
-                        .with_message(RememberDiagnostic::new(
-                            DiagnosticSeverity::Warning,
-                            "stats_update_health_check_failed",
-                            error_message,
-                        ));
-            }
-            _ => {
-                outcome.stats_update_status = StatsUpdateStatus::succeeded(updated_ids);
-            }
-        }
-    }
-
-    async fn record_remember_stats_after_write(
-        &self,
-        objects: &[MemoryObject],
-        links: &[MemoryLink],
-    ) -> Vec<MemoryId> {
-        let endpoint_refs = remember_stats_endpoint_refs(objects, links);
-        if endpoint_refs.is_empty() {
-            record_stats_after_write(self.stats_store, objects, links).await;
-            return objects.iter().map(memory_object_id).collect();
-        }
-
-        match self
-            .graph_store
-            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
-            .await
-        {
-            Ok(endpoint_objects) => {
-                let stats_objects =
-                    stats_objects_with_endpoint_lifecycle(objects, endpoint_objects);
-                record_stats_after_write(self.stats_store, &stats_objects, links).await;
-                stats_objects.iter().map(memory_object_id).collect()
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                record_stats_after_write(self.stats_store, objects, links).await;
-                let _ = self.stats_store.mark_unhealthy(error_message).await;
-                objects.iter().map(memory_object_id).collect()
+            [] => {
+                outcome.stats_update_status =
+                    StatsUpdateStatus::succeeded(projection.attempted_object_ids);
             }
         }
     }
@@ -302,14 +227,11 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Result<(), CustomError> {
-        // Known scale consideration: this checks planned IDs against current graph state without
-        // a persisted operation ledger, which is acceptable for current write volumes.
+        // These bounded reads still leave a TOCTOU window before the graph upsert. An atomic
+        // conditional upsert or persisted operation ledger belongs in a future write-path design.
         let refs = objects
             .iter()
-            .map(|object| {
-                let (id, object_type) = memory_object_identity(object);
-                GraphObjectRef::new(id, object_type)
-            })
+            .map(MemoryObject::object_ref)
             .collect::<Vec<_>>();
         if !refs.is_empty() {
             for existing in self
@@ -317,14 +239,15 @@ where
                 .query_objects(&GraphObjectQuery::by_refs(refs))
                 .await?
             {
-                if let Some(planned) = objects.iter().find(|object| {
-                    memory_object_identity(object) == memory_object_identity(&existing)
-                }) {
+                if let Some(planned) = objects
+                    .iter()
+                    .find(|object| object.object_ref() == existing.object_ref())
+                {
                     if planned != &existing {
                         return Err(validation_error(format!(
                             "write plan deterministic ID collided with existing divergent object content: {:?} {}",
-                            memory_object_type(planned),
-                            memory_object_id(planned)
+                            planned.object_type(),
+                            planned.id()
                         )));
                     }
                 }
@@ -332,7 +255,8 @@ where
         }
 
         if !links.is_empty() {
-            for existing in self.graph_store.list_diagnostic_links().await? {
+            let link_ids = links.iter().map(|link| link.id).collect::<Vec<_>>();
+            for existing in self.graph_store.query_links_by_ids(&link_ids).await? {
                 if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
                     if planned != &existing {
                         return Err(validation_error(format!(
@@ -345,44 +269,6 @@ where
         }
 
         Ok(())
-    }
-
-    async fn index_vector_records(
-        &self,
-        vector_records: &[VectorRecord],
-    ) -> Result<Vec<MemoryId>, String> {
-        let embedding_inputs = vector_records
-            .iter()
-            .map(VectorRecord::embedding_input)
-            .collect::<Vec<_>>();
-        let embeddings = self
-            .embedder
-            .embed_batch(&embedding_inputs)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        if embeddings.len() != vector_records.len() {
-            return Err(format!(
-                "embedder returned {} embeddings for {} vector records",
-                embeddings.len(),
-                vector_records.len()
-            ));
-        }
-
-        let record_embeddings = vector_records
-            .iter()
-            .zip(embeddings.iter())
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding.as_slice()))
-            .collect::<Vec<_>>();
-        self.vector_store
-            .upsert_vector_records(&record_embeddings)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        Ok(vector_records
-            .iter()
-            .map(|record| record.object_id)
-            .collect())
     }
 }
 
@@ -399,8 +285,7 @@ fn vector_records_for_targets(
         .iter()
         .filter_map(|target| {
             objects.iter().find_map(|object| {
-                (memory_object_id(object) == target.id
-                    && memory_object_type(object) == target.object_type)
+                (object.id() == target.id && object.object_type() == target.object_type)
                     .then(|| memory_object_vector_record(object))
                     .flatten()
             })
@@ -408,80 +293,19 @@ fn vector_records_for_targets(
         .collect()
 }
 
-fn remember_stats_endpoint_refs(
-    objects: &[MemoryObject],
-    links: &[MemoryLink],
-) -> Vec<GraphObjectRef> {
-    let mut refs = Vec::new();
-    for link in links {
-        push_stats_endpoint_ref(&mut refs, objects, link.from_id, link.from_type);
-        push_stats_endpoint_ref(&mut refs, objects, link.to_id, link.to_type);
-    }
-    refs
-}
-
-fn push_stats_endpoint_ref(
-    refs: &mut Vec<GraphObjectRef>,
-    objects: &[MemoryObject],
-    object_id: MemoryId,
-    object_type: ObjectType,
-) {
-    if !object_type_has_stats_state(object_type)
-        || objects
-            .iter()
-            .any(|object| memory_object_identity(object) == (object_id, object_type))
-        || refs.iter().any(|object_ref| {
-            object_ref.object_id == object_id && object_ref.object_type == object_type
-        })
-    {
-        return;
-    }
-
-    refs.push(GraphObjectRef::new(object_id, object_type));
-}
-
-fn stats_objects_with_endpoint_lifecycle(
-    objects: &[MemoryObject],
-    endpoint_objects: Vec<MemoryObject>,
-) -> Vec<MemoryObject> {
-    let mut stats_objects = objects.to_vec();
-    for endpoint_object in endpoint_objects {
-        if !stats_objects.iter().any(|object| {
-            memory_object_identity(object) == memory_object_identity(&endpoint_object)
-        }) {
-            stats_objects.push(endpoint_object);
-        }
-    }
-    stats_objects
-}
-
-fn object_type_has_stats_state(object_type: ObjectType) -> bool {
-    matches!(
-        object_type,
-        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
-    )
-}
-
 fn validation_error(error: impl ToString) -> CustomError {
     CustomError::MemoryValidation(error.to_string())
 }
 
-fn memory_object_id(object: &MemoryObject) -> MemoryId {
-    memory_object_identity(object).0
-}
-
-fn memory_object_type(object: &MemoryObject) -> ObjectType {
-    memory_object_identity(object).1
-}
-
-fn memory_object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
+fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> RememberOutcome {
+    RememberOutcome {
+        persisted_object_ids: objects.iter().map(MemoryObject::id).collect(),
+        persisted_link_ids: links.iter().map(|link| link.id).collect(),
+        vector_indexed_object_ids: Vec::new(),
+        vector_indexing_failure: None,
+        stats_update_status: StatsUpdateStatus::default(),
+        repair_needed: Vec::new(),
+        diagnostics: RememberDiagnostics::default(),
     }
 }
 
@@ -495,13 +319,25 @@ mod tests {
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
-        DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryLinkDraft, MemoryThreadDraft,
-        ObservationDraft, RememberInput,
+        CandidateProvenance, DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryCandidate,
+        MemoryLinkCandidate, MemoryLinkDraft, MemoryThreadDraft, ObservationDraft, RememberInput,
     };
-    use crate::domain::{DerivedType, EntityType, ObjectType, RelationType, RetentionState};
-    use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
+    use crate::domain::{
+        DerivedType, EntityType, MemoryId, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
+    };
+    use crate::errors::{
+        RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
+        VectorDatabaseErrorKind, VectorIndexingCause,
+    };
+    use crate::models::vector::{
+        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
+    };
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
-    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState, RetrievalStatsStore,
+    };
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
     use crate::usecases::write_planning::RememberPlanDefaults;
 
@@ -561,6 +397,27 @@ mod tests {
                 ids.derived,
             ])]
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_link_collision_query_rejects_divergent_existing_content() {
+        let graph = FakeGraphAuthorityStore::new();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let existing = representative_fixtures().links()[0].clone();
+        graph
+            .upsert_links(std::slice::from_ref(&existing))
+            .await
+            .unwrap();
+        let mut divergent = existing.clone();
+        divergent.confidence = 0.1;
+
+        let error = RememberPipeline::new(&graph, &vector, &embedder)
+            .reject_divergent_existing_writes(&[], &[divergent])
+            .await
+            .expect_err("divergent content under an existing link ID must reject");
+
+        assert!(matches!(error, CustomError::MemoryValidation(_)));
     }
 
     #[tokio::test]
@@ -668,8 +525,16 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("vector failure should be explicit");
-        assert_eq!(failure.unindexed_object_ids, outcome.persisted_object_ids);
-        assert!(failure.error_message.contains("vector write failed"));
+        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
+        assert!(matches!(
+            failure.cause,
+            VectorIndexingCause::VectorDatabase(VectorDatabaseError {
+                backend,
+                kind: VectorDatabaseErrorKind::Response,
+                message,
+                ..
+            }) if backend == "test" && message == "vector write failed"
+        ));
     }
 
     #[tokio::test]
@@ -689,10 +554,13 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("embedding mismatch should be explicit");
-        assert_eq!(failure.unindexed_object_ids, outcome.persisted_object_ids);
+        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
         assert_eq!(
-            failure.error_message,
-            "embedder returned 4 embeddings for 5 vector records"
+            failure.cause,
+            VectorIndexingCause::CardinalityMismatch {
+                expected: 5,
+                actual: 4,
+            }
         );
         assert!(vector.calls().is_empty());
     }
@@ -775,10 +643,6 @@ mod tests {
             .contains(&StoreCall::GraphLinks(vec![ids.extra_link])));
         assert!(!embedder.calls().is_empty());
         assert!(!vector.calls().is_empty());
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            0
-        );
     }
 
     #[tokio::test]
@@ -845,7 +709,12 @@ mod tests {
             .unwrap_or_default();
         assert!(failed_ids.is_empty());
 
-        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy("repair required".to_owned());
+        let health_cause = RetrievalStatsHealthCause::StoreInitialization {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "repair required".to_owned(),
+            },
+        };
+        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy(health_cause.clone());
         let repair_pipeline =
             RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
         let repair_outcome = repair_pipeline
@@ -876,10 +745,130 @@ mod tests {
         assert!(failure
             .failed_object_ids
             .contains(&fixtures.suppressed_seed.id));
+        assert_eq!(
+            failure.causes,
+            vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
+                health_cause: Some(health_cause.clone()),
+            }]
+        );
         assert!(repair_outcome.repair_needed.iter().any(|marker| matches!(
             marker,
-            RepairMarker::StatsUpdate { object_ids, .. }
+            RepairMarker::StatsUpdate { object_ids, causes }
                 if object_ids.contains(&fixtures.suppressed_seed.id)
+                    && causes == &vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
+                        health_cause: Some(health_cause.clone()),
+                    }]
+        )));
+    }
+
+    #[tokio::test]
+    async fn link_only_hydration_failure_reports_endpoint_ids_for_stats_repair() {
+        let fixtures = representative_fixtures();
+        let episode_id = fixtures.episode.id;
+        let observation_id = fixtures.salient_observation.id;
+        let graph = RecordingGraphStore::default()
+            .with_query_objects(vec![
+                MemoryObject::Episode(fixtures.episode),
+                MemoryObject::Observation(fixtures.salient_observation),
+            ])
+            .fail_id_queries();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut link = typed_link_draft(
+            id("550e8400-e29b-41d4-a716-446655443010"),
+            ObjectType::Episode,
+            episode_id,
+            RelationType::Mentions,
+            ObjectType::Observation,
+            observation_id,
+        );
+        link.created_at = Some(timestamp());
+        link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655443011"),
+            "link-only-stats-hydration-failure",
+        )
+        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+            link,
+            CandidateProvenance::caller("exercise link-only stats hydration"),
+        )));
+
+        let outcome = pipeline
+            .commit(plan, CommitOptions::default())
+            .await
+            .expect("stats hydration failure should remain a repairable graph success");
+        let expected_ids = vec![episode_id, observation_id];
+        let failure = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("endpoint hydration failure should be published");
+
+        assert_eq!(failure.failed_object_ids, expected_ids);
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [StatsUpdateCause::EndpointHydration { .. }]
+        ));
+        assert!(outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { object_ids, causes }
+                if object_ids == &expected_ids
+                    && matches!(causes.as_slice(), [StatsUpdateCause::EndpointHydration { .. }])
+        )));
+    }
+
+    #[tokio::test]
+    async fn stats_failure_and_repair_preserve_hydration_and_write_causes() {
+        let fixtures = representative_fixtures();
+        let episode_id = fixtures.episode.id;
+        let observation_id = fixtures.salient_observation.id;
+        let graph = RecordingGraphStore::default()
+            .with_query_objects(vec![
+                MemoryObject::Episode(fixtures.episode),
+                MemoryObject::Observation(fixtures.salient_observation),
+            ])
+            .fail_id_queries();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = EdgeFailingStatsStore::default();
+        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut link = typed_link_draft(
+            id("550e8400-e29b-41d4-a716-446655443012"),
+            ObjectType::Episode,
+            episode_id,
+            RelationType::Mentions,
+            ObjectType::Observation,
+            observation_id,
+        );
+        link.created_at = Some(timestamp());
+        link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655443013"),
+            "link-only-two-stats-failures",
+        )
+        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+            link,
+            CandidateProvenance::caller("exercise multiple typed stats failures"),
+        )));
+
+        let outcome = pipeline
+            .commit(plan, CommitOptions::default())
+            .await
+            .unwrap();
+        let failure = outcome.stats_update_status.failure.as_ref().unwrap();
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EndpointHydration { .. },
+                StatsUpdateCause::EdgeWrite { .. }
+            ]
+        ));
+        assert!(outcome.repair_needed.iter().any(|marker| matches!(
+            marker,
+            RepairMarker::StatsUpdate { causes, .. }
+                if causes == &failure.causes
         )));
     }
 
@@ -1031,6 +1020,62 @@ mod tests {
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_objects: bool,
         fail_links: bool,
+        query_objects: Vec<MemoryObject>,
+        fail_id_queries: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct EdgeFailingStatsStore {
+        health: Mutex<RetrievalStatsHealth>,
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for EdgeFailingStatsStore {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "edge write failed".to_owned(),
+            })
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            Ok(lock(&self.health).clone())
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            *lock(&self.health) = RetrievalStatsHealth {
+                state: crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy,
+                last_error_cause: Some(cause),
+            };
+            Ok(())
+        }
     }
 
     impl RecordingGraphStore {
@@ -1044,6 +1089,16 @@ mod tests {
             self
         }
 
+        fn with_query_objects(mut self, objects: Vec<MemoryObject>) -> Self {
+            self.query_objects = objects;
+            self
+        }
+
+        fn fail_id_queries(mut self) -> Self {
+            self.fail_id_queries = true;
+            self
+        }
+
         fn calls(&self) -> Vec<StoreCall> {
             lock(&self.calls).clone()
         }
@@ -1053,7 +1108,7 @@ mod tests {
     impl GraphAuthorityStore for RecordingGraphStore {
         async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
-                objects.iter().map(memory_object_id).collect(),
+                objects.iter().map(MemoryObject::id).collect(),
             ));
             if self.fail_objects {
                 return Err(CustomError::DatabaseError("object write failed".to_owned()));
@@ -1082,8 +1137,32 @@ mod tests {
 
         async fn query_objects(
             &self,
-            _query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
+            query: &GraphObjectQuery,
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+            if self.fail_id_queries && matches!(query, GraphObjectQuery::ByIds(_)) {
+                return Err(crate::errors::GraphQueryError::Selection {
+                    detail: "endpoint lifecycle lookup failed".to_owned(),
+                });
+            }
+
+            Ok(self
+                .query_objects
+                .iter()
+                .filter(|object| match query {
+                    GraphObjectQuery::ByRefs(refs) => refs.contains(&object.object_ref()),
+                    GraphObjectQuery::ByIds(ids) => ids.contains(&object.id()),
+                    GraphObjectQuery::ByTypes { object_types, .. } => {
+                        object_types.contains(&object.object_type())
+                    }
+                })
+                .cloned()
+                .collect())
+        }
+
+        async fn query_links_by_ids(
+            &self,
+            _link_ids: &[MemoryId],
+        ) -> Result<Vec<MemoryLink>, CustomError> {
             Ok(Vec::new())
         }
 
@@ -1106,14 +1185,6 @@ mod tests {
             _query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
-        }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(Vec::new())
         }
     }
 
@@ -1147,7 +1218,12 @@ mod tests {
                     .collect(),
             ));
             if self.fail_upsert {
-                return Err(CustomError::DatabaseError("vector write failed".to_owned()));
+                return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                    "test",
+                    VectorDatabaseErrorKind::Response,
+                    None,
+                    "vector write failed",
+                )));
             }
             Ok(())
         }
@@ -1155,15 +1231,8 @@ mod tests {
         async fn search_candidates(
             &self,
             _query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new([]))
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

@@ -4,35 +4,33 @@
 use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::{
     points_selector::PointsSelectorOneOf, value::Kind, vectors_config, Condition,
-    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DatetimeRange, DeletePointsBuilder,
-    Distance, Filter, PointId, PointStruct, RetrievedPoint, ScoredPoint, ScrollPointsBuilder,
-    SearchPointsBuilder, Timestamp, UpsertPointsBuilder, VectorParams, VectorsConfig,
+    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
+    Filter, PointStruct, ScoredPoint, SearchPointsBuilder, UpsertPointsBuilder, VectorParams,
+    VectorsConfig,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
-use crate::domain::{MemoryId, ObjectType, RetentionState};
-use crate::errors::{CustomError, VectorDatabaseError};
+use crate::domain::{MemoryId, ObjectType};
+use crate::errors::{
+    CollectionCompatibilityError, CollectionMismatch, CustomError, IoErrorKind, TransportStatus,
+    VectorDatabaseError, VectorDatabaseErrorKind,
+};
 use crate::models::vector::{
-    canonicalize_vector_candidates, VectorCandidateDiagnosticRecord, VectorCandidateFilters,
-    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-    VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
+    VectorSurface,
 };
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 use super::payload::{
-    qdrant_payload_index_fields, qdrant_payload_map, CREATED_AT_FIELD, ENDED_AT_FIELD,
-    ENTITY_IDS_FIELD, EPISODE_IDS_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, IS_SUPERSEDED_FIELD,
-    LAST_TOUCHED_AT_FIELD, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, OBSERVED_AT_FIELD,
-    PARTICIPANT_ENTITY_IDS_FIELD, RETENTION_STATE_FIELD, SCHEMA_VERSION_FIELD,
-    SPEAKER_ENTITY_ID_FIELD, STARTED_AT_FIELD, SURFACE_FIELD, THREAD_IDS_FIELD, UPDATED_AT_FIELD,
+    qdrant_payload_map, QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD,
 };
 
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
 const QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES: usize = 4_096;
 const QDRANT_TIE_COHORT_LIMIT_MULTIPLIER: usize = 16;
+const QDRANT_CONNECT_FAILURE_PREFIX: &str = "Failed to connect to ";
 
 pub(crate) struct QdrantVectorCandidateStore {
     client: Qdrant,
@@ -111,16 +109,16 @@ impl QdrantVectorCandidateStore {
             &collection_info.payload_schema
         };
 
-        for field in qdrant_payload_index_fields() {
-            if payload_schema.contains_key(field.name) {
+        for field in QdrantPayloadSchema::indexed_fields() {
+            if payload_schema.contains_key(field.field.name()) {
                 continue;
             }
 
             self.client
                 .create_field_index(CreateFieldIndexCollectionBuilder::new(
                     &self.collection_name,
-                    field.name,
-                    field.field_type,
+                    field.field.name(),
+                    field.kind.field_type(),
                 ))
                 .await
                 .map_err(qdrant_error)?;
@@ -222,9 +220,11 @@ fn validate_collection_vector_config(
     vectors_config: Option<&VectorsConfig>,
 ) -> Result<(), CustomError> {
     let Some(vectors_config) = vectors_config else {
-        return Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' is missing vector configuration; expected unnamed vectors with size {expected_vector_size}."
-        )));
+        return Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::MissingVectorConfiguration,
+        }
+        .into());
     };
 
     match vectors_config.config.as_ref() {
@@ -234,31 +234,42 @@ fn validate_collection_vector_config(
         {
             Ok(())
         }
-        Some(vectors_config::Config::Params(params))
-            if params.size == expected_vector_size =>
-        {
-            Err(CustomError::DatabaseError(format!(
-                "Qdrant collection '{collection_name}' vector distance mismatch: expected Cosine, found {}.",
-                Distance::try_from(params.distance)
-                    .map(|distance| distance.as_str_name().to_owned())
-                    .unwrap_or_else(|_| params.distance.to_string())
-            )))
+        Some(vectors_config::Config::Params(params)) if params.size == expected_vector_size => {
+            Err(CollectionCompatibilityError {
+                collection: collection_name.to_owned(),
+                mismatch: CollectionMismatch::Distance {
+                    expected: "Cosine",
+                    actual: Distance::try_from(params.distance)
+                        .map(|distance| distance.as_str_name().to_owned())
+                        .unwrap_or_else(|_| params.distance.to_string()),
+                },
+            }
+            .into())
         }
-        Some(vectors_config::Config::Params(params)) => Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' vector size mismatch: expected {expected_vector_size}, found {}.",
-            params.size
-        ))),
+        Some(vectors_config::Config::Params(params)) => Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::VectorSize {
+                expected: expected_vector_size,
+                actual: params.size,
+            },
+        }
+        .into()),
         Some(vectors_config::Config::ParamsMap(params_map)) => {
             let mut vector_names = params_map.map.keys().cloned().collect::<Vec<_>>();
             vector_names.sort();
-            Err(CustomError::DatabaseError(format!(
-                "Qdrant collection '{collection_name}' uses named vectors ({}) but CharacterMemory expects an unnamed vector with size {expected_vector_size}.",
-                vector_names.join(", ")
-            )))
+            Err(CollectionCompatibilityError {
+                collection: collection_name.to_owned(),
+                mismatch: CollectionMismatch::NamedVectors {
+                    names: vector_names,
+                },
+            }
+            .into())
         }
-        None => Err(CustomError::DatabaseError(format!(
-            "Qdrant collection '{collection_name}' vector configuration is empty; expected unnamed vectors with size {expected_vector_size}."
-        ))),
+        None => Err(CollectionCompatibilityError {
+            collection: collection_name.to_owned(),
+            mismatch: CollectionMismatch::EmptyVectorConfiguration,
+        }
+        .into()),
     }
 }
 
@@ -274,9 +285,9 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+    ) -> Result<CanonicalCandidates, CustomError> {
         if query.limit == 0 {
-            return Ok(Vec::new());
+            return Ok(CanonicalCandidates::new([]));
         }
 
         // Fetch past K until the boundary tie is closed. Growth is bounded by
@@ -290,7 +301,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         loop {
             let fetched = self.search_candidate_batch(query, fetch_limit).await?;
             let fetched_count = fetched.len();
-            let mut candidates = canonicalize_vector_candidates(fetched);
+            let candidates = CanonicalCandidates::new(fetched);
 
             match tie_cohort_fetch_decision(
                 query.limit,
@@ -301,45 +312,10 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             ) {
                 TieCohortFetchDecision::Grow(next_limit) => fetch_limit = next_limit,
                 TieCohortFetchDecision::Return | TieCohortFetchDecision::ReturnAtBound => {
-                    candidates.truncate(query.limit);
-                    return Ok(candidates);
+                    return Ok(candidates.truncated(query.limit));
                 }
             }
         }
-    }
-
-    async fn list_candidate_diagnostics(
-        &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
-        let mut records = Vec::new();
-        let mut offset: Option<PointId> = None;
-
-        loop {
-            let mut builder = ScrollPointsBuilder::new(&self.collection_name)
-                .limit(256)
-                .with_payload(true)
-                .with_vectors(false);
-            if let Some(next_offset) = offset {
-                builder = builder.offset(next_offset);
-            }
-
-            let response = self.client.scroll(builder).await.map_err(qdrant_error)?;
-            records.extend(
-                response
-                    .result
-                    .into_iter()
-                    .map(retrieved_point_to_diagnostic_record)
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-
-            offset = response.next_page_offset;
-            if offset.is_none() {
-                break;
-            }
-        }
-
-        records.sort_by_key(|record| (record.object_id, object_type_rank(record.object_type)));
-        Ok(records)
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -366,58 +342,150 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
 
 fn qdrant_error(error: QdrantError) -> CustomError {
     let vector_error = match error {
-        QdrantError::ResponseError { status } => VectorDatabaseError::new(
-            "qdrant",
-            "response",
-            Some(status.code().to_string()),
-            status.message().to_owned(),
-        ),
+        QdrantError::ResponseError { status } => {
+            let status_kind = transport_status(status.code() as i32);
+            let erased_connect_source =
+                is_erased_qdrant_connect_failure(&status_kind, status.message());
+            let kind = if let Some(io_kind) = find_io_error_kind(&status) {
+                VectorDatabaseErrorKind::Io { io_kind }
+            } else if erased_connect_source {
+                VectorDatabaseErrorKind::HttpConnect
+            } else {
+                VectorDatabaseErrorKind::Response
+            };
+            VectorDatabaseError::new(
+                "qdrant",
+                kind,
+                Some(status_kind),
+                status.message().to_owned(),
+            )
+        }
         QdrantError::ResourceExhaustedError {
             status,
             retry_after_seconds,
         } => VectorDatabaseError::new(
             "qdrant",
-            "resource_exhausted",
-            Some(status.code().to_string()),
+            VectorDatabaseErrorKind::ResourceExhausted,
+            Some(transport_status(status.code() as i32)),
             status.message().to_owned(),
         )
         .with_retry_after_seconds(retry_after_seconds),
         QdrantError::ConversionError(message) => {
-            VectorDatabaseError::new("qdrant", "conversion", None, message)
+            VectorDatabaseError::new("qdrant", VectorDatabaseErrorKind::Conversion, None, message)
         }
-        QdrantError::InvalidUri(error) => {
-            VectorDatabaseError::new("qdrant", "invalid_uri", None, error.to_string())
-        }
-        QdrantError::NoSnapshotFound(collection) => {
-            VectorDatabaseError::new("qdrant", "no_snapshot_found", None, collection)
-        }
+        QdrantError::InvalidUri(error) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::InvalidUri,
+            None,
+            error.to_string(),
+        ),
+        QdrantError::NoSnapshotFound(collection) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::NoSnapshotFound,
+            None,
+            collection,
+        ),
         QdrantError::Io(error) => VectorDatabaseError::new(
             "qdrant",
-            format!("io::{:?}", error.kind()),
+            VectorDatabaseErrorKind::Io {
+                io_kind: IoErrorKind::from(error.kind()),
+            },
             None,
             error.to_string(),
         ),
         QdrantError::Reqwest(error) => {
+            let status = error
+                .status()
+                .map(|status| http_transport_status(status.as_u16()));
             let kind = if error.is_timeout() {
-                "reqwest::timeout"
+                VectorDatabaseErrorKind::HttpTimeout
             } else if error.is_connect() {
-                "reqwest::connect"
+                VectorDatabaseErrorKind::HttpConnect
             } else if error.is_status() {
-                "reqwest::status"
+                VectorDatabaseErrorKind::HttpStatus
             } else {
-                "reqwest"
+                VectorDatabaseErrorKind::Http
             };
-            VectorDatabaseError::new("qdrant", kind, None, error.to_string())
+            VectorDatabaseError::new("qdrant", kind, status, error.to_string())
         }
-        QdrantError::JsonToPayload(value) => {
-            VectorDatabaseError::new("qdrant", "json_to_payload", None, value.to_string())
-        }
-        QdrantError::PayloadDeserialization(error) => {
-            VectorDatabaseError::new("qdrant", "payload_deserialization", None, error.to_string())
-        }
+        QdrantError::JsonToPayload(value) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::JsonToPayload,
+            None,
+            value.to_string(),
+        ),
+        QdrantError::PayloadDeserialization(error) => VectorDatabaseError::new(
+            "qdrant",
+            VectorDatabaseErrorKind::PayloadDeserialization,
+            None,
+            error.to_string(),
+        ),
     };
 
     CustomError::VectorDatabaseError(vector_error)
+}
+
+fn is_erased_qdrant_connect_failure(status: &TransportStatus, message: &str) -> bool {
+    // Ruled external-contract exception: qdrant-client 1.17.0 erases the tonic transport
+    // source in src/channel_pool.rs with
+    // `Status::internal(format!("Failed to connect to {}: {:?}", self.uri, e))`.
+    // Recheck this on every qdrant-client bump; retire the prefix coupling once upstream
+    // preserves a downcastable source.
+    *status == TransportStatus::Internal && message.starts_with(QDRANT_CONNECT_FAILURE_PREFIX)
+}
+
+fn http_transport_status(status: u16) -> TransportStatus {
+    match status {
+        200 => TransportStatus::Ok,
+        400 => TransportStatus::InvalidArgument,
+        401 => TransportStatus::Unauthenticated,
+        403 => TransportStatus::PermissionDenied,
+        404 => TransportStatus::NotFound,
+        408 | 504 => TransportStatus::DeadlineExceeded,
+        409 => TransportStatus::Aborted,
+        412 => TransportStatus::FailedPrecondition,
+        416 => TransportStatus::OutOfRange,
+        429 => TransportStatus::ResourceExhausted,
+        499 => TransportStatus::Cancelled,
+        500 => TransportStatus::Internal,
+        501 => TransportStatus::Unimplemented,
+        503 => TransportStatus::Unavailable,
+        other => TransportStatus::Unrecognized(other.to_string()),
+    }
+}
+
+fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<IoErrorKind> {
+    let mut current = Some(error);
+    while let Some(source) = current {
+        if let Some(io_error) = source.downcast_ref::<std::io::Error>() {
+            return Some(IoErrorKind::from(io_error.kind()));
+        }
+        current = source.source();
+    }
+    None
+}
+
+fn transport_status(code: i32) -> TransportStatus {
+    match code {
+        0 => TransportStatus::Ok,
+        1 => TransportStatus::Cancelled,
+        2 => TransportStatus::Unknown,
+        3 => TransportStatus::InvalidArgument,
+        4 => TransportStatus::DeadlineExceeded,
+        5 => TransportStatus::NotFound,
+        6 => TransportStatus::AlreadyExists,
+        7 => TransportStatus::PermissionDenied,
+        8 => TransportStatus::ResourceExhausted,
+        9 => TransportStatus::FailedPrecondition,
+        10 => TransportStatus::Aborted,
+        11 => TransportStatus::OutOfRange,
+        12 => TransportStatus::Unimplemented,
+        13 => TransportStatus::Internal,
+        14 => TransportStatus::Unavailable,
+        15 => TransportStatus::DataLoss,
+        16 => TransportStatus::Unauthenticated,
+        other => TransportStatus::Unrecognized(other.to_string()),
+    }
 }
 
 fn qdrant_candidate_config(url: &str) -> QdrantConfig {
@@ -431,160 +499,12 @@ fn qdrant_candidate_config(url: &str) -> QdrantConfig {
 }
 
 fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
-    let mut must_conditions = Vec::new();
-
-    if !query.object_types.is_empty() {
-        must_conditions.push(any_field_matches(
+    (!query.object_types.is_empty()).then(|| {
+        Filter::must([any_field_matches(
             OBJECT_TYPE_FIELD,
-            query
-                .object_types
-                .iter()
-                .map(|value| object_type_name(*value)),
-        ));
-    }
-
-    must_conditions.extend(qdrant_filter_conditions(&query.filters));
-    if let Some(condition) = currentness_filter_condition(query) {
-        must_conditions.push(condition);
-    }
-
-    if must_conditions.is_empty() {
-        None
-    } else {
-        Some(Filter::must(must_conditions))
-    }
-}
-
-fn qdrant_filter_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
-    let mut conditions = Vec::new();
-
-    if !filters.retention_states.is_empty() {
-        conditions.push(any_field_matches(
-            RETENTION_STATE_FIELD,
-            filters
-                .retention_states
-                .iter()
-                .map(|value| retention_state_name(*value)),
-        ));
-    }
-
-    if !filters.thread_ids.is_empty() {
-        conditions.push(any_field_matches(
-            THREAD_IDS_FIELD,
-            filters.thread_ids.iter().map(ToString::to_string),
-        ));
-    }
-
-    if !filters.episode_ids.is_empty() {
-        conditions.push(any_field_matches(
-            EPISODE_IDS_FIELD,
-            filters.episode_ids.iter().map(ToString::to_string),
-        ));
-    }
-
-    if !filters.entity_ids.is_empty() {
-        let mut entity_conditions = Vec::new();
-        for field in [
-            ENTITY_IDS_FIELD,
-            PARTICIPANT_ENTITY_IDS_FIELD,
-            SPEAKER_ENTITY_ID_FIELD,
-        ] {
-            entity_conditions.push(any_field_matches(
-                field,
-                filters.entity_ids.iter().map(ToString::to_string),
-            ));
-        }
-        conditions.push(Condition::from(Filter::min_should(1, entity_conditions)));
-    }
-
-    conditions.extend(filters.time_ranges.iter().map(|time_range| {
-        Condition::datetime_range(
-            time_field_name(time_range.field),
-            datetime_range(time_range),
-        )
-    }));
-
-    conditions
-}
-
-fn currentness_filter_condition(query: &VectorCandidateSearch) -> Option<Condition> {
-    if !query.filters.has_currentness_filters() {
-        return None;
-    }
-
-    let currentness_conditions = currentness_conditions(&query.filters);
-    if currentness_conditions.is_empty() {
-        return None;
-    }
-
-    let mut branches = Vec::new();
-    if query.object_types.is_empty() {
-        branches.push(Condition::from(Filter {
-            must: Vec::new(),
-            should: Vec::new(),
-            must_not: vec![Condition::matches(
-                OBJECT_TYPE_FIELD,
-                object_type_name(ObjectType::DerivedMemory).to_owned(),
-            )],
-            min_should: None,
-        }));
-    } else {
-        let non_derived_types = query
-            .object_types
-            .iter()
-            .copied()
-            .filter(|object_type| *object_type != ObjectType::DerivedMemory)
-            .collect::<Vec<_>>();
-        if !non_derived_types.is_empty() {
-            branches.push(any_field_matches(
-                OBJECT_TYPE_FIELD,
-                non_derived_types.into_iter().map(object_type_name),
-            ));
-        }
-    }
-
-    if query.object_types.is_empty() || query.object_types.contains(&ObjectType::DerivedMemory) {
-        let mut derived_conditions = vec![Condition::matches(
-            OBJECT_TYPE_FIELD,
-            object_type_name(ObjectType::DerivedMemory).to_owned(),
-        )];
-        derived_conditions.extend(currentness_conditions);
-        branches.push(Condition::from(Filter::must(derived_conditions)));
-    }
-
-    match branches.len() {
-        0 => None,
-        1 => branches.into_iter().next(),
-        _ => Some(Condition::from(Filter::min_should(1, branches))),
-    }
-}
-
-fn currentness_conditions(filters: &VectorCandidateFilters) -> Vec<Condition> {
-    let mut conditions = Vec::new();
-    if let Some(is_current) = filters.is_current {
-        conditions.push(payload_hint_matches_or_missing(
-            IS_CURRENT_FIELD,
-            is_current,
-        ));
-    }
-    if let Some(is_superseded) = filters.is_superseded {
-        conditions.push(payload_hint_matches_or_missing(
-            IS_SUPERSEDED_FIELD,
-            is_superseded,
-        ));
-    }
-    conditions
-}
-
-fn payload_hint_matches_or_missing(field: &str, value: bool) -> Condition {
-    Condition::from(Filter::min_should(
-        1,
-        vec![
-            Condition::matches(field, value),
-            Condition::is_empty(field),
-            Condition::is_null(field),
-        ],
-    ))
+            query.object_types.iter().copied().map(object_type_name),
+        )])
+    })
 }
 
 fn any_field_matches(
@@ -600,21 +520,6 @@ fn any_field_matches(
         conditions.into_iter().next().unwrap()
     } else {
         Condition::from(Filter::min_should(1, conditions))
-    }
-}
-
-fn datetime_range(time_range: &VectorTimeRangeFilter) -> DatetimeRange {
-    DatetimeRange {
-        gte: time_range.after.map(timestamp),
-        lte: time_range.before.map(timestamp),
-        ..DatetimeRange::default()
-    }
-}
-
-fn timestamp(value: DateTime<Utc>) -> Timestamp {
-    Timestamp {
-        seconds: value.timestamp(),
-        nanos: value.timestamp_subsec_nanos() as i32,
     }
 }
 
@@ -649,32 +554,6 @@ fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, Cus
         surface,
         point.score,
     ))
-}
-
-// Vector diagnostics are dormant until reconciliation is wired; remove with list_candidate_diagnostics.
-#[allow(dead_code)]
-fn retrieved_point_to_diagnostic_record(
-    point: RetrievedPoint,
-) -> Result<VectorCandidateDiagnosticRecord, CustomError> {
-    let object_id = payload_string(&point.payload, OBJECT_ID_FIELD)?;
-    let object_id = uuid::Uuid::parse_str(&object_id).map_err(|error| {
-        CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
-    })?;
-    let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
-    let surface = parse_vector_surface(payload_string(&point.payload, SURFACE_FIELD)?)?;
-
-    Ok(VectorCandidateDiagnosticRecord {
-        object_id,
-        object_type,
-        graph_uri: payload_string(&point.payload, GRAPH_URI_FIELD)?,
-        surface,
-        schema_version: payload_string(&point.payload, SCHEMA_VERSION_FIELD)?,
-        retention_state: optional_payload_string(&point.payload, RETENTION_STATE_FIELD)
-            .map(parse_retention_state)
-            .transpose()?,
-        is_current: optional_payload_bool(&point.payload, IS_CURRENT_FIELD)?,
-        is_superseded: optional_payload_bool(&point.payload, IS_SUPERSEDED_FIELD)?,
-    })
 }
 
 fn qdrant_point_id(record: &crate::models::vector::VectorRecord) -> uuid::Uuid {
@@ -714,33 +593,6 @@ fn payload_string(
     }
 }
 
-// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
-#[allow(dead_code)]
-fn optional_payload_string(
-    payload: &HashMap<String, qdrant_client::qdrant::Value>,
-    field: &str,
-) -> Option<String> {
-    match payload.get(field).and_then(|value| value.kind.as_ref()) {
-        Some(Kind::StringValue(value)) => Some(value.clone()),
-        _ => None,
-    }
-}
-
-// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
-#[allow(dead_code)]
-fn optional_payload_bool(
-    payload: &HashMap<String, qdrant_client::qdrant::Value>,
-    field: &str,
-) -> Result<Option<bool>, CustomError> {
-    match payload.get(field).and_then(|value| value.kind.as_ref()) {
-        Some(Kind::BoolValue(value)) => Ok(Some(*value)),
-        None => Ok(None),
-        _ => Err(CustomError::DatabaseError(format!(
-            "Invalid boolean field in Qdrant payload: {field}"
-        ))),
-    }
-}
-
 fn object_type_name(object_type: ObjectType) -> &'static str {
     match object_type {
         ObjectType::Episode => "episode",
@@ -749,39 +601,6 @@ fn object_type_name(object_type: ObjectType) -> &'static str {
         ObjectType::MemoryThread => "memory_thread",
         ObjectType::DerivedMemory => "derived_memory",
         ObjectType::MemoryLink => "memory_link",
-    }
-}
-
-// Diagnostic sort order is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
-#[allow(dead_code)]
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
-}
-
-fn retention_state_name(retention_state: RetentionState) -> &'static str {
-    match retention_state {
-        RetentionState::Active => "active",
-        RetentionState::Suppressed => "suppressed",
-        RetentionState::Archived => "archived",
-        RetentionState::Deleted => "deleted",
-    }
-}
-
-fn time_field_name(field: VectorTimeField) -> &'static str {
-    match field {
-        VectorTimeField::Created => CREATED_AT_FIELD,
-        VectorTimeField::Updated => UPDATED_AT_FIELD,
-        VectorTimeField::Started => STARTED_AT_FIELD,
-        VectorTimeField::Ended => ENDED_AT_FIELD,
-        VectorTimeField::Observed => OBSERVED_AT_FIELD,
-        VectorTimeField::LastTouched => LAST_TOUCHED_AT_FIELD,
     }
 }
 
@@ -809,20 +628,6 @@ fn parse_object_type(value: String) -> Result<ObjectType, CustomError> {
     }
 }
 
-// Diagnostic payload parsing is dormant until reconciliation is wired; remove with list_candidate_diagnostics.
-#[allow(dead_code)]
-fn parse_retention_state(value: String) -> Result<RetentionState, CustomError> {
-    match value.as_str() {
-        "active" => Ok(RetentionState::Active),
-        "suppressed" => Ok(RetentionState::Suppressed),
-        "archived" => Ok(RetentionState::Archived),
-        "deleted" => Ok(RetentionState::Deleted),
-        _ => Err(CustomError::DatabaseError(format!(
-            "Unknown Qdrant retention_state payload value: {value}"
-        ))),
-    }
-}
-
 fn parse_vector_surface(value: String) -> Result<VectorSurface, CustomError> {
     match value.as_str() {
         "summary" => Ok(VectorSurface::Summary),
@@ -838,12 +643,13 @@ fn parse_vector_surface(value: String) -> Result<VectorSurface, CustomError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::payload::{CONTENT_TEXT_FIELD, GRAPH_URI_FIELD};
+    use super::super::payload::{
+        CONTENT_TEXT_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, RETENTION_STATE_FIELD,
+    };
     use super::*;
     use crate::domain::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{
-        VectorCandidateFilters, VectorPayloadHints, VectorRecord, VectorRecordEmbedding,
-        VectorRelationshipHints, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+        VectorRecord, VectorRecordEmbedding, VectorRelationshipHints, VectorSurface,
     };
     use qdrant_client::qdrant::condition::ConditionOneOf;
     use qdrant_client::qdrant::{
@@ -852,6 +658,7 @@ mod tests {
     };
     use std::env;
     use std::time::Instant;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use uuid::Uuid;
 
     #[test]
@@ -864,6 +671,146 @@ mod tests {
         );
         assert_eq!(config.uri, "http://localhost:6334");
         assert!(config.keep_alive_while_idle);
+    }
+
+    #[test]
+    fn candidate_filter_maps_live_object_type_scope() {
+        assert!(qdrant_candidate_filter(&VectorCandidateSearch::new(vec![1.0, 0.0], 10)).is_none());
+
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
+            .with_object_types(vec![ObjectType::Episode]);
+        let filter = qdrant_candidate_filter(&query).expect("object-type scope should build");
+        let Some(ConditionOneOf::Field(field)) = &filter.must[0].condition_one_of else {
+            panic!("single object type should map to a field condition");
+        };
+
+        assert_eq!(field.key, OBJECT_TYPE_FIELD);
+    }
+
+    #[test]
+    fn qdrant_response_error_preserves_typed_transport_status() {
+        let error = qdrant_error(QdrantError::ResponseError {
+            status: tonic::Status::unavailable("offline"),
+        });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                backend,
+                kind: VectorDatabaseErrorKind::Response,
+                status: Some(TransportStatus::Unavailable),
+                message,
+                retry_after_seconds: None,
+            }) if backend == "qdrant" && message == "offline"
+        ));
+    }
+
+    #[test]
+    fn qdrant_response_error_promotes_nested_io_classification() {
+        let status = tonic::Status::from_error(Box::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionRefused,
+        )));
+        let error = qdrant_error(QdrantError::ResponseError { status });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::Io {
+                    io_kind: IoErrorKind::ConnectionRefused,
+                },
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn qdrant_http_status_error_preserves_typed_status() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let response = reqwest_012::get(format!("http://{address}/status"))
+            .await
+            .unwrap();
+        server.await.unwrap();
+        let status_error = response.error_for_status().unwrap_err();
+        let classified = qdrant_error(QdrantError::Reqwest(status_error));
+
+        assert!(matches!(
+            classified,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::HttpStatus,
+                status: Some(TransportStatus::ResourceExhausted),
+                ..
+            })
+        ));
+        assert_eq!(
+            http_transport_status(418),
+            TransportStatus::Unrecognized("418".to_owned())
+        );
+    }
+
+    #[test]
+    fn qdrant_connect_prefix_parser_fixture() {
+        // This isolates our sanctioned parser behavior; the dependency-bound canary below
+        // verifies that qdrant-client still emits the parsed shape.
+        let error = qdrant_error(QdrantError::ResponseError {
+            status: tonic::Status::internal(
+                "Failed to connect to http://127.0.0.1:65534/: tonic transport failure",
+            ),
+        });
+
+        assert!(matches!(
+            error,
+            CustomError::VectorDatabaseError(VectorDatabaseError {
+                kind: VectorDatabaseErrorKind::HttpConnect,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn qdrant_client_1_17_erased_connect_contract_canary() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let unreachable_address = listener.local_addr().unwrap();
+        drop(listener);
+
+        let client = Qdrant::new(
+            QdrantConfig::from_url(&format!("http://{unreachable_address}"))
+                .connect_timeout(Duration::from_millis(250))
+                .timeout(Duration::from_millis(500)),
+        )
+        .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), client.list_collections())
+            .await
+            .expect("qdrant-client unreachable-endpoint request must remain bounded");
+        let Err(upstream_error) = result else {
+            panic!("closed loopback endpoint unexpectedly accepted a Qdrant request");
+        };
+
+        let classified = qdrant_error(upstream_error);
+        assert!(
+            matches!(
+                classified,
+                CustomError::VectorDatabaseError(VectorDatabaseError {
+                    kind: VectorDatabaseErrorKind::HttpConnect,
+                    ..
+                })
+            ),
+            "qdrant-client connection-error contract drifted; inspect channel_pool.rs and retire or update the ruled adapter exception"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -960,10 +907,13 @@ mod tests {
             .expect_err("mismatched existing collection should fail");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("memories")
-                    && message.contains("expected 3072")
-                    && message.contains("found 1536")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: 3072,
+                    actual: 1536,
+                },
+            }) if collection == "memories"
         ));
     }
 
@@ -981,10 +931,13 @@ mod tests {
             .expect_err("same-size collection with wrong distance should fail");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("memories")
-                    && message.contains("expected Cosine")
-                    && message.contains("Euclid")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::Distance {
+                    expected: "Cosine",
+                    actual,
+                },
+            }) if collection == "memories" && actual == "Euclid"
         ));
     }
 
@@ -1007,8 +960,10 @@ mod tests {
             .expect_err("named vectors should not be accepted for unnamed vector store");
         assert!(matches!(
             error,
-            CustomError::DatabaseError(message)
-                if message.contains("named vectors") && message.contains("content")
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::NamedVectors { names },
+            }) if collection == "memories" && names == vec!["content"]
         ));
     }
 
@@ -1038,31 +993,6 @@ mod tests {
         assert_eq!(matched.object_type, ObjectType::DerivedMemory);
         assert_eq!(matched.surface, VectorSurface::DerivedText);
         assert_eq!(matched.score, 0.75);
-    }
-
-    #[test]
-    fn diagnostic_mapping_requires_current_payload_fields() {
-        let object_id = Uuid::new_v4();
-        let point = RetrievedPoint {
-            payload: HashMap::from([
-                (
-                    OBJECT_ID_FIELD.to_owned(),
-                    string_value(&object_id.to_string()),
-                ),
-                (OBJECT_TYPE_FIELD.to_owned(), string_value("derived_memory")),
-                (SURFACE_FIELD.to_owned(), string_value("derived_text")),
-                (
-                    GRAPH_URI_FIELD.to_owned(),
-                    string_value("urn:character-memory:derived-memory:test"),
-                ),
-            ]),
-            ..Default::default()
-        };
-
-        let error = retrieved_point_to_diagnostic_record(point).unwrap_err();
-
-        assert!(matches!(error, CustomError::DatabaseError(_)));
-        assert!(error.to_string().contains(SCHEMA_VERSION_FIELD));
     }
 
     #[test]
@@ -1171,77 +1101,6 @@ mod tests {
     }
 
     #[test]
-    fn candidate_prefilter_construction_maps_payload_hint_fields() {
-        let thread_id = Uuid::new_v4();
-        let entity_id = Uuid::new_v4();
-        let episode_id = Uuid::new_v4();
-        let filters = VectorCandidateFilters::new()
-            .with_retention_states(vec![RetentionState::Active])
-            .current_only()
-            .with_thread_ids(vec![thread_id])
-            .with_entity_ids(vec![entity_id])
-            .with_episode_ids(vec![episode_id])
-            .with_time_range(VectorTimeRangeFilter::new(
-                VectorTimeField::Updated,
-                Some(timestamp_utc("2026-04-29T10:00:00Z")),
-                Some(timestamp_utc("2026-04-29T11:00:00Z")),
-            ));
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(vec![ObjectType::DerivedMemory, ObjectType::Observation])
-            .with_filters(filters);
-
-        let filter = qdrant_candidate_filter(&query).expect("filter builds");
-        let keys = field_keys(&filter);
-
-        for expected in [
-            OBJECT_TYPE_FIELD,
-            RETENTION_STATE_FIELD,
-            THREAD_IDS_FIELD,
-            EPISODE_IDS_FIELD,
-            ENTITY_IDS_FIELD,
-            PARTICIPANT_ENTITY_IDS_FIELD,
-            SPEAKER_ENTITY_ID_FIELD,
-            UPDATED_AT_FIELD,
-        ] {
-            assert!(keys.contains(&expected.to_owned()), "missing {expected}");
-        }
-        assert!(keys.contains(&IS_CURRENT_FIELD.to_owned()));
-        assert!(keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
-    }
-
-    #[test]
-    fn candidate_prefilter_scopes_currentness_to_derived_memory_searches() {
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(vec![ObjectType::DerivedMemory])
-            .with_filters(VectorCandidateFilters::new().current_only());
-
-        let filter = qdrant_candidate_filter(&query).expect("filter builds");
-        let keys = field_keys(&filter);
-
-        assert!(keys.contains(&IS_CURRENT_FIELD.to_owned()));
-        assert!(keys.contains(&IS_SUPERSEDED_FIELD.to_owned()));
-    }
-
-    #[test]
-    fn candidate_prefilter_allows_missing_currentness_hints_for_graph_verification() {
-        let condition = currentness_filter_condition(
-            &VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-                .with_object_types(vec![ObjectType::DerivedMemory])
-                .with_filters(VectorCandidateFilters::new().current_only()),
-        )
-        .expect("currentness filter builds");
-        let mut condition_kinds = Vec::new();
-        collect_condition_kinds(&condition, &mut condition_kinds);
-
-        assert!(condition_kinds.contains(&"field:is_current".to_owned()));
-        assert!(condition_kinds.contains(&"is_empty:is_current".to_owned()));
-        assert!(condition_kinds.contains(&"is_null:is_current".to_owned()));
-        assert!(condition_kinds.contains(&"field:is_superseded".to_owned()));
-        assert!(condition_kinds.contains(&"is_empty:is_superseded".to_owned()));
-        assert!(condition_kinds.contains(&"is_null:is_superseded".to_owned()));
-    }
-
-    #[test]
     fn candidate_mapping_can_be_canonicalized_independently_of_qdrant_order() {
         let higher_score_id = Uuid::from_u128(3);
         let first_tied_id = Uuid::from_u128(1);
@@ -1252,7 +1111,7 @@ mod tests {
             scored_point(first_tied_id, ObjectType::DerivedMemory, 0.42),
         ];
 
-        let matches = canonicalize_vector_candidates(
+        let matches = CanonicalCandidates::new(
             points
                 .into_iter()
                 .map(scored_point_to_match)
@@ -1281,7 +1140,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let mut candidates = canonicalize_vector_candidates(fetched);
+        let candidates = CanonicalCandidates::new(fetched);
         let fetch_bound = candidates.len();
 
         assert_eq!(
@@ -1295,7 +1154,7 @@ mod tests {
             TieCohortFetchDecision::ReturnAtBound
         );
 
-        candidates.truncate(admitted_limit);
+        let candidates = candidates.truncated(admitted_limit);
         assert_eq!(
             candidates
                 .iter()
@@ -1309,10 +1168,9 @@ mod tests {
     fn candidate_mapping_does_not_return_lifecycle_hints_as_authority() {
         let object_id = Uuid::new_v4();
         let mut point = scored_point(object_id, ObjectType::DerivedMemory, 0.77);
-        point.payload.insert(
-            RETENTION_STATE_FIELD.to_owned(),
-            string_value(retention_state_name(RetentionState::Active)),
-        );
+        point
+            .payload
+            .insert(RETENTION_STATE_FIELD.to_owned(), string_value("active"));
         point
             .payload
             .insert(IS_CURRENT_FIELD.to_owned(), bool_value(true));
@@ -1326,7 +1184,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
-    async fn qdrant_candidate_store_live_smoke_upserts_filters_searches_and_deletes() {
+    async fn qdrant_candidate_store_live_smoke_upserts_searches_and_deletes() {
         let url = env::var("QDRANT_CONNECTION_STRING")
             .expect("QDRANT_CONNECTION_STRING is required for live Qdrant smoke test");
         let collection_name = format!("cmem_candidate_smoke_{}", Uuid::new_v4());
@@ -1334,9 +1192,6 @@ mod tests {
             QdrantVectorCandidateStore::new(url, &collection_name, 2).expect("store builds");
 
         let object_id = Uuid::new_v4();
-        let thread_id = Uuid::new_v4();
-        let entity_id = Uuid::new_v4();
-        let episode_id = Uuid::new_v4();
         let record = VectorRecord::new(
             object_id,
             ObjectType::DerivedMemory,
@@ -1347,19 +1202,9 @@ mod tests {
             DEFAULT_SCHEMA_VERSION,
             Some(RetentionState::Active),
             Some(true),
-            VectorRelationshipHints {
-                episode_ids: vec![episode_id],
-                thread_ids: vec![thread_id],
-                entity_ids: vec![entity_id],
-                ..VectorRelationshipHints::default()
-            },
+            VectorRelationshipHints::default(),
             None,
-        )
-        .with_payload_hints(VectorPayloadHints {
-            updated_at: Some(timestamp_utc("2026-04-29T10:30:00Z")),
-            is_superseded: Some(false),
-            ..VectorPayloadHints::default()
-        });
+        );
 
         store.init_collection().await.expect("collection init");
         store
@@ -1370,20 +1215,7 @@ mod tests {
         let matches = store
             .search_candidates(
                 &VectorCandidateSearch::new(vec![1.0, 0.0], 1)
-                    .with_object_types(vec![ObjectType::DerivedMemory])
-                    .with_filters(
-                        VectorCandidateFilters::new()
-                            .with_retention_states(vec![RetentionState::Active])
-                            .current_only()
-                            .with_thread_ids(vec![thread_id])
-                            .with_entity_ids(vec![entity_id])
-                            .with_episode_ids(vec![episode_id])
-                            .with_time_range(VectorTimeRangeFilter::new(
-                                VectorTimeField::Updated,
-                                Some(timestamp_utc("2026-04-29T10:00:00Z")),
-                                Some(timestamp_utc("2026-04-29T11:00:00Z")),
-                            )),
-                    ),
+                    .with_object_types(vec![ObjectType::DerivedMemory]),
             )
             .await
             .expect("search succeeds");
@@ -1459,56 +1291,6 @@ mod tests {
         let _ = store.client.delete_collection(&collection_name).await;
     }
 
-    fn field_keys(filter: &Filter) -> Vec<String> {
-        let mut keys = Vec::new();
-        for condition in filter
-            .must
-            .iter()
-            .chain(filter.should.iter())
-            .chain(filter.must_not.iter())
-        {
-            collect_condition_field_keys(condition, &mut keys);
-        }
-        if let Some(min_should) = &filter.min_should {
-            for condition in &min_should.conditions {
-                collect_condition_field_keys(condition, &mut keys);
-            }
-        }
-        keys
-    }
-
-    fn collect_condition_field_keys(condition: &Condition, keys: &mut Vec<String>) {
-        match &condition.condition_one_of {
-            Some(ConditionOneOf::Field(field)) => keys.push(field.key.clone()),
-            Some(ConditionOneOf::Filter(filter)) => keys.extend(field_keys(filter)),
-            _ => {}
-        }
-    }
-
-    fn collect_condition_kinds(condition: &Condition, kinds: &mut Vec<String>) {
-        match &condition.condition_one_of {
-            Some(ConditionOneOf::Field(field)) => kinds.push(format!("field:{}", field.key)),
-            Some(ConditionOneOf::IsEmpty(field)) => kinds.push(format!("is_empty:{}", field.key)),
-            Some(ConditionOneOf::IsNull(field)) => kinds.push(format!("is_null:{}", field.key)),
-            Some(ConditionOneOf::Filter(filter)) => {
-                for condition in filter
-                    .must
-                    .iter()
-                    .chain(filter.should.iter())
-                    .chain(filter.must_not.iter())
-                {
-                    collect_condition_kinds(condition, kinds);
-                }
-                if let Some(min_should) = &filter.min_should {
-                    for condition in &min_should.conditions {
-                        collect_condition_kinds(condition, kinds);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn scored_point(object_id: Uuid, object_type: ObjectType, score: f32) -> ScoredPoint {
         ScoredPoint {
             id: Some(PointId {
@@ -1528,12 +1310,6 @@ mod tests {
             score,
             ..Default::default()
         }
-    }
-
-    fn timestamp_utc(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value)
-            .unwrap()
-            .with_timezone(&Utc)
     }
 
     fn string_value(value: &str) -> Value {

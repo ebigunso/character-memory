@@ -758,6 +758,24 @@ Fix applied:
 Prevention:
 - For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
 
+## 2026-07-21 - Pruning Completion Needs Totality And Cross-Adapter Parity  [tags: review, validation, deletion-first]
+
+Context:
+- Plan: structured-verdict-observability, Task_3 pruning/hygiene wave
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Task_3 passed its worker gates while five stale `allow(dead_code)` attributes remained in touched modules, Qdrant serialization did not actually resolve fields through its manifest, and empty `GraphObjectQuery` variants diverged between fake and Oxigraph adapters.
+
+Root cause:
+- Completion audits emphasized deleted-name absence and representative happy-path tests, but did not enumerate every touched suppression, prove both directions of a claimed single-source contract, or exercise empty/non-empty semantics for every closed query variant across adapters.
+
+Fix applied:
+- Removed or test-scoped all five suppressions, routed every Qdrant payload write through the manifest with exhaustive emitted-key equality coverage, and added fake/Oxigraph parity tests for empty and non-empty forms of all three query variants.
+
+Prevention:
+- For pruning and closed-contract tasks, the worker closeout checklist must include: a touched-file suppression census, bidirectional totality assertions for every single-source manifest, and per-variant empty/non-empty parity tests for each adapter implementing the same port.
+
 ## 2026-07-21 - Constraint-Induced Workarounds Need A Tripwire, Not Hindsight  [tags: delegation, planning, review]
 
 Context:
@@ -775,3 +793,64 @@ Fix applied:
 
 Prevention:
 - Frame rules at the altitude of the failure mode, with observed instances as examples only; dispatch constraints must carry their own escape hatch; tripwire escalations are replan triggers with recorded rulings.
+
+## 2026-07-21 - Shared-Checkout Git Operations Are Orchestrator-Coordinated  [tags: delegation, workflow, tooling]
+
+Context:
+- Plan: structured-verdict-observability; Task_3/Task_4 parallel wave across the shared CM checkout
+
+Symptom:
+- Recurred twice in one phase: CME aggregate gates repeatedly compiled the sibling CM checkout mid-edit (spurious failures), and a Task_4 dispatch instructed the evals worker to check out a branch in that sibling — which is the CM worker's ACTIVE working tree (caught by the worker's tripwire discipline before mutation).
+
+Root cause:
+- Cross-repo coordination did not treat the sibling path dependency as someone's live working tree; dispatch prompts described it as a passive surface.
+
+Fix applied:
+- Standing protocol: shared-checkout git operations are exclusively orchestrator-coordinated; workers read cross-repo surfaces via git show at orchestrator-pinned SHAs; sibling-compiling validation (targeted or aggregate) is sequenced by the orchestrator around the other repo's settle points.
+
+Prevention:
+- Dispatches naming a sibling repo must state its role explicitly (active checkout vs pinned read surface) and the validation boundary (which crates compile it).
+
+## 2026-07-21 - Batch Notes From The Observability Phase  [tags: validation, tooling]
+
+- Equivalence/producer-vocabulary completeness: enumerate from the producer's full branch set, never from a finding's cited examples (SectionAssignmentReason missed a live branch; same class as the sealed-reader claim).
+- Cause-type refinements must be checked against the containing DTOs' derive obligations (serialized evidence needs Clone/serde/Eq; Box<CustomError> was unusable).
+- Run denied-warning clippy immediately after broad type-unification slices, not only at final gates (worker candidate).
+- Prefer apply_patch-style edits over PowerShell nested replacement maps for source edits (punctuation corruption risk; worker candidate).
+- agmsg send.sh takes exactly TEAM FROM TO MESSAGE; an extra positional argument silently displaces the body (reviewer candidate; symptom: bare one-word messages).
+
+## 2026-07-21 - Typed Error Contracts Must Survive Producers, Serde, And Test Gates  [tags: review, validation, errors]
+
+Context:
+- Plan: structured-verdict-observability; PR #65 review fixes
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Closed error vocabularies were flattened or made unserializable at three different boundaries: a public provider trait accepted broad `CustomError`, graph-mode validation passed through serde prose, and a primitive newtype variant could not serialize under an internal tag. Separately, the Qdrant skip gate recovered transport meaning by matching rendered error text.
+
+Root cause:
+- Type design was checked at enum declarations but not end to end through producer signatures, adapter normalization, serde representation, and control-flow consumers. Representative tests constructed only a subset of variants and the service-down control had not been run after removing prose matching.
+
+Fix applied:
+- Retyped the provider boundary to `EmbeddingError`, preserved graph-mode validation before serde flattening, made every internally tagged variant structurally serializable, normalized Qdrant connection failures inside the adapter, and made skip gating consume typed transport classifications only. Exhaustive per-variant serde coverage and both service-down/service-up controls now enforce the contract.
+
+Prevention:
+- For every closed error vocabulary, audit four surfaces together: producer return type, adapter conversion, serialization of every variant, and downstream branching. Coverage must be compiler-exhaustive, unknown fallbacks must use opaque markers or representation-frozen tokens rather than Debug output, and regression tests must traverse production wiring instead of testing only the extracted helper. Any skip/retry/fallback predicate must consume typed classification, and its verification must include both a forced-failure control and a successful exercised path.
+
+## 2026-07-22 - Typed Observability Must Include Persistence And Failure Multiplicity  [tags: review, validation, errors, configuration]
+
+Context:
+- Plan: structured-verdict-observability; final thesis audit
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- Follow-up fixes left stats causes as prose at the graph and stats ports, persisted a rendered cause in health metadata, discarded a second simultaneous stats failure, classified one upstream-erased transport error through an undocumented prefix, and special-cased one configuration field with a pre-read before deserializing the full settings object again.
+
+Root cause:
+- The typed-contract audit stopped at the immediate public enum and did not trace the same information through producer signatures, durable state, multi-error aggregation, external dependency loss, and configuration admission.
+
+Fix applied:
+- Closed graph-query and stats-store error vocabularies now cross their ports, health metadata persists a typed operation and error, stats failures and repair markers retain every observed cause, the unavoidable qdrant-client 1.17.0 prefix dependency is ruled and pinned by a canary, and settings deserialize once into a raw representation before structured conversion and validation.
+
+Prevention:
+- For typed observability changes, review a cause matrix from producer to adapter, persistence, public DTO, serde, and every branching consumer; include simultaneous-failure tests wherever operations can continue after an earlier failure. Treat external prose coupling as an exception requiring an exact upstream citation, version marker, drift canary, and retirement condition. Configuration admission must deserialize once into raw data and perform semantic parsing in one typed conversion rather than pre-reading individual fields.

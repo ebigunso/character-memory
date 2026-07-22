@@ -1,12 +1,8 @@
-#[path = "base.rs"]
-mod base;
-
-use character_memory::test_utils::load_test_settings;
 use character_memory::{CharacterMemory, CustomError, Settings};
 use config::Config;
 use std::path::Path;
 
-pub use base::{cleanup_collection, is_qdrant_unavailable_error, unique_collection_name};
+use super::base;
 
 pub async fn try_setup_persistent_character_memory(
     collection_name: String,
@@ -14,7 +10,7 @@ pub async fn try_setup_persistent_character_memory(
     stats_path: &Path,
     about_derived_memory_fanout: Option<(usize, usize)>,
 ) -> Result<CharacterMemory, CustomError> {
-    let base_settings = load_test_settings()?;
+    let base_settings = base::load_test_settings()?;
     let embedding_model = std::env::var("EMBEDDING_MODEL")
         .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
 

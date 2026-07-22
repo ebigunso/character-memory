@@ -8,264 +8,561 @@ use crate::domain::schema::require_current_schema_version;
 use crate::errors::CustomError;
 use crate::models::vector::{VectorRecord, VectorSurface};
 
-pub(crate) const OBJECT_ID_FIELD: &str = "object_id";
-pub(crate) const GRAPH_URI_FIELD: &str = "graph_uri";
-pub(crate) const OBJECT_TYPE_FIELD: &str = "object_type";
-pub(crate) const RECORD_TYPE_FIELD: &str = "record_type";
-pub(crate) const DERIVED_TYPE_FIELD: &str = "derived_type";
-pub(crate) const ENTITY_TYPE_FIELD: &str = "entity_type";
-pub(crate) const THREAD_STATUS_FIELD: &str = "thread_status";
-pub(crate) const SCHEMA_VERSION_FIELD: &str = "schema_version";
-pub(crate) const SURFACE_FIELD: &str = "surface";
-pub(crate) const RETENTION_STATE_FIELD: &str = "retention_state";
-pub(crate) const IS_CURRENT_FIELD: &str = "is_current";
-pub(crate) const IS_SUPERSEDED_FIELD: &str = "is_superseded";
-pub(crate) const EPISODE_IDS_FIELD: &str = "episode_ids";
-pub(crate) const OBSERVATION_IDS_FIELD: &str = "observation_ids";
-pub(crate) const THREAD_IDS_FIELD: &str = "thread_ids";
-pub(crate) const ENTITY_IDS_FIELD: &str = "entity_ids";
-pub(crate) const PARTICIPANT_ENTITY_IDS_FIELD: &str = "participant_entity_ids";
-pub(crate) const SPEAKER_ENTITY_ID_FIELD: &str = "speaker_entity_id";
-pub(crate) const SUPERSEDES_FIELD: &str = "supersedes";
-pub(crate) const MODALITY_FIELD: &str = "modality";
-pub(crate) const SOURCE_CONVERSATION_ID_FIELD: &str = "source_conversation_id";
-pub(crate) const CANONICAL_KEY_FIELD: &str = "canonical_key";
-pub(crate) const CREATED_AT_FIELD: &str = "created_at";
-pub(crate) const UPDATED_AT_FIELD: &str = "updated_at";
-pub(crate) const STARTED_AT_FIELD: &str = "started_at";
-pub(crate) const ENDED_AT_FIELD: &str = "ended_at";
-pub(crate) const OBSERVED_AT_FIELD: &str = "observed_at";
-pub(crate) const LAST_TOUCHED_AT_FIELD: &str = "last_touched_at";
-pub(crate) const SALIENCE_SCORE_FIELD: &str = "salience_score";
-pub(crate) const CONFIDENCE_FIELD: &str = "confidence";
-pub(crate) const STABILITY_FIELD: &str = "stability";
-pub(crate) const RAW_REF_FIELD: &str = "raw_ref";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QdrantPayloadKind {
+    Keyword,
+    Datetime,
+    Bool,
+    Float,
+    Text,
+}
 
-// Graph-authority boundary note is asserted by all-target tests; remove when Qdrant owns graph truth.
-#[cfg_attr(not(test), allow(dead_code))]
+impl QdrantPayloadKind {
+    pub(crate) const fn field_type(self) -> FieldType {
+        match self {
+            Self::Keyword => FieldType::Keyword,
+            Self::Datetime => FieldType::Datetime,
+            Self::Bool => FieldType::Bool,
+            Self::Float => FieldType::Float,
+            Self::Text => FieldType::Text,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QdrantPayloadField {
+    ObjectId,
+    GraphUri,
+    ObjectType,
+    DerivedType,
+    EntityType,
+    ThreadStatus,
+    SchemaVersion,
+    Surface,
+    EmbeddingText,
+    ContentText,
+    RetentionState,
+    IsCurrent,
+    IsSuperseded,
+    EpisodeIds,
+    ObservationIds,
+    ThreadIds,
+    EntityIds,
+    ParticipantEntityIds,
+    SpeakerEntityId,
+    Supersedes,
+    Modality,
+    SourceConversationId,
+    CanonicalKey,
+    CreatedAt,
+    UpdatedAt,
+    StartedAt,
+    EndedAt,
+    ObservedAt,
+    LastTouchedAt,
+    SalienceScore,
+    Confidence,
+    Stability,
+    RawRef,
+}
+
+impl QdrantPayloadField {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::ObjectId => "object_id",
+            Self::GraphUri => "graph_uri",
+            Self::ObjectType => "object_type",
+            Self::DerivedType => "derived_type",
+            Self::EntityType => "entity_type",
+            Self::ThreadStatus => "thread_status",
+            Self::SchemaVersion => "schema_version",
+            Self::Surface => "surface",
+            Self::EmbeddingText => "embedding_text",
+            Self::ContentText => "content_text",
+            Self::RetentionState => "retention_state",
+            Self::IsCurrent => "is_current",
+            Self::IsSuperseded => "is_superseded",
+            Self::EpisodeIds => "episode_ids",
+            Self::ObservationIds => "observation_ids",
+            Self::ThreadIds => "thread_ids",
+            Self::EntityIds => "entity_ids",
+            Self::ParticipantEntityIds => "participant_entity_ids",
+            Self::SpeakerEntityId => "speaker_entity_id",
+            Self::Supersedes => "supersedes",
+            Self::Modality => "modality",
+            Self::SourceConversationId => "source_conversation_id",
+            Self::CanonicalKey => "canonical_key",
+            Self::CreatedAt => "created_at",
+            Self::UpdatedAt => "updated_at",
+            Self::StartedAt => "started_at",
+            Self::EndedAt => "ended_at",
+            Self::ObservedAt => "observed_at",
+            Self::LastTouchedAt => "last_touched_at",
+            Self::SalienceScore => "salience_score",
+            Self::Confidence => "confidence",
+            Self::Stability => "stability",
+            Self::RawRef => "raw_ref",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct QdrantPayloadFieldSchema {
+    pub(crate) field: QdrantPayloadField,
+    pub(crate) kind: QdrantPayloadKind,
+    pub(crate) indexed: bool,
+}
+
+pub(crate) struct QdrantPayloadSchema;
+
+impl QdrantPayloadSchema {
+    pub(crate) const FIELDS: &[QdrantPayloadFieldSchema] = &[
+        schema(
+            QdrantPayloadField::ObjectId,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::GraphUri,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ObjectType,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::DerivedType,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::EntityType,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ThreadStatus,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::SchemaVersion,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::Surface,
+            QdrantPayloadKind::Keyword,
+            false,
+        ),
+        schema(
+            QdrantPayloadField::EmbeddingText,
+            QdrantPayloadKind::Text,
+            false,
+        ),
+        schema(
+            QdrantPayloadField::ContentText,
+            QdrantPayloadKind::Text,
+            false,
+        ),
+        schema(
+            QdrantPayloadField::RetentionState,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(QdrantPayloadField::IsCurrent, QdrantPayloadKind::Bool, true),
+        schema(
+            QdrantPayloadField::IsSuperseded,
+            QdrantPayloadKind::Bool,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::EpisodeIds,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ObservationIds,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ThreadIds,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::EntityIds,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ParticipantEntityIds,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::SpeakerEntityId,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::Supersedes,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::Modality,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::SourceConversationId,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::CanonicalKey,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::CreatedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::UpdatedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::StartedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::EndedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::ObservedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::LastTouchedAt,
+            QdrantPayloadKind::Datetime,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::SalienceScore,
+            QdrantPayloadKind::Float,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::Confidence,
+            QdrantPayloadKind::Float,
+            true,
+        ),
+        schema(
+            QdrantPayloadField::Stability,
+            QdrantPayloadKind::Keyword,
+            true,
+        ),
+        schema(QdrantPayloadField::RawRef, QdrantPayloadKind::Keyword, true),
+    ];
+
+    pub(crate) fn indexed_fields() -> impl Iterator<Item = &'static QdrantPayloadFieldSchema> {
+        Self::FIELDS.iter().filter(|field| field.indexed)
+    }
+
+    fn field_schema(field: QdrantPayloadField) -> &'static QdrantPayloadFieldSchema {
+        Self::FIELDS
+            .iter()
+            .find(|schema| schema.field == field)
+            .expect("every writable Qdrant payload field must be declared in the schema")
+    }
+}
+
+const fn schema(
+    field: QdrantPayloadField,
+    kind: QdrantPayloadKind,
+    indexed: bool,
+) -> QdrantPayloadFieldSchema {
+    QdrantPayloadFieldSchema {
+        field,
+        kind,
+        indexed,
+    }
+}
+
+pub(crate) const OBJECT_ID_FIELD: &str = QdrantPayloadField::ObjectId.name();
+#[cfg(test)]
+pub(crate) const GRAPH_URI_FIELD: &str = QdrantPayloadField::GraphUri.name();
+pub(crate) const OBJECT_TYPE_FIELD: &str = QdrantPayloadField::ObjectType.name();
+#[cfg(test)]
+pub(crate) const DERIVED_TYPE_FIELD: &str = QdrantPayloadField::DerivedType.name();
+#[cfg(test)]
+pub(crate) const SCHEMA_VERSION_FIELD: &str = QdrantPayloadField::SchemaVersion.name();
+pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
+#[cfg(test)]
+pub(crate) const RETENTION_STATE_FIELD: &str = QdrantPayloadField::RetentionState.name();
+#[cfg(test)]
+pub(crate) const IS_CURRENT_FIELD: &str = QdrantPayloadField::IsCurrent.name();
+#[cfg(test)]
+pub(crate) const IS_SUPERSEDED_FIELD: &str = QdrantPayloadField::IsSuperseded.name();
+#[cfg(test)]
+pub(crate) const EPISODE_IDS_FIELD: &str = QdrantPayloadField::EpisodeIds.name();
+#[cfg(test)]
+pub(crate) const OBSERVATION_IDS_FIELD: &str = QdrantPayloadField::ObservationIds.name();
+#[cfg(test)]
+pub(crate) const THREAD_IDS_FIELD: &str = QdrantPayloadField::ThreadIds.name();
+#[cfg(test)]
+pub(crate) const ENTITY_IDS_FIELD: &str = QdrantPayloadField::EntityIds.name();
+#[cfg(test)]
+pub(crate) const SUPERSEDES_FIELD: &str = QdrantPayloadField::Supersedes.name();
+#[cfg(test)]
+pub(crate) const MODALITY_FIELD: &str = QdrantPayloadField::Modality.name();
+#[cfg(test)]
+pub(crate) const CREATED_AT_FIELD: &str = QdrantPayloadField::CreatedAt.name();
+#[cfg(test)]
+pub(crate) const UPDATED_AT_FIELD: &str = QdrantPayloadField::UpdatedAt.name();
+#[cfg(test)]
+pub(crate) const OBSERVED_AT_FIELD: &str = QdrantPayloadField::ObservedAt.name();
+#[cfg(test)]
+pub(crate) const LAST_TOUCHED_AT_FIELD: &str = QdrantPayloadField::LastTouchedAt.name();
+#[cfg(test)]
+pub(crate) const SALIENCE_SCORE_FIELD: &str = QdrantPayloadField::SalienceScore.name();
+#[cfg(test)]
+pub(crate) const CONFIDENCE_FIELD: &str = QdrantPayloadField::Confidence.name();
+#[cfg(test)]
+pub(crate) const STABILITY_FIELD: &str = QdrantPayloadField::Stability.name();
+#[cfg(test)]
+pub(crate) const RAW_REF_FIELD: &str = QdrantPayloadField::RawRef.name();
+
+#[cfg(test)]
 pub(crate) const GRAPH_AUTHORITY_NOTE: &str =
     "Qdrant relationship ID fields are denormalized filter hints only; GraphAuthorityStore remains authoritative for relationships, provenance, lifecycle, currentness, and graph expansion.";
-// Payload text keys are asserted by all-target tests; remove when payload no longer stores embedded/content text.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const EMBEDDING_TEXT_FIELD: &str = "embedding_text";
-// Payload text keys are asserted by all-target tests; remove when payload no longer stores embedded/content text.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const CONTENT_TEXT_FIELD: &str = "content_text";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct QdrantPayloadIndexField {
-    pub(crate) name: &'static str,
-    pub(crate) field_type: FieldType,
-    pub(crate) purpose: &'static str,
-}
+#[cfg(test)]
+pub(crate) const EMBEDDING_TEXT_FIELD: &str = QdrantPayloadField::EmbeddingText.name();
+#[cfg(test)]
+pub(crate) const CONTENT_TEXT_FIELD: &str = QdrantPayloadField::ContentText.name();
 
 pub(crate) fn qdrant_payload_map(
     record: &VectorRecord,
 ) -> Result<serde_json::Map<String, serde_json::Value>, CustomError> {
     require_current_schema_version(&record.schema_version, "Qdrant payload mapping")?;
 
-    let payload = QdrantVectorPayload::from(record);
-    serde_json::to_value(payload)?
-        .as_object()
-        .cloned()
-        .ok_or_else(|| {
-            CustomError::DatabaseError("Failed to convert Qdrant payload to object".to_owned())
-        })
+    let hints = &record.payload_hints;
+    let relationships = &record.relationship_hints;
+    let mut payload = serde_json::Map::new();
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::ObjectId,
+        record.object_id.to_string(),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::GraphUri,
+        record.graph_uri.clone(),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::ObjectType,
+        enum_value(record.object_type),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::SchemaVersion,
+        record.schema_version.clone(),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::Surface,
+        vector_surface(record.surface),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::EmbeddingText,
+        record.embedding_text.clone(),
+    )?;
+    insert_value(
+        &mut payload,
+        QdrantPayloadField::ContentText,
+        record.content_text.clone(),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::DerivedType,
+        hints.derived_type.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::EntityType,
+        hints.entity_type.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::ThreadStatus,
+        hints.thread_status.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::RetentionState,
+        record.retention_state.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::IsCurrent,
+        record.is_current,
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::IsSuperseded,
+        hints
+            .is_superseded
+            .or_else(|| record.is_current.map(|value| !value)),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::EpisodeIds,
+        ids(&relationships.episode_ids),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::ObservationIds,
+        ids(&relationships.observation_ids),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::ThreadIds,
+        ids(&relationships.thread_ids),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::EntityIds,
+        ids(&relationships.entity_ids),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::ParticipantEntityIds,
+        ids(&relationships.participant_entity_ids),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::SpeakerEntityId,
+        relationships.speaker_entity_id.map(|id| id.to_string()),
+    )?;
+    insert_non_empty(
+        &mut payload,
+        QdrantPayloadField::Supersedes,
+        ids(&relationships.supersedes),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::Modality,
+        hints.modality.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::SourceConversationId,
+        hints.source_conversation_id.clone(),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::CanonicalKey,
+        hints.canonical_key.clone(),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::CreatedAt,
+        hints.created_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::UpdatedAt,
+        hints.updated_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::StartedAt,
+        hints.started_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::EndedAt,
+        hints.ended_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::ObservedAt,
+        hints.observed_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::LastTouchedAt,
+        hints.last_touched_at.map(timestamp),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::SalienceScore,
+        hints.salience_score,
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::Confidence,
+        hints.confidence,
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::Stability,
+        hints.stability.map(enum_value),
+    )?;
+    insert_optional(
+        &mut payload,
+        QdrantPayloadField::RawRef,
+        record.raw_ref.clone(),
+    )?;
+    Ok(payload)
 }
 
-pub(crate) fn qdrant_payload_index_fields() -> Vec<QdrantPayloadIndexField> {
-    vec![
-        keyword(OBJECT_ID_FIELD, "stable vector-to-graph join id"),
-        keyword(GRAPH_URI_FIELD, "stable graph resource pointer"),
-        keyword(OBJECT_TYPE_FIELD, "canonical memory object filtering"),
-        keyword(RECORD_TYPE_FIELD, "indexed vector record kind filtering"),
-        keyword(DERIVED_TYPE_FIELD, "derived memory subtype filtering"),
-        keyword(ENTITY_TYPE_FIELD, "entity subtype filtering"),
-        keyword(THREAD_STATUS_FIELD, "thread lifecycle filtering"),
-        keyword(SCHEMA_VERSION_FIELD, "payload/schema migration filtering"),
-        keyword(RETENTION_STATE_FIELD, "retention lifecycle filtering"),
-        keyword(EPISODE_IDS_FIELD, "episode relationship hint filtering"),
-        keyword(
-            OBSERVATION_IDS_FIELD,
-            "observation relationship hint filtering",
-        ),
-        keyword(THREAD_IDS_FIELD, "thread relationship hint filtering"),
-        keyword(ENTITY_IDS_FIELD, "entity relationship hint filtering"),
-        keyword(
-            PARTICIPANT_ENTITY_IDS_FIELD,
-            "episode participant relationship hint filtering",
-        ),
-        keyword(
-            SPEAKER_ENTITY_ID_FIELD,
-            "observation speaker relationship hint filtering",
-        ),
-        keyword(SUPERSEDES_FIELD, "supersession hint filtering"),
-        keyword(MODALITY_FIELD, "source modality filtering"),
-        keyword(
-            SOURCE_CONVERSATION_ID_FIELD,
-            "source conversation filtering",
-        ),
-        keyword(CANONICAL_KEY_FIELD, "canonical key filtering"),
-        datetime(CREATED_AT_FIELD, "creation time filtering"),
-        datetime(UPDATED_AT_FIELD, "update time filtering"),
-        datetime(STARTED_AT_FIELD, "episode start time filtering"),
-        datetime(ENDED_AT_FIELD, "episode end time filtering"),
-        datetime(OBSERVED_AT_FIELD, "observation time filtering"),
-        datetime(LAST_TOUCHED_AT_FIELD, "thread recency filtering"),
-        boolean(IS_CURRENT_FIELD, "currentness filtering"),
-        boolean(IS_SUPERSEDED_FIELD, "supersession/currentness filtering"),
-        float(SALIENCE_SCORE_FIELD, "salience threshold filtering"),
-        float(CONFIDENCE_FIELD, "confidence threshold filtering"),
-        keyword(STABILITY_FIELD, "derived memory stability filtering"),
-        keyword(
-            RAW_REF_FIELD,
-            "source pointer lookup without raw transcript storage",
-        ),
-    ]
+fn insert_value(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    field: QdrantPayloadField,
+    value: impl Serialize,
+) -> Result<(), CustomError> {
+    let field_schema = QdrantPayloadSchema::field_schema(field);
+    payload.insert(
+        field_schema.field.name().to_owned(),
+        serde_json::to_value(value)?,
+    );
+    Ok(())
 }
 
-#[derive(Debug, Serialize)]
-struct QdrantVectorPayload {
-    object_id: String,
-    graph_uri: String,
-    object_type: String,
-    record_type: String,
-    schema_version: String,
-    surface: &'static str,
-    embedding_text: String,
-    content_text: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    derived_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    entity_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thread_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retention_state: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    is_current: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    is_superseded: Option<bool>,
-
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    episode_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    observation_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    thread_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    entity_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    participant_entity_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    speaker_entity_id: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    supersedes: Vec<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    modality: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_conversation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    canonical_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    created_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    updated_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ended_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    observed_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_touched_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    salience_score: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    confidence: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stability: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    raw_ref: Option<String>,
-}
-
-impl From<&VectorRecord> for QdrantVectorPayload {
-    fn from(record: &VectorRecord) -> Self {
-        let hints = &record.payload_hints;
-        let relationships = &record.relationship_hints;
-        Self {
-            object_id: record.object_id.to_string(),
-            graph_uri: record.graph_uri.clone(),
-            object_type: enum_value(record.object_type),
-            record_type: enum_value(record.object_type),
-            schema_version: record.schema_version.clone(),
-            surface: vector_surface(record.surface),
-            embedding_text: record.embedding_text.clone(),
-            content_text: record.content_text.clone(),
-            derived_type: hints.derived_type.map(enum_value),
-            entity_type: hints.entity_type.map(enum_value),
-            thread_status: hints.thread_status.map(enum_value),
-            retention_state: record.retention_state.map(enum_value),
-            is_current: record.is_current,
-            is_superseded: hints
-                .is_superseded
-                .or_else(|| record.is_current.map(|value| !value)),
-            episode_ids: ids(&relationships.episode_ids),
-            observation_ids: ids(&relationships.observation_ids),
-            thread_ids: ids(&relationships.thread_ids),
-            entity_ids: ids(&relationships.entity_ids),
-            participant_entity_ids: ids(&relationships.participant_entity_ids),
-            speaker_entity_id: relationships.speaker_entity_id.map(|id| id.to_string()),
-            supersedes: ids(&relationships.supersedes),
-            modality: hints.modality.map(enum_value),
-            source_conversation_id: hints.source_conversation_id.clone(),
-            canonical_key: hints.canonical_key.clone(),
-            created_at: hints.created_at.map(timestamp),
-            updated_at: hints.updated_at.map(timestamp),
-            started_at: hints.started_at.map(timestamp),
-            ended_at: hints.ended_at.map(timestamp),
-            observed_at: hints.observed_at.map(timestamp),
-            last_touched_at: hints.last_touched_at.map(timestamp),
-            salience_score: hints.salience_score,
-            confidence: hints.confidence,
-            stability: hints.stability.map(enum_value),
-            raw_ref: record.raw_ref.clone(),
-        }
+fn insert_optional(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    field: QdrantPayloadField,
+    value: Option<impl Serialize>,
+) -> Result<(), CustomError> {
+    if let Some(value) = value {
+        insert_value(payload, field, value)?;
     }
+    Ok(())
 }
 
-fn keyword(name: &'static str, purpose: &'static str) -> QdrantPayloadIndexField {
-    QdrantPayloadIndexField {
-        name,
-        field_type: FieldType::Keyword,
-        purpose,
+fn insert_non_empty<T: Serialize>(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    field: QdrantPayloadField,
+    values: Vec<T>,
+) -> Result<(), CustomError> {
+    if !values.is_empty() {
+        insert_value(payload, field, values)?;
     }
-}
-
-fn datetime(name: &'static str, purpose: &'static str) -> QdrantPayloadIndexField {
-    QdrantPayloadIndexField {
-        name,
-        field_type: FieldType::Datetime,
-        purpose,
-    }
-}
-
-fn boolean(name: &'static str, purpose: &'static str) -> QdrantPayloadIndexField {
-    QdrantPayloadIndexField {
-        name,
-        field_type: FieldType::Bool,
-        purpose,
-    }
-}
-
-fn float(name: &'static str, purpose: &'static str) -> QdrantPayloadIndexField {
-    QdrantPayloadIndexField {
-        name,
-        field_type: FieldType::Float,
-        purpose,
-    }
+    Ok(())
 }
 
 fn ids(ids: &[uuid::Uuid]) -> Vec<String> {
@@ -297,7 +594,8 @@ fn vector_surface(surface: VectorSurface) -> &'static str {
 mod tests {
     use super::*;
     use crate::domain::{
-        graph_uri, DerivedType, ObjectType, RetentionState, Stability, DEFAULT_SCHEMA_VERSION,
+        graph_uri, DerivedType, EntityType, Modality, ObjectType, RetentionState, Stability,
+        ThreadStatus, DEFAULT_SCHEMA_VERSION,
     };
     use crate::models::vector::{
         VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
@@ -320,7 +618,7 @@ mod tests {
             json!(graph_uri(ObjectType::DerivedMemory, object_id))
         );
         assert_eq!(payload[OBJECT_TYPE_FIELD], json!("derived_memory"));
-        assert_eq!(payload[RECORD_TYPE_FIELD], json!("derived_memory"));
+        assert!(payload.get("record_type").is_none());
         assert_eq!(payload[DERIVED_TYPE_FIELD], json!("reflection"));
         assert_eq!(payload[SCHEMA_VERSION_FIELD], json!(DEFAULT_SCHEMA_VERSION));
         assert_eq!(
@@ -406,13 +704,31 @@ mod tests {
     }
 
     #[test]
-    fn index_helper_covers_high_value_filter_fields() {
-        let fields = qdrant_payload_index_fields();
-        let names: Vec<_> = fields.iter().map(|field| field.name).collect();
+    fn schema_manifest_drives_payload_keys_and_indexes() {
+        let payloads = [
+            qdrant_payload_map(&derived_memory_record(id(40))).expect("derived payload maps"),
+            qdrant_payload_map(&fully_populated_record()).expect("complete payload maps"),
+        ];
+        let schema_names = QdrantPayloadSchema::FIELDS
+            .iter()
+            .map(|field| field.field.name())
+            .collect::<std::collections::HashSet<_>>();
+        let emitted_names = payloads
+            .iter()
+            .flat_map(|payload| payload.keys().map(String::as_str))
+            .collect::<std::collections::HashSet<_>>();
+        let indexed_fields = QdrantPayloadSchema::indexed_fields().collect::<Vec<_>>();
+        let indexed_names = indexed_fields
+            .iter()
+            .map(|field| field.field.name())
+            .collect::<Vec<_>>();
+
+        assert_eq!(schema_names.len(), QdrantPayloadSchema::FIELDS.len());
+        assert_eq!(emitted_names, schema_names);
+        assert!(!schema_names.contains("record_type"));
 
         for expected in [
             OBJECT_TYPE_FIELD,
-            RECORD_TYPE_FIELD,
             DERIVED_TYPE_FIELD,
             SCHEMA_VERSION_FIELD,
             ENTITY_IDS_FIELD,
@@ -429,12 +745,17 @@ mod tests {
             CONFIDENCE_FIELD,
             RAW_REF_FIELD,
         ] {
-            assert!(names.contains(&expected), "missing index field {expected}");
+            assert!(
+                indexed_names.contains(&expected),
+                "missing index field {expected}"
+            );
         }
 
-        assert_eq!(field_type(&fields, CREATED_AT_FIELD), FieldType::Datetime);
-        assert_eq!(field_type(&fields, IS_CURRENT_FIELD), FieldType::Bool);
-        assert_eq!(field_type(&fields, SALIENCE_SCORE_FIELD), FieldType::Float);
+        assert_eq!(field_type(CREATED_AT_FIELD), FieldType::Datetime);
+        assert_eq!(field_type(IS_CURRENT_FIELD), FieldType::Bool);
+        assert_eq!(field_type(SALIENCE_SCORE_FIELD), FieldType::Float);
+        assert!(!indexed_names.contains(&EMBEDDING_TEXT_FIELD));
+        assert!(!indexed_names.contains(&CONTENT_TEXT_FIELD));
     }
 
     fn derived_memory_record(object_id: Uuid) -> VectorRecord {
@@ -470,11 +791,53 @@ mod tests {
         })
     }
 
-    fn field_type(fields: &[QdrantPayloadIndexField], name: &str) -> FieldType {
-        fields
+    fn fully_populated_record() -> VectorRecord {
+        VectorRecord::new(
+            id(200),
+            ObjectType::DerivedMemory,
+            graph_uri(ObjectType::DerivedMemory, id(200)),
+            VectorSurface::DerivedText,
+            "Fully populated embedding text",
+            "Fully populated content text",
+            DEFAULT_SCHEMA_VERSION,
+            Some(RetentionState::Active),
+            Some(false),
+            VectorRelationshipHints {
+                episode_ids: vec![id(201)],
+                observation_ids: vec![id(202)],
+                thread_ids: vec![id(203)],
+                entity_ids: vec![id(204)],
+                participant_entity_ids: vec![id(205)],
+                speaker_entity_id: Some(id(206)),
+                supersedes: vec![id(207)],
+            },
+            Some("raw://fully-populated".to_owned()),
+        )
+        .with_payload_hints(VectorPayloadHints {
+            modality: Some(Modality::Chat),
+            derived_type: Some(DerivedType::Reflection),
+            entity_type: Some(EntityType::Concept),
+            thread_status: Some(ThreadStatus::Active),
+            source_conversation_id: Some("conversation-1".to_owned()),
+            canonical_key: Some("canonical-1".to_owned()),
+            created_at: Some(timestamp_fixture()),
+            updated_at: Some(timestamp_fixture()),
+            started_at: Some(timestamp_fixture()),
+            ended_at: Some(timestamp_fixture()),
+            observed_at: Some(timestamp_fixture()),
+            last_touched_at: Some(timestamp_fixture()),
+            salience_score: Some(0.91),
+            confidence: Some(0.82),
+            stability: Some(Stability::Medium),
+            is_superseded: Some(true),
+        })
+    }
+
+    fn field_type(name: &str) -> FieldType {
+        QdrantPayloadSchema::FIELDS
             .iter()
-            .find(|field| field.name == name)
-            .map(|field| field.field_type)
+            .find(|field| field.field.name() == name)
+            .map(|field| field.kind.field_type())
             .expect("field exists")
     }
 

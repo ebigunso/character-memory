@@ -1,7 +1,20 @@
+mod lifecycle;
+mod object_ref;
+mod retrieval;
 pub(crate) mod schema;
 mod write_validation;
 
-pub use write_validation::{CandidateValidation, CandidateValidationStatus, MemoryCandidateKind};
+pub use lifecycle::{LifecycleDtoValidationError, LifecyclePolicyKnob};
+pub use object_ref::MemoryObjectRef;
+pub use retrieval::{
+    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
+};
+pub use write_validation::{
+    CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
+    CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
+    CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind, MemoryLinkEndpoint,
+    PlanIdentityField,
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -33,6 +46,17 @@ impl ObjectType {
             Self::MemoryThread => "thread",
             Self::DerivedMemory => "derived-memory",
             Self::MemoryLink => "link",
+        }
+    }
+
+    pub(crate) const fn stable_rank(self) -> u8 {
+        match self {
+            Self::Episode => 0,
+            Self::Observation => 1,
+            Self::Entity => 2,
+            Self::MemoryThread => 3,
+            Self::DerivedMemory => 4,
+            Self::MemoryLink => 5,
         }
     }
 }
@@ -93,6 +117,27 @@ pub enum RelationType {
     AssociatedWith,
 }
 
+impl RelationType {
+    pub(crate) const fn stable_rank(self) -> u8 {
+        match self {
+            Self::HasObservation => 0,
+            Self::ObservedIn => 1,
+            Self::Mentions => 2,
+            Self::Involves => 3,
+            Self::About => 4,
+            Self::DerivedFrom => 5,
+            Self::PartOfThread => 6,
+            Self::Supports => 7,
+            Self::Contradicts => 8,
+            Self::Supersedes => 9,
+            Self::Resolves => 10,
+            Self::CreatesOpenLoop => 11,
+            Self::FulfillsCommitment => 12,
+            Self::AssociatedWith => 13,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionState {
@@ -100,6 +145,17 @@ pub enum RetentionState {
     Suppressed,
     Archived,
     Deleted,
+}
+
+impl RetentionState {
+    pub(crate) const fn restrictiveness_rank(self) -> u8 {
+        match self {
+            Self::Active => 0,
+            Self::Archived => 1,
+            Self::Suppressed => 2,
+            Self::Deleted => 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -378,6 +434,36 @@ pub enum MemoryObject {
 }
 
 impl MemoryObject {
+    pub fn id(&self) -> MemoryId {
+        match self {
+            Self::Episode(object) => object.id,
+            Self::Observation(object) => object.id,
+            Self::Entity(object) => object.id,
+            Self::MemoryThread(object) => object.id,
+            Self::DerivedMemory(object) => object.id,
+            Self::MemoryLink(object) => object.id,
+        }
+    }
+
+    pub fn object_type(&self) -> ObjectType {
+        match self {
+            Self::Episode(object) => object.object_type,
+            Self::Observation(object) => object.object_type,
+            Self::Entity(object) => object.object_type,
+            Self::MemoryThread(object) => object.object_type,
+            Self::DerivedMemory(object) => object.object_type,
+            Self::MemoryLink(object) => object.object_type,
+        }
+    }
+
+    pub(crate) fn object_ref(&self) -> MemoryObjectRef {
+        MemoryObjectRef::new(self.object_type(), self.id())
+    }
+
+    pub(crate) fn stable_order_key(&self) -> (MemoryId, u8) {
+        (self.id(), self.object_type().stable_rank())
+    }
+
     pub fn validate(&self) -> Result<(), DomainValidationError> {
         match self {
             Self::Episode(object) => object.validate(),

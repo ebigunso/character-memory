@@ -9,14 +9,16 @@ use oxigraph::model::{GraphName, NamedNode, Quad};
 use oxigraph::model::{Literal, NamedOrBlankNode, Term};
 use oxigraph::store::Store;
 
-use crate::domain::{graph_uri, DerivedMemory, MemoryLink, MemoryObject, ObjectType};
-use crate::errors::CustomError;
+use crate::domain::{
+    graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+};
+use crate::errors::{CustomError, GraphQueryError};
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
 };
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery, GraphObjectRef,
+    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
 
 #[cfg(test)]
@@ -196,8 +198,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            let (object_id, object_type) = object_identity(object);
-            let owner_graph_uri = graph_uri(object_type, object_id);
+            let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
                 quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
@@ -236,8 +237,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             object
                 .validate()
                 .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
-            let (object_id, object_type) = object_identity(object);
-            let owner_graph_uri = graph_uri(object_type, object_id);
+            let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
                 quads_for_triples(&owner_graph_uri, &rdf_triples_for_object(object)?)?,
@@ -262,19 +262,32 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
-        let selected_refs = SparqlGraphSelectors::new(&self.store).select_objects(query)?;
-        hydrate_objects_by_refs_from_store(&self.store, &selected_refs)
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
+        let selected_refs = SparqlGraphSelectors::new(&self.store)
+            .select_objects(query)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })?;
+        hydrate_objects_by_refs_from_store(&self.store, &selected_refs).map_err(|error| {
+            GraphQueryError::Hydration {
+                detail: error.to_string(),
+            }
+        })
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        hydrate_links_by_ids_from_store(&self.store, link_ids)
     }
 
     async fn query_derived_memories_by_provenance(
         &self,
         query: &GraphDerivedMemoryProvenanceQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let mut selector_query = query.clone();
-        selector_query.limit = None;
         let selected_ids = SparqlGraphSelectors::new(&self.store)
-            .select_derived_memories_by_provenance(&selector_query)?
+            .select_derived_memories_by_provenance(query)?
             .into_iter()
             .collect::<HashSet<_>>();
 
@@ -283,7 +296,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &selected_ids
                 .iter()
                 .copied()
-                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
         let links = hydrate_all_links_from_store(&self.store)?;
@@ -300,10 +313,8 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let mut selector_query = query.clone();
-        selector_query.limit = None;
         let selected_ids = SparqlGraphSelectors::new(&self.store)
-            .select_derived_memories_by_thread(&selector_query)?
+            .select_derived_memories_by_thread(query)?
             .into_iter()
             .collect::<HashSet<_>>();
 
@@ -312,7 +323,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &selected_ids
                 .iter()
                 .copied()
-                .map(|id| GraphObjectRef::new(id, ObjectType::DerivedMemory))
+                .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
         let links = hydrate_all_links_from_store(&self.store)?;
@@ -330,7 +341,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError> {
         let selectors = SparqlGraphSelectors::new(&self.store);
-        let root_ref = GraphObjectRef::new(query.root_id, query.root_type);
+        let root_ref = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
         let root_refs = selectors.select_objects(&GraphObjectQuery::by_refs(vec![root_ref]))?;
         if root_refs.is_empty() {
             return Err(CustomError::GraphExpansionRootNotFound {
@@ -352,29 +363,12 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         )?;
 
         let mut hydrated_query = query.clone();
-        hydrated_query.record_fanout_utilization = false;
+        hydrated_query.trace_mode = crate::ports::graph_authority::TraceMode::Disabled;
         let mut expansion = bounded_expansion(&hydrated_query, objects, links)?;
         assign_expanded_fanout_utilization(&mut expansion, visibility.fanout_utilization);
         if expansion.bounded_failure.is_none() {
             expansion.bounded_failure = visibility.bounded_failure;
         }
         Ok(expansion)
-    }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        let object_types = [
-            ObjectType::Episode,
-            ObjectType::Observation,
-            ObjectType::Entity,
-            ObjectType::MemoryThread,
-            ObjectType::DerivedMemory,
-        ];
-        let object_refs = SparqlGraphSelectors::new(&self.store)
-            .select_objects(&GraphObjectQuery::by_types(object_types.to_vec(), None))?;
-        hydrate_objects_by_refs_from_store(&self.store, &object_refs)
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        hydrate_all_links_from_store(&self.store)
     }
 }

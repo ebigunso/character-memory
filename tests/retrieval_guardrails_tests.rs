@@ -1,7 +1,7 @@
 use character_memory::{
     CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId,
-    MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
+    EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, GraphFailureMode, LifecycleTargetRef,
+    MemoryId, MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
     ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, SourceProvenanceReference,
 };
@@ -9,13 +9,13 @@ use chrono::{DateTime, Utc};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-#[path = "support/persistent.rs"]
-mod test_utils;
+#[path = "support/mod.rs"]
+pub mod test_support;
 
 #[tokio::test]
 async fn stats_persist_across_facade_reopen() {
     let fixture = StoreFixture::new();
-    let collection_name = test_utils::unique_collection_name();
+    let collection_name = test_support::unique_collection_name();
     let entity_id = id("550e8400-e29b-41d4-a716-446655461001");
     let episode_id = id("550e8400-e29b-41d4-a716-446655461002");
     let memory_id = id("550e8400-e29b-41d4-a716-446655461003");
@@ -23,7 +23,7 @@ async fn stats_persist_across_facade_reopen() {
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_utils::is_qdrant_unavailable_error(&error) =>
+            if test_support::is_qdrant_unavailable_error(&error) =>
         {
             println!("skipping stats persistence test because Qdrant is unavailable: {error}");
             return;
@@ -109,14 +109,14 @@ async fn stats_persist_across_facade_reopen() {
     }
     .await;
 
-    test_utils::cleanup_collection(&collection_name).await;
+    test_support::cleanup_collection(&collection_name).await;
     test_result.expect("stats persistence test should pass");
 }
 
 #[tokio::test]
 async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let fixture = StoreFixture::new();
-    let collection_name = test_utils::unique_collection_name();
+    let collection_name = test_support::unique_collection_name();
     let entity_id = id("550e8400-e29b-41d4-a716-446655462001");
     let episode_id = id("550e8400-e29b-41d4-a716-446655462002");
     let old_id = id("550e8400-e29b-41d4-a716-446655462003");
@@ -126,7 +126,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_utils::is_qdrant_unavailable_error(&error) =>
+            if test_support::is_qdrant_unavailable_error(&error) =>
         {
             println!("skipping restart-safe retrieval test because Qdrant is unavailable: {error}");
             return;
@@ -246,20 +246,20 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     }
     .await;
 
-    test_utils::cleanup_collection(&collection_name).await;
+    test_support::cleanup_collection(&collection_name).await;
     test_result.expect("restart-safe retrieval test should pass");
 }
 
 #[tokio::test]
 async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion() {
     let fixture = StoreFixture::new();
-    let collection_name = test_utils::unique_collection_name();
+    let collection_name = test_support::unique_collection_name();
     let ids = HighDegreeIds::new();
 
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_utils::is_qdrant_unavailable_error(&error) =>
+            if test_support::is_qdrant_unavailable_error(&error) =>
         {
             println!("skipping selectivity fanout test because Qdrant is unavailable: {error}");
             return;
@@ -330,7 +330,7 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
     }
     .await;
 
-    test_utils::cleanup_collection(&collection_name).await;
+    test_support::cleanup_collection(&collection_name).await;
     test_result.expect("selectivity fanout test should pass");
 }
 
@@ -356,7 +356,7 @@ async fn setup(
     fixture: &StoreFixture,
     fanout: Option<(usize, usize)>,
 ) -> Result<character_memory::CharacterMemory, CustomError> {
-    test_utils::try_setup_persistent_character_memory(
+    test_support::try_setup_persistent_character_memory(
         collection_name.to_owned(),
         &fixture.graph_path,
         &fixture.stats_path,
@@ -377,7 +377,7 @@ fn entity_root_context(query: &str) -> RetrievalContext {
         max_fanout_per_node: 32,
         max_hub_edges: 64,
         timeout_ms: Some(500),
-        allow_degraded_results: true,
+        failure_mode: GraphFailureMode::AllowPartialResults,
         allowed_relation_types: Vec::new(),
     };
     context
@@ -586,10 +586,10 @@ fn ensure_no_vector_indexing_failure(
     if let Some(failure) = &outcome.vector_indexing_failure {
         return Err(format!(
             "{context}: vector indexing failed for object ids {:?}; persisted object ids {:?}; indexed object ids {:?}; error: {}",
-            failure.unindexed_object_ids,
+            failure.unindexed_object_ids(),
             outcome.persisted_object_ids,
             outcome.vector_indexed_object_ids,
-            failure.error_message
+            failure.cause
         ));
     }
 

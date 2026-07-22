@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 
 use crate::api::types::{
-    MemoryObjectRef, RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision,
-    SelectivityTelemetry, SelectivityTrace,
+    RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
+    SelectivityTrace,
 };
-use crate::domain::{ObjectType, RelationType};
-use crate::errors::CustomError;
+use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
+#[cfg(test)]
+use crate::errors::RetrievalStatsStoreError;
+use crate::errors::{
+    ConfigValidationError, ConfigValidationReason, CustomError, RetrievalStatsHealthCause,
+};
 use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
+use crate::ports::graph_authority::TraceMode;
 use crate::ports::retrieval_stats::{
     RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsHealth,
     RetrievalStatsHealthState, RetrievalStatsStore,
@@ -47,9 +52,14 @@ impl RetrievalSelectivityPolicy {
                 spec.min_fanout = min_fanout;
                 spec.max_fanout = max_fanout;
             } else {
-                return Err(CustomError::ConfigParseError(format!(
-                    "unsupported retrieval fanout override for relation={relation:?} object_type={object_type:?}"
-                )));
+                return Err(ConfigValidationError {
+                    keys: vec!["retrieval.fanout"],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "an implemented retrieval fanout target",
+                        actual: format!("{relation:?}->{object_type:?}"),
+                    },
+                }
+                .into());
             }
         }
         Ok(Self {
@@ -108,11 +118,14 @@ impl SelectivityStatsContext {
         let health = match stats_store.health().await {
             Ok(health) => health,
             Err(error) => {
-                let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                let cause = RetrievalStatsHealthCause::HealthCheck {
+                    error: error.clone(),
+                };
+                let _ = stats_store.mark_unhealthy(cause.clone()).await;
                 return Ok(Self {
                     health: RetrievalStatsHealth {
                         state: RetrievalStatsHealthState::Unhealthy,
-                        last_error_message: Some(error.to_string()),
+                        last_error_cause: Some(cause),
                     },
                     specs,
                     global_counters: HashMap::new(),
@@ -128,11 +141,14 @@ impl SelectivityStatsContext {
                 {
                     Ok(counter) => counter,
                     Err(error) => {
-                        let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                        let cause = RetrievalStatsHealthCause::GlobalCounterRead {
+                            error: error.clone(),
+                        };
+                        let _ = stats_store.mark_unhealthy(cause.clone()).await;
                         return Ok(Self {
                             health: RetrievalStatsHealth {
                                 state: RetrievalStatsHealthState::Unhealthy,
-                                last_error_message: Some(error.to_string()),
+                                last_error_cause: Some(cause),
                             },
                             specs,
                             global_counters: HashMap::new(),
@@ -168,7 +184,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
     policy: RetrievalSelectivityPolicy,
     stats_context: &SelectivityStatsContext,
     lifecycle_policy: RetrievalLifecyclePolicy,
-    include_trace: bool,
+    trace_mode: TraceMode,
 ) -> Result<SelectivityPlan, CustomError> {
     if candidate.object_type != ObjectType::Entity {
         return Ok(SelectivityPlan::default());
@@ -188,7 +204,9 @@ pub(crate) async fn selectivity_plan_for_candidate(
             let entity = match stats_store.counter(&key).await {
                 Ok(counter) => counter,
                 Err(error) => {
-                    let _ = stats_store.mark_unhealthy(error.to_string()).await;
+                    let _ = stats_store
+                        .mark_unhealthy(RetrievalStatsHealthCause::CounterRead { error })
+                        .await;
                     stats_reads_failed = true;
                     None
                 }
@@ -237,7 +255,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
             object_type: spec.object_type,
             max_fanout: chosen_fanout,
         });
-        if include_trace {
+        if trace_mode.is_enabled() {
             plan.traces.push(SelectivityTrace {
                 root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
                 relation: spec.relation,
@@ -258,11 +276,16 @@ pub(crate) async fn selectivity_plan_for_candidate(
     Ok(plan)
 }
 
-fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
     if !value.is_finite() || value <= 0.0 {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "a finite positive number",
+                actual: value.to_string(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
@@ -274,11 +297,31 @@ fn validate_fanout_budget(
     max_fanout: usize,
 ) -> Result<(), CustomError> {
     if min_fanout > max_fanout {
-        return Err(CustomError::ConfigParseError(format!(
-            "retrieval fanout budget for {relation:?}->{object_type:?} must have min <= max, got min={min_fanout} max={max_fanout}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![fanout_config_key(relation, object_type)],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "min <= max",
+                actual: format!("min={min_fanout} max={max_fanout}"),
+            },
+        }
+        .into());
     }
     Ok(())
+}
+
+fn fanout_config_key(relation: RelationType, object_type: ObjectType) -> &'static str {
+    match (relation, object_type) {
+        (RelationType::About, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.about_entity.derived_memory"
+        }
+        (RelationType::Involves, ObjectType::Episode) => {
+            "retrieval.fanout.participant_entity.episode"
+        }
+        (RelationType::PartOfThread, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.part_of_thread.derived_memory"
+        }
+        _ => "retrieval.fanout",
+    }
 }
 
 pub(crate) fn selectivity_score(entity_count: u64, global_count: u64, alpha: f64) -> f64 {
@@ -472,12 +515,23 @@ mod tests {
 
         assert!(matches!(
             invalid_alpha,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("selectivity_smoothing_alpha")
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a finite positive number",
+                    ..
+                },
+            })) if keys == vec!["selectivity_smoothing_alpha"]
         ));
         assert!(matches!(
             invalid_gamma,
-            Err(CustomError::ConfigParseError(message)) if message.contains("selectivity_gamma")
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a finite positive number",
+                    ..
+                },
+            })) if keys == vec!["selectivity_gamma"]
         ));
     }
 
@@ -525,8 +579,18 @@ mod tests {
             [(RelationType::About, ObjectType::DerivedMemory, 9, 8)],
         );
 
-        assert!(
-            matches!(result, Err(CustomError::ConfigParseError(message)) if message.contains("min <= max"))
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout.about_entity.derived_memory"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "min <= max",
+                    actual: "min=9 max=8".to_owned(),
+                },
+            }
         );
     }
 
@@ -538,13 +602,19 @@ mod tests {
             [(RelationType::About, ObjectType::Episode, 0, 8)],
         );
 
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("unsupported retrieval fanout override")
-                    && message.contains("About")
-                    && message.contains("Episode")
-        ));
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "an implemented retrieval fanout target",
+                    actual: "About->Episode".to_owned(),
+                },
+            }
+        );
     }
 
     #[tokio::test]
@@ -565,7 +635,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            false,
+            TraceMode::Disabled,
         )
         .await
         .unwrap();
@@ -576,7 +646,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -604,7 +674,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -658,7 +728,7 @@ mod tests {
             policy,
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -693,7 +763,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -724,7 +794,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -761,7 +831,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -799,7 +869,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -880,7 +950,7 @@ mod tests {
                 include_non_current: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -894,7 +964,7 @@ mod tests {
                 include_archived: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -910,7 +980,7 @@ mod tests {
                 include_deleted: true,
                 ..RetrievalLifecyclePolicy::default()
             },
-            true,
+            TraceMode::Enabled,
         )
         .await
         .unwrap();
@@ -963,49 +1033,48 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for FailingRetrievalStatsStore {
-        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn record_object_states(
             &self,
             _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), CustomError> {
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn counter(
             &self,
             _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "stats counter read failed".to_owned(),
-            ))
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats counter read failed".to_owned(),
+            })
         }
 
         async fn global_counter(
             &self,
             _relation_kind: RelationType,
             _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "stats global counter read failed".to_owned(),
-            ))
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats global counter read failed".to_owned(),
+            })
         }
 
-        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
 
-        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
-        }
-        async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-            Ok(0)
         }
     }
 
@@ -1016,27 +1085,30 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for PartiallyFailingRetrievalStatsStore {
-        async fn record_edges(&self, _edges: &[RetrievalStatsEdge]) -> Result<(), CustomError> {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn record_object_states(
             &self,
             _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), CustomError> {
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
         }
 
         async fn counter(
             &self,
             _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             let mut reads = self.counter_reads.lock().unwrap();
             *reads += 1;
             if *reads == 1 {
-                return Err(CustomError::DatabaseError(
-                    "first stats counter read failed".to_owned(),
-                ));
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "first stats counter read failed".to_owned(),
+                });
             }
             Ok(Some(RetrievalStatsCounter {
                 total_count: 100,
@@ -1049,7 +1121,7 @@ mod tests {
             &self,
             _relation_kind: RelationType,
             _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, CustomError> {
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
             Ok(Some(RetrievalStatsCounter {
                 total_count: 100,
                 active_count: 100,
@@ -1057,19 +1129,15 @@ mod tests {
             }))
         }
 
-        async fn health(&self) -> Result<RetrievalStatsHealth, CustomError> {
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
 
-        async fn mark_unhealthy(&self, _message: String) -> Result<(), CustomError> {
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
             Ok(())
-        }
-        async fn record_rejected_low_information_link(&self) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError> {
-            Ok(0)
         }
     }
 }

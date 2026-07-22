@@ -1,10 +1,10 @@
 use crate::api::types::{
-    CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft, LifecycleMutationOutcome,
+    CommitOptions, CorrectMemoryDraft, ForgetMemoryDraft, LifecycleMutationOutcome, LinkOutcome,
     MemoryLinkDraft, PrepareOptions, RememberInput, RememberOptions, RememberOutcome,
     RememberWritePlan, RetrievalContext, RetrieveOutcome,
 };
 use crate::composition::MemoryComposition;
-use crate::domain::{CandidateValidation, MemoryLink};
+use crate::domain::CandidateValidation;
 use crate::errors::CustomError;
 use crate::usecases::{
     CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RetrievePipeline, WritePlanValidator,
@@ -74,8 +74,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
         );
-        let outcome = pipeline.commit(plan, options).await?;
-        Ok(outcome.into())
+        pipeline.commit(plan, options).await
     }
 
     /// Prepares, validates, and commits a remember input through the canonical write-plan path.
@@ -89,8 +88,8 @@ impl CharacterMemory {
         self.commit(plan, options.commit).await
     }
 
-    /// Persists a canonical typed relationship through the graph-authoritative link pipeline.
-    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+    /// Persists a canonical typed relationship and reports its repairable stats projection.
+    pub async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let parts = self.memory_composition();
         LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
             .link(draft)
@@ -119,6 +118,7 @@ impl CharacterMemory {
         &self,
         draft: CorrectMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
+        draft.validate()?;
         let parts = self.memory_composition();
         CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
@@ -135,6 +135,7 @@ impl CharacterMemory {
         &self,
         draft: ForgetMemoryDraft,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
+        draft.validate()?;
         let parts = self.memory_composition();
         CorrectionForgetPipeline::new_with_stats(
             parts.graph_store.as_ref(),
@@ -158,7 +159,7 @@ mod tests {
     use crate::composition::retrieval_stats_store;
     use crate::config::Settings;
     use crate::ports::embedder::MemoryEmbedder;
-    use crate::ports::graph_authority::GraphAuthorityStore;
+    use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
     use crate::ports::vector_candidate::VectorCandidateStore;
     use crate::*;
     use async_trait::async_trait;
@@ -168,8 +169,8 @@ mod tests {
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{EntityType, ObjectType, RelationType};
     use crate::models::vector::{
-        EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
-        VectorSurface,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
+        VectorRecordEmbedding, VectorSurface,
     };
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
@@ -227,15 +228,21 @@ mod tests {
             .expect("remember outcome should preserve the warning-bearing validation");
         assert_eq!(validation.status, CandidateValidationStatus::Valid);
         assert!(validation.errors.is_empty());
-        assert_eq!(validation.warnings.len(), 1);
-        assert!(validation.warnings[0].contains("echo-surface"));
-        assert!(validation.warnings[0].contains(&episode_id.to_string()));
+        assert_eq!(
+            validation.warnings,
+            vec![CandidateValidationIssue::DuplicateObservationEcho {
+                echo_surface: "echoed source content".to_owned(),
+                matching_episode_ids: vec![episode_id],
+            }]
+        );
 
         let messages = outcome
             .diagnostics
             .messages
             .iter()
-            .filter(|diagnostic| diagnostic.code == "write_plan_validation_warning")
+            .filter(|diagnostic| {
+                diagnostic.code == RememberDiagnosticCode::WritePlanValidationWarning
+            })
             .collect::<Vec<_>>();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].severity, DiagnosticSeverity::Warning);
@@ -258,8 +265,20 @@ mod tests {
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid));
         let graph = memory.memory_composition.graph_store.as_ref();
-        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 0);
-        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![
+                    ObjectType::Episode,
+                    ObjectType::Observation,
+                    ObjectType::Entity,
+                    ObjectType::MemoryThread,
+                    ObjectType::DerivedMemory,
+                ],
+                None,
+            ))
+            .await
+            .unwrap();
+        assert!(objects.is_empty());
     }
 
     #[tokio::test]
@@ -279,10 +298,10 @@ mod tests {
             .await
             .expect_err("missing link target should reject during commit revalidation");
 
-        assert_validation_rejection_contains(
+        assert_validation_rejection_has_unknown_ref(
             error,
             MemoryCandidateKind::MemoryLink,
-            "target does not exist",
+            MemoryObjectRef::new(ObjectType::Entity, missing_entity_id),
         );
     }
 
@@ -299,10 +318,10 @@ mod tests {
             .await
             .expect_err("remember should return the structured commit rejection");
 
-        assert_validation_rejection_contains(
+        assert_validation_rejection_has_unknown_ref(
             error,
             MemoryCandidateKind::MemoryLink,
-            &missing_entity_id.to_string(),
+            MemoryObjectRef::new(ObjectType::Entity, missing_entity_id),
         );
     }
 
@@ -369,8 +388,20 @@ mod tests {
             1
         );
         let graph = memory.memory_composition.graph_store.as_ref();
-        assert_eq!(graph.list_diagnostic_objects().await.unwrap().len(), 2);
-        assert_eq!(graph.list_diagnostic_links().await.unwrap().len(), 0);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![
+                    ObjectType::Episode,
+                    ObjectType::Observation,
+                    ObjectType::Entity,
+                    ObjectType::MemoryThread,
+                    ObjectType::DerivedMemory,
+                ],
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(objects.len(), 2);
     }
 
     #[tokio::test]
@@ -387,14 +418,25 @@ mod tests {
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445012"));
 
-        let link = memory
+        let outcome = memory
             .link(draft)
             .await
             .expect("link facade should persist through injected graph store");
 
-        assert_eq!(link.from_id, from_id);
-        assert_eq!(link.to_id, to_id);
-        assert_eq!(link.relation, RelationType::Mentions);
+        assert_eq!(outcome.link.from_id, from_id);
+        assert_eq!(outcome.link.to_id, to_id);
+        assert_eq!(outcome.link.relation, RelationType::Mentions);
+        assert!(matches!(
+            outcome
+                .stats_update_status
+                .failure
+                .expect("missing graph endpoint should require stats repair")
+                .causes
+                .as_slice(),
+            [StatsUpdateCause::EndpointHydration {
+                error: GraphQueryError::Hydration { .. }
+            }]
+        ));
     }
 
     #[tokio::test]
@@ -489,12 +531,12 @@ mod tests {
             .trace
             .as_ref()
             .unwrap()
-            .lifecycle_filter_decisions
+            .graph_relations
             .iter()
-            .any(|decision| {
-                decision.object.id == fixtures.user_preference.id
-                    && decision.superseded_by.contains(&replacement_id)
-                    && decision.action == LifecycleFilterAction::Included
+            .any(|relation| {
+                relation.from.id == replacement_id
+                    && relation.to.id == fixtures.user_preference.id
+                    && relation.relation == RelationType::Supersedes
             }));
     }
 
@@ -703,8 +745,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            CustomError::EmbeddingInitializationError(message)
-                if message.contains("8") && message.contains("1536")
+            CustomError::Embedding(EmbeddingError::ProviderVectorSizeMismatch {
+                expected: 1536,
+                actual: 8,
+            })
         ));
     }
 
@@ -740,12 +784,18 @@ mod tests {
             Ok(_) => panic!("constructor should reject the removed service endpoint"),
             Err(error) => error,
         };
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
-        assert!(message.contains("OXIGRAPH_PATH"));
-        assert!(message.contains("local filesystem path"));
+        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "a local filesystem path",
+                actual: "http://127.0.0.1:7878".to_owned(),
+            }
+        );
     }
 
     #[tokio::test]
@@ -778,11 +828,10 @@ mod tests {
             health.state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
-        assert!(health
-            .last_error_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("using in-memory fallback"));
+        assert!(matches!(
+            health.last_error_cause,
+            Some(crate::errors::RetrievalStatsHealthCause::StoreInitialization { .. })
+        ));
     }
 
     fn injected_memory() -> CharacterMemory {
@@ -961,14 +1010,14 @@ mod tests {
             self.vector_size
         }
 
-        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, CustomError> {
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
             Ok(vec![0.0; self.vector_size])
         }
 
         async fn bulk_generate_embeddings<'a>(
             &self,
             texts: &'a [&'a str],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
+        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
             Ok(vec![vec![0.0; self.vector_size]; texts.len()])
         }
     }
@@ -1021,17 +1070,8 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            let mut candidates = self.candidates.clone();
-            candidates.truncate(query.limit);
-            Ok(candidates)
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -1048,23 +1088,19 @@ mod tests {
             &self,
             _records: &[VectorRecordEmbedding<'_>],
         ) -> Result<(), CustomError> {
-            Err(CustomError::EmbeddingGenerationError(
-                "vector store unavailable".to_owned(),
-            ))
+            Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                "test",
+                VectorDatabaseErrorKind::Response,
+                None,
+                "vector store unavailable",
+            )))
         }
 
         async fn search_candidates(
             &self,
             _query: &VectorCandidateSearch,
-        ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_candidate_diagnostics(
-            &self,
-        ) -> Result<Vec<crate::models::vector::VectorCandidateDiagnosticRecord>, CustomError>
-        {
-            Ok(Vec::new())
+        ) -> Result<CanonicalCandidates, CustomError> {
+            Ok(CanonicalCandidates::new([]))
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -1072,10 +1108,10 @@ mod tests {
         }
     }
 
-    fn assert_validation_rejection_contains(
+    fn assert_validation_rejection_has_unknown_ref(
         error: CustomError,
         expected_kind: MemoryCandidateKind,
-        needle: &str,
+        expected_ref: MemoryObjectRef,
     ) {
         let CustomError::WritePlanValidationRejected { validations } = error else {
             panic!("expected structured write-plan validation rejection, got {error:?}");
@@ -1084,9 +1120,15 @@ mod tests {
             validations.iter().any(|validation| {
                 validation.candidate_kind == expected_kind
                     && validation.status == CandidateValidationStatus::Invalid
-                    && validation.errors.iter().any(|error| error.contains(needle))
+                    && validation.errors.iter().any(|error| {
+                        matches!(
+                            error,
+                            CandidateValidationIssue::UnknownObjectRef { referenced, .. }
+                                if *referenced == expected_ref
+                        )
+                    })
             }),
-            "expected invalid {expected_kind:?} validation containing {needle:?}, got {validations:?}"
+            "expected invalid {expected_kind:?} validation for {expected_ref:?}, got {validations:?}"
         );
     }
 

@@ -1,12 +1,6 @@
-// Deterministic test harness shared by pipeline, adapter, and facade
-// tests.
-// Shared fakes and fixtures are intentionally broader than any single test module;
-// remove this module-level allow once the harness is split by fixture family.
-#![allow(dead_code)]
+// Deterministic test harness shared by pipeline, adapter, and facade tests.
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
@@ -15,14 +9,13 @@ use uuid::Uuid;
 
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
-    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Stability,
-    ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
+    Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::CustomError;
+use crate::errors::{CustomError, GraphQueryError};
 use crate::models::vector::{
-    canonicalize_vector_candidates, EmbeddingInput, VectorCandidateDiagnosticRecord,
-    VectorCandidateFilters, VectorCandidateMatch, VectorCandidateRecord, VectorCandidateSearch,
-    VectorRecordEmbedding, VectorSurface, VectorTimeField, VectorTimeRangeFilter,
+    CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord,
+    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -32,13 +25,11 @@ use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
     GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
-use crate::ports::source_reference::{ResolvedSourceReference, SourceReferenceResolver};
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Default)]
 pub(crate) struct FakeVectorCandidateStore {
     records: Mutex<Vec<VectorCandidateRecord>>,
-    diagnostics: Mutex<Vec<VectorCandidateDiagnosticRecord>>,
 }
 
 impl FakeVectorCandidateStore {
@@ -50,39 +41,11 @@ impl FakeVectorCandidateStore {
         &self,
         candidates: &[VectorCandidateRecord],
     ) -> Result<(), CustomError> {
-        self.replace_candidates(candidates)?;
-        let diagnostics = candidates
-            .iter()
-            .map(default_diagnostic_record)
-            .collect::<Vec<_>>();
-        self.replace_diagnostic_records(&diagnostics)
-    }
-
-    pub(crate) async fn upsert_diagnostic_records(
-        &self,
-        records: &[VectorCandidateDiagnosticRecord],
-    ) -> Result<(), CustomError> {
-        self.replace_diagnostic_records(records)
+        self.replace_candidates(candidates)
     }
 
     fn replace_candidates(&self, candidates: &[VectorCandidateRecord]) -> Result<(), CustomError> {
         let mut records = lock(&self.records)?;
-
-        for candidate in candidates {
-            records.retain(|record| {
-                record.object_id != candidate.object_id || record.surface != candidate.surface
-            });
-            records.push(candidate.clone());
-        }
-
-        Ok(())
-    }
-
-    fn replace_diagnostic_records(
-        &self,
-        candidates: &[VectorCandidateDiagnosticRecord],
-    ) -> Result<(), CustomError> {
-        let mut records = lock(&self.diagnostics)?;
 
         for candidate in candidates {
             records.retain(|record| {
@@ -105,25 +68,19 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             .iter()
             .map(|record| record.to_candidate_record())
             .collect::<Vec<_>>();
-        self.replace_candidates(&candidates)?;
-        let diagnostics = records
-            .iter()
-            .map(|record| VectorCandidateDiagnosticRecord::from_vector_record(record.record))
-            .collect::<Vec<_>>();
-        self.replace_diagnostic_records(&diagnostics)
+        self.replace_candidates(&candidates)
     }
 
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+    ) -> Result<CanonicalCandidates, CustomError> {
         let records = lock(&self.records)?;
-        let mut matches: Vec<_> = records
+        let matches: Vec<_> = records
             .iter()
             .filter(|record| {
                 query.object_types.is_empty() || query.object_types.contains(&record.object_type)
             })
-            .filter(|record| candidate_matches_filters(record, &query.filters))
             .map(|record| {
                 VectorCandidateMatch::new(
                     record.object_id,
@@ -134,115 +91,14 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             })
             .collect();
 
-        matches = canonicalize_vector_candidates(matches);
-        matches.truncate(query.limit);
-
-        Ok(matches)
+        Ok(CanonicalCandidates::new(matches).truncated(query.limit))
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
         let delete_ids: HashSet<_> = object_ids.iter().copied().collect();
         lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
-        lock(&self.diagnostics)?.retain(|record| !delete_ids.contains(&record.object_id));
         Ok(())
     }
-
-    async fn list_candidate_diagnostics(
-        &self,
-    ) -> Result<Vec<VectorCandidateDiagnosticRecord>, CustomError> {
-        let mut records = lock(&self.diagnostics)?.clone();
-        records.sort_by_key(|record| (record.object_id, object_type_rank(record.object_type)));
-        Ok(records)
-    }
-}
-
-fn default_diagnostic_record(record: &VectorCandidateRecord) -> VectorCandidateDiagnosticRecord {
-    VectorCandidateDiagnosticRecord {
-        object_id: record.object_id,
-        object_type: record.object_type,
-        graph_uri: crate::domain::graph_uri(record.object_type, record.object_id),
-        surface: record.surface,
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-        retention_state: record.retention_state,
-        is_current: record.is_current,
-        is_superseded: record
-            .payload_hints
-            .is_superseded
-            .or_else(|| record.is_current.map(|value| !value)),
-    }
-}
-
-fn candidate_matches_filters(
-    record: &VectorCandidateRecord,
-    filters: &VectorCandidateFilters,
-) -> bool {
-    (filters.retention_states.is_empty()
-        || record
-            .retention_state
-            .is_some_and(|retention_state| filters.retention_states.contains(&retention_state)))
-        && currentness_filters_match(record, filters)
-        && ids_overlap(&filters.thread_ids, &record.relationship_hints.thread_ids)
-        && ids_overlap(&filters.episode_ids, &record.relationship_hints.episode_ids)
-        && entity_filter_matches(record, &filters.entity_ids)
-        && filters
-            .time_ranges
-            .iter()
-            .all(|time_range| time_range_matches(record, time_range))
-}
-
-fn currentness_filters_match(
-    record: &VectorCandidateRecord,
-    filters: &VectorCandidateFilters,
-) -> bool {
-    if !filters.has_currentness_filters() || record.object_type != ObjectType::DerivedMemory {
-        return true;
-    }
-
-    filters
-        .is_current
-        .is_none_or(|is_current| record.is_current.is_none_or(|actual| actual == is_current))
-        && filters.is_superseded.is_none_or(|is_superseded| {
-            record_is_superseded(record).is_none_or(|actual| actual == is_superseded)
-        })
-}
-
-fn record_is_superseded(record: &VectorCandidateRecord) -> Option<bool> {
-    record
-        .payload_hints
-        .is_superseded
-        .or_else(|| record.is_current.map(|is_current| !is_current))
-}
-
-fn ids_overlap(filters: &[MemoryId], values: &[MemoryId]) -> bool {
-    filters.is_empty() || filters.iter().any(|filter| values.contains(filter))
-}
-
-fn entity_filter_matches(record: &VectorCandidateRecord, entity_ids: &[MemoryId]) -> bool {
-    entity_ids.is_empty()
-        || entity_ids.iter().any(|entity_id| {
-            record.relationship_hints.entity_ids.contains(entity_id)
-                || record
-                    .relationship_hints
-                    .participant_entity_ids
-                    .contains(entity_id)
-                || record.relationship_hints.speaker_entity_id == Some(*entity_id)
-        })
-}
-
-fn time_range_matches(record: &VectorCandidateRecord, time_range: &VectorTimeRangeFilter) -> bool {
-    let value = match time_range.field {
-        VectorTimeField::Created => record.payload_hints.created_at,
-        VectorTimeField::Updated => record.payload_hints.updated_at,
-        VectorTimeField::Started => record.payload_hints.started_at,
-        VectorTimeField::Ended => record.payload_hints.ended_at,
-        VectorTimeField::Observed => record.payload_hints.observed_at,
-        VectorTimeField::LastTouched => record.payload_hints.last_touched_at,
-    };
-
-    value.is_some_and(|value| {
-        time_range.after.is_none_or(|after| value >= after)
-            && time_range.before.is_none_or(|before| value <= before)
-    })
 }
 
 #[derive(Debug, Default)]
@@ -263,8 +119,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let mut stored = lock(&self.objects)?;
 
         for object in objects {
-            let (object_id, object_type) = object_identity(object);
-            stored.retain(|existing| object_identity(existing) != (object_id, object_type));
+            stored.retain(|existing| existing.object_ref() != object.object_ref());
             stored.push(object.clone());
         }
 
@@ -291,8 +146,7 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let mut stored_links = lock(&self.links)?;
 
         for object in objects {
-            let (object_id, object_type) = object_identity(object);
-            stored_objects.retain(|existing| object_identity(existing) != (object_id, object_type));
+            stored_objects.retain(|existing| existing.object_ref() != object.object_ref());
             stored_objects.push(object.clone());
         }
         for link in links {
@@ -306,27 +160,55 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
-        let mut objects: Vec<_> = lock(&self.objects)?
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut objects: Vec<_> = lock(&self.objects)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })?
             .iter()
             .filter(|object| {
-                let (object_id, object_type) = object_identity(object);
-                (query.object_refs.is_empty()
-                    || query.object_refs.iter().any(|object_ref| {
-                        object_ref.object_id == object_id && object_ref.object_type == object_type
-                    }))
-                    && (query.object_ids.is_empty() || query.object_ids.contains(&object_id))
-                    && (query.object_types.is_empty() || query.object_types.contains(&object_type))
+                let object_id = object.id();
+                let object_type = object.object_type();
+                match query {
+                    GraphObjectQuery::ByRefs(object_refs) => object_refs.iter().any(|object_ref| {
+                        object_ref.id == object_id && object_ref.object_type == object_type
+                    }),
+                    GraphObjectQuery::ByIds(object_ids) => object_ids.contains(&object_id),
+                    GraphObjectQuery::ByTypes { object_types, .. } => {
+                        object_types.contains(&object_type)
+                    }
+                }
             })
             .cloned()
             .collect();
 
         sort_objects(&mut objects);
-        if let Some(limit) = query.limit {
-            objects.truncate(limit);
+        if let GraphObjectQuery::ByTypes {
+            limit: Some(limit), ..
+        } = query
+        {
+            objects.truncate(*limit);
         }
 
         Ok(objects)
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        let mut links = lock(&self.links)?
+            .iter()
+            .filter(|link| link_ids.contains(&link.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        links.sort_by_key(|link| link.id);
+        links.dedup_by_key(|link| link.id);
+        Ok(links)
     }
 
     async fn query_derived_memories_by_provenance(
@@ -355,18 +237,6 @@ impl GraphAuthorityStore for FakeGraphAuthorityStore {
         let links = lock(&self.links)?.clone();
         bounded_expansion(query, objects, links)
     }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        let mut objects = lock(&self.objects)?.clone();
-        sort_objects(&mut objects);
-        Ok(objects)
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        let mut links = lock(&self.links)?.clone();
-        links.sort_by_key(|link| link.id);
-        Ok(links)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -393,52 +263,6 @@ impl MemoryEmbedder for DeterministicMemoryEmbedder {
             .collect();
 
         Ok(embeddings)
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct FixtureSourceReferenceResolver {
-    entries: Mutex<Vec<ResolvedSourceReference>>,
-}
-
-impl FixtureSourceReferenceResolver {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn insert(
-        &self,
-        reference: impl Into<String>,
-        text: impl Into<String>,
-    ) -> Result<(), CustomError> {
-        let source_reference = ResolvedSourceReference::new(reference, text);
-        let mut entries = lock(&self.entries)?;
-        entries.retain(|entry| entry.reference != source_reference.reference);
-        entries.push(source_reference);
-        Ok(())
-    }
-
-    pub(crate) fn insert_file(
-        &self,
-        reference: impl Into<String>,
-        path: &Path,
-    ) -> Result<(), CustomError> {
-        let text = fs::read_to_string(path)
-            .map_err(|error| CustomError::DatabaseError(error.to_string()))?;
-        self.insert(reference, text)
-    }
-}
-
-#[async_trait]
-impl SourceReferenceResolver for FixtureSourceReferenceResolver {
-    async fn resolve(
-        &self,
-        reference: &str,
-    ) -> Result<Option<ResolvedSourceReference>, CustomError> {
-        Ok(lock(&self.entries)?
-            .iter()
-            .find(|entry| entry.reference == reference)
-            .cloned())
     }
 }
 
@@ -891,43 +715,15 @@ fn timestamp(value: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
 fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by(|left, right| {
-        stable_node_key(object_identity(left)).cmp(&stable_node_key(object_identity(right)))
-    });
-}
-
-fn stable_node_key(node: (MemoryId, ObjectType)) -> (MemoryId, u8) {
-    (node.0, object_type_rank(node.1))
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
+    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
     use crate::ports::graph_authority::{
-        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
 
     #[tokio::test]
@@ -980,11 +776,11 @@ mod lifecycle_tests {
 
         let explicit_history = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
-                GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(replacement.id, ObjectType::DerivedMemory),
-                GraphObjectRef::new(episode.id, ObjectType::Episode),
-                GraphObjectRef::new(observation.id, ObjectType::Observation),
-                GraphObjectRef::new(thread.id, ObjectType::MemoryThread),
+                MemoryObjectRef::from_id_type(old_memory.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(replacement.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(observation.id, ObjectType::Observation),
+                MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread),
             ]))
             .await
             .unwrap();
@@ -1005,7 +801,8 @@ mod lifecycle_tests {
         );
         assert!(default_expansion.links.is_empty());
         assert!(default_expansion.filtered_nodes.iter().any(|filtered| {
-            filtered.object_ref == GraphObjectRef::new(old_memory.id, ObjectType::DerivedMemory)
+            filtered.object_ref
+                == MemoryObjectRef::from_id_type(old_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Suppressed
         }));
 
@@ -1043,7 +840,8 @@ mod lifecycle_tests {
             .filtered_nodes
             .iter()
             .any(|filtered| {
-                filtered.object_ref == GraphObjectRef::new(thread.id, ObjectType::MemoryThread)
+                filtered.object_ref
+                    == MemoryObjectRef::from_id_type(thread.id, ObjectType::MemoryThread)
                     && filtered.reason == GraphExpansionFilteredReason::Archived
             }));
     }
@@ -1093,13 +891,10 @@ mod lifecycle_tests {
             .unwrap();
 
         let default_matches = graph
-            .query_derived_memories_by_provenance(
-                &GraphDerivedMemoryProvenanceQuery::by_sources(
-                    vec![fixtures.episode.id],
-                    vec![fixtures.salient_observation.id],
-                )
-                .with_limit(10),
-            )
+            .query_derived_memories_by_provenance(&GraphDerivedMemoryProvenanceQuery::by_sources(
+                vec![fixtures.episode.id],
+                vec![fixtures.salient_observation.id],
+            ))
             .await
             .unwrap();
         assert!(default_matches
@@ -1181,10 +976,9 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::vector::{VectorPayloadHints, VectorRelationshipHints};
     use crate::ports::graph_authority::{
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectRef,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
 
     #[tokio::test]
@@ -1297,106 +1091,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn vector_fake_applies_payload_hint_prefilters_and_preserves_candidate_ordering() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-        let reflection = crate::policy::derived_memory_vector_record(&fixtures.derived_reflection);
-        let preference = crate::policy::derived_memory_vector_record(&fixtures.user_preference);
-        let suppressed = crate::policy::derived_memory_vector_record(&fixtures.suppressed_seed);
-
-        store
-            .upsert_vector_records(&[
-                VectorRecordEmbedding::new(&reflection, &[0.8, 0.2]),
-                VectorRecordEmbedding::new(&preference, &[1.0, 0.0]),
-                VectorRecordEmbedding::new(&suppressed, &[1.0, 0.0]),
-            ])
-            .await
-            .unwrap();
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_default_object_types()
-            .with_filters(
-                VectorCandidateFilters::new()
-                    .with_retention_states(vec![RetentionState::Active])
-                    .current_only()
-                    .with_thread_ids(vec![fixtures.soft_thread.id])
-                    .with_entity_ids(vec![fixtures.user_entity.id])
-                    .with_episode_ids(vec![fixtures.episode.id])
-                    .with_time_range(VectorTimeRangeFilter::new(
-                        VectorTimeField::Updated,
-                        Some(timestamp("2026-04-27T10:11:05Z")),
-                        Some(timestamp("2026-04-27T10:11:07Z")),
-                    )),
-            );
-
-        let matches = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].object_id, fixtures.user_preference.id);
-        assert_eq!(matches[1].object_id, fixtures.derived_reflection.id);
-        assert!(!matches
-            .iter()
-            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
-    }
-
-    #[tokio::test]
-    async fn vector_fake_currentness_prefilter_keeps_non_derived_candidates() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-        let missing_hint_id = fixture_id(360);
-
-        store
-            .upsert_candidates(&[
-                VectorCandidateRecord::new(
-                    fixtures.episode.id,
-                    ObjectType::Episode,
-                    VectorSurface::Summary,
-                    vec![1.0, 0.0],
-                ),
-                VectorCandidateRecord::new(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::DerivedText,
-                    vec![1.0, 0.0],
-                )
-                .with_filter_hints(
-                    Some(RetentionState::Suppressed),
-                    Some(false),
-                    VectorRelationshipHints::default(),
-                    VectorPayloadHints {
-                        is_superseded: Some(true),
-                        ..VectorPayloadHints::default()
-                    },
-                ),
-                VectorCandidateRecord::new(
-                    missing_hint_id,
-                    ObjectType::DerivedMemory,
-                    VectorSurface::DerivedText,
-                    vec![1.0, 0.0],
-                ),
-            ])
-            .await
-            .unwrap();
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_default_object_types()
-            .with_filters(VectorCandidateFilters::new().current_only());
-
-        let matches = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(matches.len(), 2);
-        assert!(matches.iter().any(|matched| {
-            matched.object_id == fixtures.episode.id && matched.object_type == ObjectType::Episode
-        }));
-        assert!(matches.iter().any(|matched| {
-            matched.object_id == missing_hint_id && matched.object_type == ObjectType::DerivedMemory
-        }));
-        assert!(!matches
-            .iter()
-            .any(|matched| matched.object_id == fixtures.suppressed_seed.id));
-    }
-
-    #[tokio::test]
     async fn graph_fake_preserves_objects_links_lifecycle_and_raw_refs() {
         let store = FakeGraphAuthorityStore::new();
         let fixtures = representative_fixtures();
@@ -1460,14 +1154,35 @@ mod tests {
             .unwrap();
 
         let queried = store
-            .query_objects(&GraphObjectQuery::by_refs(vec![GraphObjectRef::new(
-                fixtures.episode.id,
-                ObjectType::Episode,
-            )]))
+            .query_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+            ]))
             .await
             .unwrap();
 
         assert_eq!(queried, vec![MemoryObject::Episode(fixtures.episode)]);
+    }
+
+    #[tokio::test]
+    async fn graph_fake_queries_only_requested_link_ids_in_canonical_order() {
+        let store = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        let links = fixtures.links();
+        store.upsert_links(&links).await.unwrap();
+
+        let mut expected = vec![links[0].clone(), links[2].clone()];
+        expected.sort_by_key(|link| link.id);
+        let queried = store
+            .query_links_by_ids(&[
+                links[2].id,
+                MemoryId::from_u128(u128::MAX),
+                links[0].id,
+                links[2].id,
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(queried, expected);
     }
 
     #[tokio::test]
@@ -1565,14 +1280,15 @@ mod tests {
                     .with_max_hub_edges(2)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(250),
-                        allow_partial_results: false,
+                        mode: crate::domain::GraphFailureMode::FailClosed,
                     }),
             )
             .await
             .unwrap_err();
         assert!(matches!(
             fail_closed,
-            CustomError::GraphExpansionBounded { reason, .. } if reason == "hub_limit"
+            CustomError::GraphExpansionBounded(trace)
+                if trace.reason == crate::domain::GraphExpansionBoundedReason::HubLimit
         ));
     }
 
@@ -1602,7 +1318,7 @@ mod tests {
         assert_eq!(default_expansion.filtered_nodes.len(), 1);
         assert_eq!(
             default_expansion.filtered_nodes[0].object_ref,
-            GraphObjectRef::new(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
+            MemoryObjectRef::from_id_type(fixtures.suppressed_seed.id, ObjectType::DerivedMemory)
         );
         assert_eq!(
             default_expansion.filtered_nodes[0].reason,
@@ -1647,7 +1363,7 @@ mod tests {
                 &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
                     .with_failure_policy(GraphExpansionFailurePolicy {
                         timeout_ms: Some(0),
-                        allow_partial_results: true,
+                        mode: crate::domain::GraphFailureMode::AllowPartialResults,
                     }),
             )
             .await
@@ -1685,85 +1401,6 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, different);
         assert_eq!(first.len(), 8);
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_resolves_in_memory_fixture_content() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
-            .unwrap();
-        let resolved = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.resolved_text, "raw fixture text");
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_reports_unavailable_reference_as_none() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "raw fixture text")
-            .unwrap();
-        let resolved = resolver
-            .resolve("raw://fixture/conversation#turn=2")
-            .await
-            .unwrap();
-
-        assert_eq!(resolved, None);
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_overwrites_duplicate_references_deterministically() {
-        let resolver = FixtureSourceReferenceResolver::new();
-
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "first fixture text")
-            .unwrap();
-        resolver
-            .insert("raw://fixture/conversation#turn=1", "updated fixture text")
-            .unwrap();
-
-        let first = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap();
-        let second = resolver
-            .resolve("raw://fixture/conversation#turn=1")
-            .await
-            .unwrap();
-
-        assert_eq!(first, second);
-        let resolved = first.unwrap();
-        assert_eq!(resolved.reference, "raw://fixture/conversation#turn=1");
-        assert_eq!(resolved.resolved_text, "updated fixture text");
-    }
-
-    #[tokio::test]
-    async fn source_reference_resolver_uses_fixture_backed_file_content() {
-        let resolver = FixtureSourceReferenceResolver::new();
-        let path = std::env::temp_dir().join(format!("cmem-source-ref-{}.txt", Uuid::new_v4()));
-        fs::write(&path, "raw fixture text").unwrap();
-
-        resolver
-            .insert_file("file:fixture/raw-reference.txt", &path)
-            .unwrap();
-        let resolved = resolver
-            .resolve("file:fixture/raw-reference.txt")
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(resolved.reference, "file:fixture/raw-reference.txt");
-        assert_eq!(resolved.resolved_text, "raw fixture text");
-
-        fs::remove_file(path).unwrap();
     }
 
     #[test]

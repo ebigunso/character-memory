@@ -4,36 +4,37 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::{MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState};
-use crate::errors::CustomError;
+use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 
 #[async_trait]
 pub(crate) trait RetrievalStatsStore: Send + Sync {
-    async fn record_edges(&self, edges: &[RetrievalStatsEdge]) -> Result<(), CustomError>;
+    async fn record_edges(
+        &self,
+        edges: &[RetrievalStatsEdge],
+    ) -> Result<(), RetrievalStatsStoreError>;
 
     async fn record_object_states(
         &self,
         states: &[RetrievalStatsObjectState],
-    ) -> Result<(), CustomError>;
+    ) -> Result<(), RetrievalStatsStoreError>;
 
     async fn counter(
         &self,
         key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError>;
 
     async fn global_counter(
         &self,
         relation_kind: RelationType,
         object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, CustomError>;
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError>;
 
-    async fn health(&self) -> Result<RetrievalStatsHealth, CustomError>;
+    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError>;
 
-    async fn mark_unhealthy(&self, message: String) -> Result<(), CustomError>;
-    async fn record_rejected_low_information_link(&self) -> Result<(), CustomError>;
-
-    // Admin diagnostics are dormant until the governance surface lands; remove when a caller reads this count.
-    #[allow(dead_code)]
-    async fn rejected_low_information_link_count(&self) -> Result<u64, CustomError>;
+    async fn mark_unhealthy(
+        &self,
+        cause: RetrievalStatsHealthCause,
+    ) -> Result<(), RetrievalStatsStoreError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,8 +65,6 @@ pub(crate) struct RetrievalStatsObjectState {
     pub(crate) observed_at: DateTime<Utc>,
 }
 
-// Counter keys are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RetrievalStatsCounterKey {
     pub(crate) entity_id: MemoryId,
@@ -73,8 +72,6 @@ pub(crate) struct RetrievalStatsCounterKey {
     pub(crate) object_type: ObjectType,
 }
 
-// Counter snapshots are a typed stats boundary for future diagnostics; remove when counter reads become public or delete with the counter API.
-#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetrievalStatsCounter {
     pub(crate) total_count: u64,
@@ -85,7 +82,7 @@ pub(crate) struct RetrievalStatsCounter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RetrievalStatsHealth {
     pub(crate) state: RetrievalStatsHealthState,
-    pub(crate) last_error_message: Option<String>,
+    pub(crate) last_error_cause: Option<RetrievalStatsHealthCause>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,34 +95,11 @@ impl Default for RetrievalStatsHealth {
     fn default() -> Self {
         Self {
             state: RetrievalStatsHealthState::Healthy,
-            last_error_message: None,
+            last_error_cause: None,
         }
     }
 }
 
-pub(crate) async fn record_stats_after_write(
-    stats_store: &dyn RetrievalStatsStore,
-    objects: &[MemoryObject],
-    links: &[MemoryLink],
-) {
-    let states = retrieval_stats_object_states(objects);
-    let edges = retrieval_stats_edges_with_states(objects, links, &states);
-    if let Err(error) = stats_store.record_edges(&edges).await {
-        let _ = stats_store.mark_unhealthy(error.to_string()).await;
-        return;
-    }
-
-    if states.is_empty() {
-        return;
-    }
-
-    if let Err(error) = stats_store.record_object_states(&states).await {
-        let _ = stats_store.mark_unhealthy(error.to_string()).await;
-    }
-}
-
-// Reconciliation diagnostics need raw edge derivation; remove once reconciliation is wired to record_stats_after_write only.
-#[allow(dead_code)]
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],
     links: &[MemoryLink],
@@ -314,19 +288,10 @@ fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) 
 }
 
 fn more_restrictive_retention(left: RetentionState, right: RetentionState) -> RetentionState {
-    if retention_rank(right) > retention_rank(left) {
+    if right.restrictiveness_rank() > left.restrictiveness_rank() {
         right
     } else {
         left
-    }
-}
-
-fn retention_rank(retention_state: RetentionState) -> u8 {
-    match retention_state {
-        RetentionState::Active => 0,
-        RetentionState::Archived => 1,
-        RetentionState::Suppressed => 2,
-        RetentionState::Deleted => 3,
     }
 }
 
@@ -816,10 +781,12 @@ mod tests {
     #[tokio::test]
     async fn health_tracks_internal_failure_markers() {
         let store = InMemoryRetrievalStatsStore::new();
-        store
-            .mark_unhealthy("stats write failed".to_owned())
-            .await
-            .unwrap();
+        let failure = RetrievalStatsHealthCause::EdgeWrite {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "stats write failed".to_owned(),
+            },
+        };
+        store.mark_unhealthy(failure.clone()).await.unwrap();
         store
             .record_edges(&[edge(
                 id("550e8400-e29b-41d4-a716-446655460071"),
@@ -835,40 +802,17 @@ mod tests {
 
         let health = store.health().await.unwrap();
         assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert_eq!(
-            health.last_error_message.as_deref(),
-            Some("stats write failed")
-        );
-    }
-
-    #[tokio::test]
-    async fn diagnostics_count_rejected_low_information_links() {
-        let store = InMemoryRetrievalStatsStore::new();
-        store
-            .mark_unhealthy("transient stats failure".to_owned())
-            .await
-            .unwrap();
-
-        store.record_rejected_low_information_link().await.unwrap();
-        store.record_rejected_low_information_link().await.unwrap();
-
-        assert_eq!(
-            store.rejected_low_information_link_count().await.unwrap(),
-            2
-        );
-        let health = store.health().await.unwrap();
-        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert_eq!(
-            health.last_error_message.as_deref(),
-            Some("transient stats failure")
-        );
+        assert_eq!(health.last_error_cause, Some(failure));
     }
 
     #[tokio::test]
     async fn fallback_health_marker_survives_successful_writes() {
-        let store = InMemoryRetrievalStatsStore::unhealthy(
-            "sqlite retrieval stats unavailable; using in-memory fallback".to_owned(),
-        );
+        let failure = RetrievalStatsHealthCause::StoreInitialization {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "sqlite retrieval stats unavailable; using in-memory fallback".to_owned(),
+            },
+        };
+        let store = InMemoryRetrievalStatsStore::unhealthy(failure.clone());
         let entity_id = id("550e8400-e29b-41d4-a716-446655460051");
         let episode_id = id("550e8400-e29b-41d4-a716-446655460052");
 
@@ -887,11 +831,7 @@ mod tests {
 
         let health = store.health().await.unwrap();
         assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert!(health
-            .last_error_message
-            .as_deref()
-            .unwrap()
-            .contains("in-memory fallback"));
+        assert_eq!(health.last_error_cause, Some(failure));
     }
 
     fn id(value: &str) -> MemoryId {

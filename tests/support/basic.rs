@@ -1,11 +1,7 @@
-#[path = "base.rs"]
-mod base;
-
-use character_memory::test_utils::load_test_settings;
 use character_memory::{CharacterMemory, CustomError, Settings};
 use config::Config;
 
-pub use base::{cleanup_collection, is_qdrant_unavailable_error};
+use super::base;
 
 pub async fn try_setup_character_memory() -> Result<(CharacterMemory, String), CustomError> {
     let collection_name = base::unique_collection_name();
@@ -30,7 +26,7 @@ fn load_in_memory_settings() -> Result<Settings, CustomError> {
     // this path intentionally does not honor optional env overrides such as
     // RETRIEVAL_STATS_STORE_MODE or SELECTIVITY_*/fanout vars; fixtures that
     // need those should set them as explicit overrides here.
-    let base_settings = load_test_settings()?;
+    let base_settings = base::load_test_settings()?;
     let embedding_model = std::env::var("EMBEDDING_MODEL")
         .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
 

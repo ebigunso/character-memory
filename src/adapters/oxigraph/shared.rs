@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::{DateTime, Utc};
-use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+use oxigraph::model::{GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, Entity, Episode, GraphFailureMode, MemoryId, MemoryLink,
+    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
@@ -16,7 +16,7 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionFanoutUtilization, GraphExpansionQuery, GraphObjectRef,
+    GraphExpansionFanoutUtilization, GraphExpansionQuery,
 };
 
 use super::rdf_mapping::{RdfObject, RdfTriple};
@@ -26,11 +26,11 @@ impl BoundedExpansionLinkRef for SparqlLinkRef {
         self.link_id
     }
 
-    fn from(self) -> GraphObjectRef {
+    fn from(self) -> MemoryObjectRef {
         self.from
     }
 
-    fn to(self) -> GraphObjectRef {
+    fn to(self) -> MemoryObjectRef {
         self.to
     }
 
@@ -41,8 +41,8 @@ impl BoundedExpansionLinkRef for SparqlLinkRef {
 
 pub(super) fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
     link_refs: &[T],
-) -> HashMap<GraphObjectRef, Vec<T>> {
-    let mut refs_by_endpoint = HashMap::<GraphObjectRef, Vec<T>>::new();
+) -> HashMap<MemoryObjectRef, Vec<T>> {
+    let mut refs_by_endpoint = HashMap::<MemoryObjectRef, Vec<T>>::new();
     for link_ref in link_refs.iter().copied() {
         refs_by_endpoint
             .entry(link_ref.from())
@@ -60,9 +60,9 @@ pub(super) fn link_refs_by_endpoint<T: BoundedExpansionLinkRef>(
 
 pub(super) fn insert_visible_ref(
     query: &GraphExpansionQuery,
-    graph_refs: &mut HashSet<GraphObjectRef>,
-    next_frontier: &mut Vec<GraphObjectRef>,
-    object_ref: GraphObjectRef,
+    graph_refs: &mut HashSet<MemoryObjectRef>,
+    next_frontier: &mut Vec<MemoryObjectRef>,
+    object_ref: MemoryObjectRef,
     bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
 ) -> Result<(), CustomError> {
     if graph_refs.contains(&object_ref) {
@@ -73,7 +73,7 @@ pub(super) fn insert_visible_ref(
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        if !query.failure_policy.allow_partial_results {
+        if query.failure_policy.mode == GraphFailureMode::FailClosed {
             return Err(graph_expansion_bounded_error(failure));
         }
         bounded_failure.get_or_insert(failure);
@@ -143,7 +143,7 @@ impl RdfSubjectValues {
 
 pub(super) fn hydrate_objects_by_refs_from_store(
     store: &Store,
-    refs: &[GraphObjectRef],
+    refs: &[MemoryObjectRef],
 ) -> Result<Vec<MemoryObject>, CustomError> {
     let subjects = rdf_subject_values(store)?;
     let mut objects = Vec::new();
@@ -151,7 +151,7 @@ pub(super) fn hydrate_objects_by_refs_from_store(
         if object_ref.object_type == ObjectType::MemoryLink {
             continue;
         }
-        let subject = graph_uri(object_ref.object_type, object_ref.object_id);
+        let subject = graph_uri(object_ref.object_type, object_ref.id);
         if let Some(values) = subjects.get(&subject) {
             objects.push(memory_object_from_rdf(
                 &subject,
@@ -182,11 +182,29 @@ pub(super) fn hydrate_all_links_from_store(store: &Store) -> Result<Vec<MemoryLi
     Ok(links)
 }
 
+pub(super) fn hydrate_links_by_ids_from_store(
+    store: &Store,
+    link_ids: &[MemoryId],
+) -> Result<Vec<MemoryLink>, CustomError> {
+    let mut ids = link_ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+
+    let mut links = Vec::new();
+    for link_id in ids {
+        let subject = graph_uri(ObjectType::MemoryLink, link_id);
+        if let Some(values) = rdf_subject_values_for_named_graph(store, &subject)? {
+            links.push(memory_link_from_rdf(&subject, &values)?);
+        }
+    }
+    Ok(links)
+}
+
 pub(super) fn hydrate_links_by_id_sets_from_store(
     store: &Store,
     graph_link_ids: &HashSet<MemoryId>,
     lifecycle_link_ids: &HashSet<MemoryId>,
-    graph_ref_set: &HashSet<GraphObjectRef>,
+    graph_ref_set: &HashSet<MemoryObjectRef>,
 ) -> Result<Vec<MemoryLink>, CustomError> {
     let links = hydrate_all_links_from_store(store)?;
     Ok(links
@@ -194,8 +212,8 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
         .filter(|link| graph_link_ids.contains(&link.id) || lifecycle_link_ids.contains(&link.id))
         .filter(|link| {
             let endpoints_in_graph = graph_ref_set
-                .contains(&GraphObjectRef::new(link.from_id, link.from_type))
-                && graph_ref_set.contains(&GraphObjectRef::new(link.to_id, link.to_type));
+                .contains(&MemoryObjectRef::from_id_type(link.from_id, link.from_type))
+                && graph_ref_set.contains(&MemoryObjectRef::from_id_type(link.to_id, link.to_type));
             (graph_link_ids.contains(&link.id) && endpoints_in_graph)
                 || lifecycle_link_ids.contains(&link.id)
         })
@@ -227,6 +245,41 @@ pub(super) fn rdf_subject_values(
         }
     }
     Ok(subjects)
+}
+
+fn rdf_subject_values_for_named_graph(
+    store: &Store,
+    graph_uri: &str,
+) -> Result<Option<RdfSubjectValues>, CustomError> {
+    let graph_name = NamedNode::new(graph_uri)?;
+    let mut values = RdfSubjectValues::default();
+    let mut found = false;
+    for quad in store.quads_for_pattern(
+        None,
+        None,
+        None,
+        Some(GraphNameRef::NamedNode(graph_name.as_ref())),
+    ) {
+        let quad = quad.map_err(oxigraph_error)?;
+        let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
+            continue;
+        };
+        if subject != graph_name {
+            continue;
+        }
+        found = true;
+        match quad.object {
+            Term::NamedNode(value) => values.push_resource(
+                quad.predicate.as_str().to_owned(),
+                value.as_str().to_owned(),
+            ),
+            Term::Literal(value) => {
+                values.push_literal(quad.predicate.as_str().to_owned(), value.value().to_owned())
+            }
+            Term::BlankNode(_) => {}
+        }
+    }
+    Ok(found.then_some(values))
 }
 
 pub(super) fn memory_object_from_rdf(
@@ -468,7 +521,7 @@ pub(super) fn rdf_parse_error(
 
 #[derive(Debug, Default)]
 pub(super) struct BoundedGraphVisibility {
-    pub(super) object_refs: HashSet<GraphObjectRef>,
+    pub(super) object_refs: HashSet<MemoryObjectRef>,
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
     pub(super) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
@@ -487,7 +540,7 @@ pub(super) fn assign_expanded_fanout_utilization(
 
 pub(super) fn bounded_graph_visible_refs(
     selectors: &SparqlGraphSelectors<'_>,
-    root_ref: GraphObjectRef,
+    root_ref: MemoryObjectRef,
     query: &GraphExpansionQuery,
 ) -> Result<BoundedGraphVisibility, CustomError> {
     let mut graph_refs = HashSet::from([root_ref]);
@@ -586,36 +639,8 @@ pub(super) fn oxigraph_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph graph store error: {error}"))
 }
 
-pub(super) fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-    match object {
-        MemoryObject::Episode(object) => (object.id, object.object_type),
-        MemoryObject::Observation(object) => (object.id, object.object_type),
-        MemoryObject::Entity(object) => (object.id, object.object_type),
-        MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-        MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-        MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-    }
-}
-
 pub(super) fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by(|left, right| {
-        stable_node_key(object_identity(left)).cmp(&stable_node_key(object_identity(right)))
-    });
-}
-
-pub(super) fn stable_node_key(node: (MemoryId, ObjectType)) -> (MemoryId, u8) {
-    (node.0, object_type_rank(node.1))
-}
-
-pub(super) fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
+    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 impl From<oxigraph::model::IriParseError> for CustomError {

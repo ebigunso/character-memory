@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 use crate::domain::{
     DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode, MemoryId,
-    MemoryLink, MemoryObject, MemoryThread, Modality, ObjectType, Observation, RelationType,
-    RetentionState, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    MemoryLink, MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
+    RelationType, RetentionState, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
+use crate::errors::VectorIndexingCause;
 
 /// Supplies generated IDs and timestamps for converting draft inputs into canonical objects.
 #[derive(Debug, Clone)]
@@ -522,6 +523,13 @@ impl TryFrom<MemoryLinkDraft> for MemoryLink {
     }
 }
 
+/// Result of a graph-authoritative link write and its repairable stats projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LinkOutcome {
+    pub link: MemoryLink,
+    pub stats_update_status: StatsUpdateStatus,
+}
+
 /// Result of a remember write.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberOutcome {
@@ -537,8 +545,17 @@ pub struct RememberOutcome {
 /// Vector indexing failure recorded after graph-authoritative writes have succeeded.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorIndexingFailure {
-    pub unindexed_object_ids: Vec<MemoryId>,
-    pub error_message: String,
+    pub unindexed_objects: Vec<MemoryObjectRef>,
+    pub cause: VectorIndexingCause,
+}
+
+impl VectorIndexingFailure {
+    pub fn unindexed_object_ids(&self) -> Vec<MemoryId> {
+        self.unindexed_objects
+            .iter()
+            .map(|object| object.id)
+            .collect()
+    }
 }
 
 /// Draft wrapper for converting caller input into a canonical memory object.

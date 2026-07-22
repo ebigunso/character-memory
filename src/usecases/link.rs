@@ -1,10 +1,11 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
-use crate::api::types::{DraftDefaults, MemoryLinkDraft};
-use crate::domain::{MemoryId, MemoryLink, ObjectType, RelationType};
+use crate::api::types::{DraftDefaults, LinkOutcome, MemoryLinkDraft};
+use crate::domain::{MemoryLink, RelationType};
 use crate::errors::CustomError;
-use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery, GraphObjectRef};
-use crate::ports::retrieval_stats::{record_stats_after_write, RetrievalStatsStore};
+use crate::ports::graph_authority::GraphAuthorityStore;
+use crate::ports::retrieval_stats::RetrievalStatsStore;
+use crate::usecases::StatsProjectionService;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkAdmissionEvidence {
@@ -49,7 +50,7 @@ where
         }
     }
 
-    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<MemoryLink, CustomError> {
+    pub(crate) async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let mut defaults = DraftDefaults::generated();
         self.link_with_defaults(draft, &mut defaults).await
     }
@@ -58,7 +59,7 @@ where
         &self,
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
-    ) -> Result<MemoryLink, CustomError> {
+    ) -> Result<LinkOutcome, CustomError> {
         self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
             .await
     }
@@ -68,19 +69,12 @@ where
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
         evidence: LinkAdmissionEvidence,
-    ) -> Result<MemoryLink, CustomError> {
+    ) -> Result<LinkOutcome, CustomError> {
         let link = draft
             .into_domain_with_defaults(defaults)
             .map_err(validation_error)?;
         if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         {
-            if let Err(error) = self
-                .stats_store
-                .record_rejected_low_information_link()
-                .await
-            {
-                let _ = self.stats_store.mark_unhealthy(error.to_string()).await;
-            }
             return Err(validation_error(
                 "low-information co-occurrence link rejected",
             ));
@@ -88,64 +82,14 @@ where
         self.graph_store
             .upsert_links(std::slice::from_ref(&link))
             .await?;
-        self.record_link_stats_after_write(&link).await;
-        Ok(link)
+        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
+            .project(&[], std::slice::from_ref(&link))
+            .await;
+        Ok(LinkOutcome {
+            link,
+            stats_update_status: projection.into_status(),
+        })
     }
-
-    async fn record_link_stats_after_write(&self, link: &MemoryLink) {
-        let endpoint_refs = link_stats_endpoint_refs(link);
-        if endpoint_refs.is_empty() {
-            record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
-            return;
-        }
-
-        match self
-            .graph_store
-            .query_objects(&GraphObjectQuery::by_refs(endpoint_refs))
-            .await
-        {
-            Ok(objects) => {
-                record_stats_after_write(self.stats_store, &objects, std::slice::from_ref(link))
-                    .await;
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                record_stats_after_write(self.stats_store, &[], std::slice::from_ref(link)).await;
-                let _ = self.stats_store.mark_unhealthy(error_message).await;
-            }
-        }
-    }
-}
-
-fn link_stats_endpoint_refs(link: &MemoryLink) -> Vec<GraphObjectRef> {
-    let mut refs = Vec::new();
-    if object_type_has_stats_state(link.from_type) {
-        push_link_stats_endpoint_ref(&mut refs, link.from_id, link.from_type);
-    }
-    if object_type_has_stats_state(link.to_type) {
-        push_link_stats_endpoint_ref(&mut refs, link.to_id, link.to_type);
-    }
-    refs
-}
-
-fn push_link_stats_endpoint_ref(
-    refs: &mut Vec<GraphObjectRef>,
-    object_id: MemoryId,
-    object_type: ObjectType,
-) {
-    let object_ref = GraphObjectRef::new(object_id, object_type);
-    if refs.contains(&object_ref) {
-        return;
-    }
-
-    refs.push(object_ref);
-}
-
-fn object_type_has_stats_state(object_type: ObjectType) -> bool {
-    matches!(
-        object_type,
-        ObjectType::Episode | ObjectType::Observation | ObjectType::DerivedMemory
-    )
 }
 
 pub(crate) fn admit_link(
@@ -181,11 +125,15 @@ mod tests {
         DerivedMemory, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
+    use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause};
     use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansion, GraphExpansionQuery,
+        GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
     };
-    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+    use crate::ports::retrieval_stats::{
+        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+        RetrievalStatsObjectState, RetrievalStatsStore,
+    };
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
 
     #[tokio::test]
@@ -209,7 +157,8 @@ mod tests {
         let persisted = pipeline
             .link_with_defaults(draft, &mut defaults)
             .await
-            .expect("valid typed link should persist");
+            .expect("valid typed link should persist")
+            .link;
 
         assert_eq!(persisted.id, id("550e8400-e29b-41d4-a716-446655444001"));
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
@@ -273,31 +222,6 @@ mod tests {
             .contains("cannot point from an object to itself"));
     }
 
-    #[test]
-    fn link_stats_endpoint_refs_dedupes_self_referential_endpoint() {
-        let object_id = id("550e8400-e29b-41d4-a716-446655444010");
-        let link = MemoryLink {
-            id: id("550e8400-e29b-41d4-a716-446655444011"),
-            object_type: ObjectType::MemoryLink,
-            from_id: object_id,
-            from_type: ObjectType::Observation,
-            to_id: object_id,
-            to_type: ObjectType::Observation,
-            relation: RelationType::AssociatedWith,
-            confidence: 0.8,
-            rationale: None,
-            created_at: timestamp(),
-            schema_version: DEFAULT_SCHEMA_VERSION.to_string(),
-        };
-
-        let refs = link_stats_endpoint_refs(&link);
-
-        assert_eq!(
-            refs,
-            vec![GraphObjectRef::new(object_id, ObjectType::Observation)]
-        );
-    }
-
     #[tokio::test]
     async fn rejects_memory_link_endpoints_before_graph_write() {
         let graph = FakeGraphAuthorityStore::new();
@@ -322,7 +246,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         let pipeline = LinkPipeline::new(&graph);
 
-        let persisted = pipeline.link(valid_link_draft()).await.unwrap();
+        let persisted = pipeline.link(valid_link_draft()).await.unwrap().link;
 
         assert_eq!(persisted.object_type, ObjectType::MemoryLink);
     }
@@ -335,7 +259,7 @@ mod tests {
         let draft = valid_link_draft();
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -374,7 +298,7 @@ mod tests {
             suppressed_episode.id,
         );
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -409,11 +333,12 @@ mod tests {
         assert!(error
             .to_string()
             .contains("low-information co-occurrence link rejected"));
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            1
-        );
-        assert!(graph.list_diagnostic_links().await.unwrap().is_empty());
+        let rejected_link_id = id("550e8400-e29b-41d4-a716-446655444042");
+        assert!(graph
+            .query_links_by_ids(&[rejected_link_id])
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -422,13 +347,13 @@ mod tests {
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
 
-        let persisted = pipeline.link(associated_with_link_draft()).await.unwrap();
+        let persisted = pipeline
+            .link(associated_with_link_draft())
+            .await
+            .unwrap()
+            .link;
 
         assert_eq!(persisted.relation, RelationType::AssociatedWith);
-        assert_eq!(
-            stats.rejected_low_information_link_count().await.unwrap(),
-            0
-        );
     }
 
     #[tokio::test]
@@ -466,7 +391,7 @@ mod tests {
         let draft = valid_link_draft();
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap();
+        let persisted = pipeline.link(draft).await.unwrap().link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -484,6 +409,104 @@ mod tests {
             stats.health().await.unwrap().state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
+    }
+
+    #[tokio::test]
+    async fn link_outcome_preserves_all_stats_failures() {
+        let graph = FakeGraphAuthorityStore::new();
+        let fixtures = representative_fixtures();
+        graph
+            .upsert_objects(&[
+                MemoryObject::Entity(fixtures.hub_entity.clone()),
+                MemoryObject::Episode(fixtures.episode.clone()),
+            ])
+            .await
+            .unwrap();
+        let stats = DualFailingStatsStore;
+        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
+        let draft = MemoryLinkDraft::new(
+            ObjectType::Entity,
+            fixtures.hub_entity.id,
+            RelationType::Involves,
+            ObjectType::Episode,
+            fixtures.episode.id,
+        );
+
+        let outcome = pipeline
+            .link(draft)
+            .await
+            .expect("stats degradation should remain a repairable link outcome");
+
+        assert_eq!(outcome.link.from_id, fixtures.hub_entity.id);
+        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
+        let failure = outcome
+            .stats_update_status
+            .failure
+            .as_ref()
+            .expect("stats failure must be visible");
+        assert_eq!(failure.failed_object_ids, vec![fixtures.episode.id]);
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [
+                StatsUpdateCause::EdgeWrite { .. },
+                StatsUpdateCause::ObjectStateWrite { .. }
+            ]
+        ));
+
+        let serialized = serde_json::to_string(&outcome).unwrap();
+        assert_eq!(
+            serde_json::from_str::<LinkOutcome>(&serialized).unwrap(),
+            outcome
+        );
+    }
+
+    struct DualFailingStatsStore;
+
+    #[async_trait]
+    impl RetrievalStatsStore for DualFailingStatsStore {
+        async fn record_edges(
+            &self,
+            _edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats edge write failed".to_owned(),
+            })
+        }
+
+        async fn record_object_states(
+            &self,
+            _states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Err(RetrievalStatsStoreError::Sqlite {
+                detail: "stats object-state write failed".to_owned(),
+            })
+        }
+
+        async fn counter(
+            &self,
+            _key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn global_counter(
+            &self,
+            _relation_kind: RelationType,
+            _object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            Ok(RetrievalStatsHealth::default())
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            _cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -513,10 +536,17 @@ mod tests {
         async fn query_objects(
             &self,
             _query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, CustomError> {
-            Err(CustomError::DatabaseError(
-                "endpoint lifecycle lookup failed".to_owned(),
-            ))
+        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+            Err(crate::errors::GraphQueryError::Selection {
+                detail: "endpoint lifecycle lookup failed".to_owned(),
+            })
+        }
+
+        async fn query_links_by_ids(
+            &self,
+            _link_ids: &[MemoryId],
+        ) -> Result<Vec<MemoryLink>, CustomError> {
+            Ok(Vec::new())
         }
 
         async fn query_derived_memories_by_provenance(
@@ -538,14 +568,6 @@ mod tests {
             _query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
             Ok(GraphExpansion::new(Vec::new(), Vec::new()))
-        }
-
-        async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(self.links.lock().unwrap().clone())
         }
     }
 

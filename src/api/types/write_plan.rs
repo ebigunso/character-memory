@@ -7,8 +7,10 @@ use super::draft::{
     ObservationDraft, VectorIndexingFailure,
 };
 use super::lifecycle::ExternalSourceReference;
-use super::retrieval::MemoryObjectRef;
-use crate::domain::{CandidateValidation, MemoryCandidateKind, MemoryId, RelationType};
+use crate::domain::{
+    CandidateValidation, MemoryCandidateKind, MemoryId, MemoryObjectRef, RelationType,
+};
+use crate::errors::{StatsUpdateCause, VectorIndexingCause};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RememberInput {
@@ -666,7 +668,8 @@ impl RememberDiagnostics {
     }
 
     fn refresh_validation_warning_messages(&mut self) {
-        const VALIDATION_WARNING_CODE: &str = "write_plan_validation_warning";
+        const VALIDATION_WARNING_CODE: RememberDiagnosticCode =
+            RememberDiagnosticCode::WritePlanValidationWarning;
 
         let warning_messages = self
             .validations
@@ -676,7 +679,7 @@ impl RememberDiagnostics {
                 RememberDiagnostic::new(
                     DiagnosticSeverity::Warning,
                     VALIDATION_WARNING_CODE,
-                    warning.clone(),
+                    warning.to_string(),
                 )
             })
             .collect::<Vec<_>>();
@@ -695,22 +698,32 @@ pub struct CandidateCount {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberDiagnostic {
     pub severity: DiagnosticSeverity,
-    pub code: String,
+    pub code: RememberDiagnosticCode,
     pub message: String,
 }
 
 impl RememberDiagnostic {
     pub fn new(
         severity: DiagnosticSeverity,
-        code: impl Into<String>,
+        code: RememberDiagnosticCode,
         message: impl Into<String>,
     ) -> Self {
         Self {
             severity,
-            code: code.into(),
+            code,
             message: message.into(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RememberDiagnosticCode {
+    WritePlanValidationWarning,
+    VectorIndexingFailed,
+    StatsUpdateFailed,
+    StatsUpdateHealthCheckFailed,
+    Prepared,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -725,20 +738,20 @@ pub enum DiagnosticSeverity {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RepairMarker {
     VectorIndex {
-        unindexed_object_ids: Vec<MemoryId>,
-        error_message: String,
+        unindexed_objects: Vec<MemoryObjectRef>,
+        cause: VectorIndexingCause,
     },
     StatsUpdate {
         object_ids: Vec<MemoryId>,
-        error_message: String,
+        causes: Vec<StatsUpdateCause>,
     },
 }
 
 impl From<VectorIndexingFailure> for RepairMarker {
     fn from(value: VectorIndexingFailure) -> Self {
         Self::VectorIndex {
-            unindexed_object_ids: value.unindexed_object_ids,
-            error_message: value.error_message,
+            unindexed_objects: value.unindexed_objects,
+            cause: value.cause,
         }
     }
 }
@@ -760,13 +773,13 @@ impl StatsUpdateStatus {
     pub fn failed(
         updated_object_ids: impl IntoIterator<Item = MemoryId>,
         failed_object_ids: impl IntoIterator<Item = MemoryId>,
-        error_message: impl Into<String>,
+        causes: Vec<StatsUpdateCause>,
     ) -> Self {
         Self {
             updated_object_ids: updated_object_ids.into_iter().collect(),
             failure: Some(StatsUpdateFailure {
                 failed_object_ids: failed_object_ids.into_iter().collect(),
-                error_message: error_message.into(),
+                causes,
             }),
         }
     }
@@ -781,7 +794,7 @@ impl Default for StatsUpdateStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatsUpdateFailure {
     pub failed_object_ids: Vec<MemoryId>,
-    pub error_message: String,
+    pub causes: Vec<StatsUpdateCause>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -901,8 +914,14 @@ mod tests {
 
     #[test]
     fn remember_diagnostics_preserves_structured_validation_and_projects_warnings() {
+        let matching_episode_id = memory_id("550e8400-e29b-41d4-a716-446655442009");
         let validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation)
-            .with_warning("echo-surface: source episode 550e8400-e29b-41d4-a716-446655442009");
+            .with_warning(
+                crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
+                    echo_surface: "the same episode text".to_owned(),
+                    matching_episode_ids: vec![matching_episode_id],
+                },
+            );
         let diagnostics = RememberDiagnostics::default().with_validation(validation.clone());
 
         assert_eq!(diagnostics.validations, vec![validation]);
@@ -913,12 +932,25 @@ mod tests {
         );
         assert_eq!(
             diagnostics.messages[0].code,
-            "write_plan_validation_warning"
+            RememberDiagnosticCode::WritePlanValidationWarning
         );
+        assert!(matches!(
+            diagnostics.validations[0].warnings.as_slice(),
+            [crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
+                matching_episode_ids,
+                ..
+            }] if matching_episode_ids == &[matching_episode_id]
+        ));
 
         let serialized = serde_json::to_value(&diagnostics).unwrap();
         assert!(serialized.get("validations").is_some());
         assert!(serialized.get("validation_failures").is_none());
+        let warning = &serialized["validations"][0]["warnings"][0];
+        assert_eq!(warning["kind"], "duplicate_observation_echo");
+        assert_eq!(
+            warning["matching_episode_ids"][0],
+            matching_episode_id.to_string()
+        );
     }
 
     #[test]
@@ -938,7 +970,7 @@ mod tests {
                     .with_candidate_count(MemoryCandidateKind::Episode, 1)
                     .with_message(RememberDiagnostic::new(
                         DiagnosticSeverity::Info,
-                        "prepared",
+                        RememberDiagnosticCode::Prepared,
                         "prepared one candidate",
                     )),
             );
@@ -947,5 +979,26 @@ mod tests {
         let deserialized: RememberWritePlan = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(deserialized, plan);
+    }
+
+    #[test]
+    fn stats_update_failure_round_trips_with_typed_cause() {
+        let object_id = memory_id("550e8400-e29b-41d4-a716-446655442010");
+        let status = StatsUpdateStatus::failed(
+            [],
+            [object_id],
+            vec![StatsUpdateCause::ObjectStateWrite {
+                error: crate::errors::RetrievalStatsStoreError::Sqlite {
+                    detail: "state write rejected".to_owned(),
+                },
+            }],
+        );
+
+        let serialized = serde_json::to_string(&status).unwrap();
+        let deserialized: StatsUpdateStatus = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized, status);
+        assert!(serialized.contains("\"cause\":\"object_state_write\""));
+        assert!(serialized.contains("\"kind\":\"sqlite\""));
     }
 }

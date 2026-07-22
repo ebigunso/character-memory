@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "reviewer"
-last_updated: "2026-07-19"
+last_updated: "2026-07-21"
 ---
 
 # Reviewer Repository Rules
@@ -52,4 +52,5 @@ Suggested durable review categories:
 
 ## Mechanical Gate Candidates
 
-- None.
+
+- When reviewing compatibility claims (schema bumps, sealed-artifact readability, legacy tolerance), verify the named reader at its cited file:line yourself; a claim without a reader citation is an automatic finding (Tier A catch 2026-07-21: asserted result-reader tolerance belonged to a different artifact family).

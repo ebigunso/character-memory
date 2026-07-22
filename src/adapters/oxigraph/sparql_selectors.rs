@@ -8,11 +8,10 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType};
+use crate::domain::{graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
-    GraphObjectRef,
 };
 
 use super::vocabulary as vocab;
@@ -24,20 +23,9 @@ pub(crate) struct SparqlGraphSelectors<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SparqlLinkRef {
     pub(crate) link_id: MemoryId,
-    pub(crate) from: GraphObjectRef,
-    pub(crate) to: GraphObjectRef,
+    pub(crate) from: MemoryObjectRef,
+    pub(crate) to: MemoryObjectRef,
     pub(crate) relation: RelationType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
-#[allow(dead_code)]
-pub(crate) struct LifecycleCurrentnessPredicates {
-    pub(crate) retention_state: &'static str,
-    pub(crate) is_current: &'static str,
-    pub(crate) thread_status: &'static str,
-    pub(crate) supersedes: &'static str,
-    pub(crate) supersedes_relation: &'static str,
 }
 
 impl<'a> SparqlGraphSelectors<'a> {
@@ -48,17 +36,41 @@ impl<'a> SparqlGraphSelectors<'a> {
     pub(crate) fn select_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<GraphObjectRef>, CustomError> {
-        let id_values =
-            sparql_literal_values("id", query.object_ids.iter().map(|id| id.to_string()));
-        let type_values = sparql_literal_values(
-            "objectType",
-            query
-                .object_types
-                .iter()
-                .map(|object_type| enum_value(*object_type)),
-        );
-        let ref_values = sparql_object_ref_values(&query.object_refs);
+    ) -> Result<Vec<MemoryObjectRef>, CustomError> {
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let (id_values, type_values, ref_values, limit_clause) = match query {
+            GraphObjectQuery::ByRefs(object_refs) => (
+                String::new(),
+                String::new(),
+                sparql_object_ref_values(object_refs),
+                String::new(),
+            ),
+            GraphObjectQuery::ByIds(object_ids) => (
+                sparql_literal_values("id", object_ids.iter().map(|id| id.to_string())),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+            GraphObjectQuery::ByTypes {
+                object_types,
+                limit,
+            } => (
+                String::new(),
+                sparql_literal_values(
+                    "objectType",
+                    object_types
+                        .iter()
+                        .map(|object_type| enum_value(*object_type)),
+                ),
+                String::new(),
+                limit
+                    .map(|limit| format!("LIMIT {limit}"))
+                    .unwrap_or_default(),
+            ),
+        };
         let select_query = format!(
             r#"
             SELECT DISTINCT ?id ?objectType WHERE {{
@@ -70,21 +82,19 @@ impl<'a> SparqlGraphSelectors<'a> {
                          <{object_type}> ?objectType .
               }}
             }}
-            ORDER BY ?id ?objectType
+            ORDER BY ?id
+              (IF(?objectType = "episode", 0,
+                IF(?objectType = "observation", 1,
+                  IF(?objectType = "entity", 2,
+                    IF(?objectType = "memory_thread", 3,
+                      IF(?objectType = "derived_memory", 4, 5))))))
+            {limit_clause}
             "#,
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
         );
 
-        let mut refs = self.select_object_refs(&select_query)?;
-
-        refs.retain(|object_ref| object_matches_query(*object_ref, query));
-        sort_object_refs(&mut refs);
-        refs.dedup();
-        if let Some(limit) = query.limit {
-            refs.truncate(limit);
-        }
-        Ok(refs)
+        self.select_object_refs(&select_query)
     }
 
     pub(crate) fn select_derived_memories_by_provenance(
@@ -136,7 +146,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             derived_from_relation = vocab::relation_predicate("derived_from"),
         );
 
-        self.select_memory_ids(&query_text, query.limit)
+        self.select_memory_ids(&query_text, None)
     }
 
     pub(crate) fn select_derived_memories_by_thread(
@@ -156,78 +166,13 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_derived_memories_by_resource_predicate(
             vocab::PART_OF_THREAD,
             threads.iter().map(String::as_str),
-            query.limit,
+            None,
         )
-    }
-
-    // Entity-scoped derived-memory selectors are reserved for governance diagnostics; remove if that surface drops entity filters.
-    #[allow(dead_code)]
-    pub(crate) fn select_derived_memories_by_entity(
-        &self,
-        entity_ids: &[MemoryId],
-        limit: Option<usize>,
-    ) -> Result<Vec<MemoryId>, CustomError> {
-        let entities = entity_ids
-            .iter()
-            .map(|id| graph_uri(ObjectType::Entity, *id))
-            .collect::<Vec<_>>();
-
-        if entities.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        self.select_derived_memories_by_resource_predicate(
-            vocab::ABOUT_ENTITY,
-            entities.iter().map(String::as_str),
-            limit,
-        )
-    }
-
-    // Lifecycle predicate metadata is reserved for governance diagnostics; remove if lifecycle SPARQL inspection is retired.
-    #[allow(dead_code)]
-    pub(crate) const fn lifecycle_currentness_predicates() -> LifecycleCurrentnessPredicates {
-        LifecycleCurrentnessPredicates {
-            retention_state: vocab::RETENTION_STATE,
-            is_current: vocab::IS_CURRENT,
-            thread_status: vocab::THREAD_STATUS,
-            supersedes: vocab::SUPERSEDES,
-            supersedes_relation: vocab::RELATION_SUPERSEDES,
-        }
-    }
-
-    // Supersession selectors are reserved for governance diagnostics; remove if lifecycle reconciliation stops using SPARQL.
-    #[allow(dead_code)]
-    pub(crate) fn select_superseded_derived_memory_ids(
-        &self,
-    ) -> Result<Vec<MemoryId>, CustomError> {
-        let query_text = format!(
-            r#"
-            SELECT DISTINCT ?id WHERE {{
-              GRAPH ?memoryGraph {{
-                ?memory a <{derived_class}> ;
-                        <{object_id}> ?id .
-              }}
-              GRAPH ?supersessionGraph {{
-                {{
-                  ?replacement <{supersedes}> ?memory .
-                }} UNION {{
-                  ?replacement <{supersedes_relation}> ?memory .
-                }}
-              }}
-            }}
-            "#,
-            derived_class = vocab::CLASS_DERIVED_MEMORY,
-            object_id = vocab::OBJECT_ID,
-            supersedes = vocab::SUPERSEDES,
-            supersedes_relation = vocab::RELATION_SUPERSEDES,
-        );
-
-        self.select_memory_ids(&query_text, None)
     }
 
     pub(crate) fn select_links_touching(
         &self,
-        object_refs: &[GraphObjectRef],
+        object_refs: &[MemoryObjectRef],
     ) -> Result<Vec<SparqlLinkRef>, CustomError> {
         if object_refs.is_empty() {
             return Ok(Vec::new());
@@ -273,11 +218,11 @@ impl<'a> SparqlGraphSelectors<'a> {
         for solution in self.query_solutions(&query_text)? {
             let link_ref = SparqlLinkRef {
                 link_id: memory_id_binding(&solution, "linkId")?,
-                from: GraphObjectRef::new(
+                from: MemoryObjectRef::from_id_type(
                     memory_id_binding(&solution, "fromId")?,
                     enum_binding(&solution, "fromType")?,
                 ),
-                to: GraphObjectRef::new(
+                to: MemoryObjectRef::from_id_type(
                     memory_id_binding(&solution, "toId")?,
                     enum_binding(&solution, "toType")?,
                 ),
@@ -289,12 +234,12 @@ impl<'a> SparqlGraphSelectors<'a> {
         }
         refs.sort_by_key(|link_ref| {
             (
-                link_ref.to.object_id,
-                link_ref.from.object_id,
+                link_ref.to.id,
+                link_ref.from.id,
                 link_ref.link_id,
-                object_type_rank(link_ref.to.object_type),
-                object_type_rank(link_ref.from.object_type),
-                relation_type_rank(link_ref.relation),
+                link_ref.to.object_type.stable_rank(),
+                link_ref.from.object_type.stable_rank(),
+                link_ref.relation.stable_rank(),
             )
         });
         Ok(refs)
@@ -325,12 +270,12 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_memory_ids(&query_text, limit)
     }
 
-    fn select_object_refs(&self, query_text: &str) -> Result<Vec<GraphObjectRef>, CustomError> {
+    fn select_object_refs(&self, query_text: &str) -> Result<Vec<MemoryObjectRef>, CustomError> {
         let mut refs = Vec::new();
         for solution in self.query_solutions(query_text)? {
             let id = memory_id_binding(&solution, "id")?;
             let object_type = enum_binding(&solution, "objectType")?;
-            refs.push(GraphObjectRef::new(id, object_type));
+            refs.push(MemoryObjectRef::from_id_type(id, object_type));
         }
         Ok(refs)
     }
@@ -374,12 +319,6 @@ impl<'a> SparqlGraphSelectors<'a> {
             .collect::<Result<Vec<_>, _>>()
             .map_err(oxigraph_sparql_error)
     }
-}
-
-fn object_matches_query(object_ref: GraphObjectRef, query: &GraphObjectQuery) -> bool {
-    (query.object_refs.is_empty() || query.object_refs.contains(&object_ref))
-        && (query.object_ids.is_empty() || query.object_ids.contains(&object_ref.object_id))
-        && (query.object_types.is_empty() || query.object_types.contains(&object_ref.object_type))
 }
 
 fn memory_id_binding(solution: &QuerySolution, name: &str) -> Result<MemoryId, CustomError> {
@@ -426,11 +365,11 @@ fn sparql_iri_values<'a>(variable: &str, values: impl Iterator<Item = &'a str>) 
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
-fn sparql_node_iri_values(variable: &str, object_refs: &[GraphObjectRef]) -> String {
+fn sparql_node_iri_values(variable: &str, object_refs: &[MemoryObjectRef]) -> String {
     let values = object_refs
         .iter()
         .map(|object_ref| {
-            let graph_uri = graph_uri(object_ref.object_type, object_ref.object_id);
+            let graph_uri = graph_uri(object_ref.object_type, object_ref.id);
             format!("<{}>", sparql_iri(&graph_uri))
         })
         .collect::<Vec<_>>()
@@ -456,13 +395,13 @@ fn sparql_literal_values(variable: &str, values: impl Iterator<Item = String>) -
     format!("VALUES ?{variable} {{ {values} }}")
 }
 
-fn sparql_object_ref_values(object_refs: &[GraphObjectRef]) -> String {
+fn sparql_object_ref_values(object_refs: &[MemoryObjectRef]) -> String {
     let values = object_refs
         .iter()
         .map(|object_ref| {
             format!(
                 "({} {})",
-                sparql_string_literal(&object_ref.object_id.to_string()),
+                sparql_string_literal(&object_ref.id.to_string()),
                 sparql_string_literal(&enum_value(object_ref.object_type)),
             )
         })
@@ -483,44 +422,6 @@ fn enum_value(value: impl serde::Serialize) -> String {
         .ok()
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
         .unwrap_or_default()
-}
-
-fn sort_object_refs(refs: &mut [GraphObjectRef]) {
-    refs.sort_by_key(|object_ref| stable_node_key(object_ref.object_id, object_ref.object_type));
-}
-
-fn stable_node_key(object_id: MemoryId, object_type: ObjectType) -> (MemoryId, u8) {
-    (object_id, object_type_rank(object_type))
-}
-
-fn object_type_rank(object_type: ObjectType) -> u8 {
-    match object_type {
-        ObjectType::Episode => 0,
-        ObjectType::Observation => 1,
-        ObjectType::Entity => 2,
-        ObjectType::MemoryThread => 3,
-        ObjectType::DerivedMemory => 4,
-        ObjectType::MemoryLink => 5,
-    }
-}
-
-fn relation_type_rank(relation_type: RelationType) -> u8 {
-    match relation_type {
-        RelationType::HasObservation => 0,
-        RelationType::ObservedIn => 1,
-        RelationType::Mentions => 2,
-        RelationType::Involves => 3,
-        RelationType::About => 4,
-        RelationType::DerivedFrom => 5,
-        RelationType::PartOfThread => 6,
-        RelationType::Supports => 7,
-        RelationType::Contradicts => 8,
-        RelationType::Supersedes => 9,
-        RelationType::Resolves => 10,
-        RelationType::CreatesOpenLoop => 11,
-        RelationType::FulfillsCommitment => 12,
-        RelationType::AssociatedWith => 13,
-    }
 }
 
 fn oxigraph_sparql_error(error: impl std::fmt::Display) -> CustomError {
@@ -545,25 +446,23 @@ mod tests {
         let selectors = SparqlGraphSelectors::new(&store);
 
         let selected = selectors
-            .select_objects(&GraphObjectQuery {
-                object_refs: Vec::new(),
-                object_ids: vec![fixtures.episode.id, fixtures.correction.id],
-                object_types: vec![ObjectType::Episode, ObjectType::DerivedMemory],
-                limit: None,
-            })
+            .select_objects(&GraphObjectQuery::by_refs(vec![
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(fixtures.correction.id, ObjectType::DerivedMemory),
+            ]))
             .unwrap();
 
         assert_eq!(
             selected,
             vec![
-                GraphObjectRef::new(fixtures.episode.id, ObjectType::Episode),
-                GraphObjectRef::new(fixtures.correction.id, ObjectType::DerivedMemory),
+                MemoryObjectRef::from_id_type(fixtures.episode.id, ObjectType::Episode),
+                MemoryObjectRef::from_id_type(fixtures.correction.id, ObjectType::DerivedMemory),
             ]
         );
     }
 
     #[test]
-    fn sparql_selectors_apply_limit_after_stable_rust_ordering() {
+    fn sparql_selectors_apply_limit_after_stable_query_ordering() {
         let store = Store::new().unwrap();
         let fixtures = representative_fixtures();
         let mut entity_with_episode_id = fixtures.project_entity.clone();
@@ -581,17 +480,15 @@ mod tests {
         );
 
         let selected = SparqlGraphSelectors::new(&store)
-            .select_objects(&GraphObjectQuery {
-                object_refs: Vec::new(),
-                object_ids: vec![fixtures.episode.id],
-                object_types: vec![ObjectType::Episode, ObjectType::Entity],
-                limit: Some(1),
-            })
+            .select_objects(&GraphObjectQuery::by_types(
+                vec![ObjectType::Episode, ObjectType::Entity],
+                Some(1),
+            ))
             .unwrap();
 
         assert_eq!(
             selected,
-            vec![GraphObjectRef::new(
+            vec![MemoryObjectRef::from_id_type(
                 fixtures.episode.id,
                 ObjectType::Episode
             )]
@@ -613,11 +510,11 @@ mod tests {
             .select_objects(&GraphObjectQuery::by_ids(vec![fixtures.episode.id]))
             .unwrap();
 
-        assert_eq!(selected, Vec::<GraphObjectRef>::new());
+        assert_eq!(selected, Vec::<MemoryObjectRef>::new());
     }
 
     #[test]
-    fn sparql_selectors_find_derived_memories_by_provenance_thread_and_entity() {
+    fn sparql_selectors_find_derived_memories_by_provenance_and_thread() {
         let store = store_with_representative_fixture();
         let fixtures = representative_fixtures();
         let selectors = SparqlGraphSelectors::new(&store);
@@ -633,14 +530,9 @@ mod tests {
                 fixtures.soft_thread.id,
             ]))
             .unwrap();
-        let by_entity = selectors
-            .select_derived_memories_by_entity(&[fixtures.user_entity.id], None)
-            .unwrap();
-
         assert!(by_provenance.contains(&fixtures.correction.id));
         assert!(by_provenance.contains(&fixtures.derived_reflection.id));
         assert!(by_thread.contains(&fixtures.correction.id));
-        assert!(by_entity.contains(&fixtures.correction.id));
     }
 
     #[test]
@@ -648,7 +540,7 @@ mod tests {
         let store = store_with_representative_fixture();
         let fixtures = representative_fixtures();
         let selected = SparqlGraphSelectors::new(&store)
-            .select_links_touching(&[GraphObjectRef::new(
+            .select_links_touching(&[MemoryObjectRef::from_id_type(
                 fixtures.hub_entity.id,
                 ObjectType::Entity,
             )])
@@ -663,37 +555,20 @@ mod tests {
         assert!(selected_ids.contains(&fixtures.hub_links[1].id));
         assert!(!selected_ids.contains(&fixtures.soft_thread_link.id));
         assert!(selected.iter().all(|link_ref| {
-            link_ref.from == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
-                || link_ref.to == GraphObjectRef::new(fixtures.hub_entity.id, ObjectType::Entity)
+            link_ref.from
+                == MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity)
+                || link_ref.to
+                    == MemoryObjectRef::from_id_type(fixtures.hub_entity.id, ObjectType::Entity)
         }));
-    }
-
-    #[test]
-    fn sparql_selectors_expose_lifecycle_predicates_and_superseded_ids() {
-        let store = store_with_representative_fixture();
-        let fixtures = representative_fixtures();
-        let selectors = SparqlGraphSelectors::new(&store);
-        let predicates = SparqlGraphSelectors::lifecycle_currentness_predicates();
-
-        assert_eq!(predicates.retention_state, vocab::RETENTION_STATE);
-        assert_eq!(predicates.is_current, vocab::IS_CURRENT);
-        assert_eq!(predicates.thread_status, vocab::THREAD_STATUS);
-        assert_eq!(predicates.supersedes, vocab::SUPERSEDES);
-        assert_eq!(predicates.supersedes_relation, vocab::RELATION_SUPERSEDES);
-        assert!(selectors
-            .select_superseded_derived_memory_ids()
-            .unwrap()
-            .contains(&fixtures.suppressed_seed.id));
     }
 
     fn store_with_representative_fixture() -> Store {
         let store = Store::new().unwrap();
         let fixtures = representative_fixtures();
         for object in fixtures.objects() {
-            let (object_id, object_type) = object_identity(&object);
             insert_triples(
                 &store,
-                &graph_uri(object_type, object_id),
+                &graph_uri(object.object_type(), object.id()),
                 &rdf_triples_for_object(&object).unwrap(),
             );
         }
@@ -746,16 +621,5 @@ mod tests {
             object,
             GraphName::DefaultGraph,
         ))
-    }
-
-    fn object_identity(object: &MemoryObject) -> (MemoryId, ObjectType) {
-        match object {
-            MemoryObject::Episode(object) => (object.id, object.object_type),
-            MemoryObject::Observation(object) => (object.id, object.object_type),
-            MemoryObject::Entity(object) => (object.id, object.object_type),
-            MemoryObject::MemoryThread(object) => (object.id, object.object_type),
-            MemoryObject::DerivedMemory(object) => (object.id, object.object_type),
-            MemoryObject::MemoryLink(object) => (object.id, object.object_type),
-        }
     }
 }

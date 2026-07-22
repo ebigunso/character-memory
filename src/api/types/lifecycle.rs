@@ -1,28 +1,11 @@
+use crate::domain::{
+    DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType,
+    RetentionState, Stability, ThreadStatus,
+};
+use crate::errors::VectorIndexingCause;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-use super::retrieval::MemoryObjectRef;
-use crate::domain::{DerivedType, MemoryId, ObjectType, RetentionState, Stability, ThreadStatus};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum LifecycleDtoValidationError {
-    #[error("rationale must not be empty")]
-    EmptyRationale,
-    #[error("correction origin provenance is required")]
-    EmptyCorrectionOrigin,
-    #[error("replacement derived memory text must not be empty")]
-    EmptyReplacementText,
-    #[error(
-        "replacement derived memory must reference at least one source episode or observation"
-    )]
-    MissingReplacementSource,
-    #[error("correction requires at least one target")]
-    MissingCorrectionTarget,
-    #[error("forget requires at least one target")]
-    MissingForgetTarget,
-    #[error("unsupported lifecycle target: {0:?}")]
-    UnsupportedLifecycleTarget(ObjectType),
-}
+use super::write_plan::StatsUpdateStatus;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "object_type", content = "id", rename_all = "snake_case")]
@@ -539,21 +522,9 @@ pub struct LifecycleMutationOutcome {
     pub graph_mutated_link_ids: Vec<MemoryId>,
     pub vector_maintained_object_ids: Vec<MemoryObjectRef>,
     pub vector_maintenance_failure: Option<VectorMaintenanceFailure>,
+    pub stats_update_status: StatsUpdateStatus,
     pub trace: Option<LifecycleMutationTrace>,
     pub diagnostics: LifecycleMutationDiagnostics,
-}
-
-impl LifecycleMutationOutcome {
-    pub fn empty() -> Self {
-        Self {
-            graph_mutated_object_ids: Vec::new(),
-            graph_mutated_link_ids: Vec::new(),
-            vector_maintained_object_ids: Vec::new(),
-            vector_maintenance_failure: None,
-            trace: None,
-            diagnostics: LifecycleMutationDiagnostics::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -575,13 +546,42 @@ pub enum LifecycleMutationWarningReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorMaintenanceFailure {
-    pub unmaintained_object_ids: Vec<MemoryObjectRef>,
-    pub error_message: String,
+    pub failures: Vec<VectorMaintenanceFailureItem>,
+}
+
+impl VectorMaintenanceFailure {
+    pub fn unmaintained_objects(&self) -> Vec<MemoryObjectRef> {
+        let mut objects = self
+            .failures
+            .iter()
+            .flat_map(|failure| failure.objects.iter().copied())
+            .collect::<Vec<_>>();
+        objects.sort_by_key(|object| (object.id, object.object_type.stable_rank()));
+        objects.dedup();
+        objects
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VectorMaintenanceFailureItem {
+    pub operation: VectorMaintenanceOperation,
+    pub objects: Vec<MemoryObjectRef>,
+    pub cause: VectorIndexingCause,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorMaintenanceOperation {
+    Delete,
+    Upsert,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::{
+        RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind,
+    };
 
     use uuid::Uuid;
 
@@ -895,12 +895,29 @@ mod tests {
                 new_memory_id(),
             )],
             vector_maintenance_failure: Some(VectorMaintenanceFailure {
-                unmaintained_object_ids: vec![MemoryObjectRef::new(
-                    ObjectType::DerivedMemory,
-                    old_memory_id(),
-                )],
-                error_message: "vector maintenance timed out after graph mutation".to_owned(),
+                failures: vec![VectorMaintenanceFailureItem {
+                    operation: VectorMaintenanceOperation::Delete,
+                    objects: vec![MemoryObjectRef::new(
+                        ObjectType::DerivedMemory,
+                        old_memory_id(),
+                    )],
+                    cause: VectorIndexingCause::VectorDatabase(VectorDatabaseError::new(
+                        "test",
+                        VectorDatabaseErrorKind::HttpTimeout,
+                        None,
+                        "timed out after graph mutation",
+                    )),
+                }],
             }),
+            stats_update_status: StatsUpdateStatus::failed(
+                [],
+                [old_memory_id()],
+                vec![StatsUpdateCause::EdgeWrite {
+                    error: RetrievalStatsStoreError::Sqlite {
+                        detail: "stats edge write failed".to_owned(),
+                    },
+                }],
+            ),
             trace: Some(LifecycleMutationTrace {
                 requested_targets: vec![LifecycleTargetRef::derived_memory(old_memory_id())],
                 superseded_by: vec![SupersededByEvidence {

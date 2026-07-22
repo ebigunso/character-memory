@@ -1,27 +1,41 @@
 use config::Config;
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Deserializer};
-use std::env;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{ObjectType, RelationType};
-use crate::errors::CustomError;
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::EmbeddingModel;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
     oxigraph_path: SecretString,
     openai_api_key: SecretString,
     embedding_model: SecretString,
-    #[serde(default)]
     graph_store_mode: GraphStoreMode,
-    #[serde(default)]
     retrieval_stats_store_mode: RetrievalStatsStoreMode,
+    retrieval_stats_path: PathBuf,
+    retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode,
+    selectivity_smoothing_alpha: f64,
+    selectivity_gamma: f64,
+    retrieval: RetrievalSettings,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSettings {
+    qdrant_connection_string: SecretString,
+    oxigraph_path: SecretString,
+    openai_api_key: SecretString,
+    embedding_model: SecretString,
+    #[serde(default = "default_graph_store_mode")]
+    graph_store_mode: String,
+    #[serde(default = "default_retrieval_stats_store_mode")]
+    retrieval_stats_store_mode: String,
     #[serde(default = "default_retrieval_stats_path")]
     retrieval_stats_path: PathBuf,
-    #[serde(default)]
-    retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode,
+    #[serde(default = "default_retrieval_stats_health_fail_mode")]
+    retrieval_stats_health_fail_mode: String,
     #[serde(default = "default_selectivity_smoothing_alpha")]
     selectivity_smoothing_alpha: f64,
     #[serde(default = "default_selectivity_gamma")]
@@ -84,25 +98,19 @@ impl GraphStoreMode {
         match value {
             "persistent" => Ok(Self::Persistent),
             "in_memory" => Ok(Self::InMemory),
-            other => Err(CustomError::ConfigParseError(format!(
-                "GRAPH_STORE_MODE must be persistent or in_memory, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["GRAPH_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "persistent or in_memory",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
     }
 }
 
-impl<'de> Deserialize<'de> for GraphStoreMode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RetrievalStatsStoreMode {
     #[default]
     Sqlite,
@@ -114,15 +122,19 @@ impl RetrievalStatsStoreMode {
         match value {
             "sqlite" => Ok(Self::Sqlite),
             "in_memory" => Ok(Self::InMemory),
-            other => Err(CustomError::ConfigParseError(format!(
-                "RETRIEVAL_STATS_STORE_MODE must be sqlite or in_memory, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "sqlite or in_memory",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RetrievalStatsHealthFailMode {
     #[default]
     Conservative,
@@ -132,10 +144,42 @@ impl RetrievalStatsHealthFailMode {
     fn parse(value: &str) -> Result<Self, CustomError> {
         match value {
             "conservative" => Ok(Self::Conservative),
-            other => Err(CustomError::ConfigParseError(format!(
-                "RETRIEVAL_STATS_HEALTH_FAIL_MODE must be conservative, got {other}"
-            ))),
+            other => Err(ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_HEALTH_FAIL_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "conservative",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
         }
+    }
+}
+
+impl TryFrom<RawSettings> for Settings {
+    type Error = CustomError;
+
+    fn try_from(raw: RawSettings) -> Result<Self, Self::Error> {
+        let settings = Self {
+            qdrant_connection_string: raw.qdrant_connection_string,
+            oxigraph_path: raw.oxigraph_path,
+            openai_api_key: raw.openai_api_key,
+            embedding_model: raw.embedding_model,
+            graph_store_mode: GraphStoreMode::parse(&raw.graph_store_mode)?,
+            retrieval_stats_store_mode: RetrievalStatsStoreMode::parse(
+                &raw.retrieval_stats_store_mode,
+            )?,
+            retrieval_stats_path: raw.retrieval_stats_path,
+            retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode::parse(
+                &raw.retrieval_stats_health_fail_mode,
+            )?,
+            selectivity_smoothing_alpha: raw.selectivity_smoothing_alpha,
+            selectivity_gamma: raw.selectivity_gamma,
+            retrieval: raw.retrieval,
+        };
+        settings.validate_selectivity_settings()?;
+        settings.validate_fanout_settings()?;
+        Ok(settings)
     }
 }
 
@@ -161,85 +205,10 @@ impl Settings {
     /// - `Ok`: A new `Settings` instance with the provided configuration
     /// - `Err`: A `CustomError` if any required settings are missing or invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
-        let settings: Self = config.try_deserialize().map_err(|e| {
+        let raw: RawSettings = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))
         })?;
-        settings.validate_selectivity_settings()?;
-        settings.validate_fanout_settings()?;
-        Ok(settings)
-    }
-
-    /// Loads settings from environment variables and configuration files using default loaders.
-    ///
-    /// # Description
-    ///
-    /// This function provides a convenient way to load settings using the default environment and configuration loaders.
-    /// If a `.env` file exists in the project root it will be loaded automatically.
-    /// When the file is absent the function relies solely on the current environment variables.
-    ///
-    /// # Important
-    ///
-    /// This function is intended ONLY for use in integration tests and should not be used anywhere else in the codebase.
-    /// For production code, use the `Settings::new()` constructor with an explicitly configured `Config` instance.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    ///
-    /// - `Ok`: A new `Settings` instance with configuration loaded from environment and config files
-    /// - `Err`: A `CustomError` if:
-    ///     - Environment variables are missing or invalid
-    ///     - There are errors parsing the configuration
-    ///
-    pub(crate) fn load() -> Result<Self, CustomError> {
-        dotenvy::dotenv().ok();
-
-        let qdrant_connection_string = env::var("QDRANT_CONNECTION_STRING")
-            .map_err(|e| CustomError::ConfigParseError(format!("QDRANT_CONNECTION_STRING: {e}")))?;
-        let oxigraph_path = env::var("OXIGRAPH_PATH")
-            .map_err(|e| CustomError::ConfigParseError(format!("OXIGRAPH_PATH: {e}")))?;
-        let openai_api_key = env::var("OPENAI_API_KEY")
-            .map_err(|e| CustomError::ConfigParseError(format!("OPENAI_API_KEY: {e}")))?;
-        let embedding_model = env::var("EMBEDDING_MODEL")
-            .map_err(|e| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {e}")))?;
-        let graph_store_mode = env::var("GRAPH_STORE_MODE")
-            .map(|value| GraphStoreMode::parse(&value))
-            .unwrap_or(Ok(GraphStoreMode::Persistent))?;
-        let retrieval_stats_store_mode = env::var("RETRIEVAL_STATS_STORE_MODE")
-            .map(|value| RetrievalStatsStoreMode::parse(&value))
-            .unwrap_or(Ok(RetrievalStatsStoreMode::Sqlite))?;
-        let retrieval_stats_path = env::var("RETRIEVAL_STATS_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| default_retrieval_stats_path());
-        let retrieval_stats_health_fail_mode = env::var("RETRIEVAL_STATS_HEALTH_FAIL_MODE")
-            .map(|value| RetrievalStatsHealthFailMode::parse(&value))
-            .unwrap_or(Ok(RetrievalStatsHealthFailMode::Conservative))?;
-        let selectivity_smoothing_alpha = env::var("SELECTIVITY_SMOOTHING_ALPHA")
-            .map(|value| parse_positive_f64("SELECTIVITY_SMOOTHING_ALPHA", &value))
-            .unwrap_or(Ok(default_selectivity_smoothing_alpha()))?;
-        let selectivity_gamma = env::var("SELECTIVITY_GAMMA")
-            .map(|value| parse_positive_f64("SELECTIVITY_GAMMA", &value))
-            .unwrap_or(Ok(default_selectivity_gamma()))?;
-        let retrieval = RetrievalSettings {
-            fanout: load_env_fanout_settings()?,
-        };
-
-        let settings = Self {
-            qdrant_connection_string: SecretString::new(qdrant_connection_string.into()),
-            oxigraph_path: SecretString::new(oxigraph_path.into()),
-            openai_api_key: SecretString::new(openai_api_key.into()),
-            embedding_model: SecretString::new(embedding_model.into()),
-            graph_store_mode,
-            retrieval_stats_store_mode,
-            retrieval_stats_path,
-            retrieval_stats_health_fail_mode,
-            selectivity_smoothing_alpha,
-            selectivity_gamma,
-            retrieval,
-        };
-        settings.validate_selectivity_settings()?;
-        settings.validate_fanout_settings()?;
-        Ok(settings)
+        raw.try_into()
     }
 
     pub fn get_qdrant_connection(&self) -> &str {
@@ -279,17 +248,23 @@ impl Settings {
     pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
         let configured_path = self.oxigraph_path.expose_secret();
         if configured_path.contains("://") {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_PATH must be a local filesystem path for persistent graph mode"
-                    .to_owned(),
-            ));
+            return Err(ConfigValidationError {
+                keys: vec!["OXIGRAPH_PATH"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a local filesystem path",
+                    actual: configured_path.to_owned(),
+                },
+            }
+            .into());
         }
 
         let path = Path::new(configured_path);
         if path.as_os_str().is_empty() {
-            return Err(CustomError::ConfigParseError(
-                "OXIGRAPH_PATH must be a filesystem path for persistent graph mode".to_owned(),
-            ));
+            return Err(ConfigValidationError {
+                keys: vec!["OXIGRAPH_PATH"],
+                reason: ConfigValidationReason::MissingValue,
+            }
+            .into());
         }
         Ok(path.to_path_buf())
     }
@@ -317,14 +292,7 @@ impl Settings {
     fn validate_fanout_settings(&self) -> Result<(), CustomError> {
         self.retrieval.fanout.validate_supported_targets()?;
         for (relation, object_type, budget) in self.get_retrieval_fanout_budgets() {
-            validate_fanout_budget(
-                &format!(
-                    "retrieval.fanout.{}.{}",
-                    fanout_relation_name(relation),
-                    fanout_object_type_name(object_type)
-                ),
-                budget,
-            )?;
+            validate_fanout_budget(fanout_budget_name(relation, object_type), budget)?;
         }
         Ok(())
     }
@@ -378,13 +346,18 @@ impl RetrievalFanoutSettings {
 }
 
 fn reject_unsupported_fanout_target(
-    name: &str,
+    name: &'static str,
     budget: Option<FanoutBudgetSettings>,
 ) -> Result<(), CustomError> {
     if budget.is_some() {
-        return Err(CustomError::ConfigParseError(format!(
-            "unsupported retrieval fanout target: {name}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "an implemented retrieval fanout target",
+                actual: name.to_owned(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
@@ -411,6 +384,18 @@ impl Settings {
             retrieval: RetrievalSettings::default(),
         }
     }
+}
+
+fn default_graph_store_mode() -> String {
+    "persistent".to_owned()
+}
+
+fn default_retrieval_stats_store_mode() -> String {
+    "sqlite".to_owned()
+}
+
+fn default_retrieval_stats_health_fail_mode() -> String {
+    "conservative".to_owned()
 }
 
 fn default_retrieval_stats_path() -> PathBuf {
@@ -465,112 +450,49 @@ fn upsert_fanout_budget(
     }
 }
 
-fn load_env_fanout_settings() -> Result<RetrievalFanoutSettings, CustomError> {
-    Ok(RetrievalFanoutSettings {
-        about_entity: FanoutObjectSettings {
-            derived_memory: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
-            )?,
-            episode: None,
-        },
-        participant_entity: FanoutObjectSettings {
-            derived_memory: None,
-            episode: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MIN",
-                "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MAX",
-            )?,
-        },
-        part_of_thread: FanoutObjectSettings {
-            derived_memory: parse_env_fanout_budget(
-                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MAX",
-            )?,
-            episode: None,
-        },
-    })
-}
-
-fn parse_env_fanout_budget(
-    min_name: &str,
-    max_name: &str,
-) -> Result<Option<FanoutBudgetSettings>, CustomError> {
-    let min_value = env::var(min_name).ok();
-    let max_value = env::var(max_name).ok();
-    match (min_value, max_value) {
-        (None, None) => Ok(None),
-        (Some(min_value), Some(max_value)) => {
-            let budget = FanoutBudgetSettings::new(
-                parse_usize(min_name, &min_value)?,
-                parse_usize(max_name, &max_value)?,
-            );
-            validate_fanout_budget(fanout_env_budget_name(min_name, max_name), budget)?;
-            Ok(Some(budget))
-        }
-        _ => Err(CustomError::ConfigParseError(format!(
-            "{min_name} and {max_name} must be provided together"
-        ))),
-    }
-}
-
-fn fanout_env_budget_name<'a>(min_name: &'a str, max_name: &'a str) -> &'a str {
-    min_name
-        .strip_suffix("_MIN")
-        .filter(|base| max_name == format!("{base}_MAX"))
-        .unwrap_or(min_name)
-}
-
-fn parse_usize(name: &str, value: &str) -> Result<usize, CustomError> {
-    value.parse::<usize>().map_err(|error| {
-        CustomError::ConfigParseError(format!("{name} must be a non-negative integer: {error}"))
-    })
-}
-
-fn parse_positive_f64(name: &str, value: &str) -> Result<f64, CustomError> {
-    let parsed = value.parse::<f64>().map_err(|error| {
-        CustomError::ConfigParseError(format!("{name} must be a finite positive number: {error}"))
-    })?;
-    validate_positive_f64(name, parsed).map_err(|_| {
-        CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        ))
-    })?;
-    Ok(parsed)
-}
-
-fn validate_positive_f64(name: &str, value: f64) -> Result<(), CustomError> {
+fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
     if !value.is_finite() || value <= 0.0 {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name} must be a finite positive number, got {value}"
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "a finite positive number",
+                actual: value.to_string(),
+            },
+        }
+        .into());
     }
     Ok(())
 }
 
-fn validate_fanout_budget(name: &str, budget: FanoutBudgetSettings) -> Result<(), CustomError> {
+fn validate_fanout_budget(
+    name: &'static str,
+    budget: FanoutBudgetSettings,
+) -> Result<(), CustomError> {
     if budget.min > budget.max {
-        return Err(CustomError::ConfigParseError(format!(
-            "{name}.min must be less than or equal to {name}.max, got min={} max={}",
-            budget.min, budget.max
-        )));
+        return Err(ConfigValidationError {
+            keys: vec![name],
+            reason: ConfigValidationReason::OutOfDomain {
+                expected: "min <= max",
+                actual: format!("min={} max={}", budget.min, budget.max),
+            },
+        }
+        .into());
     }
     Ok(())
 }
 
-fn fanout_relation_name(relation: RelationType) -> &'static str {
-    match relation {
-        RelationType::About => "about_entity",
-        RelationType::Involves => "participant_entity",
-        RelationType::PartOfThread => "part_of_thread",
-        _ => "unsupported_relation",
-    }
-}
-
-fn fanout_object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::Episode => "episode",
-        _ => "unsupported_object_type",
+fn fanout_budget_name(relation: RelationType, object_type: ObjectType) -> &'static str {
+    match (relation, object_type) {
+        (RelationType::About, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.about_entity.derived_memory"
+        }
+        (RelationType::Involves, ObjectType::Episode) => {
+            "retrieval.fanout.participant_entity.episode"
+        }
+        (RelationType::PartOfThread, ObjectType::DerivedMemory) => {
+            "retrieval.fanout.part_of_thread.derived_memory"
+        }
+        _ => unreachable!("unsupported configured fanout target: {relation:?} {object_type:?}"),
     }
 }
 
@@ -686,13 +608,18 @@ mod tests {
             .unwrap();
 
         let error = Settings::new(external_config).unwrap_err();
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
-        assert!(message.contains("GRAPH_STORE_MODE"));
-        assert!(message.contains("persistent"));
-        assert!(message.contains("in_memory"));
+        assert_eq!(keys, vec!["GRAPH_STORE_MODE"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "persistent or in_memory",
+                actual: "service".to_owned(),
+            }
+        );
     }
 
     #[test]
@@ -711,13 +638,19 @@ mod tests {
 
         let settings = Settings::new(external_config).unwrap();
         let error = settings.get_oxigraph_path().unwrap_err();
-        let CustomError::ConfigParseError(message) = error else {
-            panic!("expected configuration parse error");
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
         };
 
         assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
-        assert!(message.contains("OXIGRAPH_PATH"));
-        assert!(message.contains("local filesystem path"));
+        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "a local filesystem path",
+                actual: "http://localhost:7878".to_owned(),
+            }
+        );
     }
 
     #[test]
@@ -756,6 +689,51 @@ mod tests {
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
         assert_eq!(settings.get_selectivity_gamma(), 0.5);
+    }
+
+    #[test]
+    fn test_settings_new_rejects_unknown_retrieval_stats_modes_structurally() {
+        for (config_key, validation_key, expected) in [
+            (
+                "retrieval_stats_store_mode",
+                "RETRIEVAL_STATS_STORE_MODE",
+                "sqlite or in_memory",
+            ),
+            (
+                "retrieval_stats_health_fail_mode",
+                "RETRIEVAL_STATS_HEALTH_FAIL_MODE",
+                "conservative",
+            ),
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_path", "external_oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override(config_key, "unsupported")
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let error = Settings::new(external_config).unwrap_err();
+            let CustomError::ConfigValidation(error) = error else {
+                panic!("expected configuration validation error for {config_key}");
+            };
+            assert_eq!(
+                error,
+                ConfigValidationError {
+                    keys: vec![validation_key],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected,
+                        actual: "unsupported".to_owned(),
+                    },
+                }
+            );
+        }
     }
 
     #[test]
@@ -824,11 +802,19 @@ mod tests {
 
         let result = Settings::new(external_config);
 
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("retrieval.fanout.about_entity.derived_memory")
-        ));
+        let Err(CustomError::ConfigValidation(error)) = result else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["retrieval.fanout.about_entity.derived_memory"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "min <= max",
+                    actual: "min=9 max=8".to_owned(),
+                },
+            }
+        );
     }
 
     #[test]
@@ -856,32 +842,21 @@ mod tests {
 
             let result = Settings::new(external_config);
 
-            assert!(
-                matches!(result, Err(CustomError::ConfigParseError(message))
-                    if message.contains("unsupported retrieval fanout target")
-                        && message.contains(target)),
-                "{target} should be rejected"
+            let Err(CustomError::ConfigValidation(error)) = result else {
+                panic!("expected configuration validation error for {target}");
+            };
+            assert_eq!(
+                error,
+                ConfigValidationError {
+                    keys: vec![target],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "an implemented retrieval fanout target",
+                        actual: target.to_owned(),
+                    },
+                },
+                "{target} should be rejected",
             );
         }
-    }
-
-    #[test]
-    fn env_fanout_budget_error_uses_base_env_name() {
-        let result = validate_fanout_budget(
-            fanout_env_budget_name(
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
-                "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
-            ),
-            FanoutBudgetSettings::new(9, 8),
-        );
-
-        assert!(matches!(
-            result,
-            Err(CustomError::ConfigParseError(message))
-                if message.contains("RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY.min")
-                    && !message.contains("_MIN/")
-                    && !message.contains("_MAX.min")
-        ));
     }
 
     #[test]
@@ -913,8 +888,17 @@ mod tests {
             let result = Settings::new(external_config);
 
             assert!(
-                matches!(result, Err(CustomError::ConfigParseError(_))),
-                "{key}={value:?} should be rejected"
+                matches!(
+                    result,
+                    Err(CustomError::ConfigValidation(ConfigValidationError {
+                        keys,
+                        reason: ConfigValidationReason::OutOfDomain {
+                            expected: "a finite positive number",
+                            ..
+                        },
+                    })) if keys == vec![key]
+                ),
+                "{key}={value:?} should be rejected",
             );
         }
     }

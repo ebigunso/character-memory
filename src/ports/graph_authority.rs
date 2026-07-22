@@ -4,30 +4,24 @@
 // stores keep tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
 
-use crate::domain::{DerivedMemory, MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType};
-use crate::errors::CustomError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct GraphObjectRef {
-    pub(crate) object_id: MemoryId,
-    pub(crate) object_type: ObjectType,
-}
-
-impl GraphObjectRef {
-    pub(crate) const fn new(object_id: MemoryId, object_type: ObjectType) -> Self {
-        Self {
-            object_id,
-            object_type,
-        }
-    }
-}
+use crate::domain::{
+    DerivedMemory, GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
+    ObjectType, RelationType,
+};
+use crate::errors::{CustomError, GraphQueryError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphObjectQuery {
-    pub(crate) object_refs: Vec<GraphObjectRef>,
-    pub(crate) object_ids: Vec<MemoryId>,
-    pub(crate) object_types: Vec<ObjectType>,
-    pub(crate) limit: Option<usize>,
+#[expect(
+    clippy::enum_variant_names,
+    reason = "the design names the three closed query forms ByRefs, ByIds, and ByTypes"
+)]
+pub(crate) enum GraphObjectQuery {
+    ByRefs(Vec<MemoryObjectRef>),
+    ByIds(Vec<MemoryId>),
+    ByTypes {
+        object_types: Vec<ObjectType>,
+        limit: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,14 +29,12 @@ pub(crate) struct GraphDerivedMemoryProvenanceQuery {
     pub(crate) episode_ids: Vec<MemoryId>,
     pub(crate) observation_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    pub(crate) limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphDerivedMemoryThreadQuery {
     pub(crate) thread_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    pub(crate) limit: Option<usize>,
 }
 
 impl GraphDerivedMemoryProvenanceQuery {
@@ -51,7 +43,6 @@ impl GraphDerivedMemoryProvenanceQuery {
             episode_ids,
             observation_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            limit: None,
         }
     }
 
@@ -60,13 +51,6 @@ impl GraphDerivedMemoryProvenanceQuery {
         lifecycle_policy: GraphExpansionLifecyclePolicy,
     ) -> Self {
         self.lifecycle_policy = lifecycle_policy;
-        self
-    }
-
-    // Provenance queries reserve limit support for governance diagnostics; remove if that surface drops limits.
-    #[allow(dead_code)]
-    pub(crate) fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
         self
     }
 }
@@ -76,7 +60,6 @@ impl GraphDerivedMemoryThreadQuery {
         Self {
             thread_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            limit: None,
         }
     }
 
@@ -87,42 +70,29 @@ impl GraphDerivedMemoryThreadQuery {
         self.lifecycle_policy = lifecycle_policy;
         self
     }
-
-    // Thread queries reserve limit support for governance diagnostics; remove if that surface drops limits.
-    #[allow(dead_code)]
-    pub(crate) fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
-        self
-    }
 }
 
 impl GraphObjectQuery {
-    // Diagnostics and fakes need ID-only graph lookup; remove when all callers use typed refs.
-    #[allow(dead_code)]
     pub(crate) fn by_ids(object_ids: Vec<MemoryId>) -> Self {
-        Self {
-            object_refs: Vec::new(),
-            object_ids,
-            object_types: Vec::new(),
-            limit: None,
-        }
+        Self::ByIds(object_ids)
     }
 
-    pub(crate) fn by_refs(object_refs: Vec<GraphObjectRef>) -> Self {
-        Self {
-            object_refs,
-            object_ids: Vec::new(),
-            object_types: Vec::new(),
-            limit: None,
-        }
+    pub(crate) fn by_refs(object_refs: Vec<MemoryObjectRef>) -> Self {
+        Self::ByRefs(object_refs)
     }
 
     pub(crate) fn by_types(object_types: Vec<ObjectType>, limit: Option<usize>) -> Self {
-        Self {
-            object_refs: Vec::new(),
-            object_ids: Vec::new(),
+        Self::ByTypes {
             object_types,
             limit,
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::ByRefs(object_refs) => object_refs.is_empty(),
+            Self::ByIds(object_ids) => object_ids.is_empty(),
+            Self::ByTypes { object_types, .. } => object_types.is_empty(),
         }
     }
 }
@@ -130,15 +100,36 @@ impl GraphObjectQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFailurePolicy {
     pub(crate) timeout_ms: Option<u64>,
-    pub(crate) allow_partial_results: bool,
+    pub(crate) mode: GraphFailureMode,
 }
 
 impl Default for GraphExpansionFailurePolicy {
     fn default() -> Self {
         Self {
             timeout_ms: Some(250),
-            allow_partial_results: true,
+            mode: GraphFailureMode::AllowPartialResults,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum TraceMode {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+impl TraceMode {
+    pub(crate) const fn from_enabled(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    pub(crate) const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
     }
 }
 
@@ -162,7 +153,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
-    pub(crate) record_fanout_utilization: bool,
+    pub(crate) trace_mode: TraceMode,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
 }
@@ -191,7 +182,7 @@ impl GraphExpansionQuery {
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
-            record_fanout_utilization: false,
+            trace_mode: TraceMode::Disabled,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
@@ -215,8 +206,8 @@ impl GraphExpansionQuery {
         self
     }
 
-    pub(crate) fn with_fanout_utilization_recording(mut self, record: bool) -> Self {
-        self.record_fanout_utilization = record;
+    pub(crate) fn with_fanout_utilization_recording(mut self, trace_mode: TraceMode) -> Self {
+        self.trace_mode = trace_mode;
         self
     }
 
@@ -258,7 +249,7 @@ pub(crate) enum GraphExpansionFilteredReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFilteredNode {
-    pub(crate) object_ref: GraphObjectRef,
+    pub(crate) object_ref: MemoryObjectRef,
     pub(crate) reason: GraphExpansionFilteredReason,
 }
 
@@ -272,14 +263,14 @@ pub(crate) enum GraphExpansionBoundedFailureReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionBoundedFailure {
     pub(crate) reason: GraphExpansionBoundedFailureReason,
-    pub(crate) at: Option<GraphObjectRef>,
+    pub(crate) at: Option<MemoryObjectRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphExpansionRelation {
     pub(crate) link_id: MemoryId,
-    pub(crate) from: GraphObjectRef,
-    pub(crate) to: GraphObjectRef,
+    pub(crate) from: MemoryObjectRef,
+    pub(crate) to: MemoryObjectRef,
     pub(crate) relation: RelationType,
     pub(crate) proximity: u8,
 }
@@ -290,14 +281,14 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
-    pub(crate) expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+    pub(crate) expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFanoutUtilization {
-    pub(crate) root: GraphObjectRef,
+    pub(crate) root: MemoryObjectRef,
     pub(crate) relation: RelationType,
     pub(crate) object_type: ObjectType,
     pub(crate) configured_cap: usize,
@@ -307,8 +298,7 @@ pub(crate) struct GraphExpansionFanoutUtilization {
 }
 
 impl GraphExpansion {
-    // Tests and future diagnostics need a minimal expansion constructor; remove when from_plan covers all callers.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self {
             objects,
@@ -326,7 +316,7 @@ impl GraphExpansion {
         links: Vec<MemoryLink>,
         relations: Vec<GraphExpansionRelation>,
         filtered_nodes: Vec<GraphExpansionFilteredNode>,
-        expanded_nodes: std::collections::HashSet<GraphObjectRef>,
+        expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
         fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
         bounded_failure: Option<GraphExpansionBoundedFailure>,
     ) -> Self {
@@ -357,7 +347,12 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError>;
+    ) -> Result<Vec<MemoryObject>, GraphQueryError>;
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError>;
 
     async fn query_derived_memories_by_provenance(
         &self,
@@ -373,12 +368,6 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
-
-    // Governance reconciliation is dormant; remove when diagnostic object listing is no longer part of the port.
-    #[allow(dead_code)]
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError>;
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError>;
 }
 
 #[async_trait]
@@ -402,8 +391,15 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
     async fn query_objects(
         &self,
         query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, CustomError> {
+    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
         (**self).query_objects(query).await
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        (**self).query_links_by_ids(link_ids).await
     }
 
     async fn query_derived_memories_by_provenance(
@@ -426,14 +422,6 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
     ) -> Result<GraphExpansion, CustomError> {
         (**self).expand_bounded(query).await
     }
-
-    async fn list_diagnostic_objects(&self) -> Result<Vec<MemoryObject>, CustomError> {
-        (**self).list_diagnostic_objects().await
-    }
-
-    async fn list_diagnostic_links(&self) -> Result<Vec<MemoryLink>, CustomError> {
-        (**self).list_diagnostic_links().await
-    }
 }
 
 #[cfg(test)]
@@ -444,16 +432,27 @@ mod tests {
     fn graph_queries_use_domain_ids_and_object_types() {
         let episode_id = MemoryId::new_v4();
         let by_ids = GraphObjectQuery::by_ids(vec![episode_id]);
-        let by_refs =
-            GraphObjectQuery::by_refs(vec![GraphObjectRef::new(episode_id, ObjectType::Episode)]);
+        let by_refs = GraphObjectQuery::by_refs(vec![MemoryObjectRef::from_id_type(
+            episode_id,
+            ObjectType::Episode,
+        )]);
         let by_types = GraphObjectQuery::by_types(vec![ObjectType::Episode], Some(5));
 
-        assert_eq!(by_ids.object_ids, vec![episode_id]);
-        assert_eq!(by_ids.object_types, Vec::<ObjectType>::new());
-        assert_eq!(by_refs.object_refs[0].object_id, episode_id);
-        assert_eq!(by_refs.object_refs[0].object_type, ObjectType::Episode);
-        assert_eq!(by_types.object_types, vec![ObjectType::Episode]);
-        assert_eq!(by_types.limit, Some(5));
+        assert_eq!(by_ids, GraphObjectQuery::ByIds(vec![episode_id]));
+        assert_eq!(
+            by_refs,
+            GraphObjectQuery::ByRefs(vec![MemoryObjectRef::from_id_type(
+                episode_id,
+                ObjectType::Episode,
+            )])
+        );
+        assert_eq!(
+            by_types,
+            GraphObjectQuery::ByTypes {
+                object_types: vec![ObjectType::Episode],
+                limit: Some(5),
+            }
+        );
     }
 
     #[test]
@@ -468,7 +467,7 @@ mod tests {
         assert_eq!(query.max_nodes, 25);
         assert_eq!(query.max_fanout_per_node, usize::MAX);
         assert_eq!(query.max_hub_edges, usize::MAX);
-        assert!(!query.record_fanout_utilization);
+        assert_eq!(query.trace_mode, TraceMode::Disabled);
         assert_eq!(
             query.allowed_object_types,
             vec![ObjectType::Observation, ObjectType::DerivedMemory]

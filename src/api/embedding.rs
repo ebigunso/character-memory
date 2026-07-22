@@ -1,4 +1,4 @@
-use crate::errors::CustomError;
+use crate::errors::EmbeddingError;
 use async_trait::async_trait;
 
 /// Provider trait for converting text into vector embeddings.
@@ -25,8 +25,8 @@ pub trait EmbeddingProvider: Send + Sync {
     /// A `Result` which is:
     ///
     /// - `Ok`: A vector of f32 values representing the embedding
-    /// - `Err`: A `CustomError` if generation fails
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError>;
+    /// - `Err`: An [`EmbeddingError`] if generation fails
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError>;
 
     /// Generates embeddings for a batch of texts.
     ///
@@ -39,11 +39,11 @@ pub trait EmbeddingProvider: Send + Sync {
     /// A `Result` which is:
     ///
     /// - `Ok`: A vector of embeddings, where each embedding is a vector of f32 values
-    /// - `Err`: A `CustomError` if generation fails for any text in the batch
+    /// - `Err`: An [`EmbeddingError`] if generation fails for any text in the batch
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, CustomError>;
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError>;
 }
 
 // Implement the trait for Box<dyn EmbeddingProvider> to allow using boxed trait objects
@@ -53,14 +53,14 @@ impl<T: EmbeddingProvider + ?Sized> EmbeddingProvider for Box<T> {
         (**self).vector_size()
     }
 
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, CustomError> {
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
         (**self).generate_embedding(text).await
     }
 
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, CustomError> {
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         (**self).bulk_generate_embeddings(texts).await
     }
 }
