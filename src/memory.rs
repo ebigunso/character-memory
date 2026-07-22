@@ -426,7 +426,17 @@ mod tests {
         assert_eq!(outcome.link.from_id, from_id);
         assert_eq!(outcome.link.to_id, to_id);
         assert_eq!(outcome.link.relation, RelationType::Mentions);
-        assert!(outcome.stats_update_status.failure.is_none());
+        assert!(matches!(
+            outcome
+                .stats_update_status
+                .failure
+                .expect("missing graph endpoint should require stats repair")
+                .causes
+                .as_slice(),
+            [StatsUpdateCause::EndpointHydration {
+                error: GraphQueryError::Hydration { .. }
+            }]
+        ));
     }
 
     #[tokio::test]

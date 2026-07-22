@@ -1,6 +1,6 @@
 use crate::api::types::StatsUpdateStatus;
 use crate::domain::{MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType};
-use crate::errors::StatsUpdateCause;
+use crate::errors::{GraphQueryError, StatsUpdateCause};
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 use crate::ports::retrieval_stats::{
     retrieval_stats_edges, retrieval_stats_object_states, RetrievalStatsHealthState,
@@ -65,10 +65,21 @@ where
                     let endpoint_objects = endpoint_objects
                         .into_iter()
                         .filter(|object| endpoint_refs.contains(&object.object_ref()))
-                        .collect();
+                        .collect::<Vec<_>>();
+                    let missing_endpoint_refs =
+                        missing_stats_endpoint_refs(&endpoint_refs, &endpoint_objects);
+                    let causes = if missing_endpoint_refs.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![StatsUpdateCause::EndpointHydration {
+                            error: GraphQueryError::Hydration {
+                                detail: format_missing_endpoint_refs(&missing_endpoint_refs),
+                            },
+                        }]
+                    };
                     (
                         stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
-                        Vec::new(),
+                        causes,
                     )
                 }
                 Err(error) => (
@@ -181,6 +192,32 @@ fn stats_objects_with_endpoint_lifecycle(
         }
     }
     stats_objects
+}
+
+fn missing_stats_endpoint_refs(
+    endpoint_refs: &[MemoryObjectRef],
+    endpoint_objects: &[MemoryObject],
+) -> Vec<MemoryObjectRef> {
+    let mut missing_refs = endpoint_refs
+        .iter()
+        .copied()
+        .filter(|endpoint_ref| {
+            !endpoint_objects
+                .iter()
+                .any(|object| object.object_ref() == *endpoint_ref)
+        })
+        .collect::<Vec<_>>();
+    missing_refs.sort_by_key(|object_ref| object_ref.stable_order_key());
+    missing_refs
+}
+
+fn format_missing_endpoint_refs(missing_refs: &[MemoryObjectRef]) -> String {
+    let refs = missing_refs
+        .iter()
+        .map(|object_ref| format!("{:?} {}", object_ref.object_type, object_ref.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("graph query omitted requested stats endpoint objects: {refs}")
 }
 
 fn object_type_has_stats_state(object_type: ObjectType) -> bool {
@@ -374,6 +411,67 @@ mod tests {
                     health_cause: Some(stored_health_cause),
                 },
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_endpoint_hydration_is_reported_in_stats_status() {
+        let graph_store = FakeGraphAuthorityStore::new();
+        let present_episode = simple_episode();
+        graph_store
+            .upsert_objects(&[MemoryObject::Episode(present_episode.clone())])
+            .await
+            .unwrap();
+        let missing_episode_id = MemoryId::from_u128(3);
+        let entity_id = MemoryId::from_u128(4);
+        let stats_link = |id, episode_id| MemoryLink {
+            id,
+            object_type: ObjectType::MemoryLink,
+            from_id: entity_id,
+            from_type: ObjectType::Entity,
+            to_id: episode_id,
+            to_type: ObjectType::Episode,
+            relation: RelationType::About,
+            confidence: 0.8,
+            rationale: None,
+            created_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+        };
+        let links = [
+            stats_link(MemoryId::from_u128(5), present_episode.id),
+            stats_link(MemoryId::from_u128(6), missing_episode_id),
+        ];
+        let stats_store = RecordingStatsStore::default();
+        let expected_error = GraphQueryError::Hydration {
+            detail: format!(
+                "graph query omitted requested stats endpoint objects: Episode {missing_episode_id}"
+            ),
+        };
+
+        let status = StatsProjectionService::new(&graph_store, &stats_store)
+            .project(&[], &links)
+            .await
+            .into_status();
+
+        assert!(status.updated_object_ids.is_empty());
+        let failure = status
+            .failure
+            .expect("partial endpoint hydration must not report clean success");
+        assert_eq!(
+            failure.failed_object_ids,
+            vec![present_episode.id, missing_episode_id]
+        );
+        assert_eq!(
+            failure.causes,
+            vec![StatsUpdateCause::EndpointHydration {
+                error: expected_error.clone(),
+            }]
+        );
+        assert_eq!(
+            *stats_store.marked_causes.lock().unwrap(),
+            vec![RetrievalStatsHealthCause::EndpointHydration {
+                error: expected_error,
+            }]
         );
     }
 
