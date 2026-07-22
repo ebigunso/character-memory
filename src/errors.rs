@@ -375,6 +375,21 @@ pub enum ConfigValidationReason {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("replacement {replacement_id} identity conflict: {conflict}")]
+pub struct ReplacementIdentityConflictError {
+    pub replacement_id: MemoryId,
+    pub conflict: ReplacementIdentityConflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ReplacementIdentityConflict {
+    #[error("duplicate replacement ID in correction plan")]
+    DuplicateInPlan,
+    #[error("existing replacement has divergent content")]
+    DivergentExisting,
+}
+
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum CustomError {
@@ -392,6 +407,9 @@ pub enum CustomError {
 
     #[error("Memory validation error: {0}")]
     MemoryValidation(String),
+
+    #[error(transparent)]
+    ReplacementIdentityConflict(#[from] ReplacementIdentityConflictError),
 
     #[error(
         "Write plan validation rejected: {}",

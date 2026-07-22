@@ -60,9 +60,9 @@ pub use crate::domain::{
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
     ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
-    GraphQueryError, IoErrorKind, RetrievalStatsHealthCause, RetrievalStatsStoreError,
-    StatsUpdateCause, TransportStatus, VectorDatabaseError, VectorDatabaseErrorKind,
-    VectorIndexingCause,
+    GraphQueryError, IoErrorKind, ReplacementIdentityConflict, ReplacementIdentityConflictError,
+    RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, TransportStatus,
+    VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
 };
 pub use crate::memory::CharacterMemory;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};

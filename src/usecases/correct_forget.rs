@@ -19,7 +19,9 @@ use crate::domain::{
     MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
     Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::{CustomError, VectorIndexingCause};
+use crate::errors::{
+    CustomError, ReplacementIdentityConflict, ReplacementIdentityConflictError, VectorIndexingCause,
+};
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
@@ -82,19 +84,24 @@ where
         let mut plan = self.correction_plan(draft).await?;
         self.omit_idempotent_replacements(&mut plan).await?;
 
-        self.graph_store
-            .upsert_objects_and_links(&plan.graph_objects, &plan.graph_links)
-            .await?;
+        let has_graph_mutations = !plan.graph_objects.is_empty() || !plan.graph_links.is_empty();
+        if has_graph_mutations {
+            self.graph_store
+                .upsert_objects_and_links(&plan.graph_objects, &plan.graph_links)
+                .await?;
+        }
 
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await?;
         apply_vector_result(&mut outcome, vector_result);
-        let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
-            .project(&plan.graph_objects, &plan.graph_links)
-            .await;
-        outcome.stats_update_status = projection.into_status();
+        if has_graph_mutations {
+            let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
+                .project(&plan.graph_objects, &plan.graph_links)
+                .await;
+            outcome.stats_update_status = projection.into_status();
+        }
         Ok(outcome)
     }
 
@@ -206,6 +213,7 @@ where
                     .unwrap_or_else(|| replacement_memory_id(correction_seed, index))
             })
             .collect::<Vec<_>>();
+        ensure_unique_replacement_ids(&replacement_ids)?;
         preserve_retried_replacement_lineage(
             &mut replacement_drafts,
             &superseded,
@@ -305,6 +313,7 @@ where
         if replacement_refs.is_empty() {
             return Ok(());
         }
+        let planned_replacement_count = replacement_refs.len();
 
         let existing = self
             .graph_store
@@ -328,18 +337,31 @@ where
             };
 
             if !replacement_content_matches(planned_memory, existing_memory) {
-                return Err(validation_error(format!(
-                    "correction deterministic ID collided with existing divergent replacement content: {}",
-                    planned_memory.id
-                )));
+                return Err(ReplacementIdentityConflictError {
+                    replacement_id: planned_memory.id,
+                    conflict: ReplacementIdentityConflict::DivergentExisting,
+                }
+                .into());
             }
             idempotent_ids.push(planned_memory.id);
         }
 
         plan.graph_objects
             .retain(|object| !idempotent_ids.contains(&object.id()));
+        plan.graph_links
+            .retain(|link| !idempotent_ids.contains(&link.from_id));
         plan.vector_upsert_objects
             .retain(|object| !idempotent_ids.contains(&object.id()));
+        if let Some(trace) = &mut plan.trace {
+            trace
+                .superseded_by
+                .retain(|evidence| !idempotent_ids.contains(&evidence.superseded_by_memory_id));
+        }
+        if idempotent_ids.len() == planned_replacement_count {
+            plan.graph_objects.clear();
+            plan.graph_links.clear();
+            plan.vector_delete_refs.clear();
+        }
         Ok(())
     }
 
@@ -997,22 +1019,37 @@ fn replacement_memory_id(correction_seed: MemoryId, index: usize) -> MemoryId {
     ])
 }
 
+fn ensure_unique_replacement_ids(replacement_ids: &[MemoryId]) -> Result<(), CustomError> {
+    let mut seen = Vec::new();
+    for replacement_id in replacement_ids {
+        if seen.contains(replacement_id) {
+            return Err(ReplacementIdentityConflictError {
+                replacement_id: *replacement_id,
+                conflict: ReplacementIdentityConflict::DuplicateInPlan,
+            }
+            .into());
+        }
+        seen.push(*replacement_id);
+    }
+    Ok(())
+}
+
 fn preserve_retried_replacement_lineage(
     replacements: &mut [ReplacementDerivedMemoryDraft],
     superseded: &[DerivedMemory],
     replacement_ids: &[MemoryId],
 ) -> Result<(), CustomError> {
-    let prior_lineage = superseded
-        .iter()
-        .filter(|memory| replacement_ids.contains(&memory.id))
-        .flat_map(|memory| memory.supersedes.iter().copied())
-        .collect::<Vec<_>>();
-    for replacement in replacements {
+    for (replacement, replacement_id) in replacements.iter_mut().zip(replacement_ids) {
         replacement
             .supersedes
             .retain(|id| !replacement_ids.contains(id));
-        for ancestor_id in &prior_lineage {
-            push_unique(&mut replacement.supersedes, *ancestor_id);
+        if let Some(previous) = superseded
+            .iter()
+            .find(|memory| memory.id == *replacement_id)
+        {
+            for ancestor_id in &previous.supersedes {
+                push_unique(&mut replacement.supersedes, *ancestor_id);
+            }
         }
         sort_dedup(&mut replacement.supersedes);
         replacement.validate().map_err(validation_error)?;
@@ -1240,6 +1277,7 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
     use uuid::Uuid;
 
+    use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
     use crate::api::types::{
         ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
     };
@@ -1438,6 +1476,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn identical_direct_target_retry_has_an_empty_mutation_outcome() {
+        let ids = fixed_ids();
+        let graph = FakeGraphAuthorityStore::new();
+        graph
+            .upsert_objects(&[MemoryObject::DerivedMemory(old_memory(&ids))])
+            .await
+            .unwrap();
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats_calls = Arc::new(Mutex::new(Vec::new()));
+        let stats = RecordingStatsStore {
+            calls: stats_calls.clone(),
+            ..RecordingStatsStore::default()
+        };
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut draft = correction_draft(&ids).with_trace();
+        draft.replacement_derived_memories[0].id = None;
+
+        let first = pipeline
+            .correct(draft.clone())
+            .await
+            .expect("first direct-target correction should succeed");
+        let replacement_id = graph
+            .query_links_by_ids(&first.graph_mutated_link_ids)
+            .await
+            .unwrap()[0]
+            .from_id;
+        let refs = vec![
+            MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old),
+            MemoryObjectRef::new(ObjectType::DerivedMemory, replacement_id),
+        ];
+        let objects_after_first = graph
+            .query_objects(&GraphObjectQuery::by_refs(refs.clone()))
+            .await
+            .unwrap();
+        let links_after_first = graph
+            .query_links_by_ids(&first.graph_mutated_link_ids)
+            .await
+            .unwrap();
+        let vector_calls_after_first = vector.calls();
+        let stats_calls_after_first = lock(&stats_calls).clone();
+
+        let second = pipeline
+            .correct(draft)
+            .await
+            .expect("identical direct-target retry should converge");
+
+        assert_empty_mutation_outcome(&second);
+        assert_eq!(
+            graph
+                .query_objects(&GraphObjectQuery::by_refs(refs))
+                .await
+                .unwrap(),
+            objects_after_first
+        );
+        assert_eq!(
+            graph
+                .query_links_by_ids(&first.graph_mutated_link_ids)
+                .await
+                .unwrap(),
+            links_after_first
+        );
+        assert_eq!(vector.calls(), vector_calls_after_first);
+        assert_eq!(lock(&stats_calls).clone(), stats_calls_after_first);
+    }
+
+    #[tokio::test]
+    async fn multi_replacement_retry_preserves_each_replacements_lineage() {
+        let ids = fixed_ids();
+        let graph = FakeGraphAuthorityStore::new();
+        graph
+            .upsert_objects(&[
+                MemoryObject::Episode(source_episode(&ids)),
+                MemoryObject::DerivedMemory(old_memory(&ids)),
+            ])
+            .await
+            .unwrap();
+        let vector = FakeVectorCandidateStore::new();
+        let embedder = DeterministicMemoryEmbedder::new(8);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let first_ancestor = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8201);
+        let second_ancestor = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8202);
+        let mut draft = stateful_correction_draft(&ids, "First replacement payload.");
+        draft.replacement_derived_memories[0].supersedes = vec![first_ancestor];
+        let mut second_replacement = draft.replacement_derived_memories[0].clone();
+        second_replacement.text = "Second replacement payload.".to_owned();
+        second_replacement.supersedes = vec![second_ancestor];
+        draft.replacement_derived_memories.push(second_replacement);
+        let seed = correction_seed(&draft).unwrap();
+        let replacement_ids = [
+            replacement_memory_id(seed, 0),
+            replacement_memory_id(seed, 1),
+        ];
+
+        pipeline
+            .correct(draft.clone())
+            .await
+            .expect("first multi-replacement correction should succeed");
+        let stored_after_first = graph
+            .query_objects(&GraphObjectQuery::by_refs(
+                replacement_ids
+                    .iter()
+                    .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                    .collect(),
+            ))
+            .await
+            .unwrap();
+        assert_replacement_lineage(
+            &stored_after_first,
+            replacement_ids[0],
+            first_ancestor,
+            second_ancestor,
+        );
+        assert_replacement_lineage(
+            &stored_after_first,
+            replacement_ids[1],
+            second_ancestor,
+            first_ancestor,
+        );
+
+        let retry = pipeline
+            .correct(draft)
+            .await
+            .expect("multi-replacement retry should converge independently");
+
+        assert_empty_mutation_outcome(&retry);
+        assert_eq!(
+            graph
+                .query_objects(&GraphObjectQuery::by_refs(
+                    replacement_ids
+                        .iter()
+                        .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                        .collect(),
+                ))
+                .await
+                .unwrap(),
+            stored_after_first
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_replacement_ids_reject_before_fake_and_oxigraph_side_effects() {
+        let ids = fixed_ids();
+        let fake = FakeGraphAuthorityStore::new();
+        let fake_original = old_memory(&ids);
+        fake.upsert_objects(&[MemoryObject::DerivedMemory(fake_original.clone())])
+            .await
+            .unwrap();
+        assert_duplicate_replacement_rejection(&fake, &ids).await;
+
+        let oxigraph = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let oxigraph_original = old_memory(&ids);
+        oxigraph
+            .upsert_objects(&[MemoryObject::DerivedMemory(oxigraph_original.clone())])
+            .await
+            .unwrap();
+        let triples_before_rejection = oxigraph.triple_count().unwrap();
+        assert_duplicate_replacement_rejection(&oxigraph, &ids).await;
+        assert_eq!(oxigraph.triple_count().unwrap(), triples_before_rejection);
+    }
+
+    #[tokio::test]
     async fn existing_divergent_replacement_content_is_rejected_before_writes() {
         let ids = fixed_ids();
         let mut draft = correction_draft(&ids);
@@ -1458,11 +1658,95 @@ mod tests {
             .await
             .expect_err("divergent content under a deterministic replacement ID must reject");
 
-        assert!(matches!(error, CustomError::MemoryValidation(_)));
+        let CustomError::ReplacementIdentityConflict(conflict) = error else {
+            panic!("expected structured replacement identity conflict");
+        };
+        assert_eq!(conflict.replacement_id, replacement_id);
+        assert_eq!(
+            conflict.conflict,
+            ReplacementIdentityConflict::DivergentExisting
+        );
         assert!(!graph
             .calls()
             .iter()
             .any(|call| matches!(call, StoreCall::GraphObjects(_))));
+    }
+
+    async fn assert_duplicate_replacement_rejection<G>(graph: &G, ids: &FixedIds)
+    where
+        G: GraphAuthorityStore + ?Sized,
+    {
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let mut draft = correction_draft(ids);
+        let mut duplicate = draft.replacement_derived_memories[0].clone();
+        duplicate.text = "Divergent duplicate payload.".to_owned();
+        draft.replacement_derived_memories.push(duplicate);
+        let object_refs = vec![
+            MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old),
+            MemoryObjectRef::new(ObjectType::DerivedMemory, ids.replacement),
+        ];
+        let link_id = supersedes_link(ids.replacement, ids.old, "Replace stale derived memory.").id;
+        let objects_before = graph
+            .query_objects(&GraphObjectQuery::by_refs(object_refs.clone()))
+            .await
+            .unwrap();
+        let links_before = graph.query_links_by_ids(&[link_id]).await.unwrap();
+
+        let error = CorrectionForgetPipeline::new(graph, &vector, &embedder)
+            .correct(draft)
+            .await
+            .expect_err("duplicate replacement IDs must reject before writes");
+
+        let CustomError::ReplacementIdentityConflict(conflict) = error else {
+            panic!("expected structured replacement identity conflict");
+        };
+        assert_eq!(conflict.replacement_id, ids.replacement);
+        assert_eq!(
+            conflict.conflict,
+            ReplacementIdentityConflict::DuplicateInPlan
+        );
+        assert_eq!(
+            graph
+                .query_objects(&GraphObjectQuery::by_refs(object_refs))
+                .await
+                .unwrap(),
+            objects_before
+        );
+        assert_eq!(
+            graph.query_links_by_ids(&[link_id]).await.unwrap(),
+            links_before
+        );
+        assert!(vector.calls().is_empty());
+    }
+
+    fn assert_empty_mutation_outcome(outcome: &LifecycleMutationOutcome) {
+        assert!(outcome.graph_mutated_object_ids.is_empty());
+        assert!(outcome.graph_mutated_link_ids.is_empty());
+        assert!(outcome.vector_maintained_object_ids.is_empty());
+        assert!(outcome.vector_maintenance_failure.is_none());
+        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
+        assert!(outcome.stats_update_status.failure.is_none());
+        if let Some(trace) = &outcome.trace {
+            assert!(trace.superseded_by.is_empty());
+        }
+    }
+
+    fn assert_replacement_lineage(
+        objects: &[MemoryObject],
+        replacement_id: MemoryId,
+        expected_ancestor: MemoryId,
+        excluded_ancestor: MemoryId,
+    ) {
+        let replacement = objects
+            .iter()
+            .find_map(|object| match object {
+                MemoryObject::DerivedMemory(memory) if memory.id == replacement_id => Some(memory),
+                _ => None,
+            })
+            .expect("replacement should be stored");
+        assert!(replacement.supersedes.contains(&expected_ancestor));
+        assert!(!replacement.supersedes.contains(&excluded_ancestor));
     }
 
     async fn correction_link_ids(ids: &FixedIds) -> Vec<MemoryId> {
