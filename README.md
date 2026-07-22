@@ -151,7 +151,7 @@ The write path is deliberately not an extraction system. Character Memory core d
 
 ## Memory identity across restarts
 
-Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`. Every operation that creates memory reports the resulting ids: `RememberOutcome` carries persisted object and link ids, `link` returns the created `MemoryLink`, and `correct` reports generated replacement ids through `LifecycleMutationOutcome`. Retrieval packs also carry the ids of returned objects, and drafts (including replacement drafts in corrections) accept caller-supplied ids.
+Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId`. Every operation that creates memory reports the resulting ids: `RememberOutcome` carries persisted object and link ids, `link` returns a `LinkOutcome` containing the created link, and `correct` reports generated replacement ids through `LifecycleMutationOutcome`. Retrieval packs also carry the ids of returned objects, and drafts (including replacement drafts in corrections) accept caller-supplied ids.
 
 The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist every id the API returns — including replacement ids from corrections — keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
 

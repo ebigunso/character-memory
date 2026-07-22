@@ -85,6 +85,8 @@ where
         self.omit_idempotent_replacements(&mut plan).await?;
 
         let has_graph_mutations = !plan.graph_objects.is_empty() || !plan.graph_links.is_empty();
+        let has_stats_projection =
+            !plan.stats_projection_objects.is_empty() || !plan.stats_projection_links.is_empty();
         if has_graph_mutations {
             self.graph_store
                 .upsert_objects_and_links(&plan.graph_objects, &plan.graph_links)
@@ -96,9 +98,9 @@ where
             .maintain_vectors(&plan.vector_delete_refs, &plan.vector_upsert_objects)
             .await?;
         apply_vector_result(&mut outcome, vector_result);
-        if has_graph_mutations {
+        if has_stats_projection {
             let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
-                .project(&plan.graph_objects, &plan.graph_links)
+                .project(&plan.stats_projection_objects, &plan.stats_projection_links)
                 .await;
             outcome.stats_update_status = projection.into_status();
         }
@@ -350,8 +352,6 @@ where
             .retain(|object| !idempotent_ids.contains(&object.id()));
         plan.graph_links
             .retain(|link| !idempotent_ids.contains(&link.from_id));
-        plan.vector_upsert_objects
-            .retain(|object| !idempotent_ids.contains(&object.id()));
         if let Some(trace) = &mut plan.trace {
             trace
                 .superseded_by
@@ -360,7 +360,6 @@ where
         if idempotent_ids.len() == planned_replacement_count {
             plan.graph_objects.clear();
             plan.graph_links.clear();
-            plan.vector_delete_refs.clear();
         }
         Ok(())
     }
@@ -767,6 +766,8 @@ where
 struct MutationPlan {
     graph_objects: Vec<MemoryObject>,
     graph_links: Vec<MemoryLink>,
+    stats_projection_objects: Vec<MemoryObject>,
+    stats_projection_links: Vec<MemoryLink>,
     vector_delete_refs: Vec<MemoryObjectRef>,
     vector_upsert_objects: Vec<MemoryObject>,
     trace: Option<LifecycleMutationTrace>,
@@ -786,9 +787,13 @@ impl MutationPlan {
         graph_links.sort_by_key(|link| link.id);
         sort_refs(&mut vector_delete_refs);
         vector_delete_refs.dedup();
+        let stats_projection_objects = graph_objects.clone();
+        let stats_projection_links = graph_links.clone();
         Self {
             graph_objects,
             graph_links,
+            stats_projection_objects,
+            stats_projection_links,
             vector_delete_refs,
             vector_upsert_objects,
             trace,
@@ -1278,6 +1283,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
         ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
     };
@@ -1444,7 +1450,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn identical_same_store_retry_is_an_idempotent_no_op() {
+    async fn identical_same_store_retry_repairs_without_graph_mutation() {
         let ids = fixed_ids();
         let graph = FakeGraphAuthorityStore::new();
         graph
@@ -1458,6 +1464,7 @@ mod tests {
         let embedder = DeterministicMemoryEmbedder::new(8);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let draft = stateful_correction_draft(&ids, "Stable corrected payload.");
+        let replacement_id = replacement_memory_id(correction_seed(&draft).unwrap(), 0);
 
         let first = pipeline
             .correct(draft.clone())
@@ -1469,14 +1476,11 @@ mod tests {
             .expect("identical retry should converge");
 
         assert_eq!(first.graph_mutated_link_ids.len(), 1);
-        assert!(second.graph_mutated_object_ids.is_empty());
-        assert!(second.graph_mutated_link_ids.is_empty());
-        assert!(second.vector_maintained_object_ids.is_empty());
-        assert!(second.vector_maintenance_failure.is_none());
+        assert_converged_repair_outcome(&second, &[replacement_id], &[replacement_id]);
     }
 
     #[tokio::test]
-    async fn identical_direct_target_retry_has_an_empty_mutation_outcome() {
+    async fn identical_direct_target_retry_replays_repairs_without_graph_mutation() {
         let ids = fixed_ids();
         let graph = FakeGraphAuthorityStore::new();
         graph
@@ -1523,7 +1527,11 @@ mod tests {
             .await
             .expect("identical direct-target retry should converge");
 
-        assert_empty_mutation_outcome(&second);
+        assert_converged_repair_outcome(
+            &second,
+            &[ids.old, replacement_id],
+            &[ids.old, replacement_id],
+        );
         assert_eq!(
             graph
                 .query_objects(&GraphObjectQuery::by_refs(refs))
@@ -1538,8 +1546,141 @@ mod tests {
                 .unwrap(),
             links_after_first
         );
-        assert_eq!(vector.calls(), vector_calls_after_first);
-        assert_eq!(lock(&stats_calls).clone(), stats_calls_after_first);
+        let vector_calls_after_retry = vector.calls();
+        assert_eq!(
+            &vector_calls_after_retry[vector_calls_after_first.len()..],
+            vector_calls_after_first.as_slice()
+        );
+        let stats_calls_after_retry = lock(&stats_calls).clone();
+        assert_eq!(
+            &stats_calls_after_retry[stats_calls_after_first.len()..],
+            stats_calls_after_first.as_slice()
+        );
+    }
+
+    #[tokio::test]
+    async fn identical_retry_repairs_one_shot_vector_failure_without_graph_writes() {
+        let ids = fixed_ids();
+        let old = old_memory(&ids);
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old.clone())]);
+        let vector = OneShotDeleteFailingVectorStore::new();
+        let old_record = memory_object_vector_record(&MemoryObject::DerivedMemory(old)).unwrap();
+        vector
+            .inner
+            .upsert_vector_records(&[VectorRecordEmbedding::new(
+                &old_record,
+                &[1.0, 0.0, 0.0, 0.0],
+            )])
+            .await
+            .unwrap();
+        let embedder = DeterministicMemoryEmbedder::new(4);
+        let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
+        let mut draft = correction_draft(&ids);
+        draft.replacement_derived_memories[0].id = None;
+        let replacement_id = replacement_memory_id(correction_seed(&draft).unwrap(), 0);
+
+        let first = pipeline
+            .correct(draft.clone())
+            .await
+            .expect("first correction should preserve vector failure in its outcome");
+        assert!(first.vector_maintenance_failure.is_some());
+        let graph_writes_after_first = graph_write_count(&graph.calls());
+        let candidates_after_first = vector
+            .search_candidates(
+                &VectorCandidateSearch::new(vec![1.0, 0.0, 0.0, 0.0], 10)
+                    .with_object_types(vec![ObjectType::DerivedMemory]),
+            )
+            .await
+            .unwrap();
+        assert!(candidates_after_first
+            .iter()
+            .any(|candidate| candidate.object_id == ids.old));
+
+        let retry = pipeline
+            .correct(draft)
+            .await
+            .expect("identical retry should repair vector state");
+
+        assert_eq!(graph_write_count(&graph.calls()), graph_writes_after_first);
+        assert!(retry.graph_mutated_object_ids.is_empty());
+        assert!(retry.graph_mutated_link_ids.is_empty());
+        assert!(retry.vector_maintenance_failure.is_none());
+        let maintained_ids = retry
+            .vector_maintained_object_ids
+            .iter()
+            .map(|object_ref| object_ref.id)
+            .collect::<Vec<_>>();
+        assert!(maintained_ids.contains(&ids.old));
+        assert!(maintained_ids.contains(&replacement_id));
+        let candidates_after_retry = vector
+            .search_candidates(
+                &VectorCandidateSearch::new(vec![1.0, 0.0, 0.0, 0.0], 10)
+                    .with_object_types(vec![ObjectType::DerivedMemory]),
+            )
+            .await
+            .unwrap();
+        assert!(!candidates_after_retry
+            .iter()
+            .any(|candidate| candidate.object_id == ids.old));
+        assert!(candidates_after_retry
+            .iter()
+            .any(|candidate| candidate.object_id == replacement_id));
+    }
+
+    #[tokio::test]
+    async fn identical_retry_repairs_one_shot_stats_failure_without_graph_writes() {
+        let ids = fixed_ids();
+        let entity_id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8301);
+        let mut old = old_memory(&ids);
+        old.entity_ids = vec![entity_id];
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old)]);
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = OneShotEdgeFailingStatsStore::new();
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+        let mut draft = correction_draft(&ids);
+        draft.replacement_derived_memories[0].id = None;
+
+        let first = pipeline
+            .correct(draft.clone())
+            .await
+            .expect("first correction should preserve stats failure in its outcome");
+        assert!(first.stats_update_status.failure.is_some());
+        assert!(stats.inner.state.lock().await.edges.is_empty());
+        let graph_writes_after_first = graph_write_count(&graph.calls());
+
+        let retry = pipeline
+            .correct(draft)
+            .await
+            .expect("identical retry should repair stats state");
+
+        assert_eq!(graph_write_count(&graph.calls()), graph_writes_after_first);
+        assert!(retry.graph_mutated_object_ids.is_empty());
+        assert!(retry.graph_mutated_link_ids.is_empty());
+        let retry_failure = retry
+            .stats_update_status
+            .failure
+            .expect("persisted unhealthy state remains caller-visible after repair");
+        assert!(!retry_failure
+            .causes
+            .iter()
+            .any(|cause| matches!(cause, StatsUpdateCause::EdgeWrite { .. })));
+        assert!(retry_failure
+            .causes
+            .iter()
+            .any(|cause| matches!(cause, StatsUpdateCause::StoreUnhealthy { .. })));
+        let counter = stats
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+            })
+            .await
+            .unwrap()
+            .expect("retry should rebuild the dropped stats edges");
+        assert_eq!(counter.total_count, 2);
+        assert_eq!(counter.active_count, 1);
+        assert_eq!(counter.current_count, 1);
     }
 
     #[tokio::test]
@@ -1601,7 +1742,7 @@ mod tests {
             .await
             .expect("multi-replacement retry should converge independently");
 
-        assert_empty_mutation_outcome(&retry);
+        assert_converged_repair_outcome(&retry, &replacement_ids, &replacement_ids);
         assert_eq!(
             graph
                 .query_objects(&GraphObjectQuery::by_refs(
@@ -1720,13 +1861,29 @@ mod tests {
         assert!(vector.calls().is_empty());
     }
 
-    fn assert_empty_mutation_outcome(outcome: &LifecycleMutationOutcome) {
+    fn assert_converged_repair_outcome(
+        outcome: &LifecycleMutationOutcome,
+        expected_vector_ids: &[MemoryId],
+        expected_stats_ids: &[MemoryId],
+    ) {
         assert!(outcome.graph_mutated_object_ids.is_empty());
         assert!(outcome.graph_mutated_link_ids.is_empty());
-        assert!(outcome.vector_maintained_object_ids.is_empty());
         assert!(outcome.vector_maintenance_failure.is_none());
-        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
         assert!(outcome.stats_update_status.failure.is_none());
+        let mut actual_vector_ids = outcome
+            .vector_maintained_object_ids
+            .iter()
+            .map(|object_ref| object_ref.id)
+            .collect::<Vec<_>>();
+        actual_vector_ids.sort();
+        let mut expected_vector_ids = expected_vector_ids.to_vec();
+        expected_vector_ids.sort();
+        assert_eq!(actual_vector_ids, expected_vector_ids);
+        let mut actual_stats_ids = outcome.stats_update_status.updated_object_ids.clone();
+        actual_stats_ids.sort();
+        let mut expected_stats_ids = expected_stats_ids.to_vec();
+        expected_stats_ids.sort();
+        assert_eq!(actual_stats_ids, expected_stats_ids);
         if let Some(trace) = &outcome.trace {
             assert!(trace.superseded_by.is_empty());
         }
@@ -1747,6 +1904,13 @@ mod tests {
             .expect("replacement should be stored");
         assert!(replacement.supersedes.contains(&expected_ancestor));
         assert!(!replacement.supersedes.contains(&excluded_ancestor));
+    }
+
+    fn graph_write_count(calls: &[StoreCall]) -> usize {
+        calls
+            .iter()
+            .filter(|call| matches!(call, StoreCall::GraphObjects(_) | StoreCall::GraphLinks(_)))
+            .count()
     }
 
     async fn correction_link_ids(ids: &FixedIds) -> Vec<MemoryId> {
@@ -3459,6 +3623,113 @@ mod tests {
         ) -> Result<(), RetrievalStatsStoreError> {
             lock(&self.calls).push(StoreCall::StatsUnhealthy);
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct OneShotDeleteFailingVectorStore {
+        inner: FakeVectorCandidateStore,
+        fail_next_delete: Mutex<bool>,
+    }
+
+    impl OneShotDeleteFailingVectorStore {
+        fn new() -> Self {
+            Self {
+                inner: FakeVectorCandidateStore::new(),
+                fail_next_delete: Mutex::new(true),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl VectorCandidateStore for OneShotDeleteFailingVectorStore {
+        async fn upsert_vector_records(
+            &self,
+            records: &[VectorRecordEmbedding<'_>],
+        ) -> Result<(), CustomError> {
+            self.inner.upsert_vector_records(records).await
+        }
+
+        async fn search_candidates(
+            &self,
+            query: &VectorCandidateSearch,
+        ) -> Result<CanonicalCandidates, CustomError> {
+            self.inner.search_candidates(query).await
+        }
+
+        async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
+            if std::mem::take(&mut *lock(&self.fail_next_delete)) {
+                return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                    "test",
+                    VectorDatabaseErrorKind::Response,
+                    None,
+                    "one-shot vector delete failed",
+                )));
+            }
+            self.inner.delete_candidates(object_ids).await
+        }
+    }
+
+    #[derive(Debug)]
+    struct OneShotEdgeFailingStatsStore {
+        inner: InMemoryRetrievalStatsStore,
+        fail_next_edges: Mutex<bool>,
+    }
+
+    impl OneShotEdgeFailingStatsStore {
+        fn new() -> Self {
+            Self {
+                inner: InMemoryRetrievalStatsStore::new(),
+                fail_next_edges: Mutex::new(true),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RetrievalStatsStore for OneShotEdgeFailingStatsStore {
+        async fn record_edges(
+            &self,
+            edges: &[RetrievalStatsEdge],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            if std::mem::take(&mut *lock(&self.fail_next_edges)) {
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "one-shot stats edge write failed".to_owned(),
+                });
+            }
+            self.inner.record_edges(edges).await
+        }
+
+        async fn record_object_states(
+            &self,
+            states: &[RetrievalStatsObjectState],
+        ) -> Result<(), RetrievalStatsStoreError> {
+            self.inner.record_object_states(states).await
+        }
+
+        async fn counter(
+            &self,
+            key: &RetrievalStatsCounterKey,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            self.inner.counter(key).await
+        }
+
+        async fn global_counter(
+            &self,
+            relation_kind: RelationType,
+            object_type: ObjectType,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            self.inner.global_counter(relation_kind, object_type).await
+        }
+
+        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+            self.inner.health().await
+        }
+
+        async fn mark_unhealthy(
+            &self,
+            cause: RetrievalStatsHealthCause,
+        ) -> Result<(), RetrievalStatsStoreError> {
+            self.inner.mark_unhealthy(cause).await
         }
     }
 

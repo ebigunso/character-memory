@@ -527,20 +527,6 @@ pub struct LifecycleMutationOutcome {
     pub diagnostics: LifecycleMutationDiagnostics,
 }
 
-impl LifecycleMutationOutcome {
-    pub fn empty() -> Self {
-        Self {
-            graph_mutated_object_ids: Vec::new(),
-            graph_mutated_link_ids: Vec::new(),
-            vector_maintained_object_ids: Vec::new(),
-            vector_maintenance_failure: None,
-            stats_update_status: StatsUpdateStatus::default(),
-            trace: None,
-            diagnostics: LifecycleMutationDiagnostics::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleMutationDiagnostics {
     pub warnings: Vec<LifecycleMutationWarning>,
