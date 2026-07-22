@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "orchestrator"
-last_updated: "2026-07-22"
+last_updated: "2026-07-23"
 ---
 
 # Orchestrator Repository Rules
@@ -28,6 +28,15 @@ last_updated: "2026-07-22"
 - Workers commit locally and do not push; internal reviewers pin worktrees from the local repository, so review never requires the remote. Dispatch prompts must not pair "push" with "reviewer bounce follows".
 - Exceptions, each explicit per instance: docs-only commits with no review obligation; a CI-environment behavior that genuinely cannot be reproduced locally (orchestrator-ruled, with the reason recorded).
 - Rationale: external reviewers (Copilot) should spend their rounds on internally-approved code, not re-discover defects the internal pass was already catching; overlapping the two layers wastes external rounds and creates thread churn.
+
+## Value-Audit Triggers (design-value review scheduling)
+
+- The design-value audit is a named review type (user-directed 2026-07-22): a Claude Tier A agent judges each structure against roadmap deliverables and the philosophy — does it serve a meaningful purpose NOW — with verdicts EARNS ITS PLACE / OVERSIZED / DELETE; over-engineering for what "might" happen marks structure as better deleted, per the deletion-first precedent.
+- Trigger 1, design review: every structure a design doc proposes must name its concrete consumer — a current caller or a NAMED next-phase deliverable; "future callers" is not a consumer. Apply the same existence question to new structure that reviews apply to inherited code.
+- Trigger 2, fix-chain depth: a third bounce on the same seam automatically raises the proportionality question — is the accumulated apparatus still cheaper than stepping back to the simpler contract? — answered explicitly in the Decision Log before round four proceeds (sunk-cost grows with each verified round; the question must be forced from outside the chain).
+- Trigger 3, pre-merge after fix churn: a milestone-gate value audit runs alongside the detail-coherence audit before merge — the last moment deletion is cheap, and fix pressure adds structure nobody planned.
+- Trigger 4, next-phase planning: audit which prior-phase structures the new plan actually consumes; structures no phase inherits are deletion candidates, and every deferral parked on a then-unwritten phase doc is re-confirmed when that doc is authored, or its "named consumer" is a label.
+- Deliberate non-trigger: not at every bounce or ruling — the question needs altitude and accumulated context; asked continuously it degrades into ritual answered reflexively.
 
 ## Design-Consult Threshold (coordination/advice separation)
 
