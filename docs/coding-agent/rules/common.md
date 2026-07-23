@@ -9,7 +9,7 @@ last_updated: "2026-07-24"
 ## Repository Reference Documents
 
 - Evaluation harnesses live in a separate public companion repository, `CharacterMemoryEvals` (checked out as a sibling directory of this repo; note the directory name is `CharacterMemoryEvals`, not `character-memory-evals`; made public 2026-07-19). It is a Rust workspace consuming this crate via a path dependency. Evaluation tooling exists there — do not assume it is unimplemented — but it is not part of this library's core functionality.
-- Decision records: follow `docs/decisions/` (README.md and template.md; ADR-D/ADR-I two-track numbering).
+- Decision records: follow `docs/decisions/`; match the existing ADRs' numbering and sections.
 
 ## Repo Documentation Wording
 
