@@ -854,3 +854,15 @@ Fix applied:
 
 Prevention:
 - For typed observability changes, review a cause matrix from producer to adapter, persistence, public DTO, serde, and every branching consumer; include simultaneous-failure tests wherever operations can continue after an earlier failure. Treat external prose coupling as an exception requiring an exact upstream citation, version marker, drift canary, and retirement condition. Configuration admission must deserialize once into raw data and perform semantic parsing in one typed conversion rather than pre-reading individual fields.
+
+## 2026-07-23 - Observability Phase Closeout Batch  [tags: review, validation, delegation, errors]
+
+Consolidated from sixteen worker/reviewer/audit lesson candidates accumulated across the phase (full bodies in agmsg history 2026-07-21/23):
+
+- Typed-from-introduction (three enforced recurrences before it stuck; now a worker.md rule): a new validator classifies its failures with an owned structured error at introduction, tests asserting variants/fields — never anyhow prose retrofitted later.
+- Enforcement claims need per-branch negative evidence: a five-branch validator with one tested branch is four untested claims; parametrized tamper coverage per branch (staged as a harness candidate earlier, confirmed by recurrence).
+- Idempotency/retry regressions must reuse the same mutated store and exercise resolution-driven targets; fresh-store/direct-ID tests miss read-after-write identity drift. Convergence tests must separate graph authority from replayable derived-store work and inspect actual stale state after partial failure.
+- Shared operation identity requires explicit attempt identity before dedup/counting; family-wide invariants (writer preflight, admission strictness) need a producer/reader/writer sibling census before closure claims.
+- Rules promoted from single incidents get the evidenced scope, not the broadest phrasing (Tier A lesson, applied to the reader-strictness rule).
+- Validation-table triggers should encode intent, not file paths: the two-run gate fires on changes that can alter successful artifact bytes (refined at closeout after a correct procedural hold on a failure-path-only change).
+- Tooling: agmsg send.sh takes exactly four positionals; Windows Git-Bash invocations need /usr/bin:/bin prepended; zero-executed --exact filters remain the most-recurred evidence bug of the phase (rule already exists — count: 5).
