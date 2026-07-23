@@ -2,13 +2,14 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "common"
-last_updated: "2026-07-23"
+last_updated: "2026-07-24"
 ---
 
 # Common Repository Rules
 ## Repository Reference Documents
 
 - Evaluation harnesses live in a separate public companion repository, `CharacterMemoryEvals` (checked out as a sibling directory of this repo; note the directory name is `CharacterMemoryEvals`, not `character-memory-evals`; made public 2026-07-19). It is a Rust workspace consuming this crate via a path dependency. Evaluation tooling exists there — do not assume it is unimplemented — but it is not part of this library's core functionality.
+- Decision records: follow `docs/decisions/` (README.md and template.md; ADR-D/ADR-I two-track numbering).
 
 ## Repo Documentation Wording
 
