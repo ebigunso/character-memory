@@ -24,6 +24,7 @@ last_updated: "2026-07-23"
 | Layer-boundary or module reorganization diffs | Diff-scoped dependency-direction audit result | ADR-I-0018 (canonical rule incl. the retrieval-telemetry exception) |
 | Retrieval or entity-policy changes | Entity-neutrality check (no name/role special-casing) | roadmap invariant 2.7 |
 | Live integration evidence | Endpoint + pass/skip census; no silent skips | worker.md skip-gating notes |
+| Pruning or closed-contract changes | Touched-file suppression census; bidirectional totality evidence for each claimed single source; empty/non-empty parity tests for every adapter implementing the port | lesson 2026-07-21 (Task_3 pruning wave) |
 
 ## Review Heuristics
 

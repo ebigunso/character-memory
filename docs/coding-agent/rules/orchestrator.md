@@ -37,7 +37,8 @@ last_updated: "2026-07-23"
 
 ## Repo-Specific Integration / Git Policy
 
-- None yet.
+- Before creating a branch, inspect visible repository branches and use the established `feature/YYYY-MM-DD/<slug>` convention unless the user explicitly requests another name (recurred 2026-05-01).
+- Treat sibling path-dependency checkouts as shared mutable state: only the Orchestrator may repin or switch them, only between active reviews, and sibling-compiling validation is sequenced around the owning checkout's settle points (recurred 2026-07-18/2026-07-21).
 
 ## Global Migration Candidates (Placeholder)
 

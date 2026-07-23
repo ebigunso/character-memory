@@ -65,28 +65,6 @@ Prevention:
 Evidence:
 - Task_2 Worker report deviation record; full validation suite green with unchanged test count (363 passed).
 
-## 2026-07-03 - Qdrant Builder .timeout() Is A Server-Side Operation Parameter, Not A Client Bound  [tags: tooling, validation]
-
-Context:
-- Plan: stabilize v0.1.2 retrieval guardrails
-- Task/Wave: Task_3
-- Roles involved: Worker | Orchestrator
-
-Symptom:
-- Qdrant mutating operations (upsert/delete/scroll) were several seconds slower than raw REST/gRPC probes of the same operations.
-
-Root cause:
-- UpsertPointsBuilder/DeletePointsBuilder/ScrollPointsBuilder `.timeout(secs)` sets the proto request field (a server-side operation timeout), not a client deadline. The client deadline is configured once via QdrantConfig::timeout. Setting the per-request field added measurable server-side wait overhead per call.
-
-Fix applied:
-- Removed per-request `.timeout()` from mutation/scroll builders; kept the 30s client-level QdrantConfig timeout (isolated upsert: 2.41s → 0.048s).
-
-Prevention:
-- Bound Qdrant client calls via QdrantConfig::timeout only; use per-request `.timeout()` solely when a specific server-side operation limit is intended and probe-verified.
-
-Evidence:
-- Live probe timings recorded in the stabilization plan Decision Log; config unit test pins client-level timeout.
-
 ## 2026-07-03 - Local-Only gRPC Mutation Stall After Idle Is A Known Environment Constraint  [tags: tooling, validation, ci]
 
 Context:
@@ -250,59 +228,6 @@ Prevention:
 
 Evidence:
 - `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
-
-## 2026-05-01 - Confirm Repository Branch Convention Before Branch Creation  [tags: git, tooling, workflow]
-
-Context:
-- Plan: persistent graph authority planning branch
-- Task/Wave: branch creation before plan drafting
-- Roles involved: Orchestrator
-
-Symptom:
-- Tried generic agent-style branch names before following the repository branch naming convention.
-- User corrected the workflow: "Follow the repository branch name conventions."
-
-Root cause:
-- Used the desktop default branch prefix before consulting repo-local lessons and branch naming history.
-
-Fix applied:
-- Created the plan branch with the repository convention: `feature/2026-05-01/persistent-graph-authority-plan`.
-
-Prevention:
-- Before creating a branch, inspect repo-local rules, lessons, and visible branch naming patterns.
-- Prefer the repository convention over generic agent defaults unless the user explicitly asks for a different branch name.
-
-Evidence:
-- Current branch: `feature/2026-05-01/persistent-graph-authority-plan`.
-
-## 2026-05-01 - Follow Repository Branch Naming Over Generic Agent Prefix  [tags: git, tooling, assumptions]
-
-Context:
-- Plan: none
-- Task/Wave: branch creation for separate plan commits
-- Roles involved: Orchestrator
-
-Symptom:
-- Started creating a branch with a generic Codex-style name for plan commits.
-- User corrected the workflow to follow the repository's branch naming conventions instead.
-
-Root cause:
-- Applied the desktop default branch prefix before checking the repo's visible branch naming pattern.
-- The current branch already showed the local convention: `feature/YYYY-MM-DD/<slug>`.
-
-Fix applied:
-- Switched to repository-convention branch names for the remaining branch/commit work.
-- Treat the temporary generic branch name as a misstep to rename or replace before committing.
-
-Prevention:
-- Repo rule candidate:
-  - audience: orchestrator
-  - proposed rule: Before creating branches, inspect existing local branch naming patterns and follow the repository convention over generic tool defaults unless the user requests otherwise.
-- Dispatch/plan guardrail:
-  - For branch creation tasks, record the selected branch naming pattern before the first branch mutation.
-
-Evidence:
-- User correction on 2026-05-01: "Actually, follow the branch name conventions rather than using the codex name."
 
 ## 2026-04-30 - Treat Cleanup Chunks As Completion Work When Roadmap Says Migration Cleanup  [tags: planning, scope-owns, assumptions]
 
@@ -544,44 +469,6 @@ Fix:
 Prevention:
 - Durable project principle recorded (auto-memory + this entry): retrieval-quality fix proposals route to write-plan validation diagnostics or lifecycle-mutation warnings, never to retrieval/pack post-processing.
 
-## 2026-07-18 - Sequence Shared Review-Sibling Provenance Flips With Active Reviews  [tags: review, tooling, workflow]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Wave 4 Task_6/Task_13 reviews
-- Roles involved: Orchestrator | Reviewer
-
-Symptom:
-- Orchestrator re-pinned the shared .review-worktrees/CharacterMemory sibling clone to Task_13 provenance while the Task_6 review (pinned to different CM provenance) was still active; reviewer's pre-gate provenance check caught the mismatch.
-
-Root cause:
-- All CME review worktrees resolve the path dependency to ONE shared sibling clone; provisioning a queued review's provenance eagerly invalidated the active review's environment.
-
-Fix:
-- Restored the active review's pin; established a sequencing rule: the sibling clone serves one review at a time, flipped only between reviews on reviewer handshake.
-
-Prevention:
-- Provision the sibling-clone pin only when dispatching the review that will use it, never when queueing; reviewers confirm provenance before Cargo gates (already their rule — keep it).
-
-## 2026-07-18 - Trace Compared Fields Through Default Constructors For Plan Diagnostics  [tags: validation, review]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_5 phase 2 (F-BASE-5 echo warning) bounce
-- Roles involved: Worker | Reviewer (lesson recorded by Orchestrator on Worker's behalf; lessons file was orchestrator-dirty at the time)
-
-Symptom:
-- Echo-surface warning compared VectorIndexCandidate.embedding_text, which on the default prepare path inherits RememberInput.content for every candidate — so normal plans with distinct surfaces warned falsely; the negative test masked it by disabling vector candidates.
-
-Root cause:
-- Ambiguous "content/embedding text" dispatch wording resolved without tracing each compared field through the default plan constructor; negative regression did not run on production-default candidate options.
-
-Fix:
-- Comparison scoped to draft content texts only; negative regression now runs with vector candidates enabled and distinct content.
-
-Prevention:
-- For diagnostics over generated plans: trace every compared field through the default constructor before choosing it, and keep at least one negative regression on production-default options.
-
 ## 2026-07-18 - Verify Supplied Evidence Claims Against The Canonical Artifact Before Committing  [tags: docs, validation]
 
 Context:
@@ -674,41 +561,6 @@ Fix applied:
 Prevention:
 - Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
 
-## 2026-07-21 - Pruning Completion Needs Totality And Cross-Adapter Parity  [tags: review, validation, deletion-first]
-
-Context:
-- Plan: structured-verdict-observability, Task_3 pruning/hygiene wave
-- Roles involved: Worker | Reviewer
-
-Symptom:
-- Task_3 passed its worker gates while five stale `allow(dead_code)` attributes remained in touched modules, Qdrant serialization did not actually resolve fields through its manifest, and empty `GraphObjectQuery` variants diverged between fake and Oxigraph adapters.
-
-Root cause:
-- Completion audits emphasized deleted-name absence and representative happy-path tests, but did not enumerate every touched suppression, prove both directions of a claimed single-source contract, or exercise empty/non-empty semantics for every closed query variant across adapters.
-
-Fix applied:
-- Removed or test-scoped all five suppressions, routed every Qdrant payload write through the manifest with exhaustive emitted-key equality coverage, and added fake/Oxigraph parity tests for empty and non-empty forms of all three query variants.
-
-Prevention:
-- For pruning and closed-contract tasks, the worker closeout checklist must include: a touched-file suppression census, bidirectional totality assertions for every single-source manifest, and per-variant empty/non-empty parity tests for each adapter implementing the same port.
-
-## 2026-07-21 - Shared-Checkout Git Operations Are Orchestrator-Coordinated  [tags: delegation, workflow, tooling]
-
-Context:
-- Plan: structured-verdict-observability; Task_3/Task_4 parallel wave across the shared CM checkout
-
-Symptom:
-- Recurred twice in one phase: CME aggregate gates repeatedly compiled the sibling CM checkout mid-edit (spurious failures), and a Task_4 dispatch instructed the evals worker to check out a branch in that sibling — which is the CM worker's ACTIVE working tree (caught by the worker's tripwire discipline before mutation).
-
-Root cause:
-- Cross-repo coordination did not treat the sibling path dependency as someone's live working tree; dispatch prompts described it as a passive surface.
-
-Fix applied:
-- Standing protocol: shared-checkout git operations are exclusively orchestrator-coordinated; workers read cross-repo surfaces via git show at orchestrator-pinned SHAs; sibling-compiling validation (targeted or aggregate) is sequenced by the orchestrator around the other repo's settle points.
-
-Prevention:
-- Dispatches naming a sibling repo must state its role explicitly (active checkout vs pinned read surface) and the validation boundary (which crates compile it).
-
 ## 2026-07-21 - Batch Notes From The Observability Phase  [tags: validation, tooling]
 
 - Equivalence/producer-vocabulary completeness: enumerate from the producer's full branch set, never from a finding's cited examples (SectionAssignmentReason missed a live branch; same class as the sealed-reader claim).
@@ -768,3 +620,7 @@ Consolidated from sixteen worker/reviewer/audit lesson candidates accumulated ac
 ## Promotion drain note (2026-07-23)
 
 Drained after agent-harness v0.9.0 went live in this workspace (installed plugin + Codex profiles updated 2026-07-23); each prevention now exists verbatim-or-stronger in harness content: Dispatch Research Before Broad Discovery (orchestration-harness Research Dispatch Gate), Replan Before Implementation Direction Changes (Replan Triggers + lifecycle-gates), ADRs Are Orchestrator/Claude-Authored (subagent-strategy model-routing), Equivalence Tests Must Compare The Full Observable Contract (review-latent-risk-conservation + owning-surface assertion line), Constraint-Induced Workarounds Need A Tripwire (Drift Tripwires + dispatch escape hatch + Escalation Ruling).
+
+## Repo-rule promotion drain note (2026-07-23)
+
+Promoted into this repo's rule suite and removed from this log (per-lesson triage against harness promotion guidelines, agmsg 2026-07-23T12:17Z): Qdrant client-vs-server timeout (worker.md), branch-naming convention x2 (orchestrator.md), shared sibling-checkout serialization x2 (orchestrator.md), production-default constructor tracing (worker.md), pruning-closeout evidence set (reviewer.md).
