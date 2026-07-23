@@ -91,28 +91,6 @@ Resolution (2026-07-03):
 Evidence:
 - Full falsification matrix in the stabilization plan Decision Log (entries 2–6).
 
-## 2026-06-12 - Cast `usize` To `i64` For `config` Crate `set_override` In Test Settings  [tags: tooling, validation]
-
-Context:
-- Plan: v0.1.2 closeout divergence fixes
-- Task/Wave: Task_3 facade integration tests
-- Roles involved: Worker
-
-Symptom:
-- Integration test compilation failed when passing `usize` values to `config::ConfigBuilder::set_override`.
-
-Root cause:
-- The config crate's `Value` conversion supports signed integer types such as `i64` but not `usize`.
-
-Fix applied:
-- Cast fanout override values to `i64` before calling `set_override`.
-
-Prevention:
-- When constructing test `Settings` through `config::ConfigBuilder`, cast `usize` numeric overrides to `i64` or another supported config value type.
-
-Evidence:
-- tests/test_utils.rs helper compiles and full validation passes after the cast.
-
 ## 2026-06-12 - Constrain Graph Roots When Asserting Entity-Root Fanout  [tags: planning, validation]
 
 Context:
@@ -205,30 +183,6 @@ Prevention:
 Evidence:
 - New ADRs no longer contain `v0.1.3`, `v0.6`, or exact rejected commit-mode names.
 
-## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
-
-Context:
-- Plan: v0.1.1 persistent graph authority
-- Task/Wave: documentation follow-up after PR creation
-- Roles involved: Orchestrator
-
-Symptom:
-- Added `GRAPH_STORE_MODE` and `OXIGRAPH_CONNECTION_STRING` explanations to `docs/design/database/schema_cheat_sheet.md`.
-- User clarified that the schema cheat sheet should reference actual database designs, not general database-related configuration.
-
-Root cause:
-- Treated all database-adjacent setup information as acceptable for the schema reference instead of preserving the document's narrower database-design purpose.
-
-Fix applied:
-- Removed graph-store configuration settings from the schema cheat sheet and left configuration explanation in README/design/roadmap planning docs.
-
-Prevention:
-- Keep schema reference docs focused on stored fields, graph classes/predicates, join keys, authority boundaries, and retrieval rules.
-- Put runtime service/configuration instructions in README, environment examples, operational docs, or phase plans.
-
-Evidence:
-- `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
-
 ## 2026-04-30 - Treat Cleanup Chunks As Completion Work When Roadmap Says Migration Cleanup  [tags: planning, scope-owns, assumptions]
 
 Context:
@@ -306,29 +260,6 @@ Prevention:
 Evidence:
 - Active remember/link plan now includes resolved decision and Task_1/Task_5 acceptance coverage for temporary-vs-durable comment guidance.
 
-## 2026-04-28 - Parallelize Review Loops And Avoid Token-Burning Waits  [tags: delegation, review, tooling]
-
-Context:
-- Plan: PR #31 Copilot review remediation
-- Task/Wave: PR comment triage and re-review loop
-- Roles involved: Orchestrator
-
-Symptom:
-- The user clarified that review/remediation loops should use subagents as much as possible and should wait in ways that do not burn inference tokens.
-
-Root cause:
-- The main thread was carrying too much review/verification work directly and risked treating periodic Copilot polling as an active waiting loop.
-
-Fix applied:
-- Delegated focused remediation review to Reviewer subagents, kept the main thread to orchestration and decisions, and avoided sleep/poll loops.
-
-Prevention:
-- For PR review remediation, split independent review aspects into Reviewer subagents and use main-thread checks only for state transitions, validation evidence, or user/terminal notifications.
-- Do not run token-burning polling loops while waiting for external review; use non-interactive status checks only when prompted by a state change or after returning control.
-
-Evidence:
-- PR #31 Copilot remediation used focused Reviewer subagents for scoped patch review and validation confirmation.
-
 ## 2026-04-28 - Avoid Separate Skipped Checks For CI Rationale  [tags: ci, review, communication]
 
 Context:
@@ -355,80 +286,6 @@ Prevention:
 
 Evidence:
 - PR #29 follow-up removed `integration_tests_skipped` and kept the trust-gating rationale near the `integration_tests` job condition.
-
-## 2026-04-27 - Rust Module Layout And Unit Test Placement  [tags: planning, output-contract, validation]
-
-Context:
-- Plan: Rust module file layout migration
-- Task/Wave: post-domain-foundation cleanup
-- Roles involved: Orchestrator
-
-Symptom:
-- Newly added domain code used the then-current domain module path, and pure domain tests were added under `tests/` as integration-test targets.
-- User clarified the repo should use direct Rust module filenames and reserve `tests/` for integration tests.
-
-Root cause:
-- Followed the existing mixed module layout and placed pure domain tests in integration-test files instead of applying the desired Rust 2018-style module and unit-test convention.
-
-Fix applied:
-- Migrated source modules away from `mod.rs` files and moved pure domain tests into the source-tree domain test module.
-
-Prevention:
-- Prefer direct module files such as `foo.rs` over `foo/mod.rs` for Rust modules.
-- Put unit tests in the same source module tree as the production code they test; use `tests/` only for integration tests.
-
-Evidence:
-- Repo rules now record the module layout and test placement convention.
-
-## 2026-04-27 - No Legacy Compatibility Goal For v0.1  [tags: planning, scope-owns, architecture]
-
-Context:
-- Plan: v0.1 starter episodic memory roadmap and store contracts planning
-- Task/Wave: roadmap correction before next implementation chunk
-- Roles involved: Orchestrator
-
-Symptom:
-- Roadmap and store-contracts planning still implied that old flat API compatibility or legacy repository paths might be preserved if cheap.
-- User clarified that compatibility is not a concern and legacy implementations that do not contribute to the new architecture should be removed.
-
-Root cause:
-- Treated the old flat API as a temporary compatibility surface rather than as removable migration residue for the v0.1 rewrite.
-
-Fix applied:
-- Updated the roadmap and store-contracts plan context to make legacy compatibility a non-goal for v0.1 work.
-- Removed the bounded v0.1 compatibility guidance from repo-wide common rules after user correction.
-
-Prevention:
-- Future v0.1 plans should identify legacy pieces that can be removed or replaced, not preserve them for compatibility alone.
-- Do not add compatibility wrappers for old flat APIs unless they directly serve the new v0.1 architecture.
-
-Evidence:
-- Roadmap resolved decisions now state that legacy implementations which do not contribute to v0.1 should be removed as replacement chunks land.
-
-## 2026-04-27 - Keep Bounded Guidance Out Of Common Rules  [tags: rulebook, scope-owns, planning]
-
-Context:
-- Plan: v0.1 roadmap and store-contracts planning correction
-- Task/Wave: repo rule cleanup
-- Roles involved: Orchestrator
-
-Symptom:
-- A v0.1-specific compatibility direction was added to `docs/coding-agent/rules/common.md`.
-- User clarified common rules should contain repo-wide rules that always apply, not bounded task or phase guidance.
-
-Root cause:
-- Promoted a useful but phase-scoped planning constraint into the repo-wide rulebook instead of keeping it in the roadmap and relevant plans.
-
-Fix applied:
-- Removed the v0.1 compatibility bullet from `common.md`.
-- Left the bounded guidance in the roadmap and store-contracts plan where it belongs.
-
-Prevention:
-- Before editing common rules, check whether the guidance is always repo-wide or only applies to a bounded plan, task, phase, or migration.
-- Keep bounded guidance in plans/roadmaps/lessons unless it truly applies across the repository indefinitely.
-
-Evidence:
-- `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
 
 ## 2026-07-17 - Assess Memory-Type Contribution Before Tuning Away "Pollution"  [tags: planning, assumptions, validation]
 
@@ -469,80 +326,6 @@ Fix:
 Prevention:
 - Durable project principle recorded (auto-memory + this entry): retrieval-quality fix proposals route to write-plan validation diagnostics or lifecycle-mutation warnings, never to retrieval/pack post-processing.
 
-## 2026-07-18 - Verify Supplied Evidence Claims Against The Canonical Artifact Before Committing  [tags: docs, validation]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_13 bounce (F-FIXTURE-1 wording)
-- Roles involved: Orchestrator | Worker | Reviewer
-
-Symptom:
-- A Task_12 analysis overclaim ("byte-identical" hub texts; actually ordinal-differing template instances) flowed through the orchestrator-supplied draft into the committed findings register; reviewer caught it.
-
-Root cause:
-- Supplied draft wording was treated as verified evidence; neither drafter nor committer re-checked each claimed equality/difference against the canonical fixture bytes.
-
-Fix:
-- Register wording corrected (template-aligned recurrence, ordinal+timestamp differences); finding conclusion unchanged.
-
-Prevention:
-- Before committing artifact-specific claims (equalities, counts, hashes), inspect the canonical artifact and verify every claimed equality and difference — regardless of who supplied the wording.
-
-## 2026-07-19 - Mid-Plan Task Additions Get Formal Task Records At Creation Time  [tags: planning, workflow]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Tasks 14-24 and Task_9b (added across the measurement-hardening and scope-addition gates)
-- Roles involved: Orchestrator
-
-Symptom:
-- Eleven tasks added during execution existed only as Decision Log narrative; the Tasks section and Task Waves stopped at the originally drafted set, so per-task acceptance/validation evidence was not trackable in the plan's structured form. User correction.
-
-Root cause:
-- Decision Log entries felt sufficient in the moment because they carried the ruling context; the plan-format requirement that every Task_X have type/owns/acceptance/validation was applied only at initial drafting, not treated as a standing invariant.
-
-Fix:
-- Retrospective Task_14..Task_24 + Task_9b records written with status and closure evidence; Task Waves extended with an executed-wave note.
-
-Prevention:
-- New default: any mid-plan task creation writes the formal Task_X record (type/owns/depends_on/acceptance/validation) into the Tasks section and updates Task Waves in the same edit as the Decision Log entry that creates it — the Decision Log records WHY, the task record tracks WHAT/EVIDENCE.
-
-## 2026-07-19 - Arm A Review-Comment Monitor When Opening A PR  [tags: workflow, review]
-
-Context:
-- Plan: v0.1.5 closeout (schema-migration PR #62)
-- Roles involved: Orchestrator
-
-Symptom:
-- PR #62 was opened without arming the review-comment/merge-state monitor; the user had to request it separately.
-
-Root cause:
-- PR creation was treated as complete at URL creation; the feedback channel (reviews, comments, merge state) was not treated as part of the same action even though acting on those events is the orchestrator's job.
-
-Fix:
-- Monitor armed retroactively (reviews, inline comments, issue comments, merged/closed terminal states).
-
-Prevention:
-- New default: opening or being handed a PR immediately arms a monitor covering new reviews, review comments, issue comments, and terminal merge/close state, in the same action as PR creation.
-
-## 2026-07-21 - Backcompat Code Slipped Through All Review Rounds  [tags: review, validation, scope-owns]
-
-Context:
-- Plan: v0.1.5 closeout merge PRs (CM #63, CME #13); post-hoc sweep plan `backcompat-sweep-plan.md`
-- Roles involved: Orchestrator | Worker | Reviewer
-
-Symptom:
-- The user found unnecessary backwards-compatibility code in both merge PRs after multiple Copilot rounds and Tier D reviews had passed them as clean.
-
-Root cause:
-- No rule declared that a pre-consumer library never needs backwards compatibility, so neither workers (who wrote shims defensively) nor reviewers (who check against rules and acceptance criteria) had any basis to flag compat surfaces as defects.
-
-Fix applied:
-- Forensic inventories dispatched to codex workers, cleanup commits on both PR branches; Compatibility Policy section added to both repos' `rules/common.md` (user-directed 2026-07-21).
-
-Prevention:
-- The Compatibility Policy rule makes compat surfaces a rule violation reviewers must flag; Tier D review prompts should name it explicitly for API-surface diffs until it becomes habitual.
-
 ## 2026-07-21 - Checked Incidental "Legacy" Phrasing, Not The Design Record  [tags: review, planning, delegation]
 
 Context:
@@ -560,14 +343,6 @@ Fix applied:
 
 Prevention:
 - Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
-
-## 2026-07-21 - Batch Notes From The Observability Phase  [tags: validation, tooling]
-
-- Equivalence/producer-vocabulary completeness: enumerate from the producer's full branch set, never from a finding's cited examples (SectionAssignmentReason missed a live branch; same class as the sealed-reader claim).
-- Cause-type refinements must be checked against the containing DTOs' derive obligations (serialized evidence needs Clone/serde/Eq; Box<CustomError> was unusable).
-- Run denied-warning clippy immediately after broad type-unification slices, not only at final gates (worker candidate).
-- Prefer apply_patch-style edits over PowerShell nested replacement maps for source edits (punctuation corruption risk; worker candidate).
-- agmsg send.sh takes exactly TEAM FROM TO MESSAGE; an extra positional argument silently displaces the body (reviewer candidate; symptom: bare one-word messages).
 
 ## 2026-07-21 - Typed Error Contracts Must Survive Producers, Serde, And Test Gates  [tags: review, validation, errors]
 
@@ -624,3 +399,7 @@ Drained after agent-harness v0.9.0 went live in this workspace (installed plugin
 ## Repo-rule promotion drain note (2026-07-23)
 
 Promoted into this repo's rule suite and removed from this log (per-lesson triage against harness promotion guidelines, agmsg 2026-07-23T12:17Z): Qdrant client-vs-server timeout (worker.md), branch-naming convention x2 (orchestrator.md), shared sibling-checkout serialization x2 (orchestrator.md), production-default constructor tracing (worker.md), pruning-closeout evidence set (reviewer.md).
+
+## Purge note (2026-07-23)
+
+Eleven entries purged per the user-directed low-value/invalid sweep (Codex purge map, agmsg 2026-07-23T12:28Z): ten PURGE-LOW-VALUE (restatements of now-mandatory harness/rule content — plan-format task records, PR monitoring, canonical-byte verification, compatibility policy, module layout, evidenced-scope rulebook default, parallel dispatch — plus two cheaply rediscovered one-off quirks and one unstructured batch-notes bundle) and one PURGE-INVALID (the phase-bounded v0.1 compatibility ruling, superseded by the repo-wide Compatibility Policy). Full entries recoverable from git history at 4997bdc.
