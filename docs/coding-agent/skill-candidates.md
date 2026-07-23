@@ -2,7 +2,7 @@
 
 Repo-local staging for cross-repo harness improvements, per the improvement-loop skill. Entries here are candidates for promotion into first-party harness skills/references; they are not repo rules.
 
-Status note (2026-07-23): all entries below were triaged and dispositioned by the agent-harness v0.9.0 promotion (agent-harness PR #41; triage and value-audit records in that repo's docs/coding-agent/plans/completed/). Per-entry dispositions are marked inline. Follow-up gate: this workspace's installed Claude harness plugin is still 0.4.0 (Codex profiles refreshed to 0.9.0 on 2026-07-23), so slimming the now-duplicated repo rules and draining promoted lessons is DEFERRED until the installed plugin is >= 0.9.0 — until then the repo rules are the live copy of this guidance.
+Status note (2026-07-23): all entries below were triaged and dispositioned by the agent-harness v0.9.0 promotion (agent-harness PR #41; triage and value-audit records in that repo's docs/coding-agent/plans/completed/). Per-entry dispositions are marked inline. Follow-up gate CLEARED 2026-07-23: the installed Claude plugin and Codex profiles are both at 0.9.0, and the rule slimming + lessons drain were applied in this same branch per the Codex researcher's per-rule verification map (KEEP/DELETE/REWRITE with harness citations; agmsg 2026-07-23T11:50Z).
 
 ## 2026-07-11 — Admission-signal truth-table testing for diagnostic attribution [from PR #59 rationale-category defect chain]
 

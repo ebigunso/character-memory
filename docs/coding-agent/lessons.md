@@ -179,29 +179,6 @@ Prevention:
 Evidence:
 - Final validation runs in Task_1, Task_3, and Task_4 all passed with Qdrant running.
 
-## 2026-05-10 - Dispatch Research Before Broad Discovery On Non-Trivial Work  [tags: workflow, planning, delegation]
-
-Context:
-- Plan: controlled associative recall docs integration
-- Task/Wave: pre-plan repository discovery
-- Roles involved: Orchestrator | Researcher
-
-Symptom:
-- Ran a broad `rg --files docs` discovery command before dispatching the required Researcher for a non-trivial documentation integration.
-
-Root cause:
-- Treated docs discovery as harmless setup after loading the harness, instead of applying the non-trivial Research Dispatch Gate immediately.
-
-Fix applied:
-- Dispatched a Researcher before further product-doc exploration and limited subsequent work to plan drafting pending user approval.
-
-Prevention:
-- For non-trivial requests, classify the request and dispatch at least one Researcher before any repo-wide discovery outside `docs/coding-agent/**`.
-- Turn-closing guardrail: before ending a planning turn, confirm the Research Dispatch Gate was satisfied or explicitly waived as trivial.
-
-Evidence:
-- Researcher produced the local roadmap, phase-doc, database-doc, philosophy, and ADR-numbering map used by the active plan.
-
 ## 2026-05-09 - Triage Copilot Review Comments Against Current Diff  [tags: review, ci, assumptions]
 
 Context:
@@ -273,30 +250,6 @@ Prevention:
 
 Evidence:
 - `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
-
-## 2026-05-02 - Replan Before Implementation Direction Changes  [tags: workflow, planning, scope-ownership, validation]
-
-Context:
-- Plan: v0.1.1 persistent graph authority
-- Task/Wave: follow-up change from embedded persistence default to Docker-backed Oxigraph service default
-- Roles involved: Orchestrator
-
-Symptom:
-- Began changing code for Oxigraph service mode before updating the active execution plan.
-- User corrected the workflow: "Apply the required adjustments to the plan as well. Don't veer off plan and be fine with it."
-
-Root cause:
-- Treated a follow-up implementation preference as a local adjustment instead of a plan-changing requirement under the active harness workflow.
-
-Fix applied:
-- Updated the active plan scope, resolved decisions, task acceptance criteria, validation expectations, progress log, and decision log to make Oxigraph service mode the default and embedded filesystem persistence explicit.
-
-Prevention:
-- When a user changes implementation direction under an active plan, stop implementation first and update the plan's decisions, owns scopes, acceptance criteria, and validation gates before further code edits.
-- Do not treat passing local checks as sufficient if the plan no longer describes the current implementation direction.
-
-Evidence:
-- Active plan now records Docker-backed Oxigraph service mode, explicit embedded persistent mode, and prerequisite-gated live Oxigraph smoke validation.
 
 ## 2026-05-01 - Confirm Repository Branch Convention Before Branch Creation  [tags: git, tooling, workflow]
 
@@ -648,25 +601,6 @@ Fix:
 Prevention:
 - Before committing artifact-specific claims (equalities, counts, hashes), inspect the canonical artifact and verify every claimed equality and difference — regardless of who supplied the wording.
 
-## 2026-07-18 - ADRs Are Orchestrator/Claude-Authored, Not Worker Tasks  [tags: delegation]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_17 (ADR-I-0021) dispatch
-- Roles involved: Orchestrator | Worker
-
-Symptom:
-- ADR-I-0021 authoring was bundled into a Codex worker dispatch alongside the code removal task; user corrected: the orchestrator holds the decision context and runs on the model suited to high-level decision records.
-
-Root cause:
-- Treated the ADR as a docs deliverable co-located with the code change instead of applying the existing model-strength routing (design/altitude work routes to Claude; the decision context lives with the orchestrator who ran the decision process).
-
-Fix:
-- Task_17 withdrawn from the worker; orchestrator drafted the ADR directly from the decision packet.
-
-Prevention:
-- Repo rule added (orchestrator.md Delegation Routing): ADRs and design-decision records are drafted by the Orchestrator or a Claude design agent; implementation workers may be asked to fact-check file:line claims, never to author the decision record.
-
 ## 2026-07-19 - Mid-Plan Task Additions Get Formal Task Records At Creation Time  [tags: planning, workflow]
 
 Context:
@@ -740,24 +674,6 @@ Fix applied:
 Prevention:
 - Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
 
-## 2026-07-21 - Equivalence Tests Must Compare The Full Observable Contract  [tags: validation, review]
-
-Context:
-- Plan: backcompat-sweep-plan; ADR-I-0012 equivalence test (CM) and typed-plan migration test (CME)
-- Roles involved: Worker | Reviewer
-
-Symptom:
-- Both repos' workers independently wrote equivalence/migration tests that compared cardinalities or partial fields (vector counts + a stats flag in CM; ID vectors + timestamps in CME), so a wrapper or migration persisting wrong content with matching counts would pass; both Tier D reviewers caught the same class independently.
-
-Root cause:
-- Equivalence was asserted on the easiest observable slice rather than the contract: different inputs per path, coarse assertions, no canonical-state comparison.
-
-Fix applied:
-- CM: identical deterministic inputs through wrapper and manual paths in isolated stores, comparing complete outcomes plus retrieved canonical graph state. CME: complete object/link MemoryCandidate value equality plus exact vector target/text pins.
-
-Prevention:
-- For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
-
 ## 2026-07-21 - Pruning Completion Needs Totality And Cross-Adapter Parity  [tags: review, validation, deletion-first]
 
 Context:
@@ -775,24 +691,6 @@ Fix applied:
 
 Prevention:
 - For pruning and closed-contract tasks, the worker closeout checklist must include: a touched-file suppression census, bidirectional totality assertions for every single-source manifest, and per-variant empty/non-empty parity tests for each adapter implementing the same port.
-
-## 2026-07-21 - Constraint-Induced Workarounds Need A Tripwire, Not Hindsight  [tags: delegation, planning, review]
-
-Context:
-- Plan: post-sweep Copilot fix on PR #63 (warning propagation); rule generalization discussion
-- Roles involved: Orchestrator | Worker
-
-Symptom:
-- A dispatch constraint ("no new public types unless unavoidable") steered the worker into flattening a structured verdict into prose; the lossy design was implemented without an alert and caught only by user review. When first generalizing the lesson into a rule, the Orchestrator framed tripwires as the five observed shapes — too specific; the user re-framed it to the failure mode itself.
-
-Root cause:
-- Constraints in dispatches were treated as terminal rather than instrumental, and no role owned noticing at implementation time that the work was going around something cleaner to change. Rule drafting then repeated the altitude error: encoding instances instead of the failure mode.
-
-Fix applied:
-- Workaround Tripwire rules added to both repos (common.md definition at failure-mode altitude with symptoms as non-exhaustive examples; worker.md escalation-outranks-compliance hook; orchestrator.md framing/replan obligations); harness migration candidate staged for subagent-strategy and a design_alerts report field.
-
-Prevention:
-- Frame rules at the altitude of the failure mode, with observed instances as examples only; dispatch constraints must carry their own escape hatch; tripwire escalations are replan triggers with recorded rulings.
 
 ## 2026-07-21 - Shared-Checkout Git Operations Are Orchestrator-Coordinated  [tags: delegation, workflow, tooling]
 
@@ -866,3 +764,7 @@ Consolidated from sixteen worker/reviewer/audit lesson candidates accumulated ac
 - Rules promoted from single incidents get the evidenced scope, not the broadest phrasing (Tier A lesson, applied to the reader-strictness rule).
 - Validation-table triggers should encode intent, not file paths: the two-run gate fires on changes that can alter successful artifact bytes (refined at closeout after a correct procedural hold on a failure-path-only change).
 - Tooling: agmsg send.sh takes exactly four positionals; Windows Git-Bash invocations need /usr/bin:/bin prepended; zero-executed --exact filters remain the most-recurred evidence bug of the phase (rule already exists — count: 5).
+
+## Promotion drain note (2026-07-23)
+
+Drained after agent-harness v0.9.0 went live in this workspace (installed plugin + Codex profiles updated 2026-07-23); each prevention now exists verbatim-or-stronger in harness content: Dispatch Research Before Broad Discovery (orchestration-harness Research Dispatch Gate), Replan Before Implementation Direction Changes (Replan Triggers + lifecycle-gates), ADRs Are Orchestrator/Claude-Authored (subagent-strategy model-routing), Equivalence Tests Must Compare The Full Observable Contract (review-latent-risk-conservation + owning-surface assertion line), Constraint-Induced Workarounds Need A Tripwire (Drift Tripwires + dispatch escape hatch + Escalation Ruling).
