@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "common"
-last_updated: "2026-07-22"
+last_updated: "2026-07-23"
 ---
 
 # Common Repository Rules
@@ -30,10 +30,7 @@ last_updated: "2026-07-22"
 
 ## Workaround Tripwire (design-debt escalation)
 
-- The tripwire condition is the failure mode itself, not any specific shape of it: noticing that the work is going *around* something — a type, signature, schema, channel, module boundary, existing abstraction, or a dispatch constraint — when changing that thing itself would be the cleaner design (user-directed 2026-07-21).
-- Recognizable symptoms include, non-exhaustively: structured data flattened into prose; a parallel channel or path duplicating an existing one; tests that parse message strings or pin incidental values to verify behavior; call sites compensating for what the callee should own; logic duplicated to avoid a refactor; shims or adapters absorbing a design mismatch instead of the design being aligned; special-case branches accumulating around an abstraction that no longer fits; "for now"/"workaround" markers.
-- On hitting the tripwire: stop the affected chunk and escalate the design alternative with its cost delta to the role that owns the decision; do not implement through it. In this pre-consumer codebase, design changes are cheap, so the cheapness of the alternative raises the obligation to alert.
-- An alert is an obligation to surface, not a license to redesign: the alerting agent waits for a ruling rather than unilaterally expanding scope.
+- The Workaround Tripwire (detection, stop-and-alert response, alert-awaits-ruling) is harness-owned: engineering-quality-baselines Drift Tripwires. Repo-specific clause: in this pre-consumer codebase, design changes are cheap, so the cheapness of the alternative raises the obligation to alert.
 
 ## Artifact Placement And Disposition
 
@@ -52,7 +49,6 @@ last_updated: "2026-07-22"
 - The primary public memory type is `CharacterMemory`.
 - Prefer direct Rust module filenames such as `foo.rs` over `foo/mod.rs` for source modules.
 - Reserve `tests/` for integration tests; place unit tests in the same source module tree as the production code they test.
-- Keep roadmap version labels out of long-lived production code comments, identifiers, and user-facing errors. Use stable domain/schema language instead; roadmap version labels belong in roadmap/planning docs or clearly temporary migration artifacts with cleanup conditions.
 
 ## Global Migration Candidates (Placeholder)
 

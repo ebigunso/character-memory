@@ -65,28 +65,6 @@ Prevention:
 Evidence:
 - Task_2 Worker report deviation record; full validation suite green with unchanged test count (363 passed).
 
-## 2026-07-03 - Qdrant Builder .timeout() Is A Server-Side Operation Parameter, Not A Client Bound  [tags: tooling, validation]
-
-Context:
-- Plan: stabilize v0.1.2 retrieval guardrails
-- Task/Wave: Task_3
-- Roles involved: Worker | Orchestrator
-
-Symptom:
-- Qdrant mutating operations (upsert/delete/scroll) were several seconds slower than raw REST/gRPC probes of the same operations.
-
-Root cause:
-- UpsertPointsBuilder/DeletePointsBuilder/ScrollPointsBuilder `.timeout(secs)` sets the proto request field (a server-side operation timeout), not a client deadline. The client deadline is configured once via QdrantConfig::timeout. Setting the per-request field added measurable server-side wait overhead per call.
-
-Fix applied:
-- Removed per-request `.timeout()` from mutation/scroll builders; kept the 30s client-level QdrantConfig timeout (isolated upsert: 2.41s → 0.048s).
-
-Prevention:
-- Bound Qdrant client calls via QdrantConfig::timeout only; use per-request `.timeout()` solely when a specific server-side operation limit is intended and probe-verified.
-
-Evidence:
-- Live probe timings recorded in the stabilization plan Decision Log; config unit test pins client-level timeout.
-
 ## 2026-07-03 - Local-Only gRPC Mutation Stall After Idle Is A Known Environment Constraint  [tags: tooling, validation, ci]
 
 Context:
@@ -112,28 +90,6 @@ Resolution (2026-07-03):
 
 Evidence:
 - Full falsification matrix in the stabilization plan Decision Log (entries 2–6).
-
-## 2026-06-12 - Cast `usize` To `i64` For `config` Crate `set_override` In Test Settings  [tags: tooling, validation]
-
-Context:
-- Plan: v0.1.2 closeout divergence fixes
-- Task/Wave: Task_3 facade integration tests
-- Roles involved: Worker
-
-Symptom:
-- Integration test compilation failed when passing `usize` values to `config::ConfigBuilder::set_override`.
-
-Root cause:
-- The config crate's `Value` conversion supports signed integer types such as `i64` but not `usize`.
-
-Fix applied:
-- Cast fanout override values to `i64` before calling `set_override`.
-
-Prevention:
-- When constructing test `Settings` through `config::ConfigBuilder`, cast `usize` numeric overrides to `i64` or another supported config value type.
-
-Evidence:
-- tests/test_utils.rs helper compiles and full validation passes after the cast.
 
 ## 2026-06-12 - Constrain Graph Roots When Asserting Entity-Root Fanout  [tags: planning, validation]
 
@@ -178,29 +134,6 @@ Prevention:
 
 Evidence:
 - Final validation runs in Task_1, Task_3, and Task_4 all passed with Qdrant running.
-
-## 2026-05-10 - Dispatch Research Before Broad Discovery On Non-Trivial Work  [tags: workflow, planning, delegation]
-
-Context:
-- Plan: controlled associative recall docs integration
-- Task/Wave: pre-plan repository discovery
-- Roles involved: Orchestrator | Researcher
-
-Symptom:
-- Ran a broad `rg --files docs` discovery command before dispatching the required Researcher for a non-trivial documentation integration.
-
-Root cause:
-- Treated docs discovery as harmless setup after loading the harness, instead of applying the non-trivial Research Dispatch Gate immediately.
-
-Fix applied:
-- Dispatched a Researcher before further product-doc exploration and limited subsequent work to plan drafting pending user approval.
-
-Prevention:
-- For non-trivial requests, classify the request and dispatch at least one Researcher before any repo-wide discovery outside `docs/coding-agent/**`.
-- Turn-closing guardrail: before ending a planning turn, confirm the Research Dispatch Gate was satisfied or explicitly waived as trivial.
-
-Evidence:
-- Researcher produced the local roadmap, phase-doc, database-doc, philosophy, and ADR-numbering map used by the active plan.
 
 ## 2026-05-09 - Triage Copilot Review Comments Against Current Diff  [tags: review, ci, assumptions]
 
@@ -249,107 +182,6 @@ Prevention:
 
 Evidence:
 - New ADRs no longer contain `v0.1.3`, `v0.6`, or exact rejected commit-mode names.
-
-## 2026-05-03 - Keep Schema References Separate From Configuration Docs  [tags: documentation, scope-ownership, planning]
-
-Context:
-- Plan: v0.1.1 persistent graph authority
-- Task/Wave: documentation follow-up after PR creation
-- Roles involved: Orchestrator
-
-Symptom:
-- Added `GRAPH_STORE_MODE` and `OXIGRAPH_CONNECTION_STRING` explanations to `docs/design/database/schema_cheat_sheet.md`.
-- User clarified that the schema cheat sheet should reference actual database designs, not general database-related configuration.
-
-Root cause:
-- Treated all database-adjacent setup information as acceptable for the schema reference instead of preserving the document's narrower database-design purpose.
-
-Fix applied:
-- Removed graph-store configuration settings from the schema cheat sheet and left configuration explanation in README/design/roadmap planning docs.
-
-Prevention:
-- Keep schema reference docs focused on stored fields, graph classes/predicates, join keys, authority boundaries, and retrieval rules.
-- Put runtime service/configuration instructions in README, environment examples, operational docs, or phase plans.
-
-Evidence:
-- `docs/design/database/schema_cheat_sheet.md` no longer contains `GRAPH_STORE_MODE` or `OXIGRAPH_CONNECTION_STRING`.
-
-## 2026-05-02 - Replan Before Implementation Direction Changes  [tags: workflow, planning, scope-ownership, validation]
-
-Context:
-- Plan: v0.1.1 persistent graph authority
-- Task/Wave: follow-up change from embedded persistence default to Docker-backed Oxigraph service default
-- Roles involved: Orchestrator
-
-Symptom:
-- Began changing code for Oxigraph service mode before updating the active execution plan.
-- User corrected the workflow: "Apply the required adjustments to the plan as well. Don't veer off plan and be fine with it."
-
-Root cause:
-- Treated a follow-up implementation preference as a local adjustment instead of a plan-changing requirement under the active harness workflow.
-
-Fix applied:
-- Updated the active plan scope, resolved decisions, task acceptance criteria, validation expectations, progress log, and decision log to make Oxigraph service mode the default and embedded filesystem persistence explicit.
-
-Prevention:
-- When a user changes implementation direction under an active plan, stop implementation first and update the plan's decisions, owns scopes, acceptance criteria, and validation gates before further code edits.
-- Do not treat passing local checks as sufficient if the plan no longer describes the current implementation direction.
-
-Evidence:
-- Active plan now records Docker-backed Oxigraph service mode, explicit embedded persistent mode, and prerequisite-gated live Oxigraph smoke validation.
-
-## 2026-05-01 - Confirm Repository Branch Convention Before Branch Creation  [tags: git, tooling, workflow]
-
-Context:
-- Plan: persistent graph authority planning branch
-- Task/Wave: branch creation before plan drafting
-- Roles involved: Orchestrator
-
-Symptom:
-- Tried generic agent-style branch names before following the repository branch naming convention.
-- User corrected the workflow: "Follow the repository branch name conventions."
-
-Root cause:
-- Used the desktop default branch prefix before consulting repo-local lessons and branch naming history.
-
-Fix applied:
-- Created the plan branch with the repository convention: `feature/2026-05-01/persistent-graph-authority-plan`.
-
-Prevention:
-- Before creating a branch, inspect repo-local rules, lessons, and visible branch naming patterns.
-- Prefer the repository convention over generic agent defaults unless the user explicitly asks for a different branch name.
-
-Evidence:
-- Current branch: `feature/2026-05-01/persistent-graph-authority-plan`.
-
-## 2026-05-01 - Follow Repository Branch Naming Over Generic Agent Prefix  [tags: git, tooling, assumptions]
-
-Context:
-- Plan: none
-- Task/Wave: branch creation for separate plan commits
-- Roles involved: Orchestrator
-
-Symptom:
-- Started creating a branch with a generic Codex-style name for plan commits.
-- User corrected the workflow to follow the repository's branch naming conventions instead.
-
-Root cause:
-- Applied the desktop default branch prefix before checking the repo's visible branch naming pattern.
-- The current branch already showed the local convention: `feature/YYYY-MM-DD/<slug>`.
-
-Fix applied:
-- Switched to repository-convention branch names for the remaining branch/commit work.
-- Treat the temporary generic branch name as a misstep to rename or replace before committing.
-
-Prevention:
-- Repo rule candidate:
-  - audience: orchestrator
-  - proposed rule: Before creating branches, inspect existing local branch naming patterns and follow the repository convention over generic tool defaults unless the user requests otherwise.
-- Dispatch/plan guardrail:
-  - For branch creation tasks, record the selected branch naming pattern before the first branch mutation.
-
-Evidence:
-- User correction on 2026-05-01: "Actually, follow the branch name conventions rather than using the codex name."
 
 ## 2026-04-30 - Treat Cleanup Chunks As Completion Work When Roadmap Says Migration Cleanup  [tags: planning, scope-owns, assumptions]
 
@@ -428,29 +260,6 @@ Prevention:
 Evidence:
 - Active remember/link plan now includes resolved decision and Task_1/Task_5 acceptance coverage for temporary-vs-durable comment guidance.
 
-## 2026-04-28 - Parallelize Review Loops And Avoid Token-Burning Waits  [tags: delegation, review, tooling]
-
-Context:
-- Plan: PR #31 Copilot review remediation
-- Task/Wave: PR comment triage and re-review loop
-- Roles involved: Orchestrator
-
-Symptom:
-- The user clarified that review/remediation loops should use subagents as much as possible and should wait in ways that do not burn inference tokens.
-
-Root cause:
-- The main thread was carrying too much review/verification work directly and risked treating periodic Copilot polling as an active waiting loop.
-
-Fix applied:
-- Delegated focused remediation review to Reviewer subagents, kept the main thread to orchestration and decisions, and avoided sleep/poll loops.
-
-Prevention:
-- For PR review remediation, split independent review aspects into Reviewer subagents and use main-thread checks only for state transitions, validation evidence, or user/terminal notifications.
-- Do not run token-burning polling loops while waiting for external review; use non-interactive status checks only when prompted by a state change or after returning control.
-
-Evidence:
-- PR #31 Copilot remediation used focused Reviewer subagents for scoped patch review and validation confirmation.
-
 ## 2026-04-28 - Avoid Separate Skipped Checks For CI Rationale  [tags: ci, review, communication]
 
 Context:
@@ -477,80 +286,6 @@ Prevention:
 
 Evidence:
 - PR #29 follow-up removed `integration_tests_skipped` and kept the trust-gating rationale near the `integration_tests` job condition.
-
-## 2026-04-27 - Rust Module Layout And Unit Test Placement  [tags: planning, output-contract, validation]
-
-Context:
-- Plan: Rust module file layout migration
-- Task/Wave: post-domain-foundation cleanup
-- Roles involved: Orchestrator
-
-Symptom:
-- Newly added domain code used the then-current domain module path, and pure domain tests were added under `tests/` as integration-test targets.
-- User clarified the repo should use direct Rust module filenames and reserve `tests/` for integration tests.
-
-Root cause:
-- Followed the existing mixed module layout and placed pure domain tests in integration-test files instead of applying the desired Rust 2018-style module and unit-test convention.
-
-Fix applied:
-- Migrated source modules away from `mod.rs` files and moved pure domain tests into the source-tree domain test module.
-
-Prevention:
-- Prefer direct module files such as `foo.rs` over `foo/mod.rs` for Rust modules.
-- Put unit tests in the same source module tree as the production code they test; use `tests/` only for integration tests.
-
-Evidence:
-- Repo rules now record the module layout and test placement convention.
-
-## 2026-04-27 - No Legacy Compatibility Goal For v0.1  [tags: planning, scope-owns, architecture]
-
-Context:
-- Plan: v0.1 starter episodic memory roadmap and store contracts planning
-- Task/Wave: roadmap correction before next implementation chunk
-- Roles involved: Orchestrator
-
-Symptom:
-- Roadmap and store-contracts planning still implied that old flat API compatibility or legacy repository paths might be preserved if cheap.
-- User clarified that compatibility is not a concern and legacy implementations that do not contribute to the new architecture should be removed.
-
-Root cause:
-- Treated the old flat API as a temporary compatibility surface rather than as removable migration residue for the v0.1 rewrite.
-
-Fix applied:
-- Updated the roadmap and store-contracts plan context to make legacy compatibility a non-goal for v0.1 work.
-- Removed the bounded v0.1 compatibility guidance from repo-wide common rules after user correction.
-
-Prevention:
-- Future v0.1 plans should identify legacy pieces that can be removed or replaced, not preserve them for compatibility alone.
-- Do not add compatibility wrappers for old flat APIs unless they directly serve the new v0.1 architecture.
-
-Evidence:
-- Roadmap resolved decisions now state that legacy implementations which do not contribute to v0.1 should be removed as replacement chunks land.
-
-## 2026-04-27 - Keep Bounded Guidance Out Of Common Rules  [tags: rulebook, scope-owns, planning]
-
-Context:
-- Plan: v0.1 roadmap and store-contracts planning correction
-- Task/Wave: repo rule cleanup
-- Roles involved: Orchestrator
-
-Symptom:
-- A v0.1-specific compatibility direction was added to `docs/coding-agent/rules/common.md`.
-- User clarified common rules should contain repo-wide rules that always apply, not bounded task or phase guidance.
-
-Root cause:
-- Promoted a useful but phase-scoped planning constraint into the repo-wide rulebook instead of keeping it in the roadmap and relevant plans.
-
-Fix applied:
-- Removed the v0.1 compatibility bullet from `common.md`.
-- Left the bounded guidance in the roadmap and store-contracts plan where it belongs.
-
-Prevention:
-- Before editing common rules, check whether the guidance is always repo-wide or only applies to a bounded plan, task, phase, or migration.
-- Keep bounded guidance in plans/roadmaps/lessons unless it truly applies across the repository indefinitely.
-
-Evidence:
-- `common.md` now contains only repo-wide validation, naming, module-layout, and test-placement rules.
 
 ## 2026-07-17 - Assess Memory-Type Contribution Before Tuning Away "Pollution"  [tags: planning, assumptions, validation]
 
@@ -591,137 +326,6 @@ Fix:
 Prevention:
 - Durable project principle recorded (auto-memory + this entry): retrieval-quality fix proposals route to write-plan validation diagnostics or lifecycle-mutation warnings, never to retrieval/pack post-processing.
 
-## 2026-07-18 - Sequence Shared Review-Sibling Provenance Flips With Active Reviews  [tags: review, tooling, workflow]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Wave 4 Task_6/Task_13 reviews
-- Roles involved: Orchestrator | Reviewer
-
-Symptom:
-- Orchestrator re-pinned the shared .review-worktrees/CharacterMemory sibling clone to Task_13 provenance while the Task_6 review (pinned to different CM provenance) was still active; reviewer's pre-gate provenance check caught the mismatch.
-
-Root cause:
-- All CME review worktrees resolve the path dependency to ONE shared sibling clone; provisioning a queued review's provenance eagerly invalidated the active review's environment.
-
-Fix:
-- Restored the active review's pin; established a sequencing rule: the sibling clone serves one review at a time, flipped only between reviews on reviewer handshake.
-
-Prevention:
-- Provision the sibling-clone pin only when dispatching the review that will use it, never when queueing; reviewers confirm provenance before Cargo gates (already their rule — keep it).
-
-## 2026-07-18 - Trace Compared Fields Through Default Constructors For Plan Diagnostics  [tags: validation, review]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_5 phase 2 (F-BASE-5 echo warning) bounce
-- Roles involved: Worker | Reviewer (lesson recorded by Orchestrator on Worker's behalf; lessons file was orchestrator-dirty at the time)
-
-Symptom:
-- Echo-surface warning compared VectorIndexCandidate.embedding_text, which on the default prepare path inherits RememberInput.content for every candidate — so normal plans with distinct surfaces warned falsely; the negative test masked it by disabling vector candidates.
-
-Root cause:
-- Ambiguous "content/embedding text" dispatch wording resolved without tracing each compared field through the default plan constructor; negative regression did not run on production-default candidate options.
-
-Fix:
-- Comparison scoped to draft content texts only; negative regression now runs with vector candidates enabled and distinct content.
-
-Prevention:
-- For diagnostics over generated plans: trace every compared field through the default constructor before choosing it, and keep at least one negative regression on production-default options.
-
-## 2026-07-18 - Verify Supplied Evidence Claims Against The Canonical Artifact Before Committing  [tags: docs, validation]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_13 bounce (F-FIXTURE-1 wording)
-- Roles involved: Orchestrator | Worker | Reviewer
-
-Symptom:
-- A Task_12 analysis overclaim ("byte-identical" hub texts; actually ordinal-differing template instances) flowed through the orchestrator-supplied draft into the committed findings register; reviewer caught it.
-
-Root cause:
-- Supplied draft wording was treated as verified evidence; neither drafter nor committer re-checked each claimed equality/difference against the canonical fixture bytes.
-
-Fix:
-- Register wording corrected (template-aligned recurrence, ordinal+timestamp differences); finding conclusion unchanged.
-
-Prevention:
-- Before committing artifact-specific claims (equalities, counts, hashes), inspect the canonical artifact and verify every claimed equality and difference — regardless of who supplied the wording.
-
-## 2026-07-18 - ADRs Are Orchestrator/Claude-Authored, Not Worker Tasks  [tags: delegation]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Task_17 (ADR-I-0021) dispatch
-- Roles involved: Orchestrator | Worker
-
-Symptom:
-- ADR-I-0021 authoring was bundled into a Codex worker dispatch alongside the code removal task; user corrected: the orchestrator holds the decision context and runs on the model suited to high-level decision records.
-
-Root cause:
-- Treated the ADR as a docs deliverable co-located with the code change instead of applying the existing model-strength routing (design/altitude work routes to Claude; the decision context lives with the orchestrator who ran the decision process).
-
-Fix:
-- Task_17 withdrawn from the worker; orchestrator drafted the ADR directly from the decision packet.
-
-Prevention:
-- Repo rule added (orchestrator.md Delegation Routing): ADRs and design-decision records are drafted by the Orchestrator or a Claude design agent; implementation workers may be asked to fact-check file:line claims, never to author the decision record.
-
-## 2026-07-19 - Mid-Plan Task Additions Get Formal Task Records At Creation Time  [tags: planning, workflow]
-
-Context:
-- Plan: v0.1.5 eval-driven closeout
-- Task/Wave: Tasks 14-24 and Task_9b (added across the measurement-hardening and scope-addition gates)
-- Roles involved: Orchestrator
-
-Symptom:
-- Eleven tasks added during execution existed only as Decision Log narrative; the Tasks section and Task Waves stopped at the originally drafted set, so per-task acceptance/validation evidence was not trackable in the plan's structured form. User correction.
-
-Root cause:
-- Decision Log entries felt sufficient in the moment because they carried the ruling context; the plan-format requirement that every Task_X have type/owns/acceptance/validation was applied only at initial drafting, not treated as a standing invariant.
-
-Fix:
-- Retrospective Task_14..Task_24 + Task_9b records written with status and closure evidence; Task Waves extended with an executed-wave note.
-
-Prevention:
-- New default: any mid-plan task creation writes the formal Task_X record (type/owns/depends_on/acceptance/validation) into the Tasks section and updates Task Waves in the same edit as the Decision Log entry that creates it — the Decision Log records WHY, the task record tracks WHAT/EVIDENCE.
-
-## 2026-07-19 - Arm A Review-Comment Monitor When Opening A PR  [tags: workflow, review]
-
-Context:
-- Plan: v0.1.5 closeout (schema-migration PR #62)
-- Roles involved: Orchestrator
-
-Symptom:
-- PR #62 was opened without arming the review-comment/merge-state monitor; the user had to request it separately.
-
-Root cause:
-- PR creation was treated as complete at URL creation; the feedback channel (reviews, comments, merge state) was not treated as part of the same action even though acting on those events is the orchestrator's job.
-
-Fix:
-- Monitor armed retroactively (reviews, inline comments, issue comments, merged/closed terminal states).
-
-Prevention:
-- New default: opening or being handed a PR immediately arms a monitor covering new reviews, review comments, issue comments, and terminal merge/close state, in the same action as PR creation.
-
-## 2026-07-21 - Backcompat Code Slipped Through All Review Rounds  [tags: review, validation, scope-owns]
-
-Context:
-- Plan: v0.1.5 closeout merge PRs (CM #63, CME #13); post-hoc sweep plan `backcompat-sweep-plan.md`
-- Roles involved: Orchestrator | Worker | Reviewer
-
-Symptom:
-- The user found unnecessary backwards-compatibility code in both merge PRs after multiple Copilot rounds and Tier D reviews had passed them as clean.
-
-Root cause:
-- No rule declared that a pre-consumer library never needs backwards compatibility, so neither workers (who wrote shims defensively) nor reviewers (who check against rules and acceptance criteria) had any basis to flag compat surfaces as defects.
-
-Fix applied:
-- Forensic inventories dispatched to codex workers, cleanup commits on both PR branches; Compatibility Policy section added to both repos' `rules/common.md` (user-directed 2026-07-21).
-
-Prevention:
-- The Compatibility Policy rule makes compat surfaces a rule violation reviewers must flag; Tier D review prompts should name it explicitly for API-surface diffs until it becomes habitual.
-
 ## 2026-07-21 - Checked Incidental "Legacy" Phrasing, Not The Design Record  [tags: review, planning, delegation]
 
 Context:
@@ -739,85 +343,6 @@ Fix applied:
 
 Prevention:
 - Before ruling any public API surface removable, check it against philosophy/ADRs/roadmap intent, not just code-adjacent comments; forensic inventories (Codex) establish what exists, the design record (orchestrator altitude) decides what it means. Word-level markers like "legacy" in historical phase docs describe their moment, not current intent.
-
-## 2026-07-21 - Equivalence Tests Must Compare The Full Observable Contract  [tags: validation, review]
-
-Context:
-- Plan: backcompat-sweep-plan; ADR-I-0012 equivalence test (CM) and typed-plan migration test (CME)
-- Roles involved: Worker | Reviewer
-
-Symptom:
-- Both repos' workers independently wrote equivalence/migration tests that compared cardinalities or partial fields (vector counts + a stats flag in CM; ID vectors + timestamps in CME), so a wrapper or migration persisting wrong content with matching counts would pass; both Tier D reviewers caught the same class independently.
-
-Root cause:
-- Equivalence was asserted on the easiest observable slice rather than the contract: different inputs per path, coarse assertions, no canonical-state comparison.
-
-Fix applied:
-- CM: identical deterministic inputs through wrapper and manual paths in isolated stores, comparing complete outcomes plus retrieved canonical graph state. CME: complete object/link MemoryCandidate value equality plus exact vector target/text pins.
-
-Prevention:
-- For API-path equivalence or migration regressions: identical deterministic inputs, isolated stores, compare the full observable contract and contract-relevant persisted/canonical state, normalizing only unavoidable generated metadata. Reviewers treat count/partial-field equivalence assertions as a standing Tier D check.
-
-## 2026-07-21 - Pruning Completion Needs Totality And Cross-Adapter Parity  [tags: review, validation, deletion-first]
-
-Context:
-- Plan: structured-verdict-observability, Task_3 pruning/hygiene wave
-- Roles involved: Worker | Reviewer
-
-Symptom:
-- Task_3 passed its worker gates while five stale `allow(dead_code)` attributes remained in touched modules, Qdrant serialization did not actually resolve fields through its manifest, and empty `GraphObjectQuery` variants diverged between fake and Oxigraph adapters.
-
-Root cause:
-- Completion audits emphasized deleted-name absence and representative happy-path tests, but did not enumerate every touched suppression, prove both directions of a claimed single-source contract, or exercise empty/non-empty semantics for every closed query variant across adapters.
-
-Fix applied:
-- Removed or test-scoped all five suppressions, routed every Qdrant payload write through the manifest with exhaustive emitted-key equality coverage, and added fake/Oxigraph parity tests for empty and non-empty forms of all three query variants.
-
-Prevention:
-- For pruning and closed-contract tasks, the worker closeout checklist must include: a touched-file suppression census, bidirectional totality assertions for every single-source manifest, and per-variant empty/non-empty parity tests for each adapter implementing the same port.
-
-## 2026-07-21 - Constraint-Induced Workarounds Need A Tripwire, Not Hindsight  [tags: delegation, planning, review]
-
-Context:
-- Plan: post-sweep Copilot fix on PR #63 (warning propagation); rule generalization discussion
-- Roles involved: Orchestrator | Worker
-
-Symptom:
-- A dispatch constraint ("no new public types unless unavoidable") steered the worker into flattening a structured verdict into prose; the lossy design was implemented without an alert and caught only by user review. When first generalizing the lesson into a rule, the Orchestrator framed tripwires as the five observed shapes — too specific; the user re-framed it to the failure mode itself.
-
-Root cause:
-- Constraints in dispatches were treated as terminal rather than instrumental, and no role owned noticing at implementation time that the work was going around something cleaner to change. Rule drafting then repeated the altitude error: encoding instances instead of the failure mode.
-
-Fix applied:
-- Workaround Tripwire rules added to both repos (common.md definition at failure-mode altitude with symptoms as non-exhaustive examples; worker.md escalation-outranks-compliance hook; orchestrator.md framing/replan obligations); harness migration candidate staged for subagent-strategy and a design_alerts report field.
-
-Prevention:
-- Frame rules at the altitude of the failure mode, with observed instances as examples only; dispatch constraints must carry their own escape hatch; tripwire escalations are replan triggers with recorded rulings.
-
-## 2026-07-21 - Shared-Checkout Git Operations Are Orchestrator-Coordinated  [tags: delegation, workflow, tooling]
-
-Context:
-- Plan: structured-verdict-observability; Task_3/Task_4 parallel wave across the shared CM checkout
-
-Symptom:
-- Recurred twice in one phase: CME aggregate gates repeatedly compiled the sibling CM checkout mid-edit (spurious failures), and a Task_4 dispatch instructed the evals worker to check out a branch in that sibling — which is the CM worker's ACTIVE working tree (caught by the worker's tripwire discipline before mutation).
-
-Root cause:
-- Cross-repo coordination did not treat the sibling path dependency as someone's live working tree; dispatch prompts described it as a passive surface.
-
-Fix applied:
-- Standing protocol: shared-checkout git operations are exclusively orchestrator-coordinated; workers read cross-repo surfaces via git show at orchestrator-pinned SHAs; sibling-compiling validation (targeted or aggregate) is sequenced by the orchestrator around the other repo's settle points.
-
-Prevention:
-- Dispatches naming a sibling repo must state its role explicitly (active checkout vs pinned read surface) and the validation boundary (which crates compile it).
-
-## 2026-07-21 - Batch Notes From The Observability Phase  [tags: validation, tooling]
-
-- Equivalence/producer-vocabulary completeness: enumerate from the producer's full branch set, never from a finding's cited examples (SectionAssignmentReason missed a live branch; same class as the sealed-reader claim).
-- Cause-type refinements must be checked against the containing DTOs' derive obligations (serialized evidence needs Clone/serde/Eq; Box<CustomError> was unusable).
-- Run denied-warning clippy immediately after broad type-unification slices, not only at final gates (worker candidate).
-- Prefer apply_patch-style edits over PowerShell nested replacement maps for source edits (punctuation corruption risk; worker candidate).
-- agmsg send.sh takes exactly TEAM FROM TO MESSAGE; an extra positional argument silently displaces the body (reviewer candidate; symptom: bare one-word messages).
 
 ## 2026-07-21 - Typed Error Contracts Must Survive Producers, Serde, And Test Gates  [tags: review, validation, errors]
 
@@ -866,3 +391,15 @@ Consolidated from sixteen worker/reviewer/audit lesson candidates accumulated ac
 - Rules promoted from single incidents get the evidenced scope, not the broadest phrasing (Tier A lesson, applied to the reader-strictness rule).
 - Validation-table triggers should encode intent, not file paths: the two-run gate fires on changes that can alter successful artifact bytes (refined at closeout after a correct procedural hold on a failure-path-only change).
 - Tooling: agmsg send.sh takes exactly four positionals; Windows Git-Bash invocations need /usr/bin:/bin prepended; zero-executed --exact filters remain the most-recurred evidence bug of the phase (rule already exists — count: 5).
+
+## Promotion drain note (2026-07-23)
+
+Drained after agent-harness v0.9.0 went live in this workspace (installed plugin + Codex profiles updated 2026-07-23); each prevention now exists verbatim-or-stronger in harness content: Dispatch Research Before Broad Discovery (orchestration-harness Research Dispatch Gate), Replan Before Implementation Direction Changes (Replan Triggers + lifecycle-gates), ADRs Are Orchestrator/Claude-Authored (subagent-strategy model-routing), Equivalence Tests Must Compare The Full Observable Contract (review-latent-risk-conservation + owning-surface assertion line), Constraint-Induced Workarounds Need A Tripwire (Drift Tripwires + dispatch escape hatch + Escalation Ruling).
+
+## Repo-rule promotion drain note (2026-07-23)
+
+Promoted into this repo's rule suite and removed from this log (per-lesson triage against harness promotion guidelines, agmsg 2026-07-23T12:17Z): Qdrant client-vs-server timeout (worker.md), branch-naming convention x2 (orchestrator.md), shared sibling-checkout serialization x2 (orchestrator.md), production-default constructor tracing (worker.md), pruning-closeout evidence set (reviewer.md).
+
+## Purge note (2026-07-23)
+
+Eleven entries purged per the user-directed low-value/invalid sweep (Codex purge map, agmsg 2026-07-23T12:28Z): ten PURGE-LOW-VALUE (restatements of now-mandatory harness/rule content — plan-format task records, PR monitoring, canonical-byte verification, compatibility policy, module layout, evidenced-scope rulebook default, parallel dispatch — plus two cheaply rediscovered one-off quirks and one unstructured batch-notes bundle) and one PURGE-INVALID (the phase-bounded v0.1 compatibility ruling, superseded by the repo-wide Compatibility Policy). Full entries recoverable from git history at 4997bdc.
