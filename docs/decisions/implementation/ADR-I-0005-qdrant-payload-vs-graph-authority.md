@@ -5,8 +5,17 @@ date: 2026-04-26
 deciders: ["ebigunso"]
 consulted: ["GPT-5.5 Pro"]
 informed: []
+warrant:
+  warranted_by: ""
+  detected_signals: ""
+  cost_of_violation: ""
+  cost_of_wrong_preservation: ""
+  cost_of_over_extension: ""
+depends_on: []
+implements: []
 supersedes: []
 superseded_by: null
+supersession_scope: null
 ---
 
 # ADR-I-0005: Keep Qdrant metadata filterable while graph relationships remain authoritative

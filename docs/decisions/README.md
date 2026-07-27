@@ -26,6 +26,7 @@ Separate numbering per track; IDs are never reused.
 - Active track directories list only governing decisions; numbering gaps signal archived history.
 - On full supersession or retirement, the record moves to `superseded/` — a single flat folder where the track prefix in the filename preserves identity — renamed with a self-describing suffix: `--superseded-by-ADR-X-NNNN` or `--retired`.
 - Partial supersession stays in place: the record remains authoritative for its surviving clauses, with `supersession_scope` and reciprocal frontmatter links recording the split.
+- Records predating the current template carry the newer frontmatter keys with blank values: a blank warrant means it was not recorded at decision time, not an authoring omission. Fill blanks only when the record is substantively revisited.
 
 ## Status values
 `accepted`, `rejected`, `superseded`, `deprecated`. Records capture decisions, not undecided proposals.

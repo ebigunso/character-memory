@@ -5,8 +5,17 @@ date: 2026-05-16
 deciders: ["ebigunso"]
 consulted: ["GPT-5.5 Pro"]
 informed: []
+warrant:
+  warranted_by: ""
+  detected_signals: ""
+  cost_of_violation: ""
+  cost_of_wrong_preservation: ""
+  cost_of_over_extension: ""
+depends_on: []
+implements: []
 supersedes: []
 superseded_by: null
+supersession_scope: null
 ---
 
 # ADR-D-0015: Keep raw source storage outside Character Memory core

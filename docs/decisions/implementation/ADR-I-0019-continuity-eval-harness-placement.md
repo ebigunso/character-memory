@@ -5,8 +5,17 @@ date: 2026-07-05
 deciders: ["ebigunso"]
 consulted: ["GPT-5.5"]
 informed: []
+warrant:
+  warranted_by: ""
+  detected_signals: ""
+  cost_of_violation: ""
+  cost_of_wrong_preservation: ""
+  cost_of_over_extension: ""
+depends_on: []
+implements: []
 supersedes: []
 superseded_by: null
+supersession_scope: null
 ---
 
 # ADR-I-0019: Place the continuity evaluation harness in the private evals repository

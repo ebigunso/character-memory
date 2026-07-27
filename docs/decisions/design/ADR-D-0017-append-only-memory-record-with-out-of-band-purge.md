@@ -5,8 +5,17 @@ date: 2026-06-12
 deciders: ["ebigunso"]
 consulted: ["Claude Fable 5"]
 informed: []
-supersedes: []
+warrant:
+  warranted_by: ""
+  detected_signals: ""
+  cost_of_violation: ""
+  cost_of_wrong_preservation: ""
+  cost_of_over_extension: ""
+depends_on: []
+implements: []
+supersedes: [ADR-D-0006-supersession-and-suppression.md]
 superseded_by: null
+supersession_scope: partial
 ---
 
 # ADR-D-0017: Keep the memory record append-only, with erasure as an out-of-band operational action
