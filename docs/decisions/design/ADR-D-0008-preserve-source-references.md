@@ -2,7 +2,6 @@
 status: accepted
 adr_type: design
 date: 2026-04-26
-revision_dates: ["2026-05-16"]
 deciders: ["ebigunso"]
 consulted: ["GPT-5.5 Pro"]
 informed: []
