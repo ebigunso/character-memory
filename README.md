@@ -176,7 +176,7 @@ docker run -d \
   --name charactermemory-qdrant \
   -p 6333:6333 \
   -p 6334:6334 \
-  qdrant/qdrant:latest
+  qdrant/qdrant:v1.19.0
 ```
 
 Or using Docker Compose:

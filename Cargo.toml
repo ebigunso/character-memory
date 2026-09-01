@@ -15,7 +15,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 secrecy = { version = "0.10.3", features = ["serde"] }
 
 # Database
-qdrant-client = "1.17.0"
+qdrant-client = "1.19.0"
 oxigraph = { version = "0.5.7", default-features = false, features = ["rocksdb"] }
 serde_json = "1.0.138"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
@@ -30,6 +30,5 @@ chrono = { version = "0.4.44", features = ["serde"] }
 
 [dev-dependencies]
 mockall = "0.14.0"
-reqwest_012 = { package = "reqwest", version = "0.12.23", default-features = false }
-tonic = "0.12.3"
+tonic = "0.14.6"
 tempfile = "3.20.0"

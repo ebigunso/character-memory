@@ -426,7 +426,7 @@ fn qdrant_error(error: QdrantError) -> CustomError {
 }
 
 fn is_erased_qdrant_connect_failure(status: &TransportStatus, message: &str) -> bool {
-    // Ruled external-contract exception: qdrant-client 1.17.0 erases the tonic transport
+    // Ruled external-contract exception: qdrant-client 1.19.0 erases the tonic transport
     // source in src/channel_pool.rs with
     // `Status::internal(format!("Failed to connect to {}: {:?}", self.uri, e))`.
     // Recheck this on every qdrant-client bump; retire the prefix coupling once upstream
@@ -741,7 +741,7 @@ mod tests {
                 .unwrap();
         });
 
-        let response = reqwest_012::get(format!("http://{address}/status"))
+        let response = reqwest::get(format!("http://{address}/status"))
             .await
             .unwrap();
         server.await.unwrap();
@@ -782,7 +782,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn qdrant_client_1_17_erased_connect_contract_canary() {
+    async fn qdrant_client_erased_connect_contract_canary() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let unreachable_address = listener.local_addr().unwrap();
         drop(listener);

@@ -19,7 +19,7 @@ STATUS 2026-07-23: the structured-verdict-observability phase is COMPLETE AND ME
 
 ## First post-merge item (USER-CONFIRMED 2026-07-21): Qdrant teardown hardening
 
-Spec from the 2026-07-21 failure catalog: (1) on gRPC delete timeout, verify deletion via REST before failing (the deterministic delete-response-loss class — deletes commit, responses vanish in Docker Desktop transport on all routes); (2) pre-run orphan sweeper in test support pruning stale run-scoped collections (covers killed-mid-run processes that post-run cleanup can never handle; note CME uses cmem_eval_* naming, CM uses test_collection_*); (3) endpoint normalization to 127.0.0.1 in test support (IPv6-localhost fallback stall); (4) timeout caps calibrated to measured serial durations (write_planning legitimately ~353s). Retires the two-test teardown-transport waiver granted for the observability phase validation. Also consider: live-run mutex/scheduling for concurrent agent suites (contention wedged the collections API twice).
+SUPERSEDED 2026-09-02 — in progress as a light-delta under `docs/coding-agent/plans/active/qdrant-teardown-hardening-plan.md` (branch `chore/qdrant-teardown-hardening` in both repos). Live verification on the rebuilt machine (Qdrant 1.19.0 at 127.0.0.1) reproduced none of the July failure modes across 7 service-up runs; the plan's Decision Log records why REST verification, the pre-run sweeper, and timeout-cap calibration were dropped and what replaced them (explicit client deadlines, qdrant-client/image pin at 1.19.0, prefix-scoped prune script, 127.0.0.1 defaults, waiver retirement). The active plan's Decision Log is the canonical record of the original four-step spec and its disposition.
 
 ## Standing constraints
 

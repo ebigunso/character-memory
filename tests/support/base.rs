@@ -1,10 +1,12 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use character_memory::{
     CustomError, EmbeddingError, EmbeddingProvider, IoErrorKind, Settings, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use config::Config;
-use qdrant_client::Qdrant;
+use qdrant_client::{config::QdrantConfig, Qdrant};
 use uuid::Uuid;
 
 pub fn load_test_settings() -> Result<Settings, CustomError> {
@@ -158,11 +160,24 @@ pub async fn cleanup_collection(collection_name: &str) {
     let settings = load_test_settings().expect("Failed to load settings from environment");
 
     let qdrant_url = settings.get_qdrant_connection().to_string();
-    let client = Qdrant::from_url(&qdrant_url)
-        .build()
+    let client = Qdrant::new(QdrantConfig::from_url(&qdrant_url).timeout(Duration::from_secs(30)))
         .expect("Failed to create Qdrant client");
 
-    let _ = client.delete_collection(collection_name).await;
+    if let Err(delete_error) = client.delete_collection(collection_name).await {
+        match client.collection_exists(collection_name).await {
+            Ok(false) => {}
+            Ok(true) => {
+                eprintln!(
+                    "warning: Qdrant collection {collection_name:?} remains after cleanup failed: {delete_error}"
+                );
+            }
+            Err(probe_error) => {
+                eprintln!(
+                    "warning: could not verify Qdrant collection {collection_name:?} after cleanup failed: delete error: {delete_error}; existence probe error: {probe_error}"
+                );
+            }
+        }
+    }
 }
 
 pub fn config_error(error: config::ConfigError) -> CustomError {
