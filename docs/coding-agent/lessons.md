@@ -400,6 +400,23 @@ Drained after agent-harness v0.9.0 went live in this workspace (installed plugin
 
 Promoted into this repo's rule suite and removed from this log (per-lesson triage against harness promotion guidelines, agmsg 2026-07-23T12:17Z): Qdrant client-vs-server timeout (worker.md), branch-naming convention x2 (orchestrator.md), shared sibling-checkout serialization x2 (orchestrator.md), production-default constructor tracing (worker.md), pruning-closeout evidence set (reviewer.md).
 
+## 2026-09-02 - Rebuilt-Machine Qdrant Teardown Verification Retired The Waiver  [tags: validation, qdrant, teardown]
+
+Context:
+- Plan: qdrant-teardown-hardening; rebuilt Windows host with Qdrant 1.19.0.
+
+Symptom:
+- The July teardown catalog included delete-response loss, idle-mutation stalls, IPv6-localhost stalls, service wedges under concurrent suites, and a 353-second write-planning suite, requiring a temporary cleanup waiver.
+
+Root cause:
+- Rebuilt-machine verification did not reproduce any cataloged failure across seven service-up runs; the 353-second figure was degraded-host suite duration rather than a code timeout, and the surviving Qdrant volume required the 1.19.0 server line.
+
+Fix applied:
+- Retired the waiver, pinned qdrant-client and the Qdrant image to 1.19.0, added an explicit 30-second cleanup-client deadline, normalized the example endpoint to IPv4 loopback, and made a failed cleanup warn when the collection still exists.
+
+Prevention:
+- Keep service-up compatibility and leak censuses in dependency-bump validation. No REST delete verification, retry loop, pre-run sweeper, timeout calibration, or production-adapter behavior change was added because the verified failure modes no longer reproduced and a broad sweeper could delete concurrent runs.
+
 ## Purge note (2026-07-23)
 
 Eleven entries purged per the user-directed low-value/invalid sweep (Codex purge map, agmsg 2026-07-23T12:28Z): ten PURGE-LOW-VALUE (restatements of now-mandatory harness/rule content — plan-format task records, PR monitoring, canonical-byte verification, compatibility policy, module layout, evidenced-scope rulebook default, parallel dispatch — plus two cheaply rediscovered one-off quirks and one unstructured batch-notes bundle) and one PURGE-INVALID (the phase-bounded v0.1 compatibility ruling, superseded by the repo-wide Compatibility Policy). Full entries recoverable from git history at 4997bdc.
