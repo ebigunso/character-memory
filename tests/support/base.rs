@@ -163,11 +163,19 @@ pub async fn cleanup_collection(collection_name: &str) {
     let client = Qdrant::new(QdrantConfig::from_url(&qdrant_url).timeout(Duration::from_secs(30)))
         .expect("Failed to create Qdrant client");
 
-    if let Err(error) = client.delete_collection(collection_name).await {
-        if matches!(client.collection_exists(collection_name).await, Ok(true)) {
-            eprintln!(
-                "warning: Qdrant collection {collection_name:?} remains after cleanup failed: {error}"
-            );
+    if let Err(delete_error) = client.delete_collection(collection_name).await {
+        match client.collection_exists(collection_name).await {
+            Ok(false) => {}
+            Ok(true) => {
+                eprintln!(
+                    "warning: Qdrant collection {collection_name:?} remains after cleanup failed: {delete_error}"
+                );
+            }
+            Err(probe_error) => {
+                eprintln!(
+                    "warning: could not verify Qdrant collection {collection_name:?} after cleanup failed: delete error: {delete_error}; existence probe error: {probe_error}"
+                );
+            }
         }
     }
 }
