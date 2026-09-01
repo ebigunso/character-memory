@@ -19,7 +19,7 @@ STATUS 2026-07-23: the structured-verdict-observability phase is COMPLETE AND ME
 
 ## First post-merge item (USER-CONFIRMED 2026-07-21): Qdrant teardown hardening
 
-SUPERSEDED 2026-09-02 — in progress as a light-delta under `docs/coding-agent/plans/active/qdrant-teardown-hardening-plan.md` (branch `chore/qdrant-teardown-hardening` in both repos). Live verification on the rebuilt machine (Qdrant 1.19.0 at 127.0.0.1) reproduced none of the July failure modes across 7 service-up runs; the plan's Decision Log records why REST verification, the pre-run sweeper, and timeout-cap calibration were dropped and what replaced them (explicit client deadlines, qdrant-client/image pin at 1.19.0, prefix-scoped prune script, 127.0.0.1 defaults, waiver retirement). This file is untracked, so the plan's Decision Log is the durable record of the original four-step spec and its disposition.
+SUPERSEDED 2026-09-02 — in progress as a light-delta under `docs/coding-agent/plans/active/qdrant-teardown-hardening-plan.md` (branch `chore/qdrant-teardown-hardening` in both repos). Live verification on the rebuilt machine (Qdrant 1.19.0 at 127.0.0.1) reproduced none of the July failure modes across 7 service-up runs; the plan's Decision Log records why REST verification, the pre-run sweeper, and timeout-cap calibration were dropped and what replaced them (explicit client deadlines, qdrant-client/image pin at 1.19.0, prefix-scoped prune script, 127.0.0.1 defaults, waiver retirement). The active plan's Decision Log is the canonical record of the original four-step spec and its disposition.
 
 ## Standing constraints
 
