@@ -22,7 +22,7 @@ supersession_scope: partial
 
 ## Context and Problem Statement
 
-ADR-I-0005 decided that the vector payload stores filterable metadata and graph pointers, and the payload design note enumerated thirty-three fields with thirty of them indexed.
+ADR-I-0005 decided that the vector payload stores filterable metadata and graph pointers, and the payload design note enumerated thirty-four fields with thirty-one of them indexed; the implemented manifest carried thirty-three with thirty indexed after the record-type field was dropped in the structured-verdict phase.
 By the time the embedded adapter (ADR-I-0023) was designed, the library read back exactly three of those fields — object id, object type, surface — and the only external reader was the companion evaluation repository's vector-only baseline reading the readable text column.
 The relationship hints were frozen at upsert and never updated by the link write path; the lifecycle hints described vectors the correction and forgetting paths delete; the readable text column duplicated graph text with a prefix removed; and every field was about to be mirrored into a second physical schema.
 ADR-I-0002's implementation note said to "persist both `embedding_text` and `content_text` where useful", which left the two text columns' meanings undefined.
@@ -87,7 +87,7 @@ Option 5 is the only subset with a forward-looking case that survives the synchr
 
 ## Decision Boundary
 
-Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture through ADR-I-0024's re-entry paths.
+Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance and the schema version ADR-I-0007 requires; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture through ADR-I-0024's re-entry paths.
 
 Not covered: the physical encoding of each column per adapter, and graph authority's own denormalised fields.
 
