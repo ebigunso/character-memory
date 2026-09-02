@@ -13,10 +13,10 @@
 - Every row of the phase document's deferral-reconfirmation checklist has its evidence produced and cited in the Progress Log.
 - Every deletion listed under "Deletions that are deliverables" is gone, with a zero-hit census.
 - Both repositories' service-gated suites execute (not skip) under the service-backed CI job.
-- One PR per repository per wave, merged by the decider; the evaluation repository's obligations in ADR-I-0026 are all landed.
+- One PR per wave in this repository, merged by the decider; the evaluation repository's cross-mode comparison is available as consumed evidence at closeout.
 
 ## Scope / Non-goals
-- Scope: the phase document's deliverables and deletions; the evaluation repository obligations in ADR-I-0026.
+- Scope: the phase document's deliverables and deletions, all in this repository.
 - Non-goals: the phase document's non-goals (no default flip, no approximate index, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode).
 
 ## Context (workspace)
@@ -102,12 +102,14 @@
   - src/usecases/vector_indexing.rs
   - src/errors.rs
   - docs/design/database/vector_payload_design.md
+  - docs/design/database/schema_cheat_sheet.md
+  - docs/design/database/README.md
 - depends_on: [Task_2]
 - description: |
-  Shrink the record and the typed manifest to the five fields; drop the hint carriers, the readable text column, the per-field index creation for dropped fields, the test-only field constants and the prose-assertion note constant; replace the service adapter's private enum token mappers and the pipeline's copy with one Display/FromStr per enum in the domain. Also own ADR-I-0024's zero-norm rule on the write side: the vector indexing service rejects a zero-norm record embedding as a typed per-record indexing failure (adding the error-vocabulary variant it needs) before any adapter sees it, with a unit test on the service and a parity-suite fixture that Task_4 inherits, so no adapter ever normalises a zero vector. Schema version ruling: the stored schema version is retained, because every field the new contract reads is present in records written under the current version and the removal only drops fields no reader consumes; existing stored payloads with extra fields are tolerated unread. A version bump is required only if a later change adds a read field that older records lack (the re-entry paths in ADR-I-0024), and that change owns the bump and its backfill.
+  Shrink the record and the typed manifest to the five fields; drop the hint carriers, the readable text column, the per-field index creation for dropped fields, the test-only field constants and the prose-assertion note constant; replace the service adapter's private enum token mappers and the pipeline's copy with one Display/FromStr per enum in the domain. Also own ADR-I-0024's zero-norm rule on the write side: the vector indexing service rejects a zero-norm record embedding as a typed per-record indexing failure (adding the error-vocabulary variant it needs) before any adapter sees it, with a unit test on the service and a parity-suite fixture that Task_4 inherits, so no adapter ever normalises a zero vector. Update the database documentation that advertises the old record: the schema cheat sheet and the database README lose the hint fields, the graph URI, and the readable text column, and point at the five-field contract. Schema version ruling: the stored schema version is retained, because every field the new contract reads is present in records written under the current version and the removal only drops fields no reader consumes; existing stored payloads with extra fields are tolerated unread. A version bump is required only if a later change adds a read field that older records lack (the re-entry paths in ADR-I-0024), and that change owns the bump and its backfill.
 - acceptance:
   - The manifest test asserts exactly five entries; both text-column producers except `embedding_text` are gone.
-  - Zero-hit census across both repositories for the dropped fields and for `content_text` readers (the evaluation repository's reader is removed by Task_5).
+  - Zero-hit census across both repositories for the dropped fields and for `content_text` readers (the evaluation repository removes its reader under its own plan; its zero-hit census is consumed as closeout evidence, not ordered here).
   - One token mapping per enum; census shows no copy in adapters or use cases.
   - A zero-norm record embedding yields a typed per-record indexing failure and never reaches an adapter; unit test present.
 - validation:
@@ -203,7 +205,7 @@ Each wave ends with reviewer approval and a PR per touched repository, merged by
 ## Rollback / Safety
 - Embedded mode is opt-in; the service mode's behavior is unchanged except for the reported verdict and the shrunken record, both covered by the parity suite.
 - Stored service-mode payloads with dropped fields remain readable (extra fields tolerated unread); rebuild from graph authority is the recovery path.
-- Each wave is a separately revertible PR pair.
+- Each wave is a separately revertible PR.
 
 ## Progress Log (append-only)
 
