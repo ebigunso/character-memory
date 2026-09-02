@@ -100,14 +100,16 @@
   - src/domain.rs
   - src/usecases/retrieve.rs
   - src/usecases/vector_indexing.rs
+  - src/errors.rs
   - docs/design/database/vector_payload_design.md
 - depends_on: [Task_2]
 - description: |
-  Shrink the record and the typed manifest to the five fields; drop the hint carriers, the readable text column, the per-field index creation for dropped fields, the test-only field constants and the prose-assertion note constant; replace the service adapter's private enum token mappers and the pipeline's copy with one Display/FromStr per enum in the domain. Schema version ruling: the stored schema version is retained, because every field the new contract reads is present in records written under the current version and the removal only drops fields no reader consumes; existing stored payloads with extra fields are tolerated unread. A version bump is required only if a later change adds a read field that older records lack (the re-entry paths in ADR-I-0024), and that change owns the bump and its backfill.
+  Shrink the record and the typed manifest to the five fields; drop the hint carriers, the readable text column, the per-field index creation for dropped fields, the test-only field constants and the prose-assertion note constant; replace the service adapter's private enum token mappers and the pipeline's copy with one Display/FromStr per enum in the domain. Also own ADR-I-0024's zero-norm rule on the write side: the vector indexing service rejects a zero-norm record embedding as a typed per-record indexing failure (adding the error-vocabulary variant it needs) before any adapter sees it, with a unit test on the service and a parity-suite fixture that Task_4 inherits, so no adapter ever normalises a zero vector. Schema version ruling: the stored schema version is retained, because every field the new contract reads is present in records written under the current version and the removal only drops fields no reader consumes; existing stored payloads with extra fields are tolerated unread. A version bump is required only if a later change adds a read field that older records lack (the re-entry paths in ADR-I-0024), and that change owns the bump and its backfill.
 - acceptance:
   - The manifest test asserts exactly five entries; both text-column producers except `embedding_text` are gone.
   - Zero-hit census across both repositories for the dropped fields and for `content_text` readers (the evaluation repository's reader is removed by Task_5).
   - One token mapping per enum; census shows no copy in adapters or use cases.
+  - A zero-norm record embedding yields a typed per-record indexing failure and never reaches an adapter; unit test present.
 - validation:
   - kind: command
     required: true
