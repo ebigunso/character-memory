@@ -1,78 +1,185 @@
-# v0.1.6 Design Draft: Embedded Vector Candidate Recall
+# v0.1.6 Design: Embedded Vector Candidate Recall
+
+Status: decided 2026-09-02 (ADR-I-0023 through ADR-I-0026); supersedes the 2026-07 draft of this document.
 
 ## Version intent
 
-Complete the zero-infrastructure local deployment story by adding an embedded vector candidate store mode behind the existing vector port.
-With graph authority defaulting to embedded persistent storage and retrieval statistics already file-backed, the vector candidate store is the only component that still requires an external service.
-That conflicts with the desktop-companion and game/simulation use cases, where end users cannot be expected to operate containers, and it keeps a service dependency in the default test path.
+Complete the zero-infrastructure local deployment story by adding an embedded vector candidate store mode behind the existing vector candidate port, and settle the port contract that both adapters must satisfy before a second adapter exists.
+With graph authority defaulting to embedded persistent storage (ADR-I-0021) and retrieval statistics already file-backed (ADR-I-0009), the vector candidate store is the only component that still requires an external service.
+That conflicts with the desktop-companion and game or simulation use cases, where end users cannot be expected to operate containers, and it keeps a service dependency in the default test path.
 
-Sequencing: this phase runs before v0.2, so the payload surface is mirrored across two adapters while it is still small, and so v0.2 fixture work knows which vector backend it validates against.
+Sequencing: this phase runs before scoped continuity, so the vector record is mirrored across two adapters while it is five fields, and so the scoped-continuity evaluation fixtures know which vector backend they validate against.
 
-## Why this is safe to do now
+## Why this is safe to do before scoped continuity
 
-The vector layer is candidate recall only: Qdrant suggests, statistics guide fanout, and graph authority decides final inclusion.
-An embedded adapter therefore has a low correctness bar — it must prefilter and rank candidates well, not be authoritative for anything.
-The port is small (upsert, filtered search, diagnostics listing, delete), provider-neutral, and already exercised by deterministic fakes and a live parity surface.
+The vector layer is candidate recall only: the vector store suggests, statistics guide fanout, and graph authority decides final inclusion.
+An embedded adapter therefore has a low correctness bar: it must prefilter and rank candidates well, never be authoritative for anything.
+The port is small (upsert, scoped search, delete), provider-neutral, and already exercised by deterministic fakes and a live smoke surface.
+The write path already removes the vectors of superseded and suppressed objects, so the live vector population is the active population by construction, and stale residue from failed maintenance is caught by graph verification; the embedded adapter inherits both guarantees without new code.
 
 ## Design direction
 
-- Add a `VectorStoreMode` setting (`service` | `embedded`) mirroring the graph store mode pattern, with the vector connection string interpreted as URL or local path accordingly.
-- First embedded implementation: a SQLite-backed exact-scan adapter.
-  The port's filter contract (object types, retention states, currentness, entity/thread/episode ID lists, time ranges) maps natively onto SQL predicates with junction tables for the ID lists; after prefiltering, exact cosine scan over the survivors.
-  At character-memory scale (tens of thousands of vectors), exact scan is honest, fast enough, deterministic, and strictly better recall than approximate search.
-- The Qdrant adapter remains fully supported as the service/cloud mode; this phase adds a mode, it does not deprecate one.
-- The canonical candidate ordering contract (score, object type rank, object ID, surface rank) established for deterministic admission applies identically to the embedded adapter.
-- Parity is the acceptance instrument: one shared filter-contract fixture suite runs against both adapters and must produce identical admitted sets; the embedded adapter runs it unconditionally (no service gating), which also removes the vector-service dependency from the default test path.
+### The port contract (ADR-I-0024, ADR-I-0025)
+
+This phase fixes the port contract deliberately, because two adapters cannot be held to an implicit one.
+
+Query: the embedding, the limit, and an object-type scope, and nothing else; an empty scope selects zero candidates, and the retrieval context rejects an empty configured object-type set at the boundary.
+Three-valued hint predicates are prohibited; a future predicate arrives as an explicit enum whose unknown arm never matches, in both adapters, with a parity fixture.
+
+Result: a completeness envelope, the canonical candidates plus a typed verdict — exhaustive (every scoped record was scored), boundary tie closed (an index returned a prefix and the cutoff cohort was verified closed), or boundary tie open (the overfetch bound was reached with the cohort open).
+The service adapter's existing tie-cohort loop maps onto the last two verdicts; before this phase it returned the truncated set silently at its bound, and the port's bare list type could not say whether top-K membership was determinate.
+The retrieval pipeline records the verdict in telemetry beside the returned candidate count and never repairs, retries, or fails on it, because candidate recall is non-authoritative.
+The canonical-candidates newtype introduced for deterministic admission survives as the envelope's candidates field; canonical ordering (score, object-type rank, object id, surface rank) is unchanged and applies identically to both adapters.
+
+Record: both adapters persist exactly five fields — object id, object type, surface, schema version, and the embedded text.
+Read-out text lives in graph authority; the vector record stores only the embedded surface, as provenance of what was ranked; consumers needing candidate content hydrate by object id.
+The relationship, lifecycle, time, ranking, object-specific, graph-URI, and raw-reference hints leave the write path: the library read none of them, the relationship hints were frozen at upsert and never updated by linking, the lifecycle hints described vectors the write path deletes, and the readable text column duplicated graph text.
+
+Two re-entry paths are named so the scope-only query and five-field record are read as current state, not prohibition:
+
+1. A synchronised scope predicate, owned by the scoped-continuity phase: a scope-id column written at upsert and kept in sync by the link and reflection write paths.
+2. An immutable time-window predicate over `created_at` and `observed_at`, owned by whichever phase first ships a time-bounded retrieval route; immutability makes a write-time column correct without a sync path, and the columns are backfilled from graph authority if ever needed.
+
+### The embedded adapter (ADR-I-0023)
+
+A SQLite-backed exact cosine scan, using the `rusqlite` dependency the statistics store already carries, with the same single-process, mutex-guarded connection model.
+
+Schema: one table keyed by object id and surface with a column per contract field and the embedding as a fixed-width little-endian floating-point blob normalised at write; an index on object type for the scope predicate; a metadata table recording vector size, distance, and schema version.
+Search: select the scoped rows, score by dot product in a fixed order, canonicalise through the shared constructor, truncate to the limit, and report exhaustive completeness with the scanned count.
+Delete: remove every surface of each object id, matching the service adapter's selector.
+Restart safety: opening an existing file validates the recorded vector size and distance against the configured embedding model and raises the same collection-compatibility error the service adapter raises for a mismatched collection.
+Determinism: same inputs, same scores, same total sort; equal-score cohorts are ordered by the shared comparator, so the embedded adapter satisfies deterministic admission by construction and never needs an overfetch loop.
+Score parity across adapters is not bitwise (the service computes cosine on its own normalised copy), so parity compares membership and order with a small score tolerance, and tie fixtures use identical vectors.
+
+### Settings and composition (ADR-I-0023)
+
+Follow the one-key-per-backend pattern the graph and statistics stores already use rather than overloading the service connection string.
+
+```text
+VECTOR_STORE_MODE   service | embedded   (default: service)
+VECTOR_STORE_PATH   directory, read only in embedded mode
+QDRANT_CONNECTION_STRING   required only in service mode
+```
+
+`VECTOR_STORE_PATH` is a directory; each collection is one SQLite file inside it named by the collection name the public constructor already takes, so `collection_name` is the backend-neutral namespace key in both modes.
+Collection names in embedded mode are validated to the same character set the evaluation repository already sanitises to.
+The composition root gains a vector-store mode switch mirroring the statistics-store switch; the vector database error vocabulary gains an engine-error kind for the embedded backend and reuses the existing filesystem and payload-shape kinds.
+
+### Parity suite placement (ADR-I-0023)
+
+Library: a port-conformance suite in the integration tests — scope filtering, empty scope selects zero, canonical order, identical-vector tie cohort, best-score-per-object-and-surface deduplication, delete removes all surfaces, restart reopen, completeness verdict per adapter — run against the embedded adapter unconditionally and against the service adapter when a service connection is configured.
+This follows the precedent that port conformance is enforced by contract tests run against every adapter, not by a runtime wrapper.
+Evaluation repository: no second contract suite; it adds an embedded-mode configuration to the continuity scenarios and requires identical scenario results between modes, the behaviour-level regression instrument.
 
 ## Deliverables
 
 ```text
-VectorStoreMode setting and configuration interpretation
-SqliteVectorCandidateStore adapter (schema, upsert/delete, filtered exact-scan search, diagnostics)
-composition wiring and mode selection
-shared filter-contract parity suite exercised by both adapters
-restart-safety and reconciliation coverage for embedded mode
-documentation: payload mapping addendum, setup, corpus-size guidance
-an implementation ADR recording the technology selection and its revisit triggers
+port contract: completeness envelope, scope-only query with empty-scope-selects-zero, retrieval telemetry completeness field
+vector record read contract: five-field manifest shared by both adapters
+SqliteVectorCandidateStore adapter: schema, upsert/delete, scoped exact-scan search, restart validation
+VectorStoreMode and VectorStorePath settings; composition mode switch; service connection string required only in service mode
+port-conformance parity suite in the library integration tests, run against both adapters
+restart-safety test for the embedded store; pipeline test over the embedded adapter with a deleted graph object
+measured corpus-size guidance from an in-phase benchmark
+documentation: settings, single-process expectation, corpus-size guidance, rebuild-from-graph-authority as the path between modes
+four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0003, ADR-I-0005, ADR-I-0002
+```
+
+Deletions that are deliverables, not side effects:
+
+```text
+the hint carriers on the vector record type and the surface builders' hint population
+the readable text column and the per-field payload index creation for dropped fields
+the test-only payload field constants and the prose-assertion note constant
+the service adapter's private enum token mappers, replaced by one Display/FromStr per enum in the domain (the embedded adapter must not add another copy)
+the deterministic vector fake and its embedding-bearing record type, replaced by the embedded adapter opened in memory (failure-injecting and recording fakes stay)
+the port doc comment's "documented bounded-overfetch degradation policy" clause, now expressed by the type
 ```
 
 ## Non-goals
 
 ```text
 changing the authority split or any retrieval semantics
-deprecating or altering the Qdrant adapter
-approximate-nearest-neighbor indexing (LanceDB is the recorded escalation path if embedded ANN ever becomes necessary)
-migration tooling between modes (rebuild-from-graph-authority is the documented path)
-changing the default vector mode in this phase (embedded ships opt-in first; flipping the default is a separate decision once parity evidence exists)
+deprecating or altering the service adapter
+approximate-nearest-neighbour indexing (the recorded escalation path if embedded ANN ever becomes necessary)
+migration tooling between modes or between record shapes (rebuild-from-graph-authority is the documented path)
+changing the default vector mode in this phase (embedded ships opt-in; flipping the default is a separate evidence-gated decision)
 multi-process access to the embedded store (same single-process expectation as embedded graph storage)
+any vector-layer predicate beyond the object-type scope (the two named re-entry paths belong to later phases)
+any new public facade method (the evaluation baseline consumes the retrieval trace)
+reconciliation diagnostics (the reconciliation slice was deleted in the structured-verdict phase; graph verification is the guard)
 ```
 
-## Technology posture (from the v0.1.5 closeout analysis)
+## Technology posture
 
-- SQLite exact-scan first: zero heavyweight dependencies (`rusqlite` direction already exists via the statistics store), exact filter semantics, deterministic, restart-safe.
-- LanceDB recorded as the embedded-ANN escalation path if corpora outgrow exact scan.
-- The in-process edge build of the current vector backend is a revisit candidate once it stabilizes; it would maximize payload-convention reuse and add a cloud-sync story.
-- Deployments that outgrow the embedded mode are exactly the deployments that should use the service mode; document a corpus-size guidance number rather than engineering for it.
+- SQLite exact scan first: zero new dependencies, exact filter semantics, deterministic, restart-safe.
+- The first escalation inside the embedded mode is an in-memory normalised matrix loaded at open with write-through, an implementation optimisation that changes no contract.
+- An embedded approximate-nearest-neighbour library is the recorded escalation path if corpora outgrow exact scan; a measured corpus exceeding the guidance or a benchmark showing the scan on the critical path reopens it.
+- The in-process build of the service backend is a revisit candidate once it ships a stable release; it would maximise reuse of the service adapter's conventions.
+- Deployments that outgrow the embedded mode are exactly the deployments that should use the service mode; publish a measured corpus-size guidance number rather than engineering for it (at a 3072-dimension model each ten thousand vectors is about 120 MB of embedding data read per query, which bounds the honest number).
 
 ## Acceptance criteria
 
 ```text
 Embedded mode is configurable and constructs without any running service.
-The shared parity suite produces identical admitted candidate sets from both adapters across the full filter contract.
+The parity suite produces identical admitted candidate sets and orderings from both adapters across the full contract, including identical-vector tie cohorts.
 Deterministic admission holds in embedded mode (equal-score cohorts canonically ordered; repeated runs byte-identical).
-Embedded state survives process restart; reconciliation diagnostics work against the embedded store.
-The default test path requires no vector service; Qdrant-gated suites continue to pass unchanged.
-Documentation states the single-process expectation, the corpus-size guidance, and the rebuild-from-authority migration path.
-No public facade change; no retrieval behavior change in service mode.
+Retrieval telemetry reports the completeness verdict; the embedded adapter reports exhaustive, the service adapter reports closed on the tie fixture.
+Embedded state survives process restart; a reopened store with a different vector size fails with the collection-compatibility error.
+The default test path requires no vector service; service-gated suites continue to pass unchanged.
+Both adapters persist exactly the five-field read contract; a census of both repositories shows no reader of a dropped field.
+Documentation states the single-process expectation, the corpus-size guidance, and the rebuild-from-authority path.
+No public facade change; no retrieval behaviour change in service mode beyond the added telemetry field.
 ```
+
+## Cross-repository obligations (ADR-I-0026)
+
+The companion evaluation repository is a development aid, not core library functionality; these obligations land in the same wave as the library change.
+
+- Trace-sourced baseline: the vector-only baseline issues an ordinary traced `retrieve` with the measured object types and a generous candidate limit, slices the trace's vector candidates per object kind to its per-section budgets, and reads the completeness verdict from telemetry; the direct vector-service search, its payload field constants, and its hit mapping are deleted after an A/B run proves identical item identities and ranks.
+- Item text: sourced from the evaluation repository's own ingest records keyed by external identity, never from a store payload.
+- Telemetry mirror: the evaluation telemetry record gains the completeness field.
+- Typed backend identity: result rows carry which vector backend (service or embedded) produced them, so cross-mode comparisons are attributable.
+- Backend-neutral cleanup guard: the namespace cleanup guard protects an embedded store file by the same prefix rule that protects a service collection, and cleanup removes the SQLite file with its write-ahead-log sidecars alongside the statistics store.
+- Configuration: a `vector_store_path` backend setting beside the graph and statistics paths; when set, the adapter selects embedded mode and derives a per-namespace file the way it derives the statistics path.
+- Error vocabulary: the exhaustive conversion of the vector database error kinds gains the embedded engine kind.
 
 ## Evaluation tie-in
 
-The continuity evaluation suite gains an embedded-mode configuration so the confirmation scenarios (including restart) run against the embedded vector store; the frozen-embedding infrastructure applies unchanged.
-Scenario baselines are expected to be identical between modes under the parity contract; any divergence is a finding, which makes the eval suite the cross-adapter regression instrument.
+The continuity evaluation suite gains an embedded-mode configuration so the confirmation scenarios, including restart, run against the embedded vector store; the frozen-embedding infrastructure applies unchanged.
+Scenario results are expected to be identical between modes under the parity contract; any divergence is a finding, which makes the evaluation suite the cross-adapter regression instrument.
 
-## Open questions
+## Deferral-reconfirmation checklist
 
-- Should embedded become the default vector mode once parity evidence exists, matching the embedded-default graph decision, or stay opt-in until a full release cycle passes?
-- What corpus-size number goes in the guidance (the closeout analysis suggested exact-scan comfort up to low hundreds of thousands of vectors; measure rather than assume)?
-- Does the parity suite live in the library's integration tests, the evaluation repository, or both (recommendation: shared fixtures in the library, evaluation reuse where cheap)?
+Each item was parked on this phase by the structured-verdict phase; each row states the parked claim, what was re-verified at design time, and the evidence the implementation must produce.
+
+1. Canonical-candidates newtype survival.
+   Parked claim: the newtype survives the port redesign or is absorbed into its result envelope.
+   Re-verified: every consumer is a slice read (the pipeline's count, telemetry, trace, and root selection sites, plus the test fakes); none relies on the newtype being the whole return value.
+   Evidence: after the change a census shows only the envelope field, the constructor, and the fakes' exhaustive wrapping; the existing deduplication-and-ordering test is unchanged.
+2. Dual text columns.
+   Parked claim: the text columns' fate depends on the port's read contract.
+   Re-verified: the readable text column had exactly one reader (the evaluation baseline) and the embedded text column none; the evaluation repository can source item text from its own ingest.
+   Evidence: zero-hit census for the readable text column across both repositories; a vector-only run before and after produces identical item identities and text.
+3. Search completeness.
+   Parked claim: the port cannot express whether the top-K was determinate.
+   Re-verified: the only degradation site is the service adapter's fetch bound; no pipeline path inspects or retries on it.
+   Evidence: the fetch-decision unit test asserts the open verdict at the bound; a retrieval test asserts the telemetry field per variant; the live boundary test asserts the closed verdict.
+4. Hint filter semantics.
+   Parked claim: query-side hint semantics belong to the port contract.
+   Re-verified: the filter type and both match-or-unknown implementations were deleted in the structured-verdict phase, and no consumer asks for a vector-layer predicate (the evaluation surface policy carries object types and budgets only).
+   Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prohibition and re-entry paths are recorded in ADR-I-0024.
+5. Evaluation baseline capability.
+   Parked claim: the baseline re-implements a hidden raw-vector capability against the payload schema.
+   Re-verified: trace-derived candidates with overfetch-and-slice can reproduce the direct-search baseline; the completeness verdict reports whether each question's top-K was determinate; the evaluation adapter can hold item text from ingest.
+   Evidence: the A/B run with row-level diff of item identities and ranks; after the switch, zero-hit census for vector-service search calls and payload constants in the evaluation adapter.
+
+## Decisions (the draft's open questions, resolved 2026-09-02)
+
+- Default mode: stays opt-in this phase; the flip is reopened by the evaluation suite running every dataset in embedded mode with identical results and one corpus at the guidance size (ADR-I-0023, Revisit When).
+- Corpus-size guidance: measured in-phase by a benchmark over a synthetic corpus at the configured dimension, published in documentation, revised through documentation.
+- Parity suite placement: contract parity in the library, behaviour parity in the evaluation repository (above).
+- Settings shape: separate mode and path keys with `collection_name` as the backend-neutral namespace key, not a connection string interpreted by mode (ADR-I-0023).
+- Hint families: all dropped from the vector record, with the two named re-entry paths (ADR-I-0024, ADR-I-0025).
+- Text columns: readable text dropped, embedded text kept as provenance, governed by the three sentences in ADR-I-0025.
+- Evaluation baseline: trace-sourced, no facade change (ADR-I-0026).
