@@ -1,8 +1,8 @@
 # Plan: Qdrant Teardown Hardening (light-delta, reshaped after live verification)
 
-- status: approved
+- status: done
 - generated: 2026-09-02
-- last_updated: 2026-09-02
+- last_updated: 2026-09-02 (closeout: CM PR #70 → 512427e, CME PR #21 → 45d96c7)
 - work_type: mixed
 
 ## Goal
@@ -167,6 +167,12 @@
   - Summary: named 30s QdrantConfig deadline in `new_internal`; qdrant-client 1.19.0 + lock; 127.0.0.1 test fallback and README; `scripts/qdrant_prune_collections.sh` (exact-prefix dry-run default, `--delete` opt-in, short-prefix refusal exit 2, curl-only) + scripts/README.md; lessons entry. The 15 July orphans were intentionally NOT pruned by the agent (auto-mode classifier blocks agent-initiated bulk deletes); ebigunso runs the prune.
   - Validation evidence (`.agent-work/evals-worker/task2-report.md`): fmt, clippy -D warnings (workspace), service-up `cargo test --workspace` 305/305 at 127.0.0.1:6334, three serialized runs of the three live adapter tests 9/9, zero compatibility-warning lines, collection count 15→15 throughout; script dry-run listed exactly 15, throwaway `cmem_eval_prune_selftest_<pid>` created and deleted, refusal exit 2.
   - Notes: evals-worker lesson candidate LESSON-CAND-WINDOWS-SANDBOX-DPAPI (CryptUnprotectData 2148073483 on every sandboxed launch) joins the post-task delivery-layer investigation.
+- 2026-09-02 Task_3 follow-up: cm-reviewer APPROVED a2e1fcc (offline formality, zero findings); reviewer self-correction (enumerate the operation × verification result cross-product) integrated into lessons.md together with a combined rebuilt-machine environment entry. Candidate dispositions: RB-CAND-AGMSG-FILE-FALLBACK not promoted to a rule (environment workaround; captured in the lessons entry); LESSON-CAND-AGMSG-ARG-SPLIT, LESSON-CAND-STALE-PRECOMMIT-INTERPRETER, LESSON-CAND-WINDOWS-SANDBOX-DPAPI merged into that same entry.
+- 2026-09-02 CM PR #70 MERGED (user-authorized squash) as CM main 512427e: all six checks green (incl. CI live Qdrant integration), both Copilot threads resolved, second-review remarks dispositioned above.
+- 2026-09-02 Wave 2 (CME half) completed: [Task_4] — evals-reviewer APPROVED cdaec3a from `.review-worktrees/evals-reviewer` (sibling CM pinned 1aa3dd6), zero findings.
+  - Validation evidence (`.agent-work/evals-reviewer/task4-review.md`): constructor census (single construction site, 30s deadline, no crate default); `--locked` graph with one shared qdrant-client 1.19.0; fmt + workspace all-target clippy -D warnings; script refusal paths (missing prefix, short prefix, bad flag → exit 2) and live dry-run listing exactly the 15 protected orphans; independent live tranche 3/3 at 127.0.0.1:6334, zero compatibility-warning lines, collection count 15→15.
+  - Notes: promoted as CME PR #21 (push-after-internal-approval); sibling CM review clone re-pinned to merged CM main 512427e afterwards. Copilot on #21: "Approval recommended", zero inline comments; its only remark (future-dated heading) carries the same local-calendar-date disposition recorded for CM PR #70.
+- 2026-09-02 CME PR #21 MERGED (user-authorized squash) as CME main 45d96c7: six checks green incl. "Resolve Character Memory revision" against merged CM main. Phase DONE. Closeout: review worktrees removed in both repos, transient `.agent-work` reports deleted after intake, sibling CM review clone left pinned at CM main 512427e (shim intact), plan moved to completed via a CM docs PR together with the two lessons entries. Definition of Done met except the operator-run prune of the 15 July orphans (user action, script delivered). Open follow-up outside this plan: Codex sandbox delivery-layer failure (see HANDOFF.md).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -175,6 +181,12 @@
   - Plan delta: REST verification, pre-run sweeper, and timeout-cap calibration dropped; explicit client deadlines (rule compliance), client/image version pin (new finding: `latest` tag drifted to 1.19.0), prefix-scoped prune script, and 127.0.0.1 defaults kept.
   - Tradeoffs considered: bump client vs pin image at 1.17/1.18 (rejected: the surviving volume was already opened by 1.19.0; downgrade unsupported).
   - User approval: yes (2026-09-02, "go with all the proposed changes").
+
+- 2026-09-02 Decision: Copilot second-review items on CM PR #70 (after the push of a2e1fcc + docs) — both REJECTED with disposition, no code change.
+  - Trigger / new insight: (1) "client requirement is not an exact pin" (`qdrant-client = "1.19.0"` is a caret requirement); (2) "audit records are future-dated" (entries dated 2026-09-02 while GitHub's clock read 2026-09-01 UTC).
+  - Plan delta: none. (1) Caret requirements are this repo's convention for every dependency, `Cargo.lock` pins the resolved 1.19.0 and CI runs `--locked`; the server side is pinned by the compose image tag, which is where the skew came from. An `=` pin would be a one-off inconsistency with no protective value beyond the lockfile. (2) Records use the author's local calendar date (JST), consistent with every prior entry in both repos; not a defect.
+  - Tradeoffs considered: exact pin (rejected: inconsistent, redundant with lock); rewriting dates to UTC (rejected: would break consistency with the existing log convention).
+  - User approval: not required (exit-rubric disposition; recorded here).
 
 ## Notes
 - Risks: qdrant-client 1.19.0 may change the erased-connect error shape; the canary exists precisely to catch it.

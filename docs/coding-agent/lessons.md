@@ -417,6 +417,40 @@ Fix applied:
 Prevention:
 - Keep service-up compatibility and leak censuses in dependency-bump validation. No REST delete verification, retry loop, pre-run sweeper, timeout calibration, or production-adapter behavior change was added because the verified failure modes no longer reproduced and a broad sweeper could delete concurrent runs.
 
+## 2026-09-02 - Review The Full Result Cross-Product Of An Operation And Its Verification  [tags: review, validation, teardown]
+
+Context:
+- Plan: qdrant-teardown-hardening; Task_1 cleanup warning, cm-reviewer approval, Copilot finding on CM PR #70.
+
+Symptom:
+- The best-effort cleanup warned only when the existence probe returned `Ok(true)`; when the delete AND the probe both failed (the transport-failure case the hardening targets) it stayed silent, and the review approved it.
+
+Root cause:
+- Reviewer and worker checked the primary operation's outcomes but not the verification step's own failure branch; an unknown postcondition was treated as confirmed absence.
+
+Fix applied:
+- Match on the probe result explicitly: `Ok(false)` silent, `Ok(true)` warn, `Err(probe)` warn with both errors (a2e1fcc).
+
+Prevention:
+- When a change verifies a postcondition after a failed operation, enumerate the full cross-product of (operation outcome × verification outcome) and state what each cell emits; "could not verify" is observable degradation, never silence.
+
+## 2026-09-02 - Rebuilt-Machine Environment Regressions Surface As Tooling Failures  [tags: environment, tooling, agmsg]
+
+Context:
+- Plan: qdrant-teardown-hardening; first session after the Aug 2026 hardware/OS rebuild.
+
+Symptom:
+- (1) Every codex→orchestrator agmsg body arrived truncated at its first space (PowerShell here-string → `bash.exe -lc` → `send.sh`), and one codex sandbox failed every process launch with `CryptUnprotectData error 2148073483`. (2) The generated pre-commit hook pointed at a removed Python 3.10, then at a Python 3.12 whose USER site-packages the codex sandbox interpreter ignores. (3) libclang was absent, so `oxrocksdb-sys` bindgen failed in both repos.
+
+Root cause:
+- Machine-state assumptions (interpreter paths, user-site visibility, installed toolchains) silently invalidated by the rebuild; none were repo defects. For (1), the user observed on the codex threads that the same commands succeed when escalated outside the Codex sandbox in the same thread, so the fault sits in the Codex Windows sandbox launcher (DPAPI decryption inside the sandbox), not in agmsg or shell quoting.
+
+Fix applied:
+- LLVM installed by the user; pre-commit installed into Python312's own site-packages (`python -m pip install pre-commit`, not `--user`) and the hook regenerated; agmsg reports switched to files under `.agent-work/<role>/` with single-token notifications until the delivery layer is repaired (open investigation).
+
+Prevention:
+- After any machine rebuild, before dispatching: run the ignored Qdrant canary, `cargo test --no-run` in both repos, `python -m pre_commit --version` with `PYTHONNOUSERSITE=1`, and an end-to-end agmsg round-trip that contains spaces. Treat one-word inbound bodies as a delivery fault, not an agent-formatting fault.
+
 ## Purge note (2026-07-23)
 
 Eleven entries purged per the user-directed low-value/invalid sweep (Codex purge map, agmsg 2026-07-23T12:28Z): ten PURGE-LOW-VALUE (restatements of now-mandatory harness/rule content — plan-format task records, PR monitoring, canonical-byte verification, compatibility policy, module layout, evidenced-scope rulebook default, parallel dispatch — plus two cheaply rediscovered one-off quirks and one unstructured batch-notes bundle) and one PURGE-INVALID (the phase-bounded v0.1 compatibility ruling, superseded by the repo-wide Compatibility Policy). Full entries recoverable from git history at 4997bdc.
