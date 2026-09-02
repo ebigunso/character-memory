@@ -159,7 +159,7 @@ The companion evaluation repository is a development aid; its own work is planne
 
 - The library exposes, through an ordinary traced retrieval, everything a raw-vector baseline needs: the vector candidates with scores and the completeness verdict in telemetry; the honest way to use them is one singleton-scoped traced retrieval per measured object kind with a limit of the section budget multiplied by the maximum surfaces per object, deduplicated by object.
 - The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is the evidence that gates the default flip recorded in ADR-I-0023; it is consumed at the closeout task and by that later decision, not produced by this plan.
-- No public facade or configuration surface is added for the evaluation repository; if its measurements ever require one, that is a library decision taken on its own record.
+- No candidate-search facade or configuration surface is added for the evaluation repository; the one public addition made for its trace reading is the published maximum-surfaces-per-object-kind policy value (ADR-I-0026), and if its measurements ever require more, that is a library decision taken on its own record.
 
 ## Evaluation tie-in
 

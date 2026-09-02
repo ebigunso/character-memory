@@ -41,6 +41,8 @@ An embedded adapter (ADR-I-0023) makes the gap visible: below its indexing thres
 `search_candidates` returns a result envelope: the canonical candidates (the constructor-owned canonical newtype survives as the field type) together with a typed completeness verdict.
 
 ```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")] // internally tagged, snake_case: the wire shape the public telemetry enums already use
 pub enum VectorRecallCompleteness {
     NotRequested,                                        // the limit was zero or the scope was empty; no search was issued
     Exhaustive { scanned: usize },                       // the scoped population was scored and returned in full (an unindexed shard returned fewer rows than the fetch limit)
