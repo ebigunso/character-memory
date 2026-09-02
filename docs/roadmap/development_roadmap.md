@@ -1241,7 +1241,7 @@ Embedded state survives process restart.
 Retrieval telemetry reports the completeness verdict for every retrieval in both modes.
 The default test path requires no vector service; service-gated suites still execute under the service-backed CI job and cannot pass by skipping.
 The evaluation repository's vector-only baseline produces its rows from the retrieval trace in both modes.
-No public facade change beyond the telemetry field; no retrieval behavior change in service mode.
+No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behavior change in service mode for non-empty scopes (the intended empty-scope change: zero candidates, and boundary rejection of an empty configured scope).
 ```
 
 ---

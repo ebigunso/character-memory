@@ -44,7 +44,7 @@ Item text comes from the evaluation repository's own ingest records, keyed by th
 
 What this record asks of the evaluation repository, recorded as the library-facing contract and nothing more:
 
-- The evaluation repository consumes the retrieval trace and the completeness telemetry as an ordinary caller; the library adds no surface for it.
+- The evaluation repository consumes the retrieval trace and the completeness telemetry as an ordinary caller; the library adds no candidate-search surface for it, and the only public addition made for this reading is the published maximum-surfaces-per-object-kind policy value, which is a policy constant, not a query surface.
 - A raw-vector baseline that wants per-kind top-K uses one singleton-scoped traced retrieval per kind with the multiplied limit and object-level deduplication described above; any other reading of the trace is not covered by the parity claim.
 - How the evaluation repository migrates its baseline, mirrors telemetry, labels its rows, or guards its cleanup is planned and tracked in that repository.
 
@@ -56,7 +56,7 @@ Keeping the baseline inside the traced retrieval path means the measurement of "
 
 ## Implementation Impact
 
-- Library: none beyond ADR-I-0024's telemetry field; the acceptance criterion "no public facade change" holds.
+- Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade, so the acceptance criterion "no public facade change beyond the telemetry field and this policy value" holds.
 - Evaluation repository: its baseline moves onto the trace under its own plan; nothing in this repository depends on how.
 
 ## Considered Options

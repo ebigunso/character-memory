@@ -17,7 +17,7 @@
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
-- Non-goals: the phase document's non-goals (no default flip, no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode).
+- Non-goals: the phase document's non-goals (no default flip, no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode for non-empty scopes; ADR-I-0024's empty-scope change, zero candidates for an empty scope and boundary rejection of an empty configured scope, is an intended change and in scope).
 
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
@@ -78,6 +78,7 @@
   Introduce the result envelope (canonical candidates plus the typed completeness verdict) and the verdict enum in the public retrieval telemetry vocabulary; make the service adapter map its fetch decision onto the verdict; make the query scope-only with empty-scope-selects-zero and boundary rejection of an empty configured object-type set; record the verdict in retrieval telemetry beside the returned count; update every fake store. No repair, retry, or failure on the verdict.
 - acceptance:
   - The envelope and enum match ADR-I-0024's Decision section; the canonical-candidates newtype is unchanged.
+  - Query-side zero-norm rule implemented in the service adapter: a zero-norm query scores every candidate zero and returns a truthful verdict, with a unit test and a parity fixture that Task_4 inherits.
   - Telemetry carries the verdict for every retrieval; a retrieval test asserts each variant.
   - Fetch-decision unit tests assert closed and open verdicts including the all-tied cohort at the bound.
   - Zero-hit census: no match-or-unknown condition, no filter type beyond object-type scope.
@@ -149,7 +150,7 @@
   - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets and orderings on the shared fixtures while both adapters are below their indexing thresholds; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service), both through the shared tie-closure loop, with no engine ordering relied on.
   - A recall comparison of the embedded adapter above its indexing threshold against its exhaustive setting is recorded on the benchmark corpus (informational this phase; index tuning is a later decision).
   - The collection name is validated to the phase document's allowlist before any directory is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
-  - No scan or index build occupies an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
+  - No scan, index build, or shard close occupies an async executor thread: the adapter exposes an explicit close that performs the synchronous final drop on a blocking worker; the benchmark records executor responsiveness during a concurrent scan, a build, and a close.
   - Restart test passes; repeated runs are byte-identical; reopening a shard with a mismatched vector size or distance raises the collection-compatibility error, and reopening one whose marker carries an unsupported record schema version raises the clear failure ADR-I-0007 requires, each covered by its own test.
   - Embedded mode with no `VECTOR_STORE_PATH` is a configuration error at construction, never an implicit default; covered by a settings test.
   - The contract canary passes on the pinned engine version and is documented as the gate for every engine bump.
@@ -217,7 +218,7 @@ Each wave ends with reviewer approval and a PR, merged by the decider before the
 Coordination gate: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository's plan before merge, and its sibling checkout is not re-pinned to the new library commit until its own conversion update has landed; the library wave itself does not wait.
 
 ## Rollback / Safety
-- Embedded mode is opt-in; the service mode's behavior is unchanged except for the reported verdict and the shrunken record, both covered by the parity suite.
+- Embedded mode is opt-in; the service mode's behavior is unchanged except for the reported verdict, the shrunken record, and the intended empty-scope change (an empty object-type scope selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary), all covered by the parity suite and the retrieval tests.
 - Stored service-mode payloads with dropped fields remain readable (extra fields tolerated unread); rebuild from graph authority is the recovery path.
 - Each wave is a separately revertible PR.
 

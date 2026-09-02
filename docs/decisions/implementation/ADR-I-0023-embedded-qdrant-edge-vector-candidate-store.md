@@ -113,7 +113,7 @@ Not covered: the index, quantization, and memory-map tuning values (calibrated t
 - The parity suite produces identical admitted candidate sets and orderings from both adapters while both are below their indexing thresholds, including identical-vector tie cohorts closed through the shared loop; above the threshold a recall comparison against the exhaustive setting is recorded.
 - A reopened shard with a different vector size or distance fails with the collection-compatibility error; an unsupported record schema version fails clearly.
 - The contract canary passes on the pinned engine version and is re-run on every engine bump.
-- The benchmark shows no scan or index build occupying an async executor thread.
+- The benchmark shows no scan, index build, or shard close occupying an async executor thread; the explicit close is exercised under load and its final drop is observed on a blocking worker.
 - The default-mode construction test asserts service mode.
 
 ## Revisit When

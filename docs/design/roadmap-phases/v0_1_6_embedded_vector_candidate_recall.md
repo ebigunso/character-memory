@@ -112,7 +112,7 @@ the port doc comment's "documented bounded-overfetch degradation policy" clause,
 ## Non-goals
 
 ```text
-changing the authority split or any retrieval semantics
+changing the authority split, or any retrieval semantics for non-empty scopes (the empty-scope change in ADR-I-0024 is intended and in scope)
 deprecating the service adapter, or altering it beyond what the shared port and record contracts require
 tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold, tuned by a later measured decision)
 named-vector coexistence of two embedding spaces (an engine capability this decision was taken for; its use lands with the first embedding-model migration)
@@ -143,13 +143,14 @@ A recall comparison of the embedded adapter above its indexing threshold against
 Deterministic admission holds in embedded mode (equal-score cohorts canonically ordered; repeated runs byte-identical; no engine ordering relied on).
 Retrieval telemetry reports the completeness verdict; the embedded adapter reports exhaustive below its threshold, the service adapter reports closed on the tie fixture.
 Embedded state survives process restart; a reopened shard with a different vector size or distance fails with the collection-compatibility error; an unsupported record schema version fails clearly.
-No scan or index build occupies an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
+No scan, index build, or shard close occupies an async executor thread; the adapter's explicit close performs the synchronous final drop on a blocking worker, and the benchmark records executor responsiveness during a concurrent scan, a build, and a close.
+A zero-norm record embedding is rejected at indexing as a typed per-record failure before any adapter sees it, and a zero-norm query scores every candidate zero with a truthful verdict, both proven in both adapters by parity fixtures.
 The engine contract canary passes on the pinned version.
 The dependency-weight report records unstripped and stripped release deltas and the effect of feature trimming.
 The default test path requires no vector service; service-gated suites continue to pass unchanged.
 Both adapters persist exactly the five-field read contract; a census of both repositories shows no reader of a dropped field.
 Documentation states the single-process expectation, the threshold semantics, the latency guidance, and the rebuild-from-authority path.
-No public facade change; no retrieval behaviour change in service mode beyond the added telemetry field.
+No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behaviour change in service mode for non-empty scopes (an empty object-type scope now selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary, both intended).
 ```
 
 ## What the evaluation repository provides and when it is used (ADR-I-0026)
