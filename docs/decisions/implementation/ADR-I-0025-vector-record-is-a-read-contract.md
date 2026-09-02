@@ -13,7 +13,7 @@ warrant:
   cost_of_over_extension: "extending the rule to the graph store would strip graph authority of denormalised fields it legitimately owns"
 depends_on: [implementation/ADR-I-0007-schema-versioning.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-takes-a-scope-only-query.md]
 implements: []
-supersedes: [implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md, implementation/ADR-I-0002-natural-language-embedding-surfaces.md]
+supersedes: [implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md, implementation/ADR-I-0002-natural-language-embedding-surfaces.md, implementation/ADR-I-0001-stable-cross-store-ids.md]
 superseded_by: null
 supersession_scope: partial
 ---
@@ -47,6 +47,7 @@ Consumers needing candidate content hydrate by object id.
 
 `content_text` is dropped.
 The relationship refs (episode, observation, thread, entity, participant, speaker, supersedes), the lifecycle and currentness flags, the time hints, the ranking and salience hints, the object-specific hints, the graph URI, and the raw source reference leave the vector write path.
+Dropping the graph URI partially supersedes ADR-I-0001's clause that every vector payload carries it: the stable object id remains the cross-store identity and the graph URI is derived from it by graph authority, so the pointer was a redundant copy of the id; ADR-I-0001's stable-id decision itself is unchanged.
 The typed field manifest introduced in the structured-verdict phase remains the single source of both adapters' column sets and shrinks to the five entries.
 ADR-I-0024 names the two re-entry paths (a synchronised scope predicate; an immutable time-window predicate over `created_at` and `observed_at` backfilled from graph authority) so a returning column arrives with its predicate, its adapter mappings, and a parity fixture.
 

@@ -178,7 +178,8 @@
 
 ### Task_8: Design-value audit at the pre-merge milestone gate
 - type: review
-- owns: []
+- owns:
+  - docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md
 - depends_on: [Task_4]
 - description: |
   Altitude review (Claude) against philosophy and roadmap: nothing designed twice across the two adapters, no hint field re-entered without its predicate, the evaluation repository holds no store-private knowledge, the ADR boundaries respected.

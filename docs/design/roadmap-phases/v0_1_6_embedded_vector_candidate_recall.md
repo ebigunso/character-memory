@@ -62,7 +62,7 @@ QDRANT_CONNECTION_STRING   required only in service mode
 ```
 
 `VECTOR_STORE_PATH` is a directory; each collection is one SQLite file inside it named by the collection name the public constructor already takes, so `collection_name` is the backend-neutral namespace key in both modes.
-Collection names in embedded mode are validated to the same character set the evaluation repository already sanitises to.
+Because the collection name becomes a file name under the configured directory, embedded mode validates it at construction with a contract owned here: ASCII letters, digits, underscore, and hyphen only, first character a letter or digit, at most 128 characters, no path separators, dots, or empty name; anything else is rejected with the configuration error before any file is touched, and a path-confinement test proves that separator and parent-directory inputs cannot escape the directory.
 The composition root gains a vector-store mode switch mirroring the statistics-store switch; the vector database error vocabulary gains an engine-error kind for the embedded backend and reuses the existing filesystem and payload-shape kinds.
 
 ### Parity suite placement (ADR-I-0023)
