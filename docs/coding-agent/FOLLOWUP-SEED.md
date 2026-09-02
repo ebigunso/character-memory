@@ -19,7 +19,11 @@ STATUS 2026-07-23: the structured-verdict-observability phase is COMPLETE AND ME
 
 ## First post-merge item (USER-CONFIRMED 2026-07-21): Qdrant teardown hardening
 
-SUPERSEDED 2026-09-02 — in progress as a light-delta under `docs/coding-agent/plans/active/qdrant-teardown-hardening-plan.md` (branch `chore/qdrant-teardown-hardening` in both repos). Live verification on the rebuilt machine (Qdrant 1.19.0 at 127.0.0.1) reproduced none of the July failure modes across 7 service-up runs; the plan's Decision Log records why REST verification, the pre-run sweeper, and timeout-cap calibration were dropped and what replaced them (explicit client deadlines, qdrant-client/image pin at 1.19.0, prefix-scoped prune script, 127.0.0.1 defaults, waiver retirement). The active plan's Decision Log is the canonical record of the original four-step spec and its disposition.
+DONE 2026-09-02 as a light-delta — see `docs/coding-agent/plans/completed/qdrant-teardown-hardening-plan.md` (CM PR #70 → 512427e; CME PR ebigunso/character-memory-evals#21 → 45d96c7). Live verification on the rebuilt machine (Qdrant 1.19.0 at 127.0.0.1) reproduced none of the July failure modes across 7 service-up runs; the plan's Decision Log records why REST verification, the pre-run sweeper, and timeout-cap calibration were dropped and what replaced them (explicit client deadlines, qdrant-client/image pin at 1.19.0, prefix-scoped prune script, 127.0.0.1 defaults, waiver retirement). The completed plan's Decision Log is the canonical record of the original four-step spec and its disposition.
+
+Residue from that closeout (2026-09-02):
+- OPERATOR ACTION: prune the 15 July orphan collections with the delivered CME script — `QDRANT_REST_URL=http://127.0.0.1:6333 ./scripts/qdrant_prune_collections.sh cmem_eval_continuity_continuity_v1_ --delete` from the CME checkout (dry-run first without `--delete`). Removed from the plan's Definition of Done because agent-initiated bulk deletes are blocked by policy.
+- ENVIRONMENT FOLLOW-UP: Codex sandbox delivery layer on the rebuilt machine — codex→orchestrator agmsg bodies truncate at the first space and one sandbox failed every process launch with `CryptUnprotectData error 2148073483`; the same commands succeed when escalated outside the Codex sandbox in the same thread (user observation), so the investigation starts at the Codex Windows sandbox launcher. Workaround in force: codex agents write reports under `.agent-work/<role>/` and send a single-token notification.
 
 ## Standing constraints
 

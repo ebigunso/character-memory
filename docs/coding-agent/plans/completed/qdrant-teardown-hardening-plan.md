@@ -2,7 +2,7 @@
 
 - status: done
 - generated: 2026-09-02
-- last_updated: 2026-09-02 (closeout: CM PR #70 → 512427e, CME PR #21 → 45d96c7)
+- last_updated: 2026-09-02 (closeout: CM PR #70 → 512427e, CME PR ebigunso/character-memory-evals#21 → 45d96c7)
 - work_type: mixed
 
 ## Goal
@@ -12,7 +12,7 @@
 - Both repos: every Qdrant client is built through `QdrantConfig` with an explicit deadline (worker.md rule); no client remains on the crate default.
 - Both repos: qdrant-client 1.19.0, CM compose/README image pinned to `qdrant/qdrant:v1.19.0`; live tests emit no client/server compatibility warning.
 - CM: erased-connect contract canary re-verified against 1.19.0 and renamed version-agnostic; the `is_erased_qdrant_connect_failure` comment cites the verified version, or the coupling is retired if upstream now preserves the source.
-- CME: `scripts/qdrant_prune_collections.sh` exists (REST, explicit prefix, dry-run default, `--delete` opt-in) and has pruned the 15 July `cmem_eval_continuity_continuity_v1_*` orphans (user-authorized 2026-09-02).
+- CME: `scripts/qdrant_prune_collections.sh` exists (REST, explicit prefix, dry-run default, `--delete` opt-in) and its dry-run has been validated against the 15 July `cmem_eval_continuity_continuity_v1_*` orphans. The prune itself is an operator action outside this plan (Decision 2026-09-02 below); it is tracked in FOLLOWUP-SEED.md.
 - Endpoint defaults (`.env.example`, CME test fallback, CME README) say `127.0.0.1:6334`.
 - Waiver retirement recorded in the archived observability plan's Decision Log; lessons entries in both repos; one PR per repo, green CI.
 
@@ -171,8 +171,8 @@
 - 2026-09-02 CM PR #70 MERGED (user-authorized squash) as CM main 512427e: all six checks green (incl. CI live Qdrant integration), both Copilot threads resolved, second-review remarks dispositioned above.
 - 2026-09-02 Wave 2 (CME half) completed: [Task_4] — evals-reviewer APPROVED cdaec3a from `.review-worktrees/evals-reviewer` (sibling CM pinned 1aa3dd6), zero findings.
   - Validation evidence (`.agent-work/evals-reviewer/task4-review.md`): constructor census (single construction site, 30s deadline, no crate default); `--locked` graph with one shared qdrant-client 1.19.0; fmt + workspace all-target clippy -D warnings; script refusal paths (missing prefix, short prefix, bad flag → exit 2) and live dry-run listing exactly the 15 protected orphans; independent live tranche 3/3 at 127.0.0.1:6334, zero compatibility-warning lines, collection count 15→15.
-  - Notes: promoted as CME PR #21 (push-after-internal-approval); sibling CM review clone re-pinned to merged CM main 512427e afterwards. Copilot on #21: "Approval recommended", zero inline comments; its only remark (future-dated heading) carries the same local-calendar-date disposition recorded for CM PR #70.
-- 2026-09-02 CME PR #21 MERGED (user-authorized squash) as CME main 45d96c7: six checks green incl. "Resolve Character Memory revision" against merged CM main. Phase DONE. Closeout: review worktrees removed in both repos, transient `.agent-work` reports deleted after intake, sibling CM review clone left pinned at CM main 512427e (shim intact), plan moved to completed via a CM docs PR together with the two lessons entries. Definition of Done met except the operator-run prune of the 15 July orphans (user action, script delivered). Open follow-up outside this plan: Codex sandbox delivery-layer failure (see HANDOFF.md).
+  - Notes: promoted as CME PR ebigunso/character-memory-evals#21 (push-after-internal-approval); sibling CM review clone re-pinned to merged CM main 512427e afterwards. Copilot on #21: "Approval recommended", zero inline comments; its only remark (future-dated heading) carries the same local-calendar-date disposition recorded for CM PR #70.
+- 2026-09-02 CME PR ebigunso/character-memory-evals#21 MERGED (user-authorized squash) as CME main 45d96c7: six checks green incl. "Resolve Character Memory revision" against merged CM main. Phase DONE. Closeout: review worktrees removed in both repos, transient `.agent-work` reports deleted after intake, sibling CM review clone left pinned at CM main 512427e (shim intact), plan moved to completed via a CM docs PR together with the two lessons entries. Definition of Done met (the operator-run prune was removed from it by the decision below and is tracked in FOLLOWUP-SEED.md). Open follow-up outside this plan: Codex sandbox delivery-layer failure (tracked in FOLLOWUP-SEED.md).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -187,6 +187,11 @@
   - Plan delta: none. (1) Caret requirements are this repo's convention for every dependency, `Cargo.lock` pins the resolved 1.19.0 and CI runs `--locked`; the server side is pinned by the compose image tag, which is where the skew came from. An `=` pin would be a one-off inconsistency with no protective value beyond the lockfile. (2) Records use the author's local calendar date (JST), consistent with every prior entry in both repos; not a defect.
   - Tradeoffs considered: exact pin (rejected: inconsistent, redundant with lock); rewriting dates to UTC (rejected: would break consistency with the existing log convention).
   - User approval: not required (exit-rubric disposition; recorded here).
+- 2026-09-02 Decision: the operator-run prune of the 15 July orchestration orphans is REMOVED from this plan's Definition of Done and tracked in FOLLOWUP-SEED.md instead.
+  - Trigger / new insight: the orchestrator's auto-mode classifier blocks agent-initiated bulk deletes, and the evals-worker was deliberately instructed not to delete user-owned collections; the deliverable within the plan is the validated tool, the deletion is a one-line operator action the user runs.
+  - Plan delta: Definition of Done bullet reworded (validated dry-run instead of executed prune); closeout proceeds.
+  - Tradeoffs considered: keeping the plan open until the prune is recorded (rejected: it would hold a merged, reviewed phase open on an action outside agent authority).
+  - User approval: implicit in the user's authorization to merge both PRs with the prune still pending; the prune command is in FOLLOWUP-SEED.md.
 
 ## Notes
 - Risks: qdrant-client 1.19.0 may change the erased-connect error shape; the canary exists precisely to catch it.
