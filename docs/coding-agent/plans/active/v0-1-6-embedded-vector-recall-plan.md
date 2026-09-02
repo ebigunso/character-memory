@@ -140,6 +140,8 @@
   Implement the embedded adapter per the phase document (schema keyed on object id and surface, normalised vector blobs, the query normalised once before scoring with zero-norm defined, object-type scope predicate, exact dot-product scan returning Exhaustive, restart safety), the `VECTOR_STORE_MODE` and `VECTOR_STORE_PATH` settings with mode-specific validation (service connection string required only in service mode), composition mode switch with `collection_name` as the backend-neutral namespace key, and the port-conformance parity suite run against both adapters (embedded unconditionally, service under the live gate). Extend the vector error vocabulary only where the embedded adapter needs a kind the service adapter lacks. Measure and document corpus-size guidance from an in-phase benchmark.
 - acceptance:
   - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets on the shared fixtures; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service).
+  - The collection name is validated to the phase document's allowlist before any file is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
+  - The synchronous scan runs on a blocking worker with serialized connection access, never on an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
   - Restart test passes; repeated runs are byte-identical.
   - Settings docs, single-process expectation, corpus-size guidance, and rebuild-from-graph-authority path are documented.
 - validation:

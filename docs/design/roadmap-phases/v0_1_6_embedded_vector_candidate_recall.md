@@ -42,7 +42,7 @@ Two re-entry paths are named so the scope-only query and five-field record are r
 
 ### The embedded adapter (ADR-I-0023)
 
-A SQLite-backed exact cosine scan, using the `rusqlite` dependency the statistics store already carries, with the same single-process, mutex-guarded connection model.
+A SQLite-backed exact cosine scan, using the `rusqlite` dependency the statistics store already carries, with the same single-process, mutex-guarded connection model, except that the scan itself is a synchronous, potentially long operation behind an async port: it runs on a blocking worker (the runtime's blocking pool) with connection access still serialized, so a scan never occupies an async executor thread, and the in-phase benchmark records executor responsiveness while a scan is in progress.
 
 Schema: one table keyed by object id and surface with a column per contract field and the embedding as a fixed-width little-endian floating-point blob normalised at write; an index on object type for the scope predicate; a metadata table recording vector size, distance, and schema version.
 Search: normalise the query once (a zero-norm query scores every row zero and is reported, not rejected), select the scoped rows, score by dot product in a fixed order so the score equals the service adapter's cosine, canonicalise through the shared constructor, truncate to the limit, and report exhaustive completeness with the scanned count; a parity fixture with non-unit query and record vectors pins score equality across adapters.
@@ -82,7 +82,7 @@ port-conformance parity suite in the library integration tests, run against both
 restart-safety test for the embedded store; pipeline test over the embedded adapter with a deleted graph object
 measured corpus-size guidance from an in-phase benchmark
 documentation: settings, single-process expectation, corpus-size guidance, rebuild-from-graph-authority as the path between modes
-four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0005 and ADR-I-0002
+four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0001, ADR-I-0002, and ADR-I-0005
 ```
 
 Deletions that are deliverables, not side effects:
