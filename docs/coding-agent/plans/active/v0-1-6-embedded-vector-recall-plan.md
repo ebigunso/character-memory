@@ -22,7 +22,7 @@
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
 - As-built port: `src/ports/vector_candidate.rs`, `src/models/vector/candidate_record.rs`, `src/models/vector/record.rs`, `src/adapters/qdrant/{store,payload}.rs`, `src/policy/embedding_surface.rs`, `src/usecases/retrieve.rs`, `src/api/types/retrieval.rs`, `src/composition.rs`, `src/config/app_settings.rs`, `src/test_support.rs`.
-- Prerequisite in this repository: the toolchain pin moves to the embedded engine's minimum (Rust 1.97.0 at decision time) in its own change; Task_4 cannot build before it merges.
+- Prerequisite in this repository, landed: the toolchain pin moved to the embedded engine's minimum (Rust 1.97.0) in its own change, merged 2026-09-02 as a88c117.
 - Prerequisite tracked in the evaluation repository: its evidence-integrity fixes must be merged before this phase cites any harness measurement.
 - Repo reference docs consulted: the four ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
 
@@ -240,4 +240,4 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 
 ## Notes
 - Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the latency guidance and the stripped dependency weight must be measured, not assumed; the engine is beta, so its pin is exact and its bump is gated by the canary.
-- Edge cases: empty object-type scope selects zero in both adapters; `limit == 0` issues no search and reports the not-requested verdict in both adapters; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior; the parity suite includes non-unit query and record vectors so score equality across adapters (both engines normalise cosine internally) is asserted, not assumed.
+- Edge cases: an empty object-type scope or `limit == 0` issues no search and reports the not-requested verdict in both adapters; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior; the parity suite includes non-unit query and record vectors so score equality across adapters (both engines normalise cosine internally) is asserted, not assumed.
