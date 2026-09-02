@@ -57,12 +57,12 @@ Follow the one-key-per-backend pattern the graph and statistics stores already u
 
 ```text
 VECTOR_STORE_MODE   service | embedded   (default: service)
-VECTOR_STORE_PATH   directory, read only in embedded mode
+VECTOR_STORE_PATH   directory, required in embedded mode (missing is a configuration error, never an implicit default), ignored in service mode
 QDRANT_CONNECTION_STRING   required only in service mode
 ```
 
 `VECTOR_STORE_PATH` is a directory; each collection is one SQLite file inside it named by the collection name the public constructor already takes, so `collection_name` is the backend-neutral namespace key in both modes.
-Because the collection name becomes a file name under the configured directory, embedded mode validates it at construction with a contract owned here: ASCII letters, digits, underscore, and hyphen only, first character a letter or digit, at most 128 characters, no path separators, dots, or empty name; anything else is rejected with the configuration error before any file is touched, and a path-confinement test proves that separator and parent-directory inputs cannot escape the directory.
+Because the collection name becomes a file name under the configured directory, embedded mode validates it at construction with a contract owned here: lowercase ASCII letters, digits, underscore, and hyphen only (lowercase so that names stay unique on the case-insensitive filesystems of desktop targets), first character a letter or digit, at most 128 characters, not a reserved device name on Windows (con, prn, aux, nul, com1 to com9, lpt1 to lpt9), no path separators, dots, or empty name; anything else is rejected with the configuration error before any file is touched, the name is recorded in the file's metadata table, and a path-confinement test proves that separator and parent-directory inputs cannot escape the directory.
 The composition root gains a vector-store mode switch mirroring the statistics-store switch; the vector database error vocabulary gains an engine-error kind for the embedded backend and reuses the existing filesystem and payload-shape kinds.
 
 ### Parity suite placement (ADR-I-0023)

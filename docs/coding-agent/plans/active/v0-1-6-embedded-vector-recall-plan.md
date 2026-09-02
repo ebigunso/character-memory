@@ -42,7 +42,7 @@
   - tests/initialization_tests.rs
   - tests/public_facade_tests.rs
   - tests/retrieval_guardrails_tests.rs
-  - .github/workflows/*.yml
+  - .github/workflows/*.yaml
 - depends_on: []
 - description: |
   Add one environment switch honored by the shared test support that turns every service-unavailable skip into a panic, set it in the CI job that provisions the vector service, and delete the prose-matched timeout skip (`is_qdrant_timeout_signature`) or replace it with a typed match on the existing transport classification.
@@ -142,7 +142,8 @@
   - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets on the shared fixtures; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service).
   - The collection name is validated to the phase document's allowlist before any file is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
   - The synchronous scan runs on a blocking worker with serialized connection access, never on an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
-  - Restart test passes; repeated runs are byte-identical.
+  - Restart test passes; repeated runs are byte-identical; reopening a file with a mismatched vector size or distance raises the collection-compatibility error, and reopening one with an unsupported stored schema version raises the clear failure ADR-I-0007 requires, each covered by its own test.
+  - Embedded mode with no `VECTOR_STORE_PATH` is a configuration error at construction, never an implicit default; covered by a settings test.
   - Settings docs, single-process expectation, corpus-size guidance, and rebuild-from-graph-authority path are documented.
 - validation:
   - kind: command
