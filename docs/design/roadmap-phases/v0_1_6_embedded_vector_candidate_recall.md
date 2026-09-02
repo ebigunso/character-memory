@@ -191,7 +191,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
    Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prohibition and re-entry paths are recorded in ADR-I-0024.
 5. Evaluation baseline capability.
    Parked claim: the baseline re-implements a hidden raw-vector capability against the payload schema.
-   Re-verified: one singleton-scoped traced retrieval per measured kind reproduces the direct per-kind search exactly, which a sliced mixed-kind top-K would not; each retrieval's completeness verdict reports whether that kind's top-K was determinate; the evaluation adapter can hold item text from ingest.
+   Re-verified: one singleton-scoped traced retrieval per measured kind reproduces the direct per-kind search exactly, which a sliced mixed-kind top-K would not; each retrieval's completeness verdict reports whether that kind's top-K was determinate over the scoped population (exhaustive) or only closed within the index's returned prefix (boundary verdicts), and the baseline records which; the evaluation adapter can hold item text from ingest.
    Evidence: the A/B run with row-level diff of item identities and ranks; after the switch, zero-hit census for vector-service search calls and payload constants in the evaluation adapter.
 
 ## Decisions (the draft's open questions, resolved 2026-09-02)

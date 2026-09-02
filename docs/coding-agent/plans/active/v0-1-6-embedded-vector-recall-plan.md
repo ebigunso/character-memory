@@ -124,7 +124,7 @@
   - kind: command
     required: true
     owner: worker
-    detail: "cargo fmt --check; clippy -D warnings; service-up cargo test; ignored qdrant_ lib tests; census commands recorded"
+    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; service-up cargo test; ignored qdrant_ lib tests; census commands recorded"
   - kind: review
     required: true
     owner: reviewer

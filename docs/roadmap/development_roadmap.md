@@ -1222,7 +1222,7 @@ record the re-entry paths for vector-layer predicates a later phase may need: a 
 ## Non-goals
 
 ```text
-changing the authority split or any retrieval semantics in the service mode
+changing the authority split, or any retrieval semantics in the service mode for non-empty scopes (the intended empty-scope change is in scope)
 deprecating or altering the service-mode adapter beyond the shared port contract
 tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold this phase)
 migration tooling between modes; rebuild from graph authority is the path
