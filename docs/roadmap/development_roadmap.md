@@ -1235,7 +1235,7 @@ a public candidate-search facade
 
 ```text
 Embedded mode constructs and serves retrieval without any running service.
-The shared contract suite produces identical admitted candidate sets from both adapters across the port contract.
+The shared contract suite produces identical admitted candidate sets and orderings from both adapters while both are below their indexing thresholds; above them a recall comparison is recorded.
 Deterministic admission holds in embedded mode; repeated runs are byte-identical.
 Embedded state survives process restart.
 Retrieval telemetry reports the completeness verdict for every retrieval in both modes.
