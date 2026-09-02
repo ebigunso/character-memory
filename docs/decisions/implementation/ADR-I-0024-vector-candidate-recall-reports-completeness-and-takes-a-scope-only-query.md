@@ -42,18 +42,20 @@ An embedded adapter (ADR-I-0023) makes the gap visible: an exact scan is exhaust
 
 ```rust
 pub enum VectorRecallCompleteness {
+    NotRequested,                                        // the limit was zero; no search was issued
     Exhaustive { scanned: usize },                       // every stored record in scope was scored
     BoundaryTieClosed { fetched: usize },                // an index returned a prefix and the cutoff cohort was closed
     BoundaryTieOpen { fetched: usize, fetch_bound: usize }, // the overfetch bound was reached with the cohort open
 }
 ```
 
-Adapters own canonicalisation and must state the verdict truthfully: exhaustive only when the whole scoped population was scored, closed only when the cutoff cohort was verified closed or the index returned fewer rows than asked, open at the bound.
+Adapters own canonicalisation and must state the verdict truthfully: not requested only when the limit is zero and no search was issued (an admitted configuration, so the verdict must be total over it), exhaustive only when the whole scoped population was scored, closed only when the cutoff cohort was verified closed or the index returned fewer rows than asked, open at the bound.
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 The verdict type lives in the public retrieval telemetry vocabulary so the port can name it without a mirror type.
 
 The query is the embedding, the limit, and an object-type scope, and nothing else.
 An empty scope selects zero candidates; wildcard-on-empty is prohibited, matching the graph query rule, and the retrieval context rejects an empty configured object-type set at the boundary.
+Zero-norm vectors are defined on both sides of the port: the vector indexing service rejects a zero-norm record embedding as a typed per-record indexing failure before any adapter sees it (so adapters may normalise at write without a division-by-zero path), and a zero-norm query scores every candidate zero and returns a truthful verdict; the parity suite carries both cases.
 Three-valued hint predicates are prohibited.
 Any future vector-layer predicate arrives as an explicit enum whose unknown arm is spelled out, an unknown or missing stored value never satisfies a positive predicate, and the predicate lands with its mapping in both adapters and a parity fixture in the same change.
 
