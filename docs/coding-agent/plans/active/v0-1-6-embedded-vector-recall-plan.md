@@ -175,9 +175,11 @@
   - docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md
   - docs/coding-agent/lessons.md
   - docs/roadmap/development_roadmap.md
+  - Cargo.toml
+  - Cargo.lock
 - depends_on: [Task_4]
 - description: |
-  Retire the deterministic vector fake and its embedding-bearing record type in favour of the embedded adapter opened on a temporary shard directory, as the phase document specifies, so tests exercise the persistence path (failure-injecting and recording fakes stay); collect the deferral-reconfirmation evidence for all five checklist rows; mark the roadmap row finished; move the plan to completed.
+  Retire the deterministic vector fake and its embedding-bearing record type in favour of the embedded adapter opened on a temporary shard directory, as the phase document specifies, so tests exercise the persistence path (failure-injecting and recording fakes stay); collect the deferral-reconfirmation evidence for all five checklist rows; bump the package version to 0.1.6 in the manifest and lockfile as prior milestone closeouts did; mark the roadmap row finished; move the plan to completed.
 - acceptance:
   - Zero-hit census for the retired fake and record type.
   - All five checklist rows cite evidence in the Progress Log.
@@ -216,8 +218,8 @@
 
 Task identifiers 5 and 6 were evaluation-repository work and moved to that repository's own plan; identifiers are not reused.
 
-Each wave ends with reviewer approval and a PR, merged by the decider before the next wave starts; the evaluation repository's sibling checkout is re-pinned to the merged library commit at every wave boundary.
-Coordination gate: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository's plan before merge, and its sibling checkout is not re-pinned to the new library commit until its own conversion update has landed; the library wave itself does not wait.
+Each wave ends with reviewer approval and a PR, merged by the decider before the next wave starts.
+Notification duty: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository before merge; how and when that repository adopts the change is planned there, and this plan only consumes the resulting compatibility evidence at closeout.
 
 ## Rollback / Safety
 - Embedded mode is opt-in; the service mode's behavior is unchanged except for the reported verdict, the shrunken record, and the intended empty-scope change (an empty object-type scope selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary), all covered by the parity suite and the retrieval tests.

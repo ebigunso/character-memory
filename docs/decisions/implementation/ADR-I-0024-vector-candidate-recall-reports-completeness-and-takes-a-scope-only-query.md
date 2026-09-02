@@ -45,13 +45,13 @@ An embedded adapter (ADR-I-0023) makes the gap visible: below its indexing thres
 #[serde(tag = "kind", rename_all = "snake_case")] // internally tagged, snake_case: the wire shape the public telemetry enums already use
 pub enum VectorRecallCompleteness {
     NotRequested,                                        // the limit was zero or the scope was empty; no search was issued
-    Exhaustive { scanned: usize },                       // the scoped population was scored and returned in full (an unindexed shard returned fewer rows than the fetch limit)
+    Exhaustive { scanned: usize },                       // every stored record in scope was scored, so the requested top-K is determinate (an unindexed shard returned fewer rows than it asked for; the envelope is still capped at the limit)
     BoundaryTieClosed { fetched: usize },                // an index returned a prefix and the cutoff cohort was closed
     BoundaryTieOpen { fetched: usize, fetch_bound: usize }, // the overfetch bound was reached with the cohort open
 }
 ```
 
-Adapters own canonicalisation and must state the verdict truthfully: not requested only when no search was issued because the limit is zero or the scope is empty (both admitted inputs, so the verdict must be total over them), exhaustive only when the adapter knows the shard is unindexed and the scan returned fewer rows than it asked for, so the whole scoped population was scored and returned, closed only when the cutoff cohort was verified closed or an index returned fewer rows than asked, open at the bound.
+Adapters own canonicalisation and must state the verdict truthfully: not requested only when no search was issued because the limit is zero or the scope is empty (both admitted inputs, so the verdict must be total over them), exhaustive only when the adapter knows the shard is unindexed and the scan returned fewer rows than it asked for, so the whole scoped population was scored and the requested top-K is determinate while the envelope stays capped at the limit, closed only when the cutoff cohort was verified closed or an index returned fewer rows than asked, open at the bound.
 Every adapter answers through the shared tie-closure loop and the canonical constructor; engine ordering of equal-score cohorts is never relied on, because it is not stable across freshly built shards (ADR-I-0023).
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 The verdict type lives in the public retrieval telemetry vocabulary so the port can name it without a mirror type.
