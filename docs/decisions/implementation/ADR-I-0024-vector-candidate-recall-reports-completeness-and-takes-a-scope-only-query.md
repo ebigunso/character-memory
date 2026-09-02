@@ -46,12 +46,14 @@ An embedded adapter (ADR-I-0023) makes the gap visible: below its indexing thres
 pub enum VectorRecallCompleteness {
     NotRequested,                                        // the limit was zero or the scope was empty; no search was issued
     Exhaustive { scanned: usize },                       // every stored record in scope was scored, so the requested top-K is determinate (an unindexed shard returned fewer rows than it asked for; the envelope is still capped at the limit)
-    BoundaryTieClosed { fetched: usize },                // an index returned a prefix and the cutoff cohort was closed
-    BoundaryTieOpen { fetched: usize, fetch_bound: usize }, // the overfetch bound was reached with the cohort open
+    BoundaryTieClosed { fetched: usize },                // an index returned a prefix and the cutoff cohort WITHIN THAT PREFIX was closed: determinate relative to the index's answer, which an approximate index may have built without records it never surfaced
+    BoundaryTieOpen { fetched: usize, fetch_bound: usize }, // the overfetch bound was reached with the cohort within the prefix still open
 }
 ```
 
-Adapters own canonicalisation and must state the verdict truthfully: not requested only when no search was issued because the limit is zero or the scope is empty (both admitted inputs, so the verdict must be total over them), exhaustive only when the adapter knows the shard is unindexed and the scan returned fewer rows than it asked for, so the whole scoped population was scored and the requested top-K is determinate while the envelope stays capped at the limit, closed only when the cutoff cohort was verified closed or an index returned fewer rows than asked, open at the bound.
+Adapters own canonicalisation and must state the verdict truthfully: not requested only when no search was issued because the limit is zero or the scope is empty (both admitted inputs, so the verdict must be total over them), exhaustive only when the adapter knows the shard is unindexed and the scan returned fewer rows than it asked for, so the whole scoped population was scored and the requested top-K is determinate while the envelope stays capped at the limit, closed only when the cutoff cohort within the index's returned prefix was verified closed or the index returned fewer rows than asked, open at the bound.
+The two boundary verdicts describe the index's answer, not global recall: an approximate index may omit equal- or higher-scored records it never surfaced, and no amount of overfetch can prove their absence, so only the exhaustive verdict asserts determinate top-K membership over the scoped population; the boundary verdicts assert determinism of the returned set for a given index state (the same index answers the same query the same way) and whether its cutoff cohort was closed.
+Callers that need population-level determinacy configure the adapter below its indexing threshold (ADR-I-0023) and read the exhaustive verdict; nothing in this record requires the service adapter to switch to exact search.
 Every adapter answers through the shared tie-closure loop and the canonical constructor; engine ordering of equal-score cohorts is never relied on, because it is not stable across freshly built shards (ADR-I-0023).
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 The verdict type lives in the public retrieval telemetry vocabulary so the port can name it without a mirror type.
