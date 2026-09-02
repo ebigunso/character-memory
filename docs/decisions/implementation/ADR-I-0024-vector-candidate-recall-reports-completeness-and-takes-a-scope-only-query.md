@@ -26,7 +26,7 @@ The vector candidate port promised deterministic admission: at most `limit` uniq
 The service adapter closes the cohort by growing its fetch up to a bound, but when the bound is hit it returns the truncated set with no signal, and the port's result type — a bare candidate list — cannot carry the difference between "this top-K is determinate" and "membership may vary between runs".
 Separately, the port once carried a filter type whose currentness predicates were `Option<bool>` values implemented as match-or-unknown: a record whose payload lacked the field satisfied a positive predicate in both the service adapter and the test fake.
 Those filters were deleted as speculative in the structured-verdict phase because no caller used them; the query is now an embedding, a limit, and an object-type scope.
-An embedded adapter (ADR-I-0023) makes the gap visible: an exact scan is exhaustive by construction and needs a way to say so, and a second adapter needs a query contract that cannot drift.
+An embedded adapter (ADR-I-0023) makes the gap visible: below its indexing threshold an embedded shard scans exhaustively and needs a way to say so, and a second adapter needs a query contract that cannot drift.
 
 ## Decision Drivers
 
@@ -43,13 +43,14 @@ An embedded adapter (ADR-I-0023) makes the gap visible: an exact scan is exhaust
 ```rust
 pub enum VectorRecallCompleteness {
     NotRequested,                                        // the limit was zero; no search was issued
-    Exhaustive { scanned: usize },                       // every stored record in scope was scored
+    Exhaustive { scanned: usize },                       // the scoped population was scored and returned in full (an unindexed shard returned fewer rows than the fetch limit)
     BoundaryTieClosed { fetched: usize },                // an index returned a prefix and the cutoff cohort was closed
     BoundaryTieOpen { fetched: usize, fetch_bound: usize }, // the overfetch bound was reached with the cohort open
 }
 ```
 
-Adapters own canonicalisation and must state the verdict truthfully: not requested only when the limit is zero and no search was issued (an admitted configuration, so the verdict must be total over it), exhaustive only when the whole scoped population was scored, closed only when the cutoff cohort was verified closed or the index returned fewer rows than asked, open at the bound.
+Adapters own canonicalisation and must state the verdict truthfully: not requested only when the limit is zero and no search was issued (an admitted configuration, so the verdict must be total over it), exhaustive only when the adapter knows the shard is unindexed and the scan returned fewer rows than it asked for, so the whole scoped population was scored and returned, closed only when the cutoff cohort was verified closed or an index returned fewer rows than asked, open at the bound.
+Every adapter answers through the shared tie-closure loop and the canonical constructor; engine ordering of equal-score cohorts is never relied on, because it is not stable across freshly built shards (ADR-I-0023).
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 The verdict type lives in the public retrieval telemetry vocabulary so the port can name it without a mirror type.
 
@@ -82,7 +83,7 @@ Two re-entry paths are named now so the scope-only query is read as a current st
 ## Decision Outcome
 
 Chosen option: **Option 1**.
-It makes the postcondition expressible by the type that owns it, distinguishes the exhaustive case the embedded adapter introduces from the closed-cohort case the service adapter can promise, and keeps every consumer a field access away from unchanged code.
+It makes the postcondition expressible by the type that owns it, distinguishes the exhaustive case an unindexed embedded shard can report from the closed-cohort case an index can promise, and keeps every consumer a field access away from unchanged code.
 
 ### Rejected Alternatives
 
@@ -107,7 +108,7 @@ Not covered: the service adapter's overfetch bound constants (calibrated values)
 
 - Unit tests on the service adapter's fetch decision assert the mapping to closed and open verdicts, including the all-tied cohort at the bound.
 - A retrieval test asserts the telemetry verdict for each variant using the fakes.
-- The parity suite asserts exhaustive for the embedded adapter and closed for the service adapter on the identical-vector tie fixture.
+- The parity suite asserts exhaustive for the embedded adapter below its indexing threshold and closed for the service adapter on the identical-vector tie fixture, both reached through the shared tie-closure loop.
 - A census of the vector adapters shows no match-or-unknown condition and no filter type beyond the object-type scope.
 
 ## Revisit When
@@ -123,4 +124,4 @@ Question asked: whether the deleted hint filters should return for the embedded 
 
 - ADR-I-0022 (tie-cohort closure and canonical ordering at the adapter boundary, the postcondition this record makes expressible).
 - ADR-I-0025 (the stored record whose columns the re-entry paths would extend).
-- ADR-I-0023 (the embedded adapter that always reports exhaustive completeness).
+- ADR-I-0023 (the embedded adapter, which reports exhaustive below its indexing threshold and the boundary verdicts above it).

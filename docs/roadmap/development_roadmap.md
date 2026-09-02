@@ -259,7 +259,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Finished. Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, prepare/validate/commit flow, and shared manual/future-generated commit machinery. |
 | v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](v0_1_5_closeout_report.md). |
-| v0.1.6 | Embedded vector candidate recall | Planned. An embedded SQLite exact-scan vector candidate store behind the vector port as an opt-in local mode, so zero-infrastructure local deployments become possible and the default test path needs no external service while the service mode stays the default; a redesigned port contract that reports recall completeness, takes a scope-only query, and stores only the fields a reader consumes; the evaluation repository's vector-only baseline moves onto the retrieval trace. Decisions: ADR-I-0023 through ADR-I-0026. |
+| v0.1.6 | Embedded vector candidate recall | Planned. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) behind the vector port as an opt-in local mode, shipped at its exact-scan indexing threshold, so zero-infrastructure local deployments become possible and the default test path needs no external service while the service mode stays the default; a redesigned port contract that reports recall completeness, takes a scope-only query, and stores only the fields a reader consumes; the evaluation repository's vector-only baseline moves onto the retrieval trace. Decisions: ADR-I-0023 through ADR-I-0026. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
@@ -1200,7 +1200,7 @@ v0.2 entry is explicitly confirmed against the closed v0.1 family.
 
 Detailed draft: [`v0_1_6_embedded_vector_candidate_recall.md`](../design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md)
 
-Decisions: ADR-I-0023 (embedded exact-scan vector store as the opt-in local mode), ADR-I-0024 (vector candidate recall reports completeness and takes a scope-only query), ADR-I-0025 (the vector record is a read contract), ADR-I-0026 (raw vector baselines read the retrieval trace).
+Decisions: ADR-I-0023 (embedded Qdrant Edge vector store as the opt-in local mode), ADR-I-0024 (vector candidate recall reports completeness and takes a scope-only query), ADR-I-0025 (the vector record is a read contract), ADR-I-0026 (raw vector baselines read the retrieval trace).
 
 ## Intent
 
@@ -1211,7 +1211,7 @@ Because a second adapter must implement the vector port, this phase also settles
 ## Goals
 
 ```text
-add an embedded SQLite exact-scan vector candidate store behind the existing vector port, selected by a store-mode setting with its own path setting
+add an embedded vector candidate store on the in-process build of the service backend behind the existing vector port, selected by a store-mode setting with its own path setting and shipped at its exact-scan indexing threshold
 make the port result carry a typed completeness verdict that the retrieval telemetry records and never repairs
 reduce the vector payload to its read contract: identity, surface, schema version, and the embedded text as provenance of what was ranked
 run one shared contract suite against both adapters, with the embedded adapter exercised unconditionally so the default test path needs no service
@@ -1224,7 +1224,7 @@ record the re-entry paths for vector-layer predicates a later phase may need: a 
 ```text
 changing the authority split or any retrieval semantics in the service mode
 deprecating or altering the service-mode adapter beyond the shared port contract
-approximate-nearest-neighbor indexing in the embedded mode
+tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold this phase)
 migration tooling between modes; rebuild from graph authority is the path
 flipping the default vector mode in this phase
 multi-process access to the embedded store

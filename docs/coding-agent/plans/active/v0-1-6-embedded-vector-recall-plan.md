@@ -6,7 +6,7 @@
 - work_type: mixed
 
 ## Goal
-- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0026: a redesigned vector port contract, a five-field vector record, an embedded SQLite exact-scan vector candidate store as the opt-in local mode, a shared contract suite over both adapters, and the evaluation repository's vector-only baseline moved onto the retrieval trace.
+- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0026: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the opt-in local mode, a shared contract suite over both adapters, and the evaluation repository's vector-only baseline moved onto the retrieval trace.
 
 ## Definition of Done
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
@@ -17,11 +17,12 @@
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
-- Non-goals: the phase document's non-goals (no default flip, no approximate index, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode).
+- Non-goals: the phase document's non-goals (no default flip, no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode).
 
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
 - As-built port: `src/ports/vector_candidate.rs`, `src/models/vector/candidate_record.rs`, `src/models/vector/record.rs`, `src/adapters/qdrant/{store,payload}.rs`, `src/policy/embedding_surface.rs`, `src/usecases/retrieve.rs`, `src/api/types/retrieval.rs`, `src/composition.rs`, `src/config/app_settings.rs`, `src/test_support.rs`.
+- Prerequisite in this repository: the toolchain pin moves to the embedded engine's minimum (Rust 1.97.0 at decision time) in its own change; Task_4 cannot build before it merges.
 - Prerequisite tracked in the evaluation repository: its evidence-integrity fixes must be merged before this phase cites any harness measurement.
 - Repo reference docs consulted: the four ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
 
@@ -29,7 +30,7 @@
 - none (the draft's five open questions were ruled by the decider on 2026-09-02 and are recorded in the phase document and the ADRs).
 
 ## Assumptions
-- A1: `rusqlite` (already a dependency for the statistics store) is sufficient for the embedded adapter; no vector extension is added.
+- A1: The embedded engine is `qdrant-edge` pinned exactly at 0.8.0 (beta); its API is guarded by a contract canary, and the pin is bumped only with a re-run of the canary and the parity suite.
 - A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison that gates the later default-flip decision.
 
 ## Tasks
@@ -122,14 +123,15 @@
     owner: reviewer
     detail: "Diff review vs ADR-I-0025; verify the payload design note's supersession note matches what landed"
 
-### Task_4: Embedded SQLite vector candidate store, settings, and parity suite (ADR-I-0023)
+### Task_4: Embedded Qdrant Edge vector candidate store, settings, and parity suite (ADR-I-0023)
 - type: impl
 - owns:
-  - src/adapters/sqlite_vector/**
+  - src/adapters/qdrant_edge/**
   - src/adapters.rs
   - src/composition.rs
   - src/config/app_settings.rs
   - src/errors.rs
+  - Cargo.toml
   - tests/vector_port_contract_tests.rs
   - tests/support/**
   - .env.example
@@ -137,23 +139,25 @@
   - docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md
 - depends_on: [Task_3]
 - description: |
-  Implement the embedded adapter per the phase document (schema keyed on object id and surface, normalised vector blobs, the query normalised once before scoring with zero-norm defined, object-type scope predicate, exact dot-product scan returning Exhaustive, restart safety), the `VECTOR_STORE_MODE` and `VECTOR_STORE_PATH` settings with mode-specific validation (service connection string required only in service mode), composition mode switch with `collection_name` as the backend-neutral namespace key, and the port-conformance parity suite run against both adapters (embedded unconditionally, service under the live gate). Extend the vector error vocabulary only where the embedded adapter needs a kind the service adapter lacks. Measure and document corpus-size guidance from an in-phase benchmark.
+  Implement the embedded adapter on `qdrant-edge` pinned at 0.8.0 per the phase document: one engine shard directory per collection under `VECTOR_STORE_PATH`, cosine distance at the configured vector size, the indexing threshold shipped at its exact-scan setting (zero) with no optimise call, the five-field payload with a keyword index on object type, the object-type scope as a filter, and search through the service adapter's tie-closure loop and the canonical constructor with the verdict mapping (Exhaustive when the shard is unindexed and the scan returned fewer rows than the fetch limit; BoundaryTieClosed / BoundaryTieOpen otherwise; NotRequested at limit zero). The adapter constructs only object payloads and uses only the general shard type; every search and any index build runs on a blocking worker (or the engine's own worker pool where its API is asynchronous), never on an async executor thread. Add a contract canary test in the pattern of the service client's erased-connect canary pinning the engine facts the adapter relies on (zero threshold means unindexed; object-payload precondition; shard-directory precondition; crate-local type provenance). Implement the `VECTOR_STORE_MODE` and `VECTOR_STORE_PATH` settings with mode-specific validation (service connection string required only in service mode), the composition mode switch with `collection_name` as the backend-neutral namespace key, the adapter-owned marker recording collection name and record schema version, and the port-conformance parity suite run against both adapters (embedded unconditionally, service under the live gate). Extend the vector error vocabulary only where the embedded adapter needs a kind the service adapter lacks. Produce the dependency-weight report (unstripped and stripped release deltas, effect of feature trimming) and the latency benchmark (exhaustive scan at the configured dimension across corpus sizes; executor responsiveness under a concurrent scan).
 - acceptance:
-  - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets on the shared fixtures; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service).
-  - The collection name is validated to the phase document's allowlist before any file is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
-  - The synchronous scan runs on a blocking worker with serialized connection access, never on an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
-  - Restart test passes; repeated runs are byte-identical; reopening a file with a mismatched vector size or distance raises the collection-compatibility error, and reopening one with an unsupported stored schema version raises the clear failure ADR-I-0007 requires, each covered by its own test.
+  - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets and orderings on the shared fixtures while both adapters are below their indexing thresholds; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service), both through the shared tie-closure loop, with no engine ordering relied on.
+  - A recall comparison of the embedded adapter above its indexing threshold against its exhaustive setting is recorded on the benchmark corpus (informational this phase; index tuning is a later decision).
+  - The collection name is validated to the phase document's allowlist before any directory is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
+  - No scan or index build occupies an async executor thread; the benchmark records executor responsiveness under a concurrent scan.
+  - Restart test passes; repeated runs are byte-identical; reopening a shard with a mismatched vector size or distance raises the collection-compatibility error, and reopening one whose marker carries an unsupported record schema version raises the clear failure ADR-I-0007 requires, each covered by its own test.
   - Embedded mode with no `VECTOR_STORE_PATH` is a configuration error at construction, never an implicit default; covered by a settings test.
-  - Settings docs, single-process expectation, corpus-size guidance, and rebuild-from-graph-authority path are documented.
+  - The contract canary passes on the pinned engine version and is documented as the gate for every engine bump.
+  - The dependency-weight report records unstripped and stripped release deltas and the result of feature trimming; the latency guidance is measured and documented with the single-process expectation and the rebuild-from-graph-authority path.
 - validation:
   - kind: command
     required: true
     owner: worker
-    detail: "cargo test with no service (parity suite + embedded tests execute); service-up cargo test with the live switch set; benchmark numbers recorded in the report"
+    detail: "cargo test with no service (parity suite + embedded tests + canary execute); service-up cargo test with the live switch set; benchmark and weight numbers recorded in the report"
   - kind: review
     required: true
     owner: reviewer
-    detail: "Diff review vs ADR-I-0023; independent service-free and service-up runs"
+    detail: "Diff review vs ADR-I-0023; independent service-free and service-up runs; tie-closure reuse verified by reading, not by test names"
 
 ### Task_7: Fake retirement, closeout docs, and reconfirmation evidence
 - type: chore
@@ -228,7 +232,12 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
   - Trigger / new insight: batch ingest produced phantom repair attempts and the evaluated rank was harness-invented; both would corrupt the parity and baseline evidence this phase cites.
   - Plan delta: none inside this plan; recorded as a prerequisite in Context.
   - User approval: yes, 2026-09-02.
+- 2026-09-02 Decision: the embedded vector store is the in-process edition of the service engine (Qdrant Edge), not an in-house exact scan and not a SQLite vector extension.
+  - Trigger / new insight: the decider restated the objective as a portable memory that plugs into any foundation model and tracks years to decades of continuous character development; the draft's in-house exact scan violated the library-over-in-house principle; two feasibility spikes on the same probe set measured the two library-backed candidates (numbers in ADR-I-0023).
+  - Plan delta: Task_4 rewritten for the in-process engine (shard directory per collection, threshold-based exactness, shared tie-closure loop, contract canary, dependency-weight report); the toolchain pin moved to 1.97.0 as a prerequisite; approximate indexing leaves the non-goals; named-vector coexistence and shard-to-server sync are recorded as available but not exercised this phase.
+  - Tradeoffs considered: recorded in ADR-I-0023's rejected alternatives (in-house scan; sqlite-vec, lighter and deterministic but exhaustive-only in its stable release with a single-maintainer approximate-index future; LanceDB; in-memory only; default flip now); a scale probe was offered and declined as not worth the effort, so the interactive-latency assumption at decade scale is a recorded revisit trigger rather than a measurement.
+  - User approval: yes, 2026-09-02.
 
 ## Notes
-- Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the exact-scan corpus-size guidance must be measured, not assumed.
-- Edge cases: empty object-type scope selects zero in both adapters; `limit == 0` issues no search and reports the not-requested verdict in both adapters; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior; the parity suite includes non-unit query and record vectors so score equality (query normalised once, records normalised at write) is asserted, not assumed.
+- Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the latency guidance and the stripped dependency weight must be measured, not assumed; the engine is beta, so its pin is exact and its bump is gated by the canary.
+- Edge cases: empty object-type scope selects zero in both adapters; `limit == 0` issues no search and reports the not-requested verdict in both adapters; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior; the parity suite includes non-unit query and record vectors so score equality across adapters (both engines normalise cosine internally) is asserted, not assumed.

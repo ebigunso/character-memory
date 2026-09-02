@@ -53,7 +53,7 @@ ADR-I-0024 names the two re-entry paths (a synchronised scope predicate; an immu
 
 ## Implementation Impact
 
-- The vector record type and the surface builders lose the hint carriers; the payload map and the embedded schema serialise five fields.
+- The vector record type and the surface builders lose the hint carriers; the payload map serialises five fields for both adapters, which share the engine family's payload conventions.
 - The service adapter stops creating per-field payload indexes for dropped fields.
 - The companion evaluation repository's vector-only baseline stops reading the readable text column and sources item text from its own ingest records (ADR-I-0026).
 - The payload design note's field categories and indexing policy are superseded by this record and carry a supersession note.
@@ -81,7 +81,7 @@ Option 5 is the only subset with a forward-looking case that survives the synchr
 
 ## Consequences
 
-- Positive: both adapters mirror one five-field manifest; the embedded schema stores those fields beside the vector blob with a single scope index (ADR-I-0023 owns the physical layout).
+- Positive: both adapters mirror one five-field manifest; the embedded shard stores those fields as payload beside the vector with a single keyword index on object type (ADR-I-0023 owns the physical layout).
 - Positive: the embedded surface is preserved as vector provenance before surfaces become generated.
 - Negative / tradeoffs: a future scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the re-entry paths make that step predictable.
 
@@ -111,4 +111,4 @@ Question asked: whether the unread hint families and the readable text column sh
 
 - ADR-I-0005 remains authoritative for graph authority over relationships; this record supersedes its payload field list and its "payload metadata as candidate filter" implementation guidance.
 - ADR-I-0002 remains authoritative for natural-language embedding surfaces; this record supersedes only its note to persist both text columns.
-- ADR-I-0024 (query contract and re-entry paths), ADR-I-0023 (embedded schema), ADR-I-0026 (evaluation baseline reader).
+- ADR-I-0024 (query contract and re-entry paths), ADR-I-0023 (embedded shard layout), ADR-I-0026 (evaluation baseline reader).
