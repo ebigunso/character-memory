@@ -82,7 +82,7 @@ port-conformance parity suite in the library integration tests, run against both
 restart-safety test for the embedded store; pipeline test over the embedded adapter with a deleted graph object
 measured corpus-size guidance from an in-phase benchmark
 documentation: settings, single-process expectation, corpus-size guidance, rebuild-from-graph-authority as the path between modes
-four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0003, ADR-I-0005, ADR-I-0002
+four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0005 and ADR-I-0002
 ```
 
 Deletions that are deliverables, not side effects:

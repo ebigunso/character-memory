@@ -80,7 +80,7 @@ Option 5 is the only subset with a forward-looking case that survives the synchr
 
 ## Consequences
 
-- Positive: the embedded schema is five columns and one index; both adapters mirror one small manifest.
+- Positive: both adapters mirror one five-field manifest; the embedded schema stores those fields beside the vector blob with a single scope index (ADR-I-0023 owns the physical layout).
 - Positive: the embedded surface is preserved as vector provenance before surfaces become generated.
 - Negative / tradeoffs: a future scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the re-entry paths make that step predictable.
 

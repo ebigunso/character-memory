@@ -13,9 +13,9 @@ warrant:
   cost_of_over_extension: "applying the single-process expectation to multi-replica deployments, or treating the embedded mode as the validated default before parity evidence exists, misrepresents what the library has validated"
 depends_on: [implementation/ADR-I-0009-use-sqlite-as-default-retrieval-stats-store.md, implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md]
 implements: []
-supersedes: [implementation/ADR-I-0003-qdrant-oxigraph-defaults.md]
+supersedes: []
 superseded_by: null
-supersession_scope: partial
+supersession_scope: null
 ---
 
 # ADR-I-0023: Embedded SQLite exact-scan vector candidate store as the opt-in local mode
@@ -110,6 +110,6 @@ Question asked: whether the embedded store should overload the service connectio
 
 ## More Information
 
-- ADR-I-0003 remains authoritative for the service-mode backends; this record supersedes only its claim that those backends are the sole defaults.
+- ADR-I-0003 remains fully authoritative for the default backends; this record adds an opt-in mode in response to its revisit clause and changes no default, so it supersedes nothing. A later, evidence-gated record that flips the default would supersede ADR-I-0003's vector-backend default.
 - ADR-I-0024 (port contract this adapter implements) and ADR-I-0025 (the record it stores).
 - The embedded vector candidate recall phase document in the roadmap-phases design directory.
