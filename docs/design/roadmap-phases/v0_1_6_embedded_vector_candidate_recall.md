@@ -45,7 +45,7 @@ Two re-entry paths are named so the scope-only query and five-field record are r
 A SQLite-backed exact cosine scan, using the `rusqlite` dependency the statistics store already carries, with the same single-process, mutex-guarded connection model.
 
 Schema: one table keyed by object id and surface with a column per contract field and the embedding as a fixed-width little-endian floating-point blob normalised at write; an index on object type for the scope predicate; a metadata table recording vector size, distance, and schema version.
-Search: select the scoped rows, score by dot product in a fixed order, canonicalise through the shared constructor, truncate to the limit, and report exhaustive completeness with the scanned count.
+Search: normalise the query once (a zero-norm query scores every row zero and is reported, not rejected), select the scoped rows, score by dot product in a fixed order so the score equals the service adapter's cosine, canonicalise through the shared constructor, truncate to the limit, and report exhaustive completeness with the scanned count; a parity fixture with non-unit query and record vectors pins score equality across adapters.
 Delete: remove every surface of each object id, matching the service adapter's selector.
 Restart safety: opening an existing file validates the recorded vector size and distance against the configured embedding model and raises the same collection-compatibility error the service adapter raises for a mismatched collection.
 Determinism: same inputs, same scores, same total sort; equal-score cohorts are ordered by the shared comparator, so the embedded adapter satisfies deterministic admission by construction and never needs an overfetch loop.
@@ -136,7 +136,7 @@ No public facade change; no retrieval behaviour change in service mode beyond th
 
 The companion evaluation repository is a development aid, not core library functionality; these obligations land in the same wave as the library change.
 
-- Trace-sourced baseline: the vector-only baseline issues an ordinary traced `retrieve` with the measured object types and a generous candidate limit, slices the trace's vector candidates per object kind to its per-section budgets, and reads the completeness verdict from telemetry; the direct vector-service search, its payload field constants, and its hit mapping are deleted after an A/B run proves identical item identities and ranks.
+- Trace-sourced baseline: the vector-only baseline issues one traced `retrieve` per measured object kind, each with a singleton object-type scope and that kind's section budget as the limit, and reads each retrieval's completeness verdict from telemetry (a single mixed-kind top-K would let a global cutoff exclude an underrepresented kind without any open verdict); the direct vector-service search, its payload field constants, and its hit mapping are deleted after an A/B run proves identical item identities and ranks.
 - Item text: sourced from the evaluation repository's own ingest records keyed by external identity, never from a store payload.
 - Telemetry mirror: the evaluation telemetry record gains the completeness field.
 - Typed backend identity: result rows carry which vector backend (service or embedded) produced them, so cross-mode comparisons are attributable.
@@ -171,7 +171,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
    Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prohibition and re-entry paths are recorded in ADR-I-0024.
 5. Evaluation baseline capability.
    Parked claim: the baseline re-implements a hidden raw-vector capability against the payload schema.
-   Re-verified: trace-derived candidates with overfetch-and-slice can reproduce the direct-search baseline; the completeness verdict reports whether each question's top-K was determinate; the evaluation adapter can hold item text from ingest.
+   Re-verified: one singleton-scoped traced retrieval per measured kind reproduces the direct per-kind search exactly, which a sliced mixed-kind top-K would not; each retrieval's completeness verdict reports whether that kind's top-K was determinate; the evaluation adapter can hold item text from ingest.
    Evidence: the A/B run with row-level diff of item identities and ranks; after the switch, zero-hit census for vector-service search calls and payload constants in the evaluation adapter.
 
 ## Decisions (the draft's open questions, resolved 2026-09-02)

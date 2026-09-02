@@ -37,7 +37,7 @@ The question is what capability the library must expose so the baseline stops re
 ## Decision
 
 The library exposes no raw candidate-search surface and no facade change.
-The evaluation repository's vector-only baseline issues an ordinary `retrieve` with tracing enabled, the object types it measures, and a generous candidate limit, then slices the trace's vector candidates per object kind to its per-section budgets and reads the completeness verdict from telemetry.
+The evaluation repository's vector-only baseline issues one ordinary `retrieve` with tracing enabled per measured object kind, each with a singleton object-type scope and that kind's section budget as the candidate limit, and reads each retrieval's completeness verdict from telemetry; a single mixed-kind top-K is not used, because a global cutoff can exclude an underrepresented kind's valid candidates without any open verdict.
 Item text comes from the evaluation repository's own ingest records, keyed by the external identity it already reverse-maps, never from a store payload (ADR-I-0025's third sentence: consumers needing candidate content hydrate by object id).
 The evaluation repository's vector-service client shrinks to collection lifecycle operations (existence and deletion), which the embedded mode replaces with file operations through the durable-store path list the adapter already maintains.
 
@@ -46,7 +46,7 @@ Cross-repository obligations recorded here:
 - The evaluation telemetry record mirrors the completeness field.
 - Result rows carry a typed vector-backend identity (service or embedded) so cross-mode comparisons are attributable.
 - The namespace cleanup guard is backend-neutral: it protects an embedded store file by the same prefix rule that protects a service collection.
-- The vector-only surface-policy validator keeps its object-type and budget rules and derives the overfetch from the per-section budgets.
+- The vector-only surface-policy validator keeps its object-type and budget rules; each measured kind becomes one singleton-scoped traced retrieval whose limit is that kind's section budget.
 - The baseline is re-verified by an A/B run against the direct-search implementation before that implementation is deleted.
 
 ## Character Memory Relevance
@@ -81,13 +81,13 @@ Option 4 leaves two implementations of one capability and breaks with the first 
 
 - Positive: one retrieval entry point; both adapters covered; the baseline reports the completeness of the top-K it measured.
 - Negative / tradeoffs: the baseline pays for graph expansion it discards, an evaluation-run cost accepted in exchange for not inventing a second retrieval path.
-- Negative / tradeoffs: per-kind quotas are satisfied by overfetch-and-slice; if a quota cannot be filled within the service adapter's fetch bound, the completeness verdict says so and the run records it.
+- Negative / tradeoffs: the baseline issues one traced retrieval per measured kind instead of one search, so its cost scales with the number of kinds; if a kind's budget cannot be closed within the service adapter's fetch bound, that retrieval's completeness verdict says so and the run records it.
 
 ## Decision Boundary
 
 Invariant: no public raw candidate-search surface; evaluation baselines consume the retrieval trace and telemetry; store schemas are adapter-private; candidate content is hydrated by object id from the consumer's own records or graph authority.
 
-Not covered: the overfetch multiplier the baseline uses, the shape of the evaluation repository's ingest record store, and any future diagnostic surface the observability phase designs on product demand.
+Not covered: any headroom the baseline adds to a kind's limit, the shape of the evaluation repository's ingest record store, and any future diagnostic surface the observability phase designs on product demand.
 
 ## Validation
 
@@ -98,7 +98,7 @@ Not covered: the overfetch multiplier the baseline uses, the shape of the evalua
 ## Revisit When
 
 - A product use case demands candidate-level recall — design a diagnostic surface in the retrieval-observability phase and supersede this record's prohibition for that surface only.
-- Per-kind quotas cannot be satisfied by overfetch within the service adapter's fetch bound on a real dataset — reopen whether the trace needs per-type limits.
+- One retrieval per kind proves too costly on a real dataset, or a kind's budget cannot be closed within the service adapter's fetch bound — reopen whether the port needs per-type limits in a single query.
 
 ## Consultation impact
 

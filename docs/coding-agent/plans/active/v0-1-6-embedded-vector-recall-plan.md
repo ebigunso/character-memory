@@ -133,7 +133,7 @@
   - docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md
 - depends_on: [Task_3]
 - description: |
-  Implement the embedded adapter per the phase document (schema keyed on object id and surface, normalised vector blobs, object-type scope predicate, exact scan returning Exhaustive, restart safety), the `VECTOR_STORE_MODE` and `VECTOR_STORE_PATH` settings with mode-specific validation (service connection string required only in service mode), composition mode switch with `collection_name` as the backend-neutral namespace key, and the port-conformance parity suite run against both adapters (embedded unconditionally, service under the live gate). Extend the vector error vocabulary only where the embedded adapter needs a kind the service adapter lacks. Measure and document corpus-size guidance from an in-phase benchmark.
+  Implement the embedded adapter per the phase document (schema keyed on object id and surface, normalised vector blobs, the query normalised once before scoring with zero-norm defined, object-type scope predicate, exact dot-product scan returning Exhaustive, restart safety), the `VECTOR_STORE_MODE` and `VECTOR_STORE_PATH` settings with mode-specific validation (service connection string required only in service mode), composition mode switch with `collection_name` as the backend-neutral namespace key, and the port-conformance parity suite run against both adapters (embedded unconditionally, service under the live gate). Extend the vector error vocabulary only where the embedded adapter needs a kind the service adapter lacks. Measure and document corpus-size guidance from an in-phase benchmark.
 - acceptance:
   - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets on the shared fixtures; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service).
   - Restart test passes; repeated runs are byte-identical.
@@ -159,7 +159,7 @@
   - docs/**
 - depends_on: [Task_2]
 - description: |
-  Replace the direct vector-service search in the vector-only baseline with the retrieval trace (overfetch-and-slice per kind; item text from the evaluation repository's own ingest records); mirror the completeness telemetry field; add the typed backend identity to result rows through the repository's clean-schema procedure; make the cleanup guard backend-neutral; drop the payload constants, the second vector client's search path, and the second embeddings client's divergent dimension handling. Perform the A/B run with a row-level diff of item identities and ranks against the pre-switch baseline before deleting the old path.
+  Replace the direct vector-service search in the vector-only baseline with the retrieval trace (one traced retrieval per measured kind with a singleton object-type scope and that kind's budget as the limit, never a sliced mixed-kind top-K; item text from the evaluation repository's own ingest records); mirror the completeness telemetry field; add the typed backend identity to result rows through the repository's clean-schema procedure; make the cleanup guard backend-neutral; drop the payload constants, the second vector client's search path, and the second embeddings client's divergent dimension handling. Perform the A/B run with a row-level diff of item identities and ranks against the pre-switch baseline before deleting the old path.
 - acceptance:
   - Zero-hit census for vector-service search calls and payload constants in the evaluation adapter.
   - A/B evidence recorded; vector-only rows carry the completeness verdict.
@@ -270,4 +270,4 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 
 ## Notes
 - Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the exact-scan corpus-size guidance must be measured, not assumed.
-- Edge cases: empty object-type scope selects zero in both adapters; `limit == 0` returns an empty exhaustive result; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior.
+- Edge cases: empty object-type scope selects zero in both adapters; `limit == 0` returns an empty exhaustive result; identical-vector tie fixtures must produce Exhaustive versus BoundaryTieClosed, never be encoded as expected parity of the bounded behavior; the parity suite includes non-unit query and record vectors so score equality (query normalised once, records normalised at write) is asserted, not assumed.
