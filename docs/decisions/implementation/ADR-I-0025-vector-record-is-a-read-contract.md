@@ -81,7 +81,7 @@ Option 5 is the only subset with a forward-looking case that survives the synchr
 
 ## Consequences
 
-- Positive: both adapters mirror one five-field manifest; the embedded shard stores those fields as payload beside the vector with a single keyword index on object type (ADR-I-0023 owns the physical layout).
+- Positive: both adapters mirror one five-field manifest; the embedded shard stores those fields as payload beside the vector with keyword indexes on object id (the delete selector) and object type (the scope predicate); ADR-I-0023 owns the physical layout.
 - Positive: the embedded surface is preserved as vector provenance before surfaces become generated.
 - Negative / tradeoffs: a future scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the re-entry paths make that step predictable.
 
