@@ -43,13 +43,12 @@ That limit is sufficient by construction: an object ranked within the budget by 
 Item text comes from the evaluation repository's own ingest records, keyed by the external identity it already reverse-maps, never from a store payload (ADR-I-0025's third sentence: consumers needing candidate content hydrate by object id).
 The evaluation repository's vector-service client shrinks to collection lifecycle operations (existence and deletion), which the embedded mode replaces with file operations through the durable-store path list the adapter already maintains.
 
-Cross-repository obligations recorded here:
+What this record asks of the evaluation repository, recorded as the library-facing contract and nothing more:
 
-- The evaluation telemetry record mirrors the completeness field.
-- Result rows carry a typed vector-backend identity (service or embedded) so cross-mode comparisons are attributable.
-- The namespace cleanup guard is backend-neutral: it protects an embedded store file by the same prefix rule that protects a service collection.
-- The vector-only surface-policy validator keeps its object-type and budget rules; each measured kind becomes one singleton-scoped traced retrieval whose limit is that kind's section budget.
-- The baseline is re-verified by an A/B run against the direct-search implementation before that implementation is deleted.
+- The evaluation repository consumes the retrieval trace and the completeness telemetry as an ordinary caller; the library adds no surface for it.
+- A raw-vector baseline that wants per-kind top-K uses one singleton-scoped traced retrieval per kind with the multiplied limit and object-level deduplication described above; any other reading of the trace is not covered by the parity claim.
+- How the evaluation repository migrates its baseline, mirrors telemetry, labels its rows, or guards its cleanup is planned and tracked in that repository.
+
 
 ## Character Memory Relevance
 
@@ -59,7 +58,7 @@ Keeping the baseline inside the traced retrieval path means the measurement of "
 ## Implementation Impact
 
 - Library: none beyond ADR-I-0024's telemetry field; the acceptance criterion "no public facade change" holds.
-- Evaluation repository: delete the direct search path, payload field constants, and hit mapping; add trace-derived candidate slicing and ingest-record text lookup; add the backend identity to result rows; generalise cleanup to the embedded store file.
+- Evaluation repository: its baseline moves onto the trace under its own plan; nothing in this repository depends on how.
 
 ## Considered Options
 

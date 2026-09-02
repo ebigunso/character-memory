@@ -22,7 +22,7 @@
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
 - As-built port: `src/ports/vector_candidate.rs`, `src/models/vector/candidate_record.rs`, `src/models/vector/record.rs`, `src/adapters/qdrant/{store,payload}.rs`, `src/policy/embedding_surface.rs`, `src/usecases/retrieve.rs`, `src/api/types/retrieval.rs`, `src/composition.rs`, `src/config/app_settings.rs`, `src/test_support.rs`.
-- Prerequisite landed separately: the evaluation repository's evidence-integrity light-delta (batch outcome duplication, harness-invented rank, unhonored manifest/hash knobs, shared graph-path fallback, live-skip panic switch), branch `chore/evidence-integrity-pre-v016`.
+- Prerequisite tracked in the evaluation repository: its evidence-integrity fixes must be merged before this phase cites any harness measurement.
 - Repo reference docs consulted: the four ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
 
 ## Open Questions (max 3)
@@ -30,7 +30,7 @@
 
 ## Assumptions
 - A1: `rusqlite` (already a dependency for the statistics store) is sufficient for the embedded adapter; no vector extension is added.
-- A2: The evaluation repository's row/summary schema move for the typed backend identity follows that repository's normal clean-schema procedure and is owned by its wave task.
+- A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison that gates the later default-flip decision.
 
 ## Tasks
 
@@ -150,55 +150,6 @@
     owner: reviewer
     detail: "Diff review vs ADR-I-0023; independent service-free and service-up runs"
 
-### Task_5: Evaluation repository: trace-sourced vector-only baseline and telemetry mirror (ADR-I-0026)
-- type: impl
-- owns:
-  - crates/cmem-eval-adapter-cmem/src/lib.rs
-  - crates/cmem-eval-adapter-cmem/Cargo.toml
-  - crates/cmem-eval-core/src/{config,runtime,results,verdict,metrics}.rs
-  - crates/cmem-eval-runner/src/pipeline.rs
-  - configs/**
-  - docs/**
-- depends_on: [Task_2]
-- description: |
-  Replace the direct vector-service search in the vector-only baseline with the retrieval trace (one traced retrieval per measured kind with a singleton object-type scope and a limit of that kind's budget times the maximum surfaces per object, deduplicated by object keeping the best surface and truncated to the budget, never a sliced mixed-kind top-K; item text from the evaluation repository's own ingest records); mirror the completeness telemetry field; add the typed backend identity to result rows through the repository's clean-schema procedure; make the cleanup guard backend-neutral; drop the payload constants, the second vector client's search path, and the second embeddings client's divergent dimension handling. Perform the A/B run with a row-level diff of item identities and ranks against the pre-switch baseline before deleting the old path.
-- acceptance:
-  - Zero-hit census for vector-service search calls and payload constants in the evaluation adapter.
-  - A/B evidence recorded; vector-only rows carry the completeness verdict.
-  - Cleanup and namespace guards work for both vector modes.
-- validation:
-  - kind: command
-    required: true
-    owner: evals-worker
-    detail: "fmt; workspace clippy -D warnings; service-up cargo test --workspace with the live switch set; A/B run artifacts under .agent-work with the diff"
-  - kind: review
-    required: true
-    owner: evals-reviewer
-    detail: "Diff review vs ADR-I-0026; verify the A/B diff and that no sealed evidence changed"
-
-### Task_6: Evaluation repository: embedded-mode configuration and cross-mode baselines
-- type: impl
-- owns:
-  - crates/cmem-eval-core/src/config.rs
-  - crates/cmem-eval-adapter-cmem/src/lib.rs
-  - configs/**
-  - docs/**
-- depends_on: [Task_4, Task_5]
-- description: |
-  Add the embedded vector mode to the evaluation backend configuration, run the continuity suite in embedded mode, and record that scenario baselines are identical to service mode under the parity contract (any divergence is a finding).
-- acceptance:
-  - An embedded-mode configuration exists and runs without a vector service.
-  - Cross-mode baseline comparison recorded with zero unexplained divergence.
-- validation:
-  - kind: command
-    required: true
-    owner: evals-worker
-    detail: "continuity suite in both modes; comparison artifact recorded"
-  - kind: review
-    required: true
-    owner: evals-reviewer
-    detail: "Verify the comparison and the register entries"
-
 ### Task_7: Fake retirement, closeout docs, and reconfirmation evidence
 - type: chore
 - owns:
@@ -207,7 +158,7 @@
   - docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md
   - docs/coding-agent/lessons.md
   - docs/roadmap/development_roadmap.md
-- depends_on: [Task_4, Task_6]
+- depends_on: [Task_4]
 - description: |
   Retire the deterministic vector fake and its embedding-bearing record type in favour of the embedded adapter opened in memory (failure-injecting and recording fakes stay); collect the deferral-reconfirmation evidence for all five checklist rows; mark the roadmap row finished; move the plan to completed.
 - acceptance:
@@ -226,7 +177,7 @@
 ### Task_8: Design-value audit at the pre-merge milestone gate
 - type: review
 - owns: []
-- depends_on: [Task_4, Task_5]
+- depends_on: [Task_4]
 - description: |
   Altitude review (Claude) against philosophy and roadmap: nothing designed twice across the two adapters, no hint field re-entered without its predicate, the evaluation repository holds no store-private knowledge, the ADR boundaries respected.
 - acceptance:
@@ -240,10 +191,12 @@
 ## Task Waves (explicit parallel dispatch sets)
 
 - Wave 1 (parallel): [Task_1, Task_2]
-- Wave 2 (parallel): [Task_3, Task_5]
+- Wave 2 (parallel): [Task_3]
 - Wave 3 (parallel): [Task_4]
-- Wave 4 (parallel): [Task_6, Task_8]
+- Wave 4 (parallel): [Task_8]
 - Wave 5 (parallel): [Task_7]
+
+Task identifiers 5 and 6 were evaluation-repository work and moved to that repository's own plan; identifiers are not reused.
 
 Each wave ends with reviewer approval and a PR per touched repository, merged by the decider before the next wave starts; the evaluation repository's sibling checkout is re-pinned to the merged library commit at every wave boundary.
 

@@ -132,22 +132,18 @@ Documentation states the single-process expectation, the corpus-size guidance, a
 No public facade change; no retrieval behaviour change in service mode beyond the added telemetry field.
 ```
 
-## Cross-repository obligations (ADR-I-0026)
+## What the evaluation repository provides and when it is used (ADR-I-0026)
 
-The companion evaluation repository is a development aid, not core library functionality; these obligations land in the same wave as the library change.
+The companion evaluation repository is a development aid; its own work is planned and tracked there, and this document records only what its measurements let this phase decide.
 
-- Trace-sourced baseline: the vector-only baseline issues one traced `retrieve` per measured object kind, each with a singleton object-type scope and a limit of that kind's section budget multiplied by the maximum surfaces per object of that kind (the trace lists object-and-surface pairs before object-level deduplication), deduplicates by object keeping the best surface, truncates to the budget, and reads each retrieval's completeness verdict from telemetry (a single mixed-kind top-K would let a global cutoff exclude an underrepresented kind without any open verdict; the multiplied limit makes the object top-budget determinate whenever the surface verdict is closed or exhaustive); the direct vector-service search, its payload field constants, and its hit mapping are deleted after an A/B run proves identical item identities and ranks.
-- Item text: sourced from the evaluation repository's own ingest records keyed by external identity, never from a store payload.
-- Telemetry mirror: the evaluation telemetry record gains the completeness field.
-- Typed backend identity: result rows carry which vector backend (service or embedded) produced them, so cross-mode comparisons are attributable.
-- Backend-neutral cleanup guard: the namespace cleanup guard protects an embedded store file by the same prefix rule that protects a service collection, and cleanup removes the SQLite file with its write-ahead-log sidecars alongside the statistics store.
-- Configuration: a `vector_store_path` backend setting beside the graph and statistics paths; when set, the adapter selects embedded mode and derives a per-namespace file the way it derives the statistics path.
-- Error vocabulary: the exhaustive conversion of the vector database error kinds gains the embedded engine kind.
+- The library exposes, through an ordinary traced retrieval, everything a raw-vector baseline needs: the vector candidates with scores and the completeness verdict in telemetry; the honest way to use them is one singleton-scoped traced retrieval per measured object kind with a limit of the section budget multiplied by the maximum surfaces per object, deduplicated by object.
+- The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is the evidence that gates the default flip recorded in ADR-I-0023; it is consumed at the closeout task and by that later decision, not produced by this plan.
+- No public facade or configuration surface is added for the evaluation repository; if its measurements ever require one, that is a library decision taken on its own record.
 
 ## Evaluation tie-in
 
-The continuity evaluation suite gains an embedded-mode configuration so the confirmation scenarios, including restart, run against the embedded vector store; the frozen-embedding infrastructure applies unchanged.
-Scenario results are expected to be identical between modes under the parity contract; any divergence is a finding, which makes the evaluation suite the cross-adapter regression instrument.
+The evaluation repository is expected to run its continuity suite in both vector modes; identical scenario results are what the parity contract predicts, and the comparison is the evidence that gates the later default-flip decision recorded in ADR-I-0023.
+How that configuration is built and run is planned in the evaluation repository; this phase consumes the comparison at closeout and cites nothing else from it.
 
 ## Deferral-reconfirmation checklist
 
