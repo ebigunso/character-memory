@@ -259,6 +259,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Finished. Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, prepare/validate/commit flow, and shared manual/future-generated commit machinery. |
 | v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](v0_1_5_closeout_report.md). |
+| v0.1.6 | Embedded vector candidate recall | Planned. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) behind the vector port as the default vector mode, shipped at its exact-scan indexing threshold, so zero-infrastructure local deployments are the default and the default test path needs no external service, with the service adapter retained as the explicit service mode; a redesigned port contract that reports recall completeness, forbids prefilters that match unknown values, and stores a five-field record (identity, surface, schema version, and the embedded text kept as provenance); the evaluation repository's vector-only baseline moves onto the retrieval trace. Decisions: ADR-I-0023 through ADR-I-0027. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
@@ -1101,6 +1102,7 @@ The intended sequence is:
 v0.1.3 completes the generation-ready write path
 v0.1.4 builds the harness that exercises the full write and retrieve paths
 v0.1.5 runs the harness, fixes what it reveals, and closes the v0.1 family
+v0.1.6 makes zero-infrastructure local deployment possible and removes the service dependency from the default test path
 then v0.2 builds scoped continuity on a measured substrate
 ```
 
@@ -1194,7 +1196,56 @@ v0.2 entry is explicitly confirmed against the closed v0.1 family.
 
 ---
 
-# 12. v0.2: scoped continuity and reflection
+# 12. v0.1.6: embedded vector candidate recall
+
+Detailed draft: [`v0_1_6_embedded_vector_candidate_recall.md`](../design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md)
+
+Decisions: ADR-I-0023 (embedded Qdrant Edge is the default vector candidate store), ADR-I-0024 (vector candidate recall reports completeness and prefilters never match unknown values), ADR-I-0025 (the vector record is a read contract), ADR-I-0026 (raw vector baselines read the retrieval trace), ADR-I-0027 (the embedded engine runs on a blocking owner that flushes every write).
+
+## Intent
+
+Complete the zero-infrastructure local deployment story.
+Graph authority already defaults to embedded persistent storage and retrieval statistics are file-backed; the vector candidate store is the only component that still requires an external service, which conflicts with desktop-companion and game deployments and keeps a service dependency in the default test path.
+Because a second adapter must implement the vector port, this phase also settles the port contract that the structured-verdict work deferred: recall completeness is reported instead of silently degraded, the query is scope-only, and the stored payload is exactly what a reader consumes.
+
+## Goals
+
+```text
+add an embedded vector candidate store on the in-process build of the service backend behind the existing vector port, selected by a store-mode setting with its own path setting, shipped at its exact-scan indexing threshold, and made the default vector mode on the phase's own parity evidence
+make the port result carry a typed completeness verdict that the retrieval telemetry records and never repairs
+reduce the vector payload to its read contract: identity, surface, schema version, and the embedded text as provenance of what was ranked
+run one shared contract suite against both adapters, with the embedded adapter exercised unconditionally so the default test path needs no service
+move the evaluation repository's vector-only baseline onto the retrieval trace so no consumer depends on a store's private schema
+rule that a vector-layer predicate reads only synchronized or immutable values and never matches an unknown one, noting the candidate predicates a later phase may need
+```
+
+## Non-goals
+
+```text
+changing the authority split, or any retrieval semantics in the service mode for non-empty scopes and non-degenerate queries (the intended empty-scope and zero-norm rules are in scope)
+deprecating or altering the service-mode adapter beyond the shared port contract
+tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold this phase)
+migration tooling between modes; rebuild from graph authority is the path
+multi-process access to the embedded store
+a public candidate-search facade
+```
+
+## Acceptance criteria
+
+```text
+Embedded mode constructs and serves retrieval without any running service.
+The shared contract suite produces identical admitted candidate sets and orderings from both adapters while both are below their indexing thresholds; above them a recall comparison is recorded.
+Deterministic admission holds in embedded mode; repeated runs are byte-identical.
+Embedded state survives process restart.
+Retrieval telemetry reports the completeness verdict for every retrieval in both modes.
+The default test path requires no vector service; service-gated suites still execute under the service-backed CI job and cannot pass by skipping.
+The evaluation repository's vector-only baseline produces its rows from the retrieval trace in both modes.
+No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behavior change in service mode for non-empty scopes and non-degenerate queries (the intended empty-scope change: zero candidates, and boundary rejection of an empty configured scope).
+```
+
+---
+
+# 13. v0.2: scoped continuity and reflection
 
 Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
@@ -1242,7 +1293,7 @@ Open loops and commitments can be retrieved by scope without assuming who the ma
 
 ---
 
-# 13. v0.3: factual rigor, temporal validity, and entity evolution
+# 14. v0.3: factual rigor, temporal validity, and entity evolution
 
 Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
@@ -1273,7 +1324,7 @@ This is important, but it should not block the starter because Character Memory'
 
 ---
 
-# 14. v0.4: retrieval observability and governance
+# 15. v0.4: retrieval observability and governance
 
 Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
 
@@ -1355,7 +1406,7 @@ The default intent is `Continuity`.
 
 ---
 
-# 15. v0.5: controlled associative recall and clustering
+# 16. v0.5: controlled associative recall and clustering
 
 Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
 
@@ -1417,7 +1468,7 @@ Durable graph truth is the associative unit, membership lifecycle, and support e
 
 ---
 
-# 16. v0.6: assisted remember workflow and memory candidate generation
+# 17. v0.6: assisted remember workflow and memory candidate generation
 
 Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](../design/roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
 
@@ -1511,7 +1562,7 @@ Generated candidates use the same validation and commit path as manual candidate
 
 ---
 
-# 17. v1.0+: multimodal and embodied expansion
+# 18. v1.0+: multimodal and embodied expansion
 
 Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
@@ -1539,7 +1590,7 @@ This is a future path, not starter scope.
 
 ---
 
-# 18. Public API evolution
+# 19. Public API evolution
 
 ## v0.1 API
 
@@ -1687,7 +1738,7 @@ Generated processors should produce `MemoryCandidate` and `RememberWritePlan` va
 
 ---
 
-# 19. YAGNI rules
+# 20. YAGNI rules
 
 Do not implement in v0.1 / v0.1.2:
 

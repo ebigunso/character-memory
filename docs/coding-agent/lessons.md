@@ -454,3 +454,69 @@ Prevention:
 ## Purge note (2026-07-23)
 
 Eleven entries purged per the user-directed low-value/invalid sweep (Codex purge map, agmsg 2026-07-23T12:28Z): ten PURGE-LOW-VALUE (restatements of now-mandatory harness/rule content — plan-format task records, PR monitoring, canonical-byte verification, compatibility policy, module layout, evidenced-scope rulebook default, parallel dispatch — plus two cheaply rediscovered one-off quirks and one unstructured batch-notes bundle) and one PURGE-INVALID (the phase-bounded v0.1 compatibility ruling, superseded by the repo-wide Compatibility Policy). Full entries recoverable from git history at 4997bdc.
+
+## 2026-09-03 — Reconcile The Companion Pin Before Filing Cross-Repository Breakage  [tags: review, scope, cross-repo, assumptions]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_3 / Wave 2
+- Roles involved: Reviewer | Orchestrator
+
+Symptom:
+- The reviewer filed a preliminary HIGH because a new variant in the closed error vocabulary would not compile in the evaluation repository's exhaustive match once that repository re-pins.
+
+Root cause:
+- The finding treated the companion repository's current main as if it were already pinned to the change under review, although the companion stays pinned at an older library commit until its own migration plan runs; ADR-I-0023's impact section names that conversion as the companion's re-pin prerequisite.
+
+Fix applied:
+- The orchestrator ruled the item out of scope; the reviewer recorded it as the already-tracked re-pin obligation and completed the review on the in-PR acceptance bullets.
+
+Prevention:
+- Before filing cross-repository breakage, reconcile the companion's pin and the plan that owns its migration; when the companion intentionally remains pinned until its own migration, record an obligation, not an in-PR defect.
+
+Evidence:
+- Reviewer messages of 2026-09-03 (preliminary HIGH, ruling acknowledgement, final REVIEW3_DONE) on Task_3 at 773d65e.
+
+## 2026-09-04 — PR Watchers Must Not Depend On Tools Absent From The Monitor Shell  [tags: workflow, monitoring, tooling, orchestrator]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Wave 1–2 PR monitoring
+- Roles involved: Orchestrator
+
+Symptom:
+- Copilot reviews on the wave PRs and on the evaluation repository's PR arrived without any watcher notification; the decider noticed the review before the orchestrator did.
+
+Root cause:
+- The watcher scripts piped GitHub API output through `jq`, which is not on the PATH of the background monitor shell; every poll failed on stderr, which the monitor does not surface, so the watchers stayed silent while appearing armed.
+
+Fix applied:
+- Watchers re-armed using only `gh api --jq` (no external `jq`), one loop covering the whole stack, printing on any change in review count, review-comment count, or merge state.
+
+Prevention:
+- A watcher script uses only tools proven available in the monitor shell (`gh --jq`, POSIX sh); before trusting a new watcher, read its output file once to confirm it produced a first sample rather than errors.
+
+Evidence:
+- Monitor output file for the PR #77 watcher on 2026-09-04: eighteen consecutive `jq: command not found` lines and no events, while Copilot's "approval recommended" review was already posted.
+
+## 2026-09-04 — Edit Only Through Absolute Worktree Paths, And Run Broad Suites Only After The Live Window Is Granted  [tags: workflow, worktrees, live-mutex, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_4 / Wave 3
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- A relative-path patch briefly modified files in the shared main checkout instead of the task worktree before being reverted; and a full test suite started before the exclusive service window was confirmed, so service-backed tests could have collided with another agent's run.
+
+Root cause:
+- Relative paths resolve against whatever the current directory happens to be, and several checkouts of the same repository share identical relative paths; the live-window protocol grants exclusivity only on the explicit `WINDOW_YOURS` reply, not on sending `LIVE_START`.
+
+Fix applied:
+- The stray edits were reverted and verified clean; the suite was re-run inside the granted window.
+
+Prevention:
+- Every edit and every git command names an absolute path inside the task worktree, and the current directory is checked before each edit; a suite that may reach a shared service starts only after `WINDOW_YOURS` is observed, otherwise run the service-free command.
+
+Evidence:
+- Worker Task_4 report of 2026-09-03 (commit d232830) and the orchestrator's clean `git status` check on the main checkout.

@@ -28,5 +28,12 @@ Separate numbering per track; IDs are never reused.
 - Partial supersession stays in place: the record remains authoritative for its surviving clauses, with `supersession_scope` and reciprocal frontmatter links recording the split.
 - In records predating the current template, a blank warrant means it was not recorded at decision time, not an authoring omission. Fill blank newer frontmatter fields only when the record is substantively revisited.
 
+## Authoring rules
+- One decision per record. A choice of component and a choice of how that component is run or made durable are separate decisions with separate records.
+- A record encodes a locked-in decision. A deciding factor is deferred only when it is out of reach because of external factors, never when the same change produces the evidence.
+- The decision body pins the system's design and, at most, the behaviour of a narrow part of the implementation. Code shapes go in a non-binding appendix, never in the decision.
+- Every protected clause is checked against the project philosophy: it stays only if a philosophy goal (continuity, provenance, inspectable recall, correction) is what it protects. Current state is recorded under "Not covered", not as an invariant.
+- Records read the same at any time. No wording that hinges on when the record was written ("this phase", "later decision", "at decision time", "once", "already", change verbs such as "gains" or "moves"); history is anchored to named records, versions, and absolute dates, and Implementation Impact describes the resulting state.
+
 ## Status values
 `accepted`, `rejected`, `superseded`, `deprecated`. Records capture decisions, not undecided proposals.

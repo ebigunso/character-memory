@@ -14,8 +14,8 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: null
-supersession_scope: null
+superseded_by: implementation/ADR-I-0025-vector-record-is-a-read-contract.md
+supersession_scope: partial
 ---
 
 # ADR-I-0005: Keep Qdrant metadata filterable while graph relationships remain authoritative
