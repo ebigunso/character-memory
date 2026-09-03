@@ -221,7 +221,7 @@
 
 Task identifiers 5 and 6 were evaluation-repository work and moved to that repository's own plan; identifiers are not reused.
 
-Each wave ends with reviewer approval and a PR against the planning branch `plan/v0-1-6-embedded-vector-recall`, merged by the decider before the next wave starts; the planning branch merges to main as one change at phase end (Decision Log, 2026-09-03).
+Each wave ends with reviewer approval and a PR stacked on the previous wave's PR (GitHub stack on the planning PR); the next wave branches from the approved tip without waiting for a merge, and the decider merges the entire stack in one go at phase end (Decision Log, 2026-09-03 and 2026-09-04).
 Notification duty: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository before merge; how and when that repository adopts the change is planned there, and this plan only consumes the resulting compatibility evidence at closeout.
 
 ## Rollback / Safety
@@ -237,6 +237,7 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 
 - 2026-09-04 Wave 1 done: Task_1 (a633b2e, PR #74) and Task_2 (5b30856, PR #75) approved by the Tier D reviewer; Task_2 needed one revision (checked backend-limit conversion with a BoundaryTieOpen regression at the u32 cap; public re-exports) and carries one post-review fix (dimension check before the zero-norm scroll). PRs stacked on the planning PR as stack #76; merges pending. Wave 2 (Task_3) dispatched on a branch stacked on Task_2.
 - 2026-09-04 Wave 2 done: Task_3 (36ef8c8, PR #77) approved by the Tier D reviewer after two revisions on the zero-norm rejected-record fixture (final shape: one definition behind the non-default `test-fixtures` feature, enabled for integration tests by a self dev-dependency, doc-hidden). The evaluation repository's exhaustive error-vocabulary conversion is recorded as its re-pin obligation (ADR-I-0023), not a finding. PR appended to stack #76.
+- 2026-09-04 — Merge shape refined: the stack (planning PR at the bottom, one PR per wave above it) is merged in one go at phase end; GitHub's bottom-up stack order blocks interim merges of wave PRs while the planning PR is a draft, which is the intended shape. Waves proceed by branching from the previous wave's approved tip.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
