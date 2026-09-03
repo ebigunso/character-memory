@@ -26,6 +26,8 @@ pub async fn try_setup_persistent_character_memory(
         .map_err(config_error)?
         .set_override("embedding_model", embedding_model)
         .map_err(config_error)?
+        .set_override("vector_store_mode", "service")
+        .map_err(config_error)?
         .set_override("graph_store_mode", "persistent")
         .map_err(config_error)?
         .set_override("retrieval_stats_store_mode", "sqlite")

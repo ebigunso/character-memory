@@ -10,6 +10,8 @@ use crate::models::vector::EmbeddingModel;
 #[derive(Debug)]
 pub struct Settings {
     qdrant_connection_string: SecretString,
+    vector_store_mode: VectorStoreMode,
+    vector_store_path: Option<PathBuf>,
     oxigraph_path: SecretString,
     openai_api_key: SecretString,
     embedding_model: SecretString,
@@ -24,7 +26,12 @@ pub struct Settings {
 
 #[derive(Debug, Deserialize)]
 struct RawSettings {
-    qdrant_connection_string: SecretString,
+    #[serde(default)]
+    qdrant_connection_string: Option<SecretString>,
+    #[serde(default = "default_vector_store_mode")]
+    vector_store_mode: String,
+    #[serde(default)]
+    vector_store_path: Option<PathBuf>,
     oxigraph_path: SecretString,
     openai_api_key: SecretString,
     embedding_model: SecretString,
@@ -111,6 +118,30 @@ impl GraphStoreMode {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum VectorStoreMode {
+    #[default]
+    Embedded,
+    Service,
+}
+
+impl VectorStoreMode {
+    fn parse(value: &str) -> Result<Self, CustomError> {
+        match value {
+            "embedded" => Ok(Self::Embedded),
+            "service" => Ok(Self::Service),
+            other => Err(ConfigValidationError {
+                keys: vec!["VECTOR_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "embedded or service",
+                    actual: other.to_owned(),
+                },
+            }
+            .into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RetrievalStatsStoreMode {
     #[default]
     Sqlite,
@@ -161,7 +192,11 @@ impl TryFrom<RawSettings> for Settings {
 
     fn try_from(raw: RawSettings) -> Result<Self, Self::Error> {
         let settings = Self {
-            qdrant_connection_string: raw.qdrant_connection_string,
+            qdrant_connection_string: raw
+                .qdrant_connection_string
+                .unwrap_or_else(|| SecretString::from(String::new())),
+            vector_store_mode: VectorStoreMode::parse(&raw.vector_store_mode)?,
+            vector_store_path: raw.vector_store_path,
             oxigraph_path: raw.oxigraph_path,
             openai_api_key: raw.openai_api_key,
             embedding_model: raw.embedding_model,
@@ -213,6 +248,43 @@ impl Settings {
 
     pub fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
+    }
+
+    pub(crate) fn get_vector_store_mode(&self) -> VectorStoreMode {
+        self.vector_store_mode
+    }
+
+    pub fn get_vector_store_path(&self) -> Result<&Path, CustomError> {
+        let Some(path) = self.vector_store_path.as_deref() else {
+            return Err(ConfigValidationError {
+                keys: vec!["VECTOR_STORE_PATH"],
+                reason: ConfigValidationReason::MissingValue,
+            }
+            .into());
+        };
+        if path.as_os_str().is_empty() || path.to_string_lossy().contains("://") {
+            return Err(ConfigValidationError {
+                keys: vec!["VECTOR_STORE_PATH"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "a non-empty local filesystem directory",
+                    actual: path.to_string_lossy().into_owned(),
+                },
+            }
+            .into());
+        }
+        Ok(path)
+    }
+
+    pub(crate) fn get_service_qdrant_connection(&self) -> Result<&str, CustomError> {
+        let connection = self.get_qdrant_connection();
+        if connection.trim().is_empty() {
+            return Err(ConfigValidationError {
+                keys: vec!["QDRANT_CONNECTION_STRING"],
+                reason: ConfigValidationReason::MissingValue,
+            }
+            .into());
+        }
+        Ok(connection)
     }
 
     pub fn get_graph_store_mode(&self) -> GraphStoreMode {
@@ -372,6 +444,8 @@ impl Settings {
     ) -> Self {
         Settings {
             qdrant_connection_string,
+            vector_store_mode: VectorStoreMode::Service,
+            vector_store_path: None,
             oxigraph_path,
             openai_api_key,
             embedding_model,
@@ -388,6 +462,10 @@ impl Settings {
 
 fn default_graph_store_mode() -> String {
     "persistent".to_owned()
+}
+
+fn default_vector_store_mode() -> String {
+    "embedded".to_owned()
 }
 
 fn default_retrieval_stats_store_mode() -> String {
@@ -519,6 +597,14 @@ mod tests {
         assert!(result.is_ok());
 
         let settings = result.unwrap();
+        assert_eq!(settings.get_vector_store_mode(), VectorStoreMode::Embedded);
+        assert!(matches!(
+            settings.get_vector_store_path(),
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingValue,
+            })) if keys == vec!["VECTOR_STORE_PATH"]
+        ));
         assert_eq!(settings.get_qdrant_connection(), "external_qdrant");
         assert_eq!(
             settings.get_oxigraph_path().unwrap(),
@@ -543,6 +629,78 @@ mod tests {
             settings.get_retrieval_fanout_budgets(),
             default_retrieval_fanout_budgets()
         );
+    }
+
+    #[test]
+    fn vector_store_settings_validate_only_the_selected_mode() {
+        let embedded = Settings::new(
+            Config::builder()
+                .set_override("vector_store_path", "local-vectors")
+                .unwrap()
+                .set_override("oxigraph_path", "local-graph")
+                .unwrap()
+                .set_override("openai_api_key", "key")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            embedded.get_vector_store_path().unwrap(),
+            Path::new("local-vectors")
+        );
+
+        let service = Settings::new(
+            Config::builder()
+                .set_override("vector_store_mode", "service")
+                .unwrap()
+                .set_override("oxigraph_path", "local-graph")
+                .unwrap()
+                .set_override("openai_api_key", "key")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            service.get_service_qdrant_connection(),
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingValue,
+            })) if keys == vec!["QDRANT_CONNECTION_STRING"]
+        ));
+    }
+
+    #[test]
+    fn settings_reject_unknown_vector_store_mode() {
+        let error = Settings::new(
+            Config::builder()
+                .set_override("vector_store_mode", "automatic")
+                .unwrap()
+                .set_override("oxigraph_path", "local-graph")
+                .unwrap()
+                .set_override("openai_api_key", "key")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "embedded or service",
+                    actual,
+                },
+            }) if keys == vec!["VECTOR_STORE_MODE"] && actual == "automatic"
+        ));
     }
 
     #[test]
