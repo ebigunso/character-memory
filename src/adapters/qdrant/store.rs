@@ -21,8 +21,8 @@ use crate::models::vector::{VectorCandidateMatch, VectorCandidateSearch, VectorR
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 use super::payload::{
-    payload_deserialization_error, qdrant_payload_map, qdrant_point_id, read_candidate_match,
-    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
+    qdrant_payload_map, qdrant_point_id, read_candidate_match, QdrantPayloadSchema,
+    OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
 };
 use super::tie_closure::close_tie_cohort;
 
@@ -519,8 +519,10 @@ fn qdrant_candidate_config(url: &str) -> QdrantConfig {
 
 fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
     u32::try_from(fetch_limit).map_err(|_| {
-        CustomError::VectorDatabaseError(payload_deserialization_error(
+        CustomError::VectorDatabaseError(VectorDatabaseError::new(
             "qdrant",
+            VectorDatabaseErrorKind::Conversion,
+            None,
             format!(
                 "Qdrant scroll limit {fetch_limit} exceeds the backend maximum {}",
                 u32::MAX
@@ -591,7 +593,7 @@ fn qdrant_payload_to_match(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::qdrant::payload::SURFACE_FIELD;
+    use crate::adapters::qdrant::payload::QdrantPayloadField;
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::domain::{ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{CanonicalCandidates, VectorRecord, VectorRecordEmbedding};
@@ -686,7 +688,7 @@ mod tests {
             assert!(matches!(
                 qdrant_scroll_fetch_limit(too_large),
                 Err(CustomError::VectorDatabaseError(VectorDatabaseError {
-                    kind: VectorDatabaseErrorKind::PayloadDeserialization,
+                    kind: VectorDatabaseErrorKind::Conversion,
                     ..
                 }))
             ));
@@ -981,7 +983,10 @@ mod tests {
                     string_value(&object_id.to_string()),
                 ),
                 (OBJECT_TYPE_FIELD.to_owned(), string_value("derived_memory")),
-                (SURFACE_FIELD.to_owned(), string_value("derived_text")),
+                (
+                    QdrantPayloadField::Surface.name().to_owned(),
+                    string_value("derived_text"),
+                ),
             ]),
             score: 0.75,
             ..Default::default()
@@ -1064,7 +1069,7 @@ mod tests {
             "derived_memory"
         );
         assert_eq!(
-            payload_string(&points[0].payload, SURFACE_FIELD).unwrap(),
+            payload_string(&points[0].payload, QdrantPayloadField::Surface.name()).unwrap(),
             "derived_text"
         );
         assert_eq!(points[0].payload.len(), 5);
@@ -1292,7 +1297,10 @@ mod tests {
                     OBJECT_TYPE_FIELD.to_owned(),
                     string_value(&object_type.to_string()),
                 ),
-                (SURFACE_FIELD.to_owned(), string_value("derived_text")),
+                (
+                    QdrantPayloadField::Surface.name().to_owned(),
+                    string_value("derived_text"),
+                ),
             ]),
             score,
             ..Default::default()

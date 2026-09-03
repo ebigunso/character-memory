@@ -39,7 +39,7 @@ A second adapter (ADR-I-0023) makes both gaps matter: below its indexing thresho
 
 The search result carries, beside the canonical candidates, a completeness verdict stated by the adapter.
 The verdict distinguishes four situations: no search was issued because the limit was zero or the scope was empty; every stored record in scope was scored, so the requested top-K is determinate over the population; an index answered with a prefix whose cutoff cohort was closed, so the returned set is determinate for that index state although an approximate index may have omitted records it never surfaced; and the overfetch bound was reached with the cutoff cohort still open, so membership may vary.
-Adapters state the verdict truthfully: exhaustive only when the adapter knows the shard is unindexed and the cutoff cohort was closed, with the scanned count taken from the scope rather than the rows returned; an exhaustive scan whose cohort stays open at the bound reports open.
+Adapters state the verdict truthfully: exhaustive only when every record in the requested scope was scored through a path the adapter knows to be exhaustive (an unindexed scan or a full-scope scroll such as the zero-norm path) and the cutoff cohort was closed, with the scanned count taken from the scope rather than the rows returned; an exhaustive path whose cohort stays open at the bound reports open.
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 Degenerate vectors are defined on both sides of the port so that neither adapter has an undefined path: a zero-norm record embedding is rejected at indexing as a typed per-record failure before any adapter sees it, and a zero-norm query scores every candidate zero and reports a truthful verdict.
 
@@ -93,7 +93,7 @@ Not covered: the current query shape (an embedding, a limit, and an object-type 
 
 - Unit tests on the service adapter's fetch decision assert the closed and open verdicts, including the all-tied cohort at the bound.
 - A retrieval test asserts the telemetry verdict for each situation using the fakes.
-- The parity suite asserts exhaustive for the embedded adapter below its indexing threshold and closed for the service adapter on the identical-vector tie fixture.
+- The parity suite asserts exhaustive for the embedded adapter below its indexing threshold and closed for the service adapter on the identical-vector tie fixture; the zero-norm parity fixture asserts exhaustive for both adapters because each scores the full requested scope.
 - A census of the vector adapters shows no match-or-unknown condition.
 - Parity fixtures cover the zero-norm query and the rejected zero-norm record in both adapters.
 

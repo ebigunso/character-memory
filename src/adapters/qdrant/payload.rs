@@ -107,8 +107,6 @@ const fn schema(
 
 pub(crate) const OBJECT_ID_FIELD: &str = QdrantPayloadField::ObjectId.name();
 pub(crate) const OBJECT_TYPE_FIELD: &str = QdrantPayloadField::ObjectType.name();
-#[cfg(test)]
-pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
 
 pub(crate) fn qdrant_point_id(record: &VectorRecord) -> MemoryId {
     MemoryId::new_v5(&record.object_id, record.surface.to_string().as_bytes())

@@ -142,7 +142,7 @@ impl QdrantEdgeVectorCandidateStore {
     }
 
     #[cfg(test)]
-    async fn close(&self) -> Result<(), CustomError> {
+    pub(crate) async fn close(&self) -> Result<(), CustomError> {
         let _operation = self.operation.lock().await;
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Shutdown { reply: Some(reply) })?;

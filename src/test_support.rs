@@ -28,8 +28,8 @@ use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore
 
 #[derive(Debug)]
 pub(crate) struct TemporaryVectorCandidateStore {
-    store: QdrantEdgeVectorCandidateStore,
-    _directory: tempfile::TempDir,
+    store: Option<QdrantEdgeVectorCandidateStore>,
+    directory: tempfile::TempDir,
 }
 
 impl TemporaryVectorCandidateStore {
@@ -43,9 +43,28 @@ impl TemporaryVectorCandidateStore {
         .await
         .expect("temporary embedded vector store");
         Self {
-            store,
-            _directory: directory,
+            store: Some(store),
+            directory,
         }
+    }
+
+    fn store(&self) -> &QdrantEdgeVectorCandidateStore {
+        self.store.as_ref().expect("temporary vector store is open")
+    }
+}
+
+impl Drop for TemporaryVectorCandidateStore {
+    fn drop(&mut self) {
+        let store = self.store.take().expect("temporary vector store is open");
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("temporary vector shutdown runtime")
+                .block_on(store.close())
+                .expect("temporary vector store shutdown");
+        })
+        .join()
+        .expect("temporary vector shutdown thread");
     }
 }
 
@@ -55,18 +74,18 @@ impl VectorCandidateStore for TemporaryVectorCandidateStore {
         &self,
         records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError> {
-        self.store.upsert_vector_records(records).await
+        self.store().upsert_vector_records(records).await
     }
 
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError> {
-        self.store.search_candidates(query).await
+        self.store().search_candidates(query).await
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        self.store.delete_candidates(object_ids).await
+        self.store().delete_candidates(object_ids).await
     }
 }
 
@@ -929,6 +948,17 @@ mod tests {
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
+
+    #[tokio::test]
+    async fn temporary_vector_store_removes_its_directory_on_drop() {
+        let store = TemporaryVectorCandidateStore::open(2).await;
+        let path = store.directory.path().to_path_buf();
+        assert!(path.exists());
+
+        drop(store);
+
+        assert!(!path.exists());
+    }
 
     #[tokio::test]
     async fn graph_fake_preserves_objects_links_lifecycle_and_raw_refs() {

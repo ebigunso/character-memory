@@ -589,3 +589,95 @@ Prevention:
 
 Evidence:
 - Corrected ignored run: 4 passed, 0 failed, 396 filtered out; the exclusive Qdrant window was then released.
+
+## 2026-09-04 — Classify Boundary Conversions By Operation, Not Nearby Helper  [tags: review, errors, conversion, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The service adapter classified a `usize`-to-`u32` scroll-limit overflow as `PayloadDeserialization`.
+
+Root cause:
+- The closeout reused the nearby payload-error helper while replacing a stringly error, without checking the semantic kind already used for scope-count width conversion.
+
+Fix applied:
+- Construct the existing typed `Conversion` error directly and update the boundary test to require that kind.
+
+Prevention:
+- When replacing a stringly error, classify the failed operation first and compare sibling conversions before selecting an existing helper.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 at `src/adapters/qdrant/store.rs`; the corrected overflow assertion requires `VectorDatabaseErrorKind::Conversion`.
+
+## 2026-09-04 — Give Every Deletion Deliverable Its Own Exact Census  [tags: review, deletion, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The fake/type/helper census passed, but the separately required zero test-only payload-field constants still had a `SURFACE_FIELD` alias.
+
+Root cause:
+- The closeout census covered named fake artifacts but did not translate every independent deletion requirement into an exact symbol search.
+
+Fix applied:
+- Delete `SURFACE_FIELD` and have tests use `QdrantPayloadField::Surface.name()` directly.
+
+Prevention:
+- List each deletion deliverable separately and record an exact zero-hit census for each; do not treat one representative census as covering adjacent deletions.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and `rg -n "SURFACE_FIELD" src tests` after the correction.
+
+## 2026-09-04 — Define Completeness By Proven Work, Not Index State  [tags: review, docs, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- Public and decision-record wording said `Exhaustive` was available only on an unindexed shard, although the service zero-norm full-scope scroll correctly reports it too.
+
+Root cause:
+- Documentation generalized one implementation path into the verdict's semantic condition instead of checking every branch that produces the public enum.
+
+Fix applied:
+- State that exhaustive means every requested-scope record was scored through a known-exhaustive path, the cutoff cohort closed, and `scanned` came from the scope count; name unindexed scans and full-scope scrolls as examples.
+
+Prevention:
+- Define public verdicts from observable proof conditions and audit every constructor branch before documenting implementation examples.
+- Residual risk / waiver: none.
+
+Evidence:
+- Orchestrator ruling during Task_7 review and the service zero-norm parity test that reports `Exhaustive` from a full-scope scroll.
+
+## 2026-09-04 — Shut Down Background Owners Before Temporary Directories Drop  [tags: review, cleanup, windows, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The embedded test fixture dropped its temporary directory immediately after the store destructor only signalled the shard-owner thread, so Windows could attempt deletion while shard files remained open and `TempDir` would ignore the cleanup error.
+
+Root cause:
+- The fixture relied on field drop order but did not distinguish a shutdown signal from an acknowledged owner shutdown.
+
+Fix applied:
+- The fixture destructor moves the store to a helper thread, awaits the adapter's test-only acknowledged close there, joins the helper, and only then lets the temporary directory drop.
+
+Prevention:
+- A temporary fixture that owns a background resource must wait for that resource's shutdown acknowledgement before filesystem cleanup, and a test must assert the directory is actually removed.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and `temporary_vector_store_removes_its_directory_on_drop`.
