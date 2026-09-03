@@ -116,23 +116,23 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
 
-    use crate::domain::{MemoryId, ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
-    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch};
+    use crate::domain::MemoryId;
+    use crate::models::vector::{zero_norm_record_fixture, EmbeddingInput, VectorCandidateSearch};
     use crate::ports::vector_candidate::VectorCandidateRecall;
 
-    struct ZeroNormEmbedder;
+    struct FixedEmbedder(Vec<f32>);
 
     #[async_trait]
-    impl MemoryEmbedder for ZeroNormEmbedder {
+    impl MemoryEmbedder for FixedEmbedder {
         async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(vec![0.0, 0.0])
+            Ok(self.0.clone())
         }
 
         async fn embed_batch(
             &self,
             inputs: &[EmbeddingInput],
         ) -> Result<Vec<Vec<f32>>, CustomError> {
-            Ok(vec![vec![0.0, 0.0]; inputs.len()])
+            Ok(vec![self.0.clone(); inputs.len()])
         }
     }
 
@@ -161,16 +161,10 @@ mod tests {
 
     #[tokio::test]
     async fn zero_norm_record_embedding_is_typed_failure_before_adapter() {
-        let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::new_v4());
-        let record = VectorRecord::new(
-            object.id,
-            object.object_type,
-            VectorSurface::Summary,
-            DEFAULT_SCHEMA_VERSION,
-            "Episode summary",
-        );
+        let (record, embedding) = zero_norm_record_fixture();
+        let object = MemoryObjectRef::new(record.object_type, record.object_id);
         let store = AdapterMustNotRun;
-        let embedder = ZeroNormEmbedder;
+        let embedder = FixedEmbedder(embedding);
         let service = VectorIndexingService::new(&store, &embedder);
 
         let outcome = service.index(vec![record]).await.expect("typed outcome");
