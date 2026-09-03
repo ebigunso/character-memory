@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::domain::{
     CandidateValidation, GraphExpansionBoundedFailureTrace, LifecycleDtoValidationError,
-    LifecyclePolicyKnob, MemoryId, ObjectType,
+    LifecyclePolicyKnob, MemoryId, MemoryObjectRef, ObjectType,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -212,6 +212,8 @@ pub enum VectorIndexingCause {
     Embedding(#[source] EmbeddingError),
     #[error("embedding cardinality mismatch: expected {expected}, got {actual}")]
     CardinalityMismatch { expected: usize, actual: usize },
+    #[error("zero-norm embedding for {object:?}")]
+    ZeroNormEmbedding { object: MemoryObjectRef },
     #[error("vector database failed: {0}")]
     VectorDatabase(#[source] VectorDatabaseError),
 }

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{
     DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
     GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
-    RelationType, RetentionState, ThreadStatus,
+    RelationType, RetentionState, ThreadStatus, VectorSurface,
 };
 use crate::errors::{ConfigValidationError, ConfigValidationReason};
 
@@ -563,16 +563,6 @@ pub struct SectionScoreComponents {
 pub enum SectionVectorScoreSource {
     DirectMatch,
     DerivedFromRoot { root_score: f32 },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum VectorSurface {
-    Summary,
-    Text,
-    Name,
-    DerivedText,
-    Query,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

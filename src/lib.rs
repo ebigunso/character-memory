@@ -42,7 +42,6 @@ pub use crate::api::types::{
     StatsUpdateStatus, SupersededByEvidence, SuppressionPolicy, VectorCandidateTrace,
     VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure,
     VectorMaintenanceFailureItem, VectorMaintenanceOperation, VectorRecallCompleteness,
-    VectorSurface,
 };
 pub use crate::config::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
@@ -55,7 +54,7 @@ pub use crate::domain::{
     GraphExpansionBoundedReason, GraphFailureMode, LifecycleDtoValidationError,
     LifecyclePolicyKnob, MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint,
     MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
-    PlanIdentityField, RelationType, RetentionState, Stability, ThreadStatus,
+    PlanIdentityField, RelationType, RetentionState, Stability, ThreadStatus, VectorSurface,
     CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::errors::{
@@ -66,4 +65,5 @@ pub use crate::errors::{
     VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
 };
 pub use crate::memory::CharacterMemory;
+pub use crate::policy::embedding_surface::max_embedding_surfaces;
 pub use crate::usecases::write_planning::{PreparedCandidateRefs, RememberPlanDefaults};

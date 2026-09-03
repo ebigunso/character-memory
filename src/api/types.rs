@@ -29,7 +29,7 @@ pub use retrieval::{
     SectionPressureSummary, SectionScoreComponents, SectionVectorScoreSource,
     SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
     StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace, VectorRecallCompleteness, VectorSurface,
+    VectorCandidateTrace, VectorRecallCompleteness,
 };
 pub use write_plan::{
     CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,

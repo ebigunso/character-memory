@@ -1,126 +1,63 @@
 // Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
+    DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
+    VectorSurface,
 };
 
-use crate::models::vector::{
-    VectorPayloadHints, VectorRecord, VectorRelationshipHints, VectorSurface,
-};
+use crate::models::vector::VectorRecord;
+
+pub const fn max_embedding_surfaces(object_type: ObjectType) -> usize {
+    match object_type {
+        ObjectType::Episode
+        | ObjectType::Observation
+        | ObjectType::Entity
+        | ObjectType::MemoryThread
+        | ObjectType::DerivedMemory => 1,
+        ObjectType::MemoryLink => 0,
+    }
+}
 
 pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
     VectorRecord::new(
         episode.id,
         ObjectType::Episode,
-        graph_uri(ObjectType::Episode, episode.id),
         VectorSurface::Summary,
-        prefixed_text("Episode summary", &episode.summary),
-        clean_text(&episode.summary),
         episode.schema_version.clone(),
-        Some(episode.retention_state),
-        None,
-        VectorRelationshipHints {
-            participant_entity_ids: episode.participant_entity_ids.clone(),
-            ..VectorRelationshipHints::default()
-        },
-        episode.raw_ref.clone(),
+        prefixed_text("Episode summary", &episode.summary),
     )
-    .with_payload_hints(VectorPayloadHints {
-        modality: Some(episode.modality),
-        source_conversation_id: episode.source_conversation_id.clone(),
-        created_at: Some(episode.created_at),
-        started_at: episode.started_at,
-        ended_at: episode.ended_at,
-        salience_score: Some(episode.salience_score),
-        ..VectorPayloadHints::default()
-    })
 }
 
 pub(crate) fn observation_vector_record(observation: &Observation) -> VectorRecord {
     VectorRecord::new(
         observation.id,
         ObjectType::Observation,
-        graph_uri(ObjectType::Observation, observation.id),
         VectorSurface::Text,
-        prefixed_text("Observation excerpt", &observation.text),
-        clean_text(&observation.text),
         observation.schema_version.clone(),
-        Some(observation.retention_state),
-        None,
-        VectorRelationshipHints {
-            episode_ids: vec![observation.episode_id],
-            speaker_entity_id: observation.speaker_entity_id,
-            ..VectorRelationshipHints::default()
-        },
-        observation.raw_ref.clone(),
+        prefixed_text("Observation excerpt", &observation.text),
     )
-    .with_payload_hints(VectorPayloadHints {
-        modality: Some(observation.modality),
-        created_at: Some(observation.created_at),
-        observed_at: observation.observed_at,
-        salience_score: Some(observation.salience_score),
-        ..VectorPayloadHints::default()
-    })
 }
 
 pub(crate) fn derived_memory_vector_record(memory: &DerivedMemory) -> VectorRecord {
     VectorRecord::new(
         memory.id,
         ObjectType::DerivedMemory,
-        graph_uri(ObjectType::DerivedMemory, memory.id),
         VectorSurface::DerivedText,
-        prefixed_text(derived_label(memory), &memory.text),
-        clean_text(&memory.text),
         memory.schema_version.clone(),
-        Some(memory.retention_state),
-        Some(memory.is_current),
-        VectorRelationshipHints {
-            episode_ids: memory.derived_from_episode_ids.clone(),
-            observation_ids: memory.derived_from_observation_ids.clone(),
-            thread_ids: memory.thread_ids.clone(),
-            entity_ids: memory.entity_ids.clone(),
-            supersedes: memory.supersedes.clone(),
-            ..VectorRelationshipHints::default()
-        },
-        None,
+        prefixed_text(derived_label(memory), &memory.text),
     )
-    .with_payload_hints(VectorPayloadHints {
-        derived_type: Some(memory.derived_type),
-        created_at: Some(memory.created_at),
-        updated_at: Some(memory.updated_at),
-        salience_score: Some(memory.salience_score),
-        confidence: Some(memory.confidence),
-        stability: Some(memory.stability),
-        is_superseded: Some(!memory.is_current),
-        ..VectorPayloadHints::default()
-    })
 }
 
 pub(crate) fn memory_thread_vector_record(thread: &MemoryThread) -> VectorRecord {
-    let content_text = join_clean([thread.title.as_str(), thread.summary.as_str()]);
+    let surface_text = join_clean([thread.title.as_str(), thread.summary.as_str()]);
 
     VectorRecord::new(
         thread.id,
         ObjectType::MemoryThread,
-        graph_uri(ObjectType::MemoryThread, thread.id),
         VectorSurface::Summary,
-        prefixed_text("Thread summary", &content_text),
-        content_text,
         thread.schema_version.clone(),
-        None,
-        None,
-        VectorRelationshipHints::default(),
-        None,
+        prefixed_text("Thread summary", &surface_text),
     )
-    .with_payload_hints(VectorPayloadHints {
-        thread_status: Some(thread.status),
-        canonical_key: thread.canonical_key.clone(),
-        created_at: Some(thread.created_at),
-        updated_at: Some(thread.updated_at),
-        last_touched_at: Some(thread.last_touched_at),
-        salience_score: Some(thread.salience_score),
-        ..VectorPayloadHints::default()
-    })
 }
 
 pub(crate) fn entity_vector_record(entity: &Entity) -> VectorRecord {
@@ -130,28 +67,15 @@ pub(crate) fn entity_vector_record(entity: &Entity) -> VectorRecord {
         format!("Aliases: {}", entity.aliases.join(", "))
     };
     let summary = entity.summary.as_deref().unwrap_or_default();
-    let content_text = join_clean([entity.name.as_str(), alias_text.as_str(), summary]);
+    let surface_text = join_clean([entity.name.as_str(), alias_text.as_str(), summary]);
 
     VectorRecord::new(
         entity.id,
         ObjectType::Entity,
-        graph_uri(ObjectType::Entity, entity.id),
         VectorSurface::Name,
-        prefixed_text("Entity", &content_text),
-        content_text,
         entity.schema_version.clone(),
-        None,
-        None,
-        VectorRelationshipHints::default(),
-        None,
+        prefixed_text("Entity", &surface_text),
     )
-    .with_payload_hints(VectorPayloadHints {
-        entity_type: Some(entity.entity_type),
-        canonical_key: entity.canonical_key.clone(),
-        created_at: Some(entity.created_at),
-        updated_at: Some(entity.updated_at),
-        ..VectorPayloadHints::default()
-    })
 }
 
 pub(crate) fn memory_object_vector_record(object: &MemoryObject) -> Option<VectorRecord> {
@@ -213,23 +137,15 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn episode_builder_uses_summary_surface_and_preserves_filter_hints() {
+    fn episode_builder_uses_summary_surface() {
         let episode = episode_fixture();
         let record = episode_vector_record(&episode);
 
         assert_eq!(record.object_id, episode.id);
         assert_eq!(record.object_type, ObjectType::Episode);
-        assert_eq!(record.graph_uri, graph_uri(ObjectType::Episode, episode.id));
         assert_eq!(record.surface, VectorSurface::Summary);
         assert_eq!(record.embedding_text, "Episode summary: Short summary.");
-        assert_eq!(record.content_text, "Short summary.");
         assert_eq!(record.schema_version, DEFAULT_SCHEMA_VERSION);
-        assert_eq!(record.retention_state, Some(RetentionState::Active));
-        assert_eq!(
-            record.relationship_hints.participant_entity_ids,
-            vec![id(1)]
-        );
-        assert_eq!(record.raw_ref.as_deref(), Some("raw://episode"));
         assert_embedding_text_excludes_metadata(&record);
     }
 
@@ -243,26 +159,16 @@ mod tests {
             record.embedding_text,
             "Observation excerpt: Important excerpt."
         );
-        assert_eq!(record.content_text, "Important excerpt.");
-        assert_eq!(record.relationship_hints.episode_ids, vec![id(10)]);
-        assert_eq!(record.relationship_hints.speaker_entity_id, Some(id(1)));
-        assert_eq!(record.raw_ref.as_deref(), Some("raw://observation"));
         assert_embedding_text_excludes_metadata(&record);
     }
 
     #[test]
-    fn derived_memory_builder_keeps_currentness_and_relationship_hints_out_of_embedding_text() {
+    fn derived_memory_builder_keeps_graph_state_out_of_embedding_text() {
         let derived = derived_memory_fixture();
         let record = derived_memory_vector_record(&derived);
 
         assert_eq!(record.surface, VectorSurface::DerivedText);
         assert_eq!(record.embedding_text, "Reflection: Derived insight.");
-        assert_eq!(record.is_current, Some(false));
-        assert_eq!(record.relationship_hints.episode_ids, vec![id(10)]);
-        assert_eq!(record.relationship_hints.observation_ids, vec![id(20)]);
-        assert_eq!(record.relationship_hints.thread_ids, vec![id(30)]);
-        assert_eq!(record.relationship_hints.entity_ids, vec![id(1)]);
-        assert_eq!(record.relationship_hints.supersedes, vec![id(99)]);
         assert_embedding_text_excludes_metadata(&record);
     }
 
@@ -317,11 +223,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn published_surface_limits_match_current_builders() {
+        let objects = [
+            MemoryObject::Episode(episode_fixture()),
+            MemoryObject::Observation(observation_fixture()),
+            MemoryObject::DerivedMemory(derived_memory_fixture()),
+            MemoryObject::MemoryThread(thread_fixture()),
+            MemoryObject::Entity(entity_fixture()),
+            MemoryObject::MemoryLink(link_fixture()),
+        ];
+
+        for object in &objects {
+            let produced = usize::from(memory_object_vector_record(object).is_some());
+            assert_eq!(produced, max_embedding_surfaces(object.object_type()));
+        }
+    }
+
     fn assert_embedding_text_excludes_metadata(record: &VectorRecord) {
         assert!(!record
             .embedding_text
             .contains(&record.object_id.to_string()));
-        assert!(!record.embedding_text.contains(&record.graph_uri));
         assert!(!record.embedding_text.contains(&record.schema_version));
         assert!(!record.embedding_text.contains("raw://"));
         assert!(!record.embedding_text.contains("Retention"));
