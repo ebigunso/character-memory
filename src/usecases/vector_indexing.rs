@@ -161,8 +161,15 @@ mod tests {
 
     #[tokio::test]
     async fn zero_norm_record_embedding_is_typed_failure_before_adapter() {
-        let (record, embedding) = zero_norm_record_fixture();
-        let object = MemoryObjectRef::new(record.object_type, record.object_id);
+        let (object, surface, schema_version, embedding_text, embedding) =
+            zero_norm_record_fixture();
+        let record = VectorRecord::new(
+            object.id,
+            object.object_type,
+            surface,
+            schema_version,
+            embedding_text,
+        );
         let store = AdapterMustNotRun;
         let embedder = FixedEmbedder(embedding);
         let service = VectorIndexingService::new(&store, &embedder);

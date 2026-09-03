@@ -3,6 +3,10 @@ name = "character_memory"
 version = "0.1.5"
 edition = "2021"
 
+[features]
+default = []
+test-fixtures = []
+
 [dependencies]
 # Core
 config = "0.15.22"
@@ -29,6 +33,7 @@ uuid = { version = "1.23.1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 
 [dev-dependencies]
+character_memory = { path = ".", features = ["test-fixtures"] }
 mockall = "0.14.0"
 tonic = "0.14.6"
 tempfile = "3.20.0"
