@@ -1,6 +1,6 @@
 # Plan: v0.1.6 Embedded Vector Candidate Recall
 
-- status: draft
+- status: approved
 - generated: 2026-09-02
 - last_updated: 2026-09-03
 - work_type: mixed
@@ -221,7 +221,7 @@
 
 Task identifiers 5 and 6 were evaluation-repository work and moved to that repository's own plan; identifiers are not reused.
 
-Each wave ends with reviewer approval and a PR, merged by the decider before the next wave starts.
+Each wave ends with reviewer approval and a PR against the planning branch `plan/v0-1-6-embedded-vector-recall`, merged by the decider before the next wave starts; the planning branch merges to main as one change at phase end (Decision Log, 2026-09-03).
 Notification duty: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository before merge; how and when that repository adopts the change is planned there, and this plan only consumes the resulting compatibility evidence at closeout.
 
 ## Rollback / Safety
