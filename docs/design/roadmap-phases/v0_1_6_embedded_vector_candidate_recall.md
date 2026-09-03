@@ -115,7 +115,7 @@ the port doc comment's "documented bounded-overfetch degradation policy" clause,
 ## Non-goals
 
 ```text
-changing the authority split, or any retrieval semantics for non-empty scopes (the empty-scope change in ADR-I-0024 is intended and in scope)
+changing the authority split, or any retrieval semantics for non-empty scopes and non-degenerate queries (the empty-scope and zero-norm rules in ADR-I-0024 are intended and in scope)
 deprecating the service adapter, or altering it beyond what the shared port and record contracts require
 tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold, tuned by a later measured decision)
 named-vector coexistence of two embedding spaces (an engine capability this decision was taken for; its use lands with the first embedding-model migration)
@@ -152,7 +152,7 @@ The dependency-weight report records unstripped and stripped release deltas and 
 The default test path requires no vector service; service-gated suites continue to pass unchanged.
 Both adapters persist exactly the five-field read contract; a census of both repositories shows no reader of a dropped field.
 Documentation states the single-process expectation, the threshold semantics, the latency guidance, and the rebuild-from-authority path.
-No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behaviour change in service mode for non-empty scopes (an empty object-type scope now selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary, both intended).
+No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behaviour change in service mode for non-empty scopes and non-degenerate queries (an empty object-type scope now selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary, both intended).
 ```
 
 ## What the evaluation repository provides and when it is used (ADR-I-0026)

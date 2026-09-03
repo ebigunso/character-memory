@@ -41,7 +41,7 @@ The async composition entry point never touches the engine; it only hands work t
 The owner acknowledges an upsert or delete only after the engine's flush has completed, so every acknowledged write is durable independently of the shard's final drop.
 Dropping the adapter through the existing facade drop only signals the owner; the shard's final drop happens on the owner's thread, and a process exit that pre-empts it loses nothing acknowledged.
 A shard directory stays locked while an owner holds it; a constructor that meets a locked directory waits with a bounded backoff for the previous owner to release it rather than failing or opening a second handle.
-The contract canary (ADR-I-0023) additionally pins the two engine facts this record rests on: the engine does not persist a write until its flush runs, and a load does not replay the log.
+The contract canary (ADR-I-0023) additionally pins the three engine facts this record rests on: the engine does not persist a write until its flush runs, a load does not replay the log, and a shard directory held by one owner refuses a second open until it is released.
 
 ## Implementation Impact
 
@@ -74,7 +74,7 @@ Option 4 adds a close method every consumer must remember to call and still lose
 
 ## Decision Boundary
 
-Invariant: every engine call runs on the adapter's blocking owner; a write is acknowledged only after it is durable; the facade drop stays signal-only; the two engine facts are pinned by the canary.
+Invariant: every engine call runs on the adapter's blocking owner; a write is acknowledged only after it is durable; the facade drop stays signal-only; a constructor waits for a locked directory rather than opening a second handle; the three engine facts are pinned by the canary.
 
 Not covered: the channel and thread mechanics, the backoff bound, and the batching of flushes behind an acknowledgement if measurement calls for it.
 
@@ -83,12 +83,13 @@ Not covered: the channel and thread mechanics, the backoff bound, and the batchi
 - The hard-exit test writes, exits the process without dropping the shard, reopens the directory from a second process, and finds every acknowledged write.
 - The close-then-reopen test drops the facade inside an async runtime, reopens the same directory immediately, and finds every write.
 - The benchmark shows no engine call occupying an async executor thread and observes the shard's final drop on the owner's thread.
-- The contract canary fails if the pinned engine starts replaying its log on load or persisting on write.
+- The contract canary fails if the pinned engine starts replaying its log on load, persisting on write, or admitting a second open of a held shard directory.
 
 ## Revisit When
 
 - The engine persists on write or replays its log on load (the canary fails in that direction) — the per-write flush becomes optional and this record is revised.
 - The write-burst measurement shows the per-write flush dominating ingestion cost — batch flushes behind an explicit acknowledgement rather than weakening the durability rule.
+- The engine's directory lock changes semantics (the canary fails in that direction) — the constructor's wait-for-release rule is re-derived before the pin moves.
 - A multi-process deployment shape is designed — the single-owner lock discipline is reconsidered with the graph and statistics stores, never alone.
 
 ## Consultation impact

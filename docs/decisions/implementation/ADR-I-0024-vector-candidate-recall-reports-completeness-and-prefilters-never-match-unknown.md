@@ -41,6 +41,7 @@ The search result carries, beside the canonical candidates, a completeness verdi
 The verdict distinguishes four situations: no search was issued because the limit was zero or the scope was empty; every stored record in scope was scored, so the requested top-K is determinate over the population; an index answered with a prefix whose cutoff cohort was closed, so the returned set is determinate for that index state although an approximate index may have omitted records it never surfaced; and the overfetch bound was reached with the cutoff cohort still open, so membership may vary.
 Adapters state the verdict truthfully: exhaustive only when the adapter knows the shard is unindexed and the cutoff cohort was closed, with the scanned count taken from the scope rather than the rows returned; an exhaustive scan whose cohort stays open at the bound reports open.
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
+Degenerate vectors are defined on both sides of the port so that neither adapter has an undefined path: a zero-norm record embedding is rejected at indexing as a typed per-record failure before any adapter sees it, and a zero-norm query scores every candidate zero and reports a truthful verdict.
 
 A vector-layer predicate may be evaluated only over a column that is fully populated for every searchable record (backfilled from graph authority before the predicate is enabled, per ADR-I-0025) and that is immutable or synchronised on every mutation; under those two conditions a missing or unknown value is a defect, not a state, and it never satisfies a positive predicate, so the rule produces no false negative on a correctly populated column and turns an incorrectly populated one into a visible failure rather than a silent widening.
 A predicate that needs a stored value the write paths do not keep current, or that is not populated for every record, is not a prefilter; it is a graph-authority question.
@@ -86,7 +87,7 @@ Option 5 recreates a prefilter over values that only the upsert path wrote, whic
 
 Invariant: the search result carries a completeness verdict stated truthfully by the adapter, and the pipeline never repairs, retries, or fails on it; a vector-layer predicate reads only a fully populated column that is immutable or synchronised, and an unknown value never satisfies a positive predicate.
 
-Not covered: the current query shape (an embedding, a limit, and an object-type scope, with an empty scope selecting zero — a current state, not a rule), the verdict's type and wire shape (the appendix is a reference, not a contract), the telemetry field name, and the service adapter's overfetch bound.
+Not covered: the current query shape (an embedding, a limit, and an object-type scope, with an empty scope selecting zero — a current state, not a rule; the zero-norm rules above are the one query-shape behaviour this record fixes), the verdict's type and wire shape (the appendix is a reference, not a contract), the telemetry field name, and the service adapter's overfetch bound.
 
 ## Validation
 
@@ -94,6 +95,7 @@ Not covered: the current query shape (an embedding, a limit, and an object-type 
 - A retrieval test asserts the telemetry verdict for each situation using the fakes.
 - The parity suite asserts exhaustive for the embedded adapter below its indexing threshold and closed for the service adapter on the identical-vector tie fixture.
 - A census of the vector adapters shows no match-or-unknown condition.
+- Parity fixtures cover the zero-norm query and the rejected zero-norm record in both adapters.
 
 ## Revisit When
 

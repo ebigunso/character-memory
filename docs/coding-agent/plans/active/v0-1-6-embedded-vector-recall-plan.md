@@ -17,7 +17,7 @@
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
-- Non-goals: the phase document's non-goals (no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode for non-empty scopes; ADR-I-0024's empty-scope change, zero candidates for an empty scope and boundary rejection of an empty configured scope, is an intended change and in scope).
+- Non-goals: the phase document's non-goals (no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode for non-empty scopes and non-degenerate queries; ADR-I-0024's empty-scope change, zero candidates for an empty scope and boundary rejection of an empty configured scope, is an intended change and in scope).
 
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
@@ -80,7 +80,7 @@
   Introduce the result envelope (canonical candidates plus the typed completeness verdict) and the verdict enum in the public retrieval telemetry vocabulary; extract the service adapter's private tie-closure loop (fetch decision, fetch bound, cohort closure, canonical construction) into `src/adapters/qdrant/tie_closure.rs` as crate-visible shared logic that takes an engine-neutral fetch callback, so the embedded adapter (Task_4) calls it rather than re-implementing it; make the service adapter map the shared fetch decision onto the verdict; make the query scope-only with empty-scope-selects-zero and boundary rejection of an empty configured object-type set; record the verdict in retrieval telemetry beside the returned count; update every fake store. No repair, retry, or failure on the verdict.
 - acceptance:
   - The envelope and verdict express the four situations in ADR-I-0024's Decision section (its appendix shape is a non-binding reference); the canonical-candidates newtype is unchanged.
-  - Query-side zero-norm rule implemented in the service adapter: a zero-norm query scores every candidate zero and returns a truthful verdict, with a unit test and a parity fixture that Task_4 inherits.
+  - Query-side zero-norm rule (ADR-I-0024) implemented in the service adapter: a zero-norm query scores every candidate zero and returns a truthful verdict, with a unit test and a parity fixture that Task_4 inherits.
   - Telemetry carries the verdict for every retrieval; a retrieval test asserts each variant.
   - The tie-closure loop lives in `src/adapters/qdrant/tie_closure.rs`, the service adapter calls it, and its existing unit tests (fetch decision, all-tied cohort at the bound) move with it; nothing in `store.rs` closes a cohort on its own.
   - Fetch-decision unit tests assert closed and open verdicts including the all-tied cohort at the bound.
@@ -122,7 +122,7 @@
   - The manifest test asserts exactly five entries; both text-column producers except `embedding_text` are gone.
   - Zero-hit census across both repositories for the dropped fields and for `content_text` readers (the evaluation repository removes its reader under its own plan; its zero-hit census is consumed as closeout evidence, not ordered here).
   - One token mapping per enum; census shows no copy in adapters or use cases.
-  - A zero-norm record embedding yields a typed per-record indexing failure and never reaches an adapter; unit test present.
+  - A zero-norm record embedding yields a typed per-record indexing failure and never reaches an adapter (ADR-I-0024); unit test present.
 - validation:
   - kind: command
     required: true
