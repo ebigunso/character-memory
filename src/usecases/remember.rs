@@ -338,6 +338,7 @@ mod tests {
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState, RetrievalStatsStore,
     };
+    use crate::ports::vector_candidate::VectorCandidateRecall;
     use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
     use crate::usecases::write_planning::RememberPlanDefaults;
 
@@ -1230,9 +1231,18 @@ mod tests {
 
         async fn search_candidates(
             &self,
-            _query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new([]))
+            query: &VectorCandidateSearch,
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new([]),
+                completeness: if query.limit == 0 || query.object_types.is_empty() {
+                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
+                } else {
+                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
+                        scanned: 0,
+                    }
+                },
+            })
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

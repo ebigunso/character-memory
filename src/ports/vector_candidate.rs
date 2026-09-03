@@ -2,9 +2,16 @@
 // tests use deterministic fake stores.
 use async_trait::async_trait;
 
+use crate::api::types::retrieval::VectorRecallCompleteness;
 use crate::domain::MemoryId;
 use crate::errors::CustomError;
 use crate::models::vector::{CanonicalCandidates, VectorCandidateSearch, VectorRecordEmbedding};
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VectorCandidateRecall {
+    pub(crate) candidates: CanonicalCandidates,
+    pub(crate) completeness: VectorRecallCompleteness,
+}
 
 #[async_trait]
 pub(crate) trait VectorCandidateStore: Send + Sync {
@@ -14,13 +21,11 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
     ) -> Result<(), CustomError>;
 
     /// Returns at most `query.limit` unique object/surface matches in canonical
-    /// score-descending, object-type, object-id, surface order. Adapters close
-    /// equal-score cutoff cohorts before canonical truncation, subject to their
-    /// documented bounded-overfetch degradation policy.
+    /// score-descending, object-type, object-id, surface order.
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<CanonicalCandidates, CustomError>;
+    ) -> Result<VectorCandidateRecall, CustomError>;
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError>;
 }
@@ -37,7 +42,7 @@ impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<CanonicalCandidates, CustomError> {
+    ) -> Result<VectorCandidateRecall, CustomError> {
         (**self).search_candidates(query).await
     }
 
