@@ -476,3 +476,25 @@ Prevention:
 
 Evidence:
 - Reviewer messages of 2026-09-03 (preliminary HIGH, ruling acknowledgement, final REVIEW3_DONE) on Task_3 at 773d65e.
+
+## 2026-09-04 — PR Watchers Must Not Depend On Tools Absent From The Monitor Shell  [tags: workflow, monitoring, tooling, orchestrator]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Wave 1–2 PR monitoring
+- Roles involved: Orchestrator
+
+Symptom:
+- Copilot reviews on the wave PRs and on the evaluation repository's PR arrived without any watcher notification; the decider noticed the review before the orchestrator did.
+
+Root cause:
+- The watcher scripts piped GitHub API output through `jq`, which is not on the PATH of the background monitor shell; every poll failed on stderr, which the monitor does not surface, so the watchers stayed silent while appearing armed.
+
+Fix applied:
+- Watchers re-armed using only `gh api --jq` (no external `jq`), one loop covering the whole stack, printing on any change in review count, review-comment count, or merge state.
+
+Prevention:
+- A watcher script uses only tools proven available in the monitor shell (`gh --jq`, POSIX sh); before trusting a new watcher, read its output file once to confirm it produced a first sample rather than errors.
+
+Evidence:
+- Monitor output file for the PR #77 watcher on 2026-09-04: eighteen consecutive `jq: command not found` lines and no events, while Copilot's "approval recommended" review was already posted.
