@@ -235,6 +235,8 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 
 - 2026-09-02 Planning wave completed: five parallel inputs (design consult, two altitude audits, two forensic censuses) consolidated; decider ruled the five design questions; ADR-I-0023 through ADR-I-0026, the rewritten phase document, and the roadmap section authored on branch `plan/v0-1-6-embedded-vector-recall`. Plan awaits approval.
 
+- 2026-09-04 Wave 1 done: Task_1 (a633b2e, PR #74) and Task_2 (5b30856, PR #75) approved by the Tier D reviewer; Task_2 needed one revision (checked backend-limit conversion with a BoundaryTieOpen regression at the u32 cap; public re-exports) and carries one post-review fix (dimension check before the zero-norm scroll). PRs stacked on the planning PR as stack #76; merges pending. Wave 2 (Task_3) dispatched on a branch stacked on Task_2.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-02 Decision: the draft's port description was rewritten as an intentional new port contract.
