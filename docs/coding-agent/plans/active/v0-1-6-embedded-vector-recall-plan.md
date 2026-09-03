@@ -6,7 +6,7 @@
 - work_type: mixed
 
 ## Goal
-- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0026: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the opt-in local mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there and consumed here as closeout evidence.
+- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0027: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the default vector mode with the service adapter retained as the explicit service mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there and consumed here as closeout evidence.
 
 ## Definition of Done
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
@@ -17,14 +17,14 @@
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
-- Non-goals: the phase document's non-goals (no default flip, no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode for non-empty scopes; ADR-I-0024's empty-scope change, zero candidates for an empty scope and boundary rejection of an empty configured scope, is an intended change and in scope).
+- Non-goals: the phase document's non-goals (no index tuning beyond the exact-scan threshold, no migration tooling, no multi-process embedded access, no public candidate-search facade, no retrieval semantics change in service mode for non-empty scopes; ADR-I-0024's empty-scope change, zero candidates for an empty scope and boundary rejection of an empty configured scope, is an intended change and in scope).
 
 ## Context (workspace)
 - Design memo and audits: `.agent-work/orchestrator/` (v016-port-design-consult.md sections A-G; cm-design-audit.md; cme-design-audit.md; v016-consolidated-triage.md) and the researcher censuses under `.agent-work/researcher/` and the evaluation repository's `.agent-work/evals-researcher/`; all transient, consumed into this plan and the ADRs.
 - As-built port: `src/ports/vector_candidate.rs`, `src/models/vector/candidate_record.rs`, `src/models/vector/record.rs`, `src/adapters/qdrant/{store,payload}.rs`, `src/policy/embedding_surface.rs`, `src/usecases/retrieve.rs`, `src/api/types/retrieval.rs`, `src/composition.rs`, `src/config/app_settings.rs`, `src/test_support.rs`.
 - Prerequisite in this repository, landed: the toolchain pin moved to the embedded engine's minimum (Rust 1.97.0) in its own change, merged 2026-09-02 as a88c117.
 - Prerequisite tracked in the evaluation repository: its evidence-integrity fixes must be merged before this phase cites any harness measurement.
-- Repo reference docs consulted: the four ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
+- Repo reference docs consulted: the five ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
 
 ## Open Questions (max 3)
 - none (the draft's five open questions were ruled by the decider on 2026-09-02 and are recorded in the phase document and the ADRs).
@@ -77,7 +77,7 @@
 - description: |
   Introduce the result envelope (canonical candidates plus the typed completeness verdict) and the verdict enum in the public retrieval telemetry vocabulary; make the service adapter map its fetch decision onto the verdict; make the query scope-only with empty-scope-selects-zero and boundary rejection of an empty configured object-type set; record the verdict in retrieval telemetry beside the returned count; update every fake store. No repair, retry, or failure on the verdict.
 - acceptance:
-  - The envelope and enum match ADR-I-0024's Decision section; the canonical-candidates newtype is unchanged.
+  - The envelope and verdict express the four situations in ADR-I-0024's Decision section (its appendix shape is a non-binding reference); the canonical-candidates newtype is unchanged.
   - Query-side zero-norm rule implemented in the service adapter: a zero-norm query scores every candidate zero and returns a truthful verdict, with a unit test and a parity fixture that Task_4 inherits.
   - Telemetry carries the verdict for every retrieval; a retrieval test asserts each variant.
   - Fetch-decision unit tests assert closed and open verdicts including the all-tied cohort at the bound.
@@ -152,7 +152,7 @@
   - Embedded mode constructs and retrieves with no service running; the parity suite yields identical admitted sets and orderings on the shared fixtures while both adapters are below their indexing thresholds; the tie fixture yields Exhaustive (embedded) and BoundaryTieClosed (service), both through the shared tie-closure loop, with no engine ordering relied on.
   - A recall comparison of the embedded adapter above its indexing threshold against its exhaustive setting is recorded on the benchmark corpus (informational this phase; index tuning is a later decision).
   - The collection name is validated to the phase document's allowlist before any directory is touched, and a path-confinement test proves separator and parent-directory inputs cannot escape the configured directory.
-  - No engine call (shard open and load with its lock backoff, payload index creation, upsert, delete, search, the filtered scope count behind the exhaustive verdict, index build, or shutdown) occupies an async executor thread: all run on the adapter's dedicated blocking owner, which opens the shard itself so the async composition entry point never calls the engine directly, and dropping the adapter through the existing facade drop signals that owner so the final shard drop happens there; the owner flushes after every upsert or delete and acknowledges only then, so durability of acknowledged writes does not depend on that final drop (the engine persists only on flush and does not replay its log on load), and a constructor meeting a directory still locked by a closing owner waits with a bounded backoff; a close-then-reopen test drops the facade inside an async runtime, asserts the executor was never blocked, reopens the same directory immediately, and finds every write; a hard-exit test writes, exits the process without dropping the shard, reopens from a second process, and finds every acknowledged write; the contract canary pins both engine facts (no log replay on load; directory lock); the benchmark records executor responsiveness during construction and reopen (including a lock-backoff wait), a concurrent scan, a write burst, a build, and a close.
+  - ADR-I-0027 holds: every engine call (shard open and load with its lock backoff, payload index creation, upsert, delete, search, the filtered scope count, index build, shutdown) runs on the adapter's dedicated blocking owner, which opens the shard itself; a write is acknowledged only after the engine's flush; the facade drop only signals the owner; a constructor meeting a locked directory waits with a bounded backoff; the close-then-reopen test, the hard-exit test (exit without dropping the shard, reopen from a second process, find every acknowledged write), and the responsiveness benchmark (construction and reopen with a lock-backoff wait, a concurrent scan, a write burst, a build, a close) pass; the contract canary pins no-replay-on-load and the directory lock.
   - Restart test passes; repeated runs are byte-identical; reopening a shard with a mismatched vector size or distance raises the collection-compatibility error, and reopening one whose marker carries an unsupported record schema version raises the clear failure ADR-I-0007 requires, each covered by its own test.
   - Embedded mode with no `VECTOR_STORE_PATH` is a configuration error at construction, never an implicit default; covered by a settings test.
   - The contract canary passes on the pinned engine version and is documented as the gate for every engine bump.
@@ -222,7 +222,7 @@ Each wave ends with reviewer approval and a PR, merged by the decider before the
 Notification duty: any wave that changes a public vocabulary the evaluation repository converts exhaustively (the vector database error kinds in Wave 3, the telemetry field in Wave 1) is announced to that repository before merge; how and when that repository adopts the change is planned there, and this plan only consumes the resulting compatibility evidence at closeout.
 
 ## Rollback / Safety
-- Embedded mode is opt-in; the service mode's behavior is unchanged except for the reported verdict, the shrunken record, and the intended empty-scope change (an empty object-type scope selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary), all covered by the parity suite and the retrieval tests.
+- Embedded mode is the default and the default-mode construction test asserts it; the service mode's behavior is unchanged except for the reported verdict, the shrunken record, and the intended empty-scope change (an empty object-type scope selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary), all covered by the parity suite and the retrieval tests.
 - Stored service-mode payloads with dropped fields remain readable (extra fields tolerated unread); rebuild from graph authority is the recovery path.
 - Each wave is a separately revertible PR.
 
@@ -237,7 +237,7 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 - 2026-09-02 Decision: the draft's port description was rewritten as an intentional new port contract.
   - Trigger / new insight: the draft (2026-07-20) described filter, diagnostics, and reconciliation capabilities that the structured-verdict phase deleted; thirty of thirty-three payload fields were write-only; the readable text column's only reader was the evaluation repository's direct store access.
   - Plan delta: contract-first waves (envelope and query, then record, then adapter); evaluation baseline moved to the trace; deletions promoted to deliverables.
-  - Tradeoffs considered: recorded in the four ADRs' rejected alternatives; the forward-looking keep case for hint fields (immutable time window) is recorded as a re-entry path rather than kept.
+  - Tradeoffs considered: recorded in the ADRs' rejected alternatives; the forward-looking keep case for hint fields (immutable time window) is recorded as a re-entry path rather than kept.
   - User approval: rulings on all five questions given 2026-09-02; plan approval pending.
 - 2026-09-02 Decision: evidence-integrity defects in the evaluation repository are fixed before this phase, outside this plan.
   - Trigger / new insight: batch ingest produced phantom repair attempts and the evaluated rank was harness-invented; both would corrupt the parity and baseline evidence this phase cites.
@@ -252,6 +252,10 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
   - Finding: the engine persists a write only on flush and does not replay its log on load; process-level probes that skipped the shard drop reopened with zero of two hundred points.
   - Ruling: the blocking owner flushes after every write and acknowledges only then; the signal-only facade drop stays; no port or facade method is added; a hard-exit test joins Task_4's acceptance.
   - Tradeoff: one synchronous disk sync per write, measured by the write burst in the benchmark; batching behind an acknowledgement is the named upgrade.
+- 2026-09-03 — Decision records restructured on the decider's review.
+  - ADR-I-0023 now decides the default: embedded is the default vector mode from this phase, licensed by the phase's own parity suite and service-free integration path (defaults-match-evidence, ADR-I-0021); ADR-I-0003's vector default is partially superseded; the evaluation repository's cross-mode run becomes a revisit trigger, not a gate. Task_4's default-mode test asserts embedded; Task_8's documentation leads with the local path.
+  - The blocking-owner and per-write-flush rules moved out of ADR-I-0023 into ADR-I-0027 as their own decision.
+  - ADR-I-0024 narrowed to the completeness verdict and the prefilter rule (unknown never matches); the scope-only query is a current state, the type shape is a non-binding appendix, and the two predicate paths are notes binding on no phase.
 
 ## Notes
 - Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the latency guidance and the stripped dependency weight must be measured, not assumed; the engine is beta, so its pin is exact and its bump is gated by the canary.

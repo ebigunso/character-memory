@@ -14,8 +14,8 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: null
-supersession_scope: null
+superseded_by: implementation/ADR-I-0023-embedded-qdrant-edge-vector-candidate-store.md
+supersession_scope: partial   # the vector-backend default only (embedded Qdrant Edge is the default); backend roles remain authoritative
 ---
 
 # ADR-I-0003: Use Qdrant and Oxigraph as default storage backends

@@ -11,7 +11,7 @@ warrant:
   cost_of_violation: "every column that returns without a reader is mirrored across two adapters, indexed at every collection initialisation, and carried stale by write paths that never update it; a column deleted as unread would erase the only record of what a generated vector embedded"
   cost_of_wrong_preservation: "if a retrieval route needs a prefilter and the five-column rule is preserved as prohibition rather than current state, the predicate is blocked instead of landing through the named re-entry path"
   cost_of_over_extension: "extending the rule to the graph store would strip graph authority of denormalised fields it legitimately owns"
-depends_on: [implementation/ADR-I-0007-schema-versioning.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-takes-a-scope-only-query.md]
+depends_on: [implementation/ADR-I-0007-schema-versioning.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md]
 implements: []
 supersedes: [implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md, implementation/ADR-I-0002-natural-language-embedding-surfaces.md, implementation/ADR-I-0001-stable-cross-store-ids.md]
 superseded_by: null
@@ -49,7 +49,7 @@ Consumers needing candidate content hydrate by object id.
 The relationship refs (episode, observation, thread, entity, participant, speaker, supersedes), the lifecycle and currentness flags, the time hints, the ranking and salience hints, the object-specific hints, the graph URI, and the raw source reference leave the vector write path.
 Dropping the graph URI partially supersedes ADR-I-0001's clause that every vector payload carries it: the stable object id remains the cross-store identity and the graph URI is derived from it by graph authority, so the pointer was a redundant copy of the id; ADR-I-0001's stable-id decision itself is unchanged.
 The typed field manifest introduced in the structured-verdict phase remains the single source of both adapters' column sets and shrinks to the five entries.
-ADR-I-0024 names the two re-entry paths (a synchronised scope predicate; an immutable time-window predicate over `created_at` and `observed_at` backfilled from graph authority) so a returning column arrives with its predicate, its adapter mappings, and a parity fixture.
+ADR-I-0024 rules that a predicate reads only synchronised or immutable values and notes the two candidate predicates (a synchronised scope id; an immutable time window over `created_at` and `observed_at` backfilled from graph authority), so a returning column arrives with its predicate and its reader.
 
 ## Implementation Impact
 
@@ -99,7 +99,7 @@ Not covered: the physical encoding of each column per adapter, and graph authori
 
 ## Revisit When
 
-- A retrieval route needs a scoped or time-bounded semantic search — take the ADR-I-0024 re-entry path; this record's invariant is satisfied by a column that arrives with its reader.
+- A retrieval route needs a scoped or time-bounded semantic search — add the column under ADR-I-0024's prefilter rule; this record's invariant is satisfied by a column that arrives with its reader.
 - The assisted-remember phase makes the embedding surface a graph-authoritative provenance artifact — the vector copy becomes a cache and this record's provenance argument moves to the graph.
 - A re-indexing workflow appears that cannot rebuild from graph authority — the readable-text question reopens with that workflow as its reader.
 
@@ -111,4 +111,4 @@ Question asked: whether the unread hint families and the readable text column sh
 
 - ADR-I-0005 remains authoritative for graph authority over relationships; this record supersedes its payload field list and its "payload metadata as candidate filter" implementation guidance.
 - ADR-I-0002 remains authoritative for natural-language embedding surfaces; this record supersedes only its note to persist both text columns.
-- ADR-I-0024 (query contract and re-entry paths), ADR-I-0023 (embedded shard layout), ADR-I-0026 (evaluation baseline reader).
+- ADR-I-0024 (completeness verdict and prefilter rule), ADR-I-0023 (embedded shard layout), ADR-I-0026 (evaluation baseline reader).

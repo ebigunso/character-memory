@@ -1,6 +1,6 @@
 # v0.1.6 Design: Embedded Vector Candidate Recall
 
-Status: decided 2026-09-02 (ADR-I-0023 through ADR-I-0026); supersedes the 2026-07 draft of this document; the embedded engine ruling (Qdrant Edge over an in-house scan) was taken the same day on two feasibility spikes.
+Status: decided 2026-09-02, revised 2026-09-03 (ADR-I-0023 through ADR-I-0027); supersedes the 2026-07 draft of this document; the embedded engine ruling (Qdrant Edge over an in-house scan) was taken the same day on two feasibility spikes.
 
 ## Version intent
 
@@ -26,7 +26,7 @@ The embedded engine is the same family as the service backend, so payload and fi
 This phase fixes the port contract deliberately, because two adapters cannot be held to an implicit one.
 
 Query: the embedding, the limit, and an object-type scope, and nothing else; an empty scope selects zero candidates, and the retrieval context rejects an empty configured object-type set at the boundary.
-Three-valued hint predicates are prohibited; a future predicate arrives as an explicit enum whose unknown arm never matches, in both adapters, with a parity fixture.
+A vector-layer predicate reads only immutable or synchronised stored values, and an unknown or missing value never satisfies a positive predicate (ADR-I-0024); a future predicate lands in both adapters with a parity fixture, as every port change does.
 
 Result: a completeness envelope, the canonical candidates plus a typed verdict — not requested (the limit was zero or the scope was empty, so no search was issued), exhaustive (every scoped record was scored, so the requested top-K is determinate), boundary tie closed (an index returned a prefix and the cutoff cohort within that prefix was verified closed), or boundary tie open (the overfetch bound was reached with the cohort within the prefix still open).
 The boundary verdicts describe the index's answer, not global recall: an approximate index may omit records it never surfaced, so only the exhaustive verdict asserts determinate membership over the scoped population, while the boundary verdicts assert that the returned set is deterministic for a given index state and whether its cutoff cohort was closed.
@@ -38,7 +38,7 @@ Record: both adapters persist exactly five fields — object id, object type, su
 Read-out text lives in graph authority; the vector record stores only the embedded surface, as provenance of what was ranked; consumers needing candidate content hydrate by object id.
 The relationship, lifecycle, time, ranking, object-specific, graph-URI, and raw-reference hints leave the write path: the library read none of them, the relationship hints were frozen at upsert and never updated by linking, the lifecycle hints described vectors the write path deletes, and the readable text column duplicated graph text.
 
-Two re-entry paths are named so the scope-only query and five-field record are read as current state, not prohibition:
+Two candidate predicates that satisfy that rule are noted so the scope-only query and five-field record are read as current state, not prohibition (binding on no phase):
 
 1. A synchronised scope predicate, owned by the scoped-continuity phase: a scope-id column written at upsert and kept in sync by the link and reflection write paths.
 2. An immutable time-window predicate over `created_at` and `observed_at`, owned by whichever phase first ships a time-bounded retrieval route; immutability makes a write-time column correct without a sync path, and the columns are backfilled from graph authority if ever needed.
@@ -55,8 +55,8 @@ Search: the query runs through the service adapter's tie-closure loop and the ca
 Verdict mapping: exhaustive when the shard is unindexed (known from the adapter's own threshold configuration) and the shared loop closed the cutoff cohort, with the scanned count taken from a filtered count of the scope rather than from the rows returned, so every exact scan with a closed cutoff reports exhaustive regardless of population size; boundary tie closed when an indexed shard's cutoff cohort closed (a statement about the index's returned prefix, not about global recall); boundary tie open whenever the bound is reached with the cohort still open, on an exact scan too; not requested at limit zero or empty scope.
 Delete: remove every surface of each object id, matching the service adapter's selector.
 Restart safety: opening an existing shard validates its recorded vector size and distance against the configured embedding model and the adapter-owned marker's record schema version against the supported version before any query, raising the collection-compatibility error or the clear unsupported-schema failure ADR-I-0007 requires.
-Blocking discipline: every engine call is synchronous (shard open and load with the lock backoff; payload index creation; upsert and delete write the log and update payload and field indexes; search scans or traverses; the filtered scope count behind the exhaustive verdict; index build; and shutdown flushes on drop), so the adapter creates a dedicated blocking owner at construction, one blocking worker that opens the shard itself, holds it, serialises access, and acknowledges an upsert or delete only after the engine's flush has completed, and routes every call through it; the adapter's own drop only signals that owner, so the shard's final drop happens on the owner's thread and no port or facade method is needed.
-That non-blocking drop is safe because the owner flushes after every write and acknowledges only then (the engine persists a write only when its flush runs: the flush on shard drop is the persistence step, not compaction, and a load does not replay the write-ahead log, so a writer that skips the final drop reopens with none of its unflushed writes (measured on the pinned version: two process-level probes, one skipping the drop and one exiting the process, reopened with zero of two hundred points; the normal-drop control reopened with all of them)), so every acknowledged write is durable independently of the final drop and a process exit that pre-empts it loses nothing acknowledged, and because a shard directory stays locked while an owner holds it, so a constructor that meets a locked directory waits with a bounded backoff for the previous owner to release it; both facts are pinned by the contract canary and proven by a close-then-reopen test that drops the facade inside an async runtime, reopens the same directory immediately, and finds every write, and by a hard-exit test that exits the process without dropping the shard, reopens the directory from a second process, and finds every acknowledged write.
+Blocking discipline and durability (ADR-I-0027): every engine call — shard open and load with the lock backoff, payload index creation, upsert and delete, search, the filtered scope count behind the exhaustive verdict, index build, and the final drop — runs on a dedicated blocking owner the adapter creates at construction and that opens the shard itself, so the async composition entry point never touches the engine; the owner acknowledges a write only after the engine's flush, because the pinned engine persists only on flush and does not replay its log on load (writers that skipped the drop reopened with zero of two hundred points); the facade drop only signals the owner and no port or facade method is added.
+A shard directory stays locked while an owner holds it, so a constructor that meets a locked directory waits with a bounded backoff; the two engine facts are pinned by the contract canary and proven by the close-then-reopen test and the hard-exit test (exit without dropping the shard, reopen from a second process, find every acknowledged write).
 The in-phase benchmark records executor responsiveness while a scan, a write burst, a build, and a close are in progress.
 Type mapping: the engine's point, filter, condition, and scored-point types are crate-local engine types, not the service client's protocol types, so the conversion is adapter-specific; payload and filter conventions, the tie-closure loop, the verdict mapping, and the error classification are shared library logic that neither adapter re-implements.
 Contract canary: a test in the pattern of the service client's erased-connect canary pins the engine facts the adapter relies on — zero threshold means unindexed, object-payload precondition, shard-directory precondition, crate-local type provenance — so an upstream change fails a test rather than a character; the pin is bumped only with a canary and parity re-run.
@@ -67,7 +67,7 @@ Score parity across adapters was measured at 0.0 delta on the spike; the parity 
 Follow the one-key-per-backend pattern the graph and statistics stores already use rather than overloading the service connection string.
 
 ```text
-VECTOR_STORE_MODE   service | embedded   (default: service)
+VECTOR_STORE_MODE   embedded | service   (default: embedded)
 VECTOR_STORE_PATH   directory, required in embedded mode (missing is a configuration error, never an implicit default), ignored in service mode
 QDRANT_CONNECTION_STRING   required only in service mode
 ```
@@ -98,7 +98,7 @@ restart-safety test for the embedded store; pipeline test over the embedded adap
 dependency-weight report: unstripped and stripped release deltas, effect of feature trimming
 latency benchmark: exhaustive scan across corpus sizes at the configured dimension; executor responsiveness under a concurrent scan
 documentation: settings, single-process expectation, threshold semantics, measured latency guidance, rebuild-from-graph-authority as the path between modes
-four implementation ADRs (ADR-I-0023 through ADR-I-0026) with reciprocal partial-supersession frontmatter on ADR-I-0001, ADR-I-0002, and ADR-I-0005
+five implementation ADRs (ADR-I-0023 through ADR-I-0027) with reciprocal partial-supersession frontmatter on ADR-I-0001, ADR-I-0002, ADR-I-0003, and ADR-I-0005
 ```
 
 Deletions that are deliverables, not side effects:
@@ -120,10 +120,9 @@ deprecating the service adapter, or altering it beyond what the shared port and 
 tuning the embedded index, quantization, or memory-mapping defaults (available in the engine; shipped at the exact-scan threshold, tuned by a later measured decision)
 named-vector coexistence of two embedding spaces (an engine capability this decision was taken for; its use lands with the first embedding-model migration)
 migration tooling between modes or between record shapes (rebuild-from-graph-authority is the documented path)
-changing the default vector mode in this phase (embedded ships opt-in; flipping the default is a separate evidence-gated decision)
 multi-process access to the embedded store (same single-process expectation as embedded graph storage)
 synchronisation between an embedded shard and a service collection (an engine capability; not exercised this phase)
-any vector-layer predicate beyond the object-type scope (the two named re-entry paths belong to later phases)
+any vector-layer predicate beyond the object-type scope (the candidate predicates noted in ADR-I-0024 belong to later phases)
 any new public facade method (the evaluation baseline consumes the retrieval trace)
 reconciliation diagnostics (the reconciliation slice was deleted in the structured-verdict phase; graph verification is the guard)
 ```
@@ -146,7 +145,7 @@ A recall comparison of the embedded adapter above its indexing threshold against
 Deterministic admission holds in embedded mode (equal-score cohorts canonically ordered; repeated runs byte-identical; no engine ordering relied on).
 Retrieval telemetry reports the completeness verdict; the embedded adapter reports exhaustive below its threshold, the service adapter reports closed on the tie fixture.
 Embedded state survives process restart; a reopened shard with a different vector size or distance fails with the collection-compatibility error; an unsupported record schema version fails clearly.
-No engine call (shard open and load with its lock backoff, payload index creation, upsert, delete, search, the filtered scope count, index build, or shutdown) occupies an async executor thread; all run on the adapter's dedicated blocking owner, which opens the shard itself so the async composition entry point never touches the engine, dropping the facade signals that owner so the shard's final drop happens there; the owner acknowledges a write only after the engine's flush, the hard-exit test finds every acknowledged write after a process exit that skipped the drop, and the benchmark records executor responsiveness during construction and reopen (including a lock-backoff wait), a concurrent scan, a write burst, a build, and a close.
+ADR-I-0027 holds: no engine call occupies an async executor thread and every acknowledged write survives a hard exit, shown by the hard-exit test, the close-then-reopen test, and the responsiveness benchmark during construction and reopen (including a lock-backoff wait), a concurrent scan, a write burst, a build, and a close.
 A zero-norm record embedding is rejected at indexing as a typed per-record failure before any adapter sees it, and a zero-norm query scores every candidate zero with a truthful verdict, both proven in both adapters by parity fixtures.
 The engine contract canary passes on the pinned version.
 The dependency-weight report records unstripped and stripped release deltas and the effect of feature trimming.
@@ -161,12 +160,12 @@ No public facade change beyond the telemetry field and the published maximum-sur
 The companion evaluation repository is a development aid; its own work is planned and tracked there, and this document records only what its measurements let this phase decide.
 
 - The library exposes, through an ordinary traced retrieval, everything a raw-vector baseline needs: the vector candidates with scores and the completeness verdict in telemetry; the honest way to use them is one singleton-scoped traced retrieval per measured object kind with a limit of the section budget multiplied by the maximum surfaces per object, deduplicated by object.
-- The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is the evidence that gates the default flip recorded in ADR-I-0023; it is consumed at the closeout task and by that later decision, not produced by this plan.
+- The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is closeout evidence and a revisit trigger for the embedded default recorded in ADR-I-0023 (a difference between modes reopens it); it is consumed at the closeout task, not produced by this plan.
 - No candidate-search facade or configuration surface is added for the evaluation repository; the one public addition made for its trace reading is the published maximum-surfaces-per-object-kind policy value (ADR-I-0026), and if its measurements ever require more, that is a library decision taken on its own record.
 
 ## Evaluation tie-in
 
-The evaluation repository is expected to run its continuity suite in both vector modes; identical scenario results are what the parity contract predicts, and the comparison is the evidence that gates the later default-flip decision recorded in ADR-I-0023.
+The evaluation repository is expected to run its continuity suite in both vector modes; identical scenario results are what the parity contract predicts, and a difference between modes is a revisit trigger for the embedded default (ADR-I-0023).
 How that configuration is built and run is planned in the evaluation repository; this phase consumes the comparison at closeout and cites nothing else from it.
 
 ## Deferral-reconfirmation checklist
@@ -188,7 +187,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 4. Hint filter semantics.
    Parked claim: query-side hint semantics belong to the port contract.
    Re-verified: the filter type and both match-or-unknown implementations were deleted in the structured-verdict phase, and no consumer asks for a vector-layer predicate (the evaluation surface policy carries object types and budgets only).
-   Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prohibition and re-entry paths are recorded in ADR-I-0024.
+   Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prefilter rule and candidate predicates are recorded in ADR-I-0024.
 5. Evaluation baseline capability.
    Parked claim: the baseline re-implements a hidden raw-vector capability against the payload schema.
    Re-verified: one singleton-scoped traced retrieval per measured kind reproduces the direct per-kind search exactly, which a sliced mixed-kind top-K would not; each retrieval's completeness verdict reports whether that kind's top-K was determinate over the scoped population (exhaustive) or only closed within the index's returned prefix (boundary verdicts), and the baseline records which; the evaluation adapter can hold item text from ingest.
@@ -198,11 +197,12 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 
 - Embedded engine: the in-process build of the service backend (Qdrant Edge), on the decade-scale portability standard and the two spikes' measurements; the in-house exact scan and the SQLite vector extension are rejected alternatives (ADR-I-0023).
 - Exactness: a threshold property shipped at the exact-scan setting; index, quantization, and memory-map tuning is a later measured decision (ADR-I-0023).
-- Default mode: stays opt-in this phase; the flip is reopened by the evaluation suite running every dataset in embedded mode with identical results and one corpus at the guidance size (ADR-I-0023, Revisit When).
+- Default mode: embedded from this phase, licensed by the phase's own parity suite and service-free integration path under the defaults-match-evidence rule (ADR-I-0021); the evaluation repository's cross-mode run is a revisit trigger, not a gate (ADR-I-0023).
+- Engine discipline: every engine call on a dedicated blocking owner; a write acknowledged only after the engine's flush; signal-only facade drop (ADR-I-0027).
 - Latency guidance: measured in-phase by a benchmark over a synthetic corpus at the configured dimension, published in documentation, revised through documentation.
 - Dependency weight: the unstripped delta is recorded; the stripped delta and feature trimming are measured in-phase, and a material change reopens ADR-I-0023.
 - Parity suite placement: contract parity in the library, behaviour parity in the evaluation repository (above).
 - Settings shape: separate mode and path keys with `collection_name` as the backend-neutral namespace key naming one shard directory per collection, not a connection string interpreted by mode (ADR-I-0023).
-- Hint families: all dropped from the vector record, with the two named re-entry paths (ADR-I-0024, ADR-I-0025).
+- Hint families: all dropped from the vector record, with the two candidate predicates noted (ADR-I-0024, ADR-I-0025).
 - Text columns: readable text dropped, embedded text kept as provenance, governed by the three sentences in ADR-I-0025.
 - Evaluation baseline: trace-sourced, no facade change (ADR-I-0026).
