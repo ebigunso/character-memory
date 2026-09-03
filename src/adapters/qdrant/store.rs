@@ -269,6 +269,18 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             });
         }
 
+        let actual_vector_size = u64::try_from(query.query_embedding.len()).unwrap_or(u64::MAX);
+        if actual_vector_size != self.vector_size {
+            return Err(CollectionCompatibilityError {
+                collection: self.collection_name.clone(),
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: self.vector_size,
+                    actual: actual_vector_size,
+                },
+            }
+            .into());
+        }
+
         let zero_norm = query.is_zero_norm();
         let fetch_limit_cap = if zero_norm {
             usize::try_from(u32::MAX).unwrap_or(usize::MAX)
@@ -687,6 +699,26 @@ mod tests {
             assert!(recall.candidates.is_empty());
             assert_eq!(recall.completeness, VectorRecallCompleteness::NotRequested);
         }
+    }
+
+    #[tokio::test]
+    async fn wrong_dimension_zero_norm_query_fails_before_contacting_qdrant() {
+        let store =
+            QdrantVectorCandidateStore::new("http://127.0.0.1:1", "not_contacted", 2).unwrap();
+        let query = VectorCandidateSearch::new(vec![0.0], 10, vec![ObjectType::Episode]);
+
+        let error = store.search_candidates(&query).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: 2,
+                    actual: 1,
+                },
+            }) if collection == "not_contacted"
+        ));
     }
 
     #[test]
