@@ -23,7 +23,7 @@ supersession_scope: null
 ## Context and Problem Statement
 
 The companion evaluation repository (a development aid, not core library functionality) runs a vector-only baseline: ingest through the library, then rank by plain vector similarity to measure what hybrid retrieval adds.
-As built, that baseline held its own client to the vector service, ran one filtered search per object kind against the library's collection, read three payload fields by hard-coded name, re-implemented best-score-per-object deduplication and score ordering, and took item text from a payload column.
+Before this record, that baseline held its own client to the vector service, ran one filtered search per object kind against the library's collection, read three payload fields by hard-coded name, re-implemented best-score-per-object deduplication and score ordering, and took item text from a payload column.
 That is a hidden capability: the baseline depended on an adapter-private schema, duplicated ordering the library owns, and could not run at all against an embedded store (ADR-I-0023).
 The question is what capability the library must expose so the baseline stops reaching into a store.
 
@@ -31,7 +31,7 @@ The question is what capability the library must expose so the baseline stops re
 
 - Evaluation tooling must not grow library surface that no product use case has demanded (ADR-I-0020's driver).
 - The library is not a vector-database abstraction, and vector-only candidates must never become behavior-influencing memory without graph verification (project philosophy; the persistent-graph-authority phase's acceptance criteria).
-- The retrieval trace already is the raw vector recall: the canonical, pre-verification top-K with object reference, surface, score, and rank, scoped by the configured object types and sized by the candidate limit, and ADR-I-0024 adds the completeness verdict, which says either that the scoped population was scored exhaustively (top-K determinate over the population) or, for an indexed answer, only whether the cutoff cohort within the index's returned prefix was closed.
+- The retrieval trace is the raw vector recall: the canonical, pre-verification top-K with object reference, surface, score, and rank, scoped by the configured object types and sized by the candidate limit, and ADR-I-0024 adds the completeness verdict, which says either that the scoped population was scored exhaustively (top-K determinate over the population) or, for an indexed answer, only whether the cutoff cohort within the index's returned prefix was closed.
 - Every store's physical schema is adapter-private; two adapters must not create two baseline implementations.
 
 ## Decision
@@ -40,7 +40,7 @@ The library exposes no raw candidate-search surface and no facade change.
 The evaluation repository's vector-only baseline issues one ordinary `retrieve` with tracing enabled per measured object kind, each with a singleton object-type scope, and reads each retrieval's completeness verdict from telemetry; a single mixed-kind top-K is not used, because a global cutoff can exclude an underrepresented kind's valid candidates without any open verdict.
 The trace's vector candidates are object-and-surface pairs recorded before the pipeline's object-level deduplication, so the baseline's candidate limit per kind is that kind's section budget multiplied by the maximum number of embedding surfaces one object of that kind can have (a constant the library publishes as public policy per object kind, alongside the surface policy that defines it, so an ordinary caller never duplicates private policy and a new surface changes the published value in the same change; one for every kind at the time of this record), and the baseline deduplicates by object keeping the best-scoring surface and truncates to the budget.
 That limit is sufficient by construction: an object ranked within the budget by its best surface has that surface inside the surface top-K of budget times surfaces, because the surfaces above it belong to fewer than the budget's worth of objects; therefore an exhaustive surface-level verdict at that limit makes the object-level top-budget determinate over the scoped population, while a closed boundary verdict makes it determinate only relative to the index's returned prefix (an approximate index may have omitted records before tie closure), and the baseline records which of the two it obtained; the contract is pinned by a fixture whose objects carry every surface.
-Item text comes from the evaluation repository's own ingest records, keyed by the external identity it already reverse-maps, never from a store payload (ADR-I-0025's third sentence: consumers needing candidate content hydrate by object id).
+Item text comes from the evaluation repository's own ingest records, keyed by the external identity it reverse-maps, never from a store payload (ADR-I-0025's third sentence: consumers needing candidate content hydrate by object id).
 
 What this record asks of the evaluation repository, recorded as the library-facing contract and nothing more:
 
@@ -57,7 +57,7 @@ Keeping the baseline inside the traced retrieval path means the measurement of "
 ## Implementation Impact
 
 - Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade, so the acceptance criterion "no public facade change beyond the telemetry field and this policy value" holds.
-- Evaluation repository: its baseline moves onto the trace under its own plan; nothing in this repository depends on how.
+- Evaluation repository: its baseline reads the trace under its own plan; nothing in this repository depends on how.
 
 ## Considered Options
 
@@ -92,7 +92,7 @@ Not covered: any headroom the baseline adds to a kind's limit, the shape of the 
 ## Validation
 
 - An A/B run of the vector-only configuration (direct search versus trace-derived) shows identical item identities and ranks per question before the direct path is deleted.
-- After the switch, the evaluation adapter contains no search call against the vector service and no payload field constant.
+- The evaluation adapter contains no search call against the vector service and no payload field constant.
 - The baseline runs unchanged in embedded mode.
 
 ## Revisit When

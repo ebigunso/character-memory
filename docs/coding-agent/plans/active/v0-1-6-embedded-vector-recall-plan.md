@@ -31,7 +31,7 @@
 
 ## Assumptions
 - A1: The embedded engine is `qdrant-edge` pinned exactly at 0.8.0 (beta); its API is guarded by a contract canary, and the pin is bumped only with a re-run of the canary and the parity suite.
-- A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison that gates the later embedded-default revisit decision.
+- A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison consumed as closeout evidence and as a revisit trigger for the embedded default.
 
 ## Tasks
 

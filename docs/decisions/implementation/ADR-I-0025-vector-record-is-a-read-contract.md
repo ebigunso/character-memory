@@ -23,8 +23,8 @@ supersession_scope: partial
 ## Context and Problem Statement
 
 ADR-I-0005 decided that the vector payload stores filterable metadata and graph pointers, and the payload design note enumerated thirty-four fields with thirty-one of them indexed; the implemented manifest carried thirty-three with thirty indexed after the record-type field was dropped in the structured-verdict phase.
-By the time the embedded adapter (ADR-I-0023) was designed, the library read back exactly three of those fields — object id, object type, surface — and the only external reader was the companion evaluation repository's vector-only baseline reading the readable text column.
-The relationship hints were frozen at upsert and never updated by the link write path; the lifecycle hints described vectors the correction and forgetting paths delete; the readable text column duplicated graph text with a prefix removed; and every field was about to be mirrored into a second physical schema.
+When the embedded adapter (ADR-I-0023) was designed, the library read back exactly three of those fields — object id, object type, surface — and the only external reader was the companion evaluation repository's vector-only baseline reading the readable text column.
+The relationship hints were frozen at upsert and never updated by the link write path; the lifecycle hints described vectors the correction and forgetting paths delete; the readable text column duplicated graph text with a prefix removed; and the embedded adapter would have mirrored every field into a second physical schema.
 ADR-I-0002's implementation note said to "persist both `embedding_text` and `content_text` where useful", which left the two text columns' meanings undefined.
 The forward-looking case for each family was analysed against the planned phases (scoped continuity, factual rigor and temporal validity, retrieval observability, associative recall, assisted remember, multimodal) before deciding.
 
@@ -32,8 +32,8 @@ The forward-looking case for each family was analysed against the planned phases
 
 - A column earns its place when a reader exists; carrying it unread costs two adapter mappings, index creation per collection, a parity fixture, and the sync discipline ADR-I-0005 named in its own tradeoffs.
 - Prefilter hints are only safe on immutable or synchronised data; the relationship, lifecycle, ranking, and mutable time hints were none of those.
-- Re-adding an immutable column later is a backfill from graph authority, not a re-index.
-- Once embedding surfaces are generated or caller-supplied (the assisted-remember phase; the write plan already carries a caller-supplied surface), the text a vector embeds is no longer re-derivable from graph authority, so it is provenance in the philosophy's sense.
+- Re-adding an immutable column is a backfill from graph authority, not a re-index.
+- When embedding surfaces are generated or caller-supplied (the assisted-remember phase; the write plan carries a caller-supplied surface), the text a vector embeds is not re-derivable from graph authority, so it is provenance in the philosophy's sense.
 - Read-out text is graph authority's job; the vector layer suggests, it does not describe.
 
 ## Decision
@@ -45,23 +45,23 @@ Read-out text lives in graph authority.
 The vector record stores only the embedded surface, as provenance of what was ranked.
 Consumers needing candidate content hydrate by object id.
 
-`content_text` is dropped.
-The relationship refs (episode, observation, thread, entity, participant, speaker, supersedes), the lifecycle and currentness flags, the time hints, the ranking and salience hints, the object-specific hints, the graph URI, and the raw source reference leave the vector write path.
+There is no readable-text column (`content_text`).
+The relationship refs (episode, observation, thread, entity, participant, speaker, supersedes), the lifecycle and currentness flags, the time hints, the ranking and salience hints, the object-specific hints, the graph URI, and the raw source reference are not part of the vector record.
 Dropping the graph URI partially supersedes ADR-I-0001's clause that every vector payload carries it: the stable object id remains the cross-store identity and the graph URI is derived from it by graph authority, so the pointer was a redundant copy of the id; ADR-I-0001's stable-id decision itself is unchanged.
-The typed field manifest introduced in the structured-verdict phase remains the single source of both adapters' column sets and shrinks to the five entries.
+The typed field manifest is the single source of both adapters' column sets and holds exactly the five entries.
 ADR-I-0024 rules that a predicate reads only synchronised or immutable values and notes the two candidate predicates (a synchronised scope id; an immutable time window over `created_at` and `observed_at` backfilled from graph authority), so a returning column arrives with its predicate and its reader.
 
 ## Implementation Impact
 
-- The vector record type and the surface builders lose the hint carriers; the payload map serialises five fields for both adapters, which share the engine family's payload conventions.
-- The service adapter stops creating per-field payload indexes for dropped fields.
-- The companion evaluation repository's vector-only baseline stops reading the readable text column and sources item text from its own ingest records (ADR-I-0026).
-- The payload design note's field categories and indexing policy are superseded by this record and carry a supersession note.
+- The vector record type and the surface builders carry no hint fields; the payload map serialises five fields for both adapters, which share the engine family's payload conventions.
+- The service adapter creates payload indexes only for object id and object type.
+- The companion evaluation repository's vector-only baseline sources item text from its own ingest records, not from a payload column (ADR-I-0026).
+- The payload design note's field categories and indexing policy are superseded by this record and carry a supersession note saying so.
 - No migration: under the Compatibility Policy, existing stores are rebuilt from graph authority.
 
 ## Considered Options
 
-1. Five-column read contract; keep `embedding_text` only; drop the hint families with named re-entry paths.
+1. Five-column read contract; keep `embedding_text` only; no hint families, with the candidate predicates noted in ADR-I-0024.
 2. Keep both text columns.
 3. Drop both text columns.
 4. Keep the unread hints for the planned phases.
@@ -70,24 +70,24 @@ ADR-I-0024 rules that a predicate reads only synchronised or immutable values an
 ## Decision Outcome
 
 Chosen option: **Option 1**.
-It stores what is read, keeps the one column that becomes non-re-derivable, and prices re-entry honestly.
+It stores what is read, keeps the one column that ceases to be re-derivable when surfaces are generated, and prices a returning column honestly.
 
 ### Rejected Alternatives
 
-Option 2: `content_text` is a deterministic function of graph object fields at every surface builder, so it never carries information graph authority lacks, and its one reader moves to its own ingest records; rejected outright.
-Option 3: `embedding_text` is cheap and becomes the only record of what a generated or caller-supplied vector embeds; rejected outright.
-Option 4: no planned phase names a vector-layer predicate the existing fields could serve without new synchronisation work — scoped retrieval needs a scope id kept in sync by linking, temporal validity is a ranking property of new claim objects, salience evolves by reinforcement, and lifecycle hints describe vectors the write path deletes; reopened only through the re-entry paths.
+Option 2: `content_text` is a deterministic function of graph object fields at every surface builder, so it never carries information graph authority lacks, and its one reader has its own ingest records; rejected outright.
+Option 3: `embedding_text` is cheap and is the only record of what a generated or caller-supplied vector embeds; rejected outright.
+Option 4: no planned phase names a vector-layer predicate the existing fields could serve without new synchronisation work — scoped retrieval needs a scope id kept in sync by linking, temporal validity is a ranking property of new claim objects, salience evolves by reinforcement, and lifecycle hints describe vectors the write path deletes; reopened only under ADR-I-0024's prefilter rule.
 Option 5 is the only subset with a forward-looking case that survives the synchronisation test; it was declined because no phase document asks for the predicate and the columns backfill cheaply when one does.
 
 ## Consequences
 
 - Positive: both adapters mirror one five-field manifest; the embedded shard stores those fields as payload beside the vector with keyword indexes on object id (the delete selector) and object type (the scope predicate); ADR-I-0023 owns the physical layout.
-- Positive: the embedded surface is preserved as vector provenance before surfaces become generated.
-- Negative / tradeoffs: a future scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the re-entry paths make that step predictable.
+- Positive: the embedded surface is preserved as vector provenance, which matters once surfaces are generated rather than derived.
+- Negative / tradeoffs: a scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the candidate predicates noted in ADR-I-0024 make that step predictable.
 
 ## Decision Boundary
 
-Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance and the schema version ADR-I-0007 requires; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture through ADR-I-0024's re-entry paths.
+Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance and the schema version ADR-I-0007 requires; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture under ADR-I-0024's prefilter rule.
 
 Not covered: the physical encoding of each column per adapter, and graph authority's own denormalised fields.
 
@@ -105,7 +105,7 @@ Not covered: the physical encoding of each column per adapter, and graph authori
 
 ## Consultation impact
 
-Question asked: whether the unread hint families and the readable text column should be kept for planned phases; ruling adopted the five-column contract with the three governing sentences and the named re-entry paths.
+Question asked: whether the unread hint families and the readable text column should be kept for planned phases; ruling adopted the five-column contract with the three governing sentences and the noted candidate predicates.
 
 ## More Information
 

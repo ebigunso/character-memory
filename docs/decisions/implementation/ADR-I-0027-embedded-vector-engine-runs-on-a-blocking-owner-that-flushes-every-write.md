@@ -29,7 +29,7 @@ An adapter that relies on the final drop for persistence therefore loses every u
 
 ## Decision Drivers
 
-- No engine call may occupy an async executor thread; the library's other embedded stores already hold this line.
+- No engine call may occupy an async executor thread; the library's other embedded stores hold this line.
 - A write the library has acknowledged must survive a process exit that skips orderly shutdown; a character that forgets after a crash violates continuity silently.
 - No port or facade method is added for shutdown; the existing facade drop remains the only close path.
 - The rule must be pinned to measured engine behaviour so a change in the engine reopens it rather than silently voiding it.
@@ -93,7 +93,7 @@ Not covered: the channel and thread mechanics, the backoff bound, and the batchi
 
 ## Consultation impact
 
-Question asked (review round 22): whether the shard's drop-time flush is persistence or compaction; a process-level probe settled it as persistence, and the decider's rule "await the flush or document the weaker guarantee" was met by flushing per write.
+Question asked in review: whether the shard's drop-time flush is persistence or compaction; a process-level probe settled it as persistence, and the decider's rule "await the flush or document the weaker guarantee" was met by flushing per write.
 
 ## More Information
 
