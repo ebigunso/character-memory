@@ -24,7 +24,7 @@ supersession_scope: null
 
 The vector candidate port promised deterministic admission: at most `limit` unique object-and-surface matches in canonical order, with equal-score cohorts at the cutoff closed before truncation (ADR-I-0022 records the fix).
 The service adapter closes the cohort by growing its fetch up to a bound, but when the bound is hit it returns the truncated set with no signal, so a caller cannot tell "this top-K is determinate" from "membership may vary between runs", and evaluation evidence later attributes the variation to retrieval.
-Separately, the port once carried currentness predicates implemented as match-or-unknown: a record whose payload lacked the field satisfied a positive predicate in both the service adapter and the test fake, so a memory with a stale or missing value could be silently excluded from recall by a filter that was meant to include it.
+Separately, the port once carried currentness predicates implemented as match-or-unknown: a record whose payload lacked the field satisfied a positive predicate in both the service adapter and the test fake, so the filter admitted records under a rationale ("current") that was not true of them; and because the field was written only at upsert, a record whose value had since changed in graph authority was filtered on a stale value, admitted when it should not have been or excluded when it should have been returned.
 Those filters were deleted as speculative when no caller used them.
 A second adapter (ADR-I-0023) makes both gaps matter: below its indexing threshold an embedded shard scans exhaustively and needs a way to say so, and two adapters must agree on what a prefilter may do.
 
@@ -47,8 +47,8 @@ A predicate that needs a stored value the write paths do not keep current is not
 
 ## Character Memory Relevance
 
-Recall that silently drops memories, or silently varies between runs, is the unexplained recall the philosophy forbids: a character that forgets an episode because a filter matched a blank looks like a character that never lived it.
-The verdict keeps determinism inspectable, and the prefilter rule keeps a candidate stage from ever being the reason a memory is unreachable.
+Recall that silently varies between runs, or that admits and excludes memories on values nobody keeps true, is the unexplained recall the philosophy forbids: a character that forgets an episode because a stale column excluded it looks like a character that never lived it, and a filter that admits on a blank gives a rationale that is false.
+The verdict keeps determinism inspectable; the prefilter rule keeps a candidate stage from being the reason a memory is unreachable, and keeps every stated filter rationale true.
 
 ## Implementation Impact
 

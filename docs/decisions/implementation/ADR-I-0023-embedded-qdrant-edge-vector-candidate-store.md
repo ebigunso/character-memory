@@ -15,7 +15,7 @@ depends_on: [implementation/ADR-I-0003-qdrant-oxigraph-defaults.md, implementati
 implements: []
 supersedes: [implementation/ADR-I-0003-qdrant-oxigraph-defaults.md]
 superseded_by: null
-supersession_scope: partial   # ADR-I-0003's vector-backend default only; its backend roles stay authoritative and its graph default was already superseded by ADR-I-0021
+supersession_scope: partial   # ADR-I-0003's vector-backend default only; its backend roles and its embedded graph description stay authoritative
 ---
 
 # ADR-I-0023: Embedded Qdrant Edge is the default vector candidate store; the service adapter remains the service mode
@@ -132,7 +132,7 @@ Question asked: which embedded engine, on the two spikes' evidence; the consult'
 
 ## More Information
 
-- ADR-I-0003 remains authoritative for the backend roles (vectors in the service backend family, graph authority in Oxigraph); this record supersedes only its vector-backend default, answering its own revisit clause; ADR-I-0021 already superseded its graph default.
+- ADR-I-0003 remains authoritative for the backend roles (vectors in the service backend family, graph authority in Oxigraph); this record supersedes only its vector-backend default, answering its own revisit clause; its embedded graph description is untouched (ADR-I-0021 made persistent embedded storage the validated graph default without superseding it).
 - ADR-I-0024 (port contract this adapter implements, including the verdict rule), ADR-I-0025 (the record it stores), and ADR-I-0027 (how the adapter runs the engine and makes writes durable).
 - The two spike reports (2026-09-02) are transient working artifacts; the numbers above are their record.
 - The embedded vector candidate recall phase document in the roadmap-phases design directory.
