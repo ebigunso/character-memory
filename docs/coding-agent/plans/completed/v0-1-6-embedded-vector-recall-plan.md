@@ -177,6 +177,7 @@
   - src/**/tests (fake stores only)
   - src/api/types/retrieval.rs (doc comments only)
   - src/ports/vector_candidate.rs (doc comments only)
+  - src/composition.rs, src/config/app_settings.rs (public constructor doc comments only; deferred from the Task_4 Copilot review)
   - src/adapters/qdrant/store.rs, src/adapters/qdrant/payload.rs, src/adapters/qdrant_edge/mod.rs (Task_8 audit dispositions only)
   - src/models/vector/candidate_record.rs (header comment only)
   - tests/vector_port_contract_tests.rs, tests/support/** (point-id parity fixture and fake-retirement fallout)
@@ -193,7 +194,7 @@
 - acceptance:
   - Zero-hit census for the retired fake and record type.
   - All five checklist rows cite evidence in the Progress Log.
-  - Task_8 audit dispositions landed: one point-identity derivation (the v5 derivation) shared by both adapters with a parity assertion and no compat shim; one shared read function for the record contract returning the closed error vocabulary, with the service adapter's stringly database errors for payload and scroll-limit faults removed; the canary pins that an indexed shard searched exactly returns the exhaustive result; the service zero-norm verdict's `scanned` comes from the scope count or the loop invariant is stated; the duplicate vector-config validation is reduced to one or justified in place; the stale header comments and README line are corrected.
+  - Task_8 audit dispositions landed: one point-identity derivation (the v5 derivation) shared by both adapters with a parity assertion and no compat shim; one shared read function for the record contract returning the closed error vocabulary, with the service adapter's stringly database errors for payload and scroll-limit faults removed; the canary pins that an indexed shard searched exactly returns the exhaustive result; the service zero-norm verdict's `scanned` comes from the scope count or the loop invariant is stated; the duplicate vector-config validation is reduced to one or justified in place; the stale header comments and README line are corrected; the public facade constructor and `Settings::new` rustdoc describe both vector-store modes in backend-neutral terms (embedded default with a store path; explicit service mode with a connection string).
   - The public completeness type documents all four verdict meanings and the `scanned` and `fetched` counters, stating that a closed boundary verdict is deterministic only for the index-returned prefix, never population-level completeness; the port trait's doc comment states the verdict guarantees (tie closure through the shared loop; exhaustive only on an unindexed shard with a closed cohort; open at the bound) so a future adapter cannot label an indexed prefix exhaustive (deferred from the Task_2 review to avoid re-cascading the stack mid-wave).
 - validation:
   - kind: command
