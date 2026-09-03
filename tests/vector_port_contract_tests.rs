@@ -2,10 +2,11 @@ use std::path::Path;
 
 use async_trait::async_trait;
 use character_memory::{
-    CharacterMemory, ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
-    EmbeddingProvider, EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObjectType,
-    ObservationDraft, RememberInput, RememberOptions, RetrievalCandidateLimits, RetrievalContext,
-    Settings, VectorCandidateTrace, VectorRecallCompleteness,
+    zero_norm_record_fixture, CharacterMemory, ConfigValidationError, ConfigValidationReason,
+    CustomError, EmbeddingError, EmbeddingProvider, EpisodeDraft, ForgetMemoryDraft,
+    LifecycleTargetRef, MemoryId, ObjectType, ObservationDraft, RememberInput, RememberOptions,
+    RetrievalCandidateLimits, RetrievalContext, Settings, VectorCandidateTrace,
+    VectorIndexingCause, VectorRecallCompleteness,
 };
 use config::{builder::DefaultState, Config, ConfigBuilder};
 use tempfile::TempDir;
@@ -79,6 +80,40 @@ async fn default_construction_rejects_a_missing_vector_store_path() {
 }
 
 #[tokio::test]
+async fn embedded_zero_norm_contract_rejects_records_and_exhaustively_scores_queries() {
+    let temp = TempDir::new().unwrap();
+    let memory = open_embedded_for_zero_norm(temp.path(), "embedded_zero_norm")
+        .await
+        .unwrap();
+
+    assert_zero_norm_contract(&memory).await;
+}
+
+#[tokio::test]
+async fn service_and_embedded_share_the_zero_norm_contract() {
+    if std::env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
+        return;
+    }
+
+    dotenvy::dotenv().ok();
+    let temp = TempDir::new().unwrap();
+    let collection = test_support::unique_collection_name();
+    let embedded = open_embedded_for_zero_norm(temp.path(), "parity_zero_norm")
+        .await
+        .unwrap();
+    let service = open_service_for_zero_norm(&collection).await.unwrap();
+
+    let result = async {
+        assert_zero_norm_contract(&embedded).await;
+        assert_zero_norm_contract(&service).await;
+    }
+    .await;
+
+    test_support::cleanup_collection(&collection).await;
+    result
+}
+
+#[tokio::test]
 async fn service_and_embedded_admit_identical_candidates_in_identical_order() {
     if std::env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
         return;
@@ -136,6 +171,33 @@ async fn open_service(collection: &str) -> Result<CharacterMemory, CustomError> 
     .await
 }
 
+async fn open_embedded_for_zero_norm(
+    path: &Path,
+    collection: &str,
+) -> Result<CharacterMemory, CustomError> {
+    open_for_zero_norm(
+        common_settings()
+            .set_override("vector_store_path", path.to_string_lossy().into_owned())
+            .unwrap(),
+        collection,
+    )
+    .await
+}
+
+async fn open_service_for_zero_norm(collection: &str) -> Result<CharacterMemory, CustomError> {
+    let connection = std::env::var("QDRANT_CONNECTION_STRING")
+        .map_err(|error| CustomError::ConfigParseError(error.to_string()))?;
+    open_for_zero_norm(
+        common_settings()
+            .set_override("vector_store_mode", "service")
+            .unwrap()
+            .set_override("qdrant_connection_string", connection)
+            .unwrap(),
+        collection,
+    )
+    .await
+}
+
 async fn open(
     builder: ConfigBuilder<DefaultState>,
     collection: &str,
@@ -146,6 +208,29 @@ async fn open(
         settings,
         collection.to_owned(),
         Box::new(ConstantEmbeddingProvider(vector_size)),
+    )
+    .await
+}
+
+async fn open_for_zero_norm(
+    builder: ConfigBuilder<DefaultState>,
+    collection: &str,
+) -> Result<CharacterMemory, CustomError> {
+    let settings = Settings::new(builder.build().unwrap())?;
+    let vector_size = settings.get_embedding_vector_size()?;
+    let (_, _, _, record_text, mut fixture_embedding) = zero_norm_record_fixture();
+    fixture_embedding.resize(vector_size, 0.0);
+    CharacterMemory::new_with_embedding_provider(
+        settings,
+        collection.to_owned(),
+        Box::new(ZeroNormFixtureEmbeddingProvider {
+            vector_size,
+            zero_texts: [
+                format!("Episode summary: {record_text}"),
+                ZERO_NORM_QUERY.to_owned(),
+            ],
+            fixture_embedding,
+        }),
     )
     .await
 }
@@ -187,6 +272,59 @@ async fn remember_fixture(memory: &CharacterMemory) {
         .await
         .unwrap();
     assert!(outcome.vector_indexing_failure.is_none());
+}
+
+const ZERO_NORM_QUERY: &str = "zero norm query";
+
+async fn assert_zero_norm_contract(memory: &CharacterMemory) {
+    let (object, _, _, record_text, _) = zero_norm_record_fixture();
+    let mut rejected = EpisodeDraft::new(record_text);
+    rejected.id = Some(object.id);
+    let outcome = memory
+        .remember(
+            RememberInput::new("zero norm record fixture").with_episode(rejected),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    let failure = outcome
+        .vector_indexing_failure
+        .expect("zero-norm record must produce a typed indexing failure");
+    assert!(failure.unindexed_objects.contains(&object));
+    assert_eq!(
+        failure.cause,
+        VectorIndexingCause::ZeroNormEmbedding { object }
+    );
+    let empty = memory.retrieve(episode_query()).await.unwrap();
+    assert!(empty.trace.unwrap().vector_candidates.is_empty());
+    assert_eq!(
+        empty.rationale.telemetry.vector_recall_completeness,
+        VectorRecallCompleteness::Exhaustive { scanned: 0 }
+    );
+    for value in 2..=3 {
+        let mut episode = EpisodeDraft::new(format!("positive episode {value}"));
+        episode.id = Some(id(value));
+        let outcome = memory
+            .remember(
+                RememberInput::new(format!("positive source {value}")).with_episode(episode),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        assert!(outcome.vector_indexing_failure.is_none());
+    }
+
+    let mut query = RetrievalContext::new(ZERO_NORM_QUERY).with_trace();
+    query.object_type_defaults = vec![ObjectType::Episode];
+    query.candidate_limits.max_vector_candidates = 2;
+    let outcome = memory.retrieve(query).await.unwrap();
+    let candidates = outcome.trace.unwrap().vector_candidates;
+    assert_eq!(ids(&candidates), vec![id(2), id(3)]);
+    assert!(candidates.iter().all(|candidate| candidate.score == 0.0));
+    assert_eq!(
+        outcome.rationale.telemetry.vector_recall_completeness,
+        VectorRecallCompleteness::Exhaustive { scanned: 2 }
+    );
 }
 
 async fn episode_snapshot(memory: &CharacterMemory) -> Vec<VectorCandidateTrace> {
@@ -245,6 +383,40 @@ impl EmbeddingProvider for ConstantEmbeddingProvider {
         texts: &'a [&'a str],
     ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         Ok(texts.iter().map(|_| constant_embedding(self.0)).collect())
+    }
+}
+
+struct ZeroNormFixtureEmbeddingProvider {
+    vector_size: usize,
+    zero_texts: [String; 2],
+    fixture_embedding: Vec<f32>,
+}
+
+impl ZeroNormFixtureEmbeddingProvider {
+    fn embedding(&self, text: &str) -> Vec<f32> {
+        if self.zero_texts.iter().any(|zero_text| zero_text == text) {
+            self.fixture_embedding.clone()
+        } else {
+            constant_embedding(self.vector_size)
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingProvider for ZeroNormFixtureEmbeddingProvider {
+    fn vector_size(&self) -> usize {
+        self.vector_size
+    }
+
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
+        Ok(self.embedding(text))
+    }
+
+    async fn bulk_generate_embeddings<'a>(
+        &self,
+        texts: &'a [&'a str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        Ok(texts.iter().map(|text| self.embedding(text)).collect())
     }
 }
 

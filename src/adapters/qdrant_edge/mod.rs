@@ -1020,8 +1020,8 @@ mod tests {
         reopened.close().await.unwrap();
     }
 
-    #[test]
-    fn qdrant_edge_0_8_0_contract_canary() {
+    #[tokio::test]
+    async fn qdrant_edge_0_8_0_contract_canary() {
         if env::var(CHILD_MODE).as_deref() == Ok("raw_no_flush") {
             let path = PathBuf::from(env::var(CHILD_PATH).unwrap()).join("raw");
             fs::create_dir_all(&path).unwrap();
@@ -1063,6 +1063,33 @@ mod tests {
             std::any::type_name::<qdrant_edge::PointStruct>(),
             std::any::type_name::<qdrant_client::qdrant::PointStruct>()
         );
+
+        let (records, embeddings) = records(3, &[1.0, 0.0]);
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "zero_threshold", 2)
+            .await
+            .unwrap();
+        assert!(store.exact_scan);
+        upsert(&store, &records, &embeddings).await;
+        store.close().await.unwrap();
+
+        let populated = open_shard(temp.path(), "zero_threshold", 2, 0).unwrap();
+        assert_eq!(populated.count(CountRequest::new()).unwrap(), 3);
+        assert_eq!(populated.info().unwrap().indexed_vectors_count, 0);
+        drop(populated);
+
+        let reopened = QdrantEdgeVectorCandidateStore::open(temp.path(), "zero_threshold", 2)
+            .await
+            .unwrap();
+        assert!(reopened.exact_scan);
+        assert_eq!(
+            reopened
+                .search_candidates(&query(10))
+                .await
+                .unwrap()
+                .completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 3 }
+        );
+        reopened.close().await.unwrap();
     }
 
     #[tokio::test]
