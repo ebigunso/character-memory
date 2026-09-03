@@ -238,6 +238,7 @@ name = "character_memory"
 version = "0.1.5"
 dependencies = [
  "async-trait",
+ "character_memory",
  "chrono",
  "config",
  "dotenvy",

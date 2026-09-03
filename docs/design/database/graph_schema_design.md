@@ -44,7 +44,7 @@ urn:cmem:link:<uuid>
 
 The graph also stores the UUID, object type, graph URI, and schema version as literal properties.
 
-This is redundant by design. The URI is efficient for graph edges, while the literal fields make debugging, migration checks, and cross-store joins easier. Qdrant carries the same `object_id` and `graph_uri` so vector candidates can be joined back to graph truth without guessing.
+This is redundant inside the graph representation by design. The URI is efficient for graph edges, while the literal fields make debugging and migration checks easier. Qdrant carries `object_id`; retrieval uses that stable identity to hydrate graph truth without duplicating the graph URI in vector payloads.
 
 ## Object Classes
 
@@ -370,20 +370,19 @@ This means a reopened graph store can answer object queries, link queries, prove
 Qdrant, Oxigraph, and the retrieval stats store share stable object IDs, but they do not share authority.
 
 ```text
-Qdrant   recalls candidates and applies coarse payload filters
+Qdrant   recalls candidates and filters by canonical object type
 Stats    supplies derived selectivity/fanout inputs
 Oxigraph verifies existence, relationships, provenance, lifecycle, and context
 ```
 
-This is why the vector payload intentionally duplicates some graph-derived hints. Duplication is acceptable for speed as long as retrieval treats those hints as non-authoritative.
+The vector payload does not duplicate graph-derived hints. Retrieval joins candidates to Oxigraph by stable object ID, then applies relationships, provenance, lifecycle, currentness, and context from graph authority.
 
 Internal reconciliation diagnostics can report cross-store drift:
 
 - vector point exists but graph object is missing
 - graph object exists but vector point is missing
-- vector payload `graph_uri` does not match the canonical graph URI
-- vector lifecycle/currentness hints disagree with graph authority
 - vector payload schema version is unsupported
+- vector payload identity or surface token is malformed
 - graph object is missing required provenance
 - stats counter refers to graph edge/object state that no longer exists
 - stats health indicates conservative fallback should be used
