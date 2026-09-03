@@ -13,7 +13,7 @@ async fn public_remember_and_retrieve_use_graph_authoritative_path() {
     let (memory, collection_name) = match test_support::try_setup_character_memory().await {
         Ok(setup) => setup,
         Err(CustomError::VectorDatabaseError(error))
-            if test_support::is_qdrant_unavailable_error(&error) =>
+            if test_support::should_skip_qdrant_unavailable(&error) =>
         {
             println!("skipping live public facade test because Qdrant is unavailable: {error}");
             return;
@@ -106,7 +106,7 @@ async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
     let (memory, collection_name) = match test_support::try_setup_character_memory().await {
         Ok(setup) => setup,
         Err(CustomError::VectorDatabaseError(error))
-            if test_support::is_qdrant_unavailable_error(&error) =>
+            if test_support::should_skip_qdrant_unavailable(&error) =>
         {
             println!(
                 "skipping live public lifecycle facade test because Qdrant is unavailable: {error}"
