@@ -9,6 +9,7 @@ last_updated: "2026-07-23"
 ## Repo-Specific Orchestrator Policies
 
 - When creating or updating a PR, follow the format specified in `.github/pull_request_template.md`.
+- PR titles state what the change achieves, not a list of its contents; the contents go in the body. Never use bare version numbers or milestone labels as titles.
 - Layer-boundary reorganizations must include a `use crate::` dependency-direction audit as required Reviewer evidence per ADR-I-0018 (ports/policy/models never import usecases, and import api only for the ADR's one named exception: the `api::types::retrieval` trace/telemetry vocabulary; errors/domain import no upper layer); file-placement conformance alone does not catch inverted edges hidden behind re-export shims.
 - Scope the ADR-I-0018 dependency-direction audit to the diff under review (e.g. `git diff | grep '^+.*use crate::'`) when reviewing incremental changes: pre-existing ports/policy/models imports of domain types via `crate::api::types` are grandfathered debt awaiting a one-time sweep to `crate::domain`, and a blanket grep forces per-line disambiguation between old and newly introduced edges.
 - PR feedback monitors must include terminal merged/closed state (harness pr-review-monitoring owns arming for reviews/comments but does not cover terminal-state watch) (user-directed 2026-07-19).
