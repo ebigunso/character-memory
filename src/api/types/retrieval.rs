@@ -278,6 +278,14 @@ pub struct RetrievalTelemetry {
     pub section_pressure: Vec<SectionPressureSummary>,
 }
 
+/// Completeness of the vector candidate set reported for a retrieval.
+///
+/// ```
+/// use character_memory::api::types::VectorRecallCompleteness as ApiCompleteness;
+/// use character_memory::VectorRecallCompleteness;
+///
+/// let _: VectorRecallCompleteness = ApiCompleteness::NotRequested;
+/// ```
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VectorRecallCompleteness {

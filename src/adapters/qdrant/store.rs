@@ -172,9 +172,10 @@ impl QdrantVectorCandidateStore {
         query: &VectorCandidateSearch,
         fetch_limit: usize,
     ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        let backend_limit = qdrant_scroll_fetch_limit(fetch_limit)?;
         let request = ScrollPointsBuilder::new(&self.collection_name)
             .filter(qdrant_candidate_filter(query))
-            .limit(fetch_limit as u32)
+            .limit(backend_limit)
             .with_payload(true)
             .with_vectors(false)
             .build();
@@ -269,7 +270,12 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         }
 
         let zero_norm = query.is_zero_norm();
-        let closed = close_tie_cohort(query.limit, |fetch_limit| async move {
+        let fetch_limit_cap = if zero_norm {
+            usize::try_from(u32::MAX).unwrap_or(usize::MAX)
+        } else {
+            usize::MAX
+        };
+        let closed = close_tie_cohort(query.limit, fetch_limit_cap, |fetch_limit| async move {
             if zero_norm {
                 self.scroll_zero_norm_candidate_batch(query, fetch_limit)
                     .await
@@ -463,6 +469,15 @@ fn qdrant_candidate_config(url: &str) -> QdrantConfig {
     QdrantConfig::from_url(url)
         .timeout(Duration::from_secs(QDRANT_CANDIDATE_TIMEOUT_SECS))
         .keep_alive_while_idle()
+}
+
+fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
+    u32::try_from(fetch_limit).map_err(|_| {
+        CustomError::DatabaseError(format!(
+            "Qdrant scroll limit {fetch_limit} exceeds the backend maximum {}",
+            u32::MAX
+        ))
+    })
 }
 
 fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Filter {
@@ -671,6 +686,16 @@ mod tests {
             let recall = store.search_candidates(&query).await.unwrap();
             assert!(recall.candidates.is_empty());
             assert_eq!(recall.completeness, VectorRecallCompleteness::NotRequested);
+        }
+    }
+
+    #[test]
+    fn qdrant_scroll_limit_checks_backend_width_without_narrowing() {
+        let backend_max = usize::try_from(u32::MAX).unwrap();
+        assert_eq!(qdrant_scroll_fetch_limit(backend_max).unwrap(), u32::MAX);
+
+        if let Some(too_large) = backend_max.checked_add(1) {
+            assert!(qdrant_scroll_fetch_limit(too_large).is_err());
         }
     }
 

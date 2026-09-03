@@ -46,13 +46,14 @@ impl TieClosureResult {
 
 pub(crate) async fn close_tie_cohort<F, Fut, E>(
     admitted_limit: usize,
+    fetch_limit_cap: usize,
     mut fetch: F,
 ) -> Result<TieClosureResult, E>
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = Result<Vec<VectorCandidateMatch>, E>>,
 {
-    let fetch_bound = tie_cohort_fetch_bound(admitted_limit);
+    let fetch_bound = tie_cohort_fetch_bound(admitted_limit, fetch_limit_cap);
     let mut fetch_limit = admitted_limit.saturating_add(1).min(fetch_bound);
 
     loop {
@@ -61,11 +62,10 @@ where
         let candidates = CanonicalCandidates::new(fetched);
 
         match fetch_decision(
-            admitted_limit,
             fetch_limit,
             fetch_bound,
             fetched_count,
-            &candidates,
+            tie_cohort_is_closed(&candidates, admitted_limit),
         ) {
             FetchDecision::Grow(next_limit) => fetch_limit = next_limit,
             FetchDecision::Return => {
@@ -88,20 +88,20 @@ where
     }
 }
 
-fn tie_cohort_fetch_bound(limit: usize) -> usize {
+fn tie_cohort_fetch_bound(limit: usize, fetch_limit_cap: usize) -> usize {
     limit
         .saturating_mul(TIE_COHORT_LIMIT_MULTIPLIER)
         .max(limit.saturating_add(TIE_COHORT_MIN_EXTRA_CANDIDATES))
+        .min(fetch_limit_cap)
 }
 
 fn fetch_decision(
-    admitted_limit: usize,
     fetch_limit: usize,
     fetch_bound: usize,
     fetched_count: usize,
-    candidates: &[VectorCandidateMatch],
+    tie_cohort_closed: bool,
 ) -> FetchDecision {
-    if fetched_count < fetch_limit || tie_cohort_is_closed(candidates, admitted_limit) {
+    if fetched_count < fetch_limit || tie_cohort_closed {
         return FetchDecision::Return;
     }
     if fetch_limit >= fetch_bound {
@@ -149,7 +149,7 @@ mod tests {
             CanonicalCandidates::new([candidate(1, 1.0), candidate(2, 1.0), candidate(3, 0.5)]);
 
         assert_eq!(
-            fetch_decision(2, 3, 10, 3, &candidates),
+            fetch_decision(3, 10, 3, tie_cohort_is_closed(&candidates, 2)),
             FetchDecision::Return
         );
         let result = TieClosureResult {
@@ -169,7 +169,7 @@ mod tests {
         let candidates = CanonicalCandidates::new((1..=6).rev().map(|id| candidate(id, 1.0)));
 
         assert_eq!(
-            fetch_decision(2, 6, 6, 6, &candidates),
+            fetch_decision(6, 6, 6, tie_cohort_is_closed(&candidates, 2)),
             FetchDecision::ReturnAtBound
         );
         let result = TieClosureResult {
@@ -189,12 +189,42 @@ mod tests {
         assert_eq!(result.candidates[1].object_id, Uuid::from_u128(2));
     }
 
+    #[test]
+    fn backend_fetch_cap_reports_an_open_boundary_without_allocating_rows() {
+        let Ok(fetch_limit_cap) = usize::try_from(u32::MAX) else {
+            return;
+        };
+        let Some(admitted_limit) = fetch_limit_cap.checked_add(1) else {
+            return;
+        };
+        let fetch_bound = tie_cohort_fetch_bound(admitted_limit, fetch_limit_cap);
+
+        assert_eq!(fetch_bound, fetch_limit_cap);
+        assert_eq!(
+            fetch_decision(fetch_limit_cap, fetch_bound, fetch_limit_cap, false),
+            FetchDecision::ReturnAtBound
+        );
+        let result = TieClosureResult {
+            candidates: CanonicalCandidates::new([]),
+            fetched: fetch_limit_cap,
+            fetch_bound,
+            closure: TieClosure::OpenAtBound,
+        };
+        assert_eq!(
+            result.completeness(Some(fetch_limit_cap)),
+            VectorRecallCompleteness::BoundaryTieOpen {
+                fetched: fetch_limit_cap,
+                fetch_bound: fetch_limit_cap,
+            }
+        );
+    }
+
     #[tokio::test]
     async fn closure_loop_grows_and_canonicalizes_before_returning() {
         let candidates = [candidate(2, 1.0), candidate(1, 1.0), candidate(3, 0.5)];
         let fetch_limits = RefCell::new(Vec::new());
 
-        let result = close_tie_cohort(1, |fetch_limit| {
+        let result = close_tie_cohort(1, usize::MAX, |fetch_limit| {
             fetch_limits.borrow_mut().push(fetch_limit);
             ready(Ok::<_, ()>(
                 candidates.iter().take(fetch_limit).cloned().collect(),
