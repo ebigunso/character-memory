@@ -520,3 +520,72 @@ Prevention:
 
 Evidence:
 - Worker Task_4 report of 2026-09-03 (commit d232830) and the orchestrator's clean `git status` check on the main checkout.
+
+## 2026-09-04 — Include Unit Assertions In Deleted-Helper Call-Site Censuses  [tags: validation, refactor, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker
+
+Symptom:
+- The first focused compile after consolidating Qdrant payload reads failed because service-adapter unit assertions still called the deleted local payload helper and relied on its removed surface-field import.
+
+Root cause:
+- The pre-edit trace found the production callers but did not census the helper's unit-test callers before deleting it.
+
+Fix applied:
+- Route the assertions through a test-only raw string accessor and import the surface field in the test module, then rerun the focused compile.
+
+Prevention:
+- Before deleting or moving a shared helper, run an exact-symbol census across the whole repository, including inline unit-test modules, and resolve every hit in the same patch.
+- Residual risk / waiver: none.
+
+Evidence:
+- `cargo test adapters::qdrant::payload::tests --lib` reported all remaining `payload_string` and `SURFACE_FIELD` test references before the correction.
+
+## 2026-09-04 — Compare Recall Results At The Same Contract Boundary  [tags: validation, tests, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker
+
+Symptom:
+- The first library-suite run failed because the new indexed-exact canary compared 200 raw backend rows with the port's canonical 20-candidate result.
+
+Root cause:
+- The assertion crossed the backend-fetch and port-result boundaries without applying the port's canonicalization and requested limit.
+
+Fix applied:
+- Canonicalize and truncate the indexed exact rows to the request limit before comparing them with the unindexed port result.
+
+Prevention:
+- When a test compares backend rows with a port result, explicitly apply the port's ordering, deduplication, and limit rules before asserting equality.
+- Residual risk / waiver: none.
+
+Evidence:
+- `cargo test --lib` passed 393 tests before failing only `indexed_test_configuration_reports_boundary_and_matches_exact_recall` on the 200-row versus 20-row comparison.
+
+## 2026-09-04 — Export The Endpoint For Ignored Qdrant Unit Tests  [tags: validation, qdrant, environment, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- The first ignored service-Qdrant run failed three tests with `QDRANT_CONNECTION_STRING is required`, while the idle-channel test passed through its separate setup path.
+
+Root cause:
+- The integration tests load `.env`, but the ignored service-adapter unit tests read `QDRANT_CONNECTION_STRING` directly; setting only `REQUIRE_QDRANT_TESTS=1` was insufficient.
+
+Fix applied:
+- Export the existing `.env` endpoint into the test process together with `REQUIRE_QDRANT_TESTS=1`; all four ignored service-Qdrant tests then passed.
+
+Prevention:
+- The live-gate command for ignored Qdrant unit tests must explicitly export both `QDRANT_CONNECTION_STRING` and `REQUIRE_QDRANT_TESTS=1`; do not assume unit tests load `.env`.
+- Residual risk / waiver: none.
+
+Evidence:
+- Corrected ignored run: 4 passed, 0 failed, 396 filtered out; the exclusive Qdrant window was then released.

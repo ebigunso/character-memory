@@ -280,6 +280,14 @@ pub struct RetrievalTelemetry {
 
 /// Completeness of the vector candidate set reported for a retrieval.
 ///
+/// `NotRequested` means no vector search ran. `Exhaustive` means an unindexed
+/// shard scanned the full closed scope, and `scanned` is that scope's population.
+/// `BoundaryTieClosed` means the shared fetch loop closed the cutoff score cohort
+/// within an indexed result prefix; `fetched` is the number of backend rows read.
+/// `BoundaryTieOpen` means the cohort was still open at `fetch_bound`; `fetched`
+/// is the number of rows read. Indexed boundary verdicts are deterministic only
+/// for the index-returned prefix and never claim population-level completeness.
+///
 /// ```
 /// use character_memory::api::types::VectorRecallCompleteness as ApiCompleteness;
 /// use character_memory::VectorRecallCompleteness;

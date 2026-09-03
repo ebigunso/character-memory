@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::adapters::qdrant::payload::{
-    qdrant_payload_map, QdrantPayloadKind, QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
-    SURFACE_FIELD,
+    qdrant_payload_map, qdrant_point_id, read_candidate_match, QdrantPayloadKind,
+    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
 };
 use crate::adapters::qdrant::tie_closure::close_tie_cohort;
 use crate::domain::{MemoryId, DEFAULT_SCHEMA_VERSION};
@@ -170,6 +170,24 @@ impl QdrantEdgeVectorCandidateStore {
         receive(receiver).await
     }
 
+    #[cfg(test)]
+    async fn search_batch_exact(
+        &self,
+        query: &VectorCandidateSearch,
+        fetch_limit: usize,
+    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(Command::Search {
+            query_embedding: query.query_embedding.clone(),
+            object_types: object_type_tokens(query),
+            limit: fetch_limit,
+            exact: true,
+            zero_norm: query.is_zero_norm(),
+            reply,
+        })?;
+        receive(receiver).await
+    }
+
     async fn scoped_count(&self, query: &VectorCandidateSearch) -> Result<usize, CustomError> {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Count {
@@ -265,13 +283,10 @@ impl QdrantEdgeVectorCandidateStore {
             }
             .into());
         }
-        let point_id = MemoryId::new_v5(
-            &record.record.object_id,
-            record.record.surface.to_string().as_bytes(),
-        )
-        .to_string()
-        .parse::<qdrant_edge::PointId>()
-        .expect("UUID text is a valid Qdrant Edge point ID");
+        let point_id = qdrant_point_id(record.record)
+            .to_string()
+            .parse::<qdrant_edge::PointId>()
+            .expect("UUID text is a valid Qdrant Edge point ID");
         let payload = serde_json::Value::Object(qdrant_payload_map(record.record)?);
         Ok(PointStruct::new(point_id, record.embedding.to_vec(), payload).into())
     }
@@ -363,6 +378,9 @@ fn open_shard(
     let existing = path.join(EDGE_CONFIG_FILE).is_file();
     if existing {
         validate_marker(&path, collection_name)?;
+        // Validate before the retry loop so an incompatible shard fails once
+        // with the typed compatibility error instead of retrying a load that
+        // cannot succeed. The post-load check also protects newly created shards.
         let config = EdgeConfig::load(&path)
             .expect("existing config path must produce a load result")
             .map_err(edge_error)?;
@@ -537,33 +555,21 @@ fn payload_to_match(
     payload: Option<&qdrant_edge::Payload>,
     score: f32,
 ) -> Result<VectorCandidateMatch, CustomError> {
-    let payload = payload.ok_or_else(|| payload_error("payload is missing"))?;
-    let object_id = payload_string(payload, OBJECT_ID_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid object_id UUID: {error}")))?;
-    let object_type = payload_string(payload, OBJECT_TYPE_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid object_type: {error}")))?;
-    let surface = payload_string(payload, SURFACE_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid surface: {error}")))?;
-    Ok(VectorCandidateMatch::new(
-        object_id,
-        object_type,
-        surface,
-        score,
-    ))
-}
-
-fn payload_string<'a>(
-    payload: &'a qdrant_edge::Payload,
-    field: &str,
-) -> Result<&'a str, CustomError> {
-    payload
-        .0
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| payload_error(format!("missing or invalid string field {field}")))
+    let payload = payload.ok_or_else(|| {
+        CustomError::VectorDatabaseError(
+            crate::adapters::qdrant::payload::payload_deserialization_error(
+                "qdrant_edge",
+                "payload is missing",
+            ),
+        )
+    })?;
+    read_candidate_match("qdrant_edge", score, |field| {
+        payload
+            .0
+            .get(field.name())
+            .and_then(serde_json::Value::as_str)
+    })
+    .map_err(CustomError::VectorDatabaseError)
 }
 
 fn string_filter(field: &str, values: Vec<String>) -> Filter {
@@ -690,15 +696,6 @@ fn owner_unavailable() -> CustomError {
     ))
 }
 
-fn payload_error(message: impl Into<String>) -> CustomError {
-    CustomError::VectorDatabaseError(VectorDatabaseError::new(
-        "qdrant_edge",
-        VectorDatabaseErrorKind::PayloadDeserialization,
-        None,
-        message,
-    ))
-}
-
 fn edge_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::VectorDatabaseError(VectorDatabaseError::new(
         "qdrant_edge",
@@ -757,6 +754,27 @@ mod tests {
             .collect::<Vec<_>>();
         let embeddings = (0..count).map(|_| embedding.to_vec()).collect();
         (records, embeddings)
+    }
+
+    #[tokio::test]
+    async fn point_identity_matches_the_shared_service_derivation() {
+        let temp = TempDir::new().unwrap();
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "point_identity", 2)
+            .await
+            .unwrap();
+        let record = VectorRecord::new(
+            MemoryId::from_u128(7),
+            ObjectType::Episode,
+            VectorSurface::Summary,
+            DEFAULT_SCHEMA_VERSION,
+            "Episode summary",
+        );
+
+        let point = store
+            .point(&VectorRecordEmbedding::new(&record, &[1.0, 0.0]))
+            .unwrap();
+
+        assert_eq!(point.id.to_string(), qdrant_point_id(&record).to_string());
     }
 
     async fn upsert(
@@ -1109,7 +1127,12 @@ mod tests {
 
         let exact_result = exact.search_candidates(&query(20)).await.unwrap();
         let indexed_result = indexed.search_candidates(&query(20)).await.unwrap();
+        let indexed_exact_result = indexed.search_batch_exact(&query(20), 200).await.unwrap();
         assert_eq!(exact_result.candidates, indexed_result.candidates);
+        assert_eq!(
+            exact_result.candidates,
+            CanonicalCandidates::new(indexed_exact_result).truncated(20)
+        );
         assert_eq!(
             exact_result.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 200 }

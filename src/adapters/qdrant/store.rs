@@ -5,7 +5,7 @@ use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    points_selector::PointsSelectorOneOf, value::Kind, vectors_config, Condition,
+    points_selector::PointsSelectorOneOf, vectors_config, Condition, CountPointsBuilder,
     CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
     Filter, PointStruct, ScoredPoint, ScrollPointsBuilder, SearchPointsBuilder,
     UpsertPointsBuilder, VectorParams, VectorsConfig,
@@ -21,7 +21,8 @@ use crate::models::vector::{VectorCandidateMatch, VectorCandidateSearch, VectorR
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 use super::payload::{
-    qdrant_payload_map, QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD,
+    payload_deserialization_error, qdrant_payload_map, qdrant_point_id, read_candidate_match,
+    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
 };
 use super::tie_closure::close_tie_cohort;
 
@@ -186,6 +187,36 @@ impl QdrantVectorCandidateStore {
             .map(|point| qdrant_payload_to_match(&point.payload, 0.0))
             .collect()
     }
+
+    async fn scoped_count(&self, query: &VectorCandidateSearch) -> Result<usize, CustomError> {
+        let request = CountPointsBuilder::new(&self.collection_name)
+            .filter(qdrant_candidate_filter(query))
+            .exact(true)
+            .build();
+        let count = self
+            .client
+            .count(request)
+            .await
+            .map_err(qdrant_error)?
+            .result
+            .ok_or_else(|| {
+                CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                    "qdrant",
+                    VectorDatabaseErrorKind::Response,
+                    None,
+                    "Qdrant count response was missing result",
+                ))
+            })?
+            .count;
+        usize::try_from(count).map_err(|_| {
+            CustomError::VectorDatabaseError(VectorDatabaseError::new(
+                "qdrant",
+                VectorDatabaseErrorKind::Conversion,
+                None,
+                format!("Qdrant scope count {count} exceeds the platform maximum"),
+            ))
+        })
+    }
 }
 
 fn validate_collection_vector_config(
@@ -285,6 +316,11 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         } else {
             usize::MAX
         };
+        let scanned = if zero_norm {
+            Some(self.scoped_count(query).await?)
+        } else {
+            None
+        };
         let closed = close_tie_cohort(query.limit, fetch_limit_cap, |fetch_limit| async move {
             if zero_norm {
                 self.scroll_zero_norm_candidate_batch(query, fetch_limit)
@@ -294,7 +330,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             }
         })
         .await?;
-        let completeness = closed.completeness(zero_norm.then_some(closed.fetched));
+        let completeness = closed.completeness(scanned);
         Ok(VectorCandidateRecall {
             candidates: closed.candidates,
             completeness,
@@ -483,9 +519,12 @@ fn qdrant_candidate_config(url: &str) -> QdrantConfig {
 
 fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
     u32::try_from(fetch_limit).map_err(|_| {
-        CustomError::DatabaseError(format!(
-            "Qdrant scroll limit {fetch_limit} exceeds the backend maximum {}",
-            u32::MAX
+        CustomError::VectorDatabaseError(payload_deserialization_error(
+            "qdrant",
+            format!(
+                "Qdrant scroll limit {fetch_limit} exceeds the backend maximum {}",
+                u32::MAX
+            ),
         ))
     })
 }
@@ -537,69 +576,22 @@ fn qdrant_payload_to_match(
     payload: &HashMap<String, qdrant_client::qdrant::Value>,
     score: f32,
 ) -> Result<VectorCandidateMatch, CustomError> {
-    let object_id = payload_string(payload, OBJECT_ID_FIELD)?;
-    let object_id = uuid::Uuid::parse_str(&object_id).map_err(|error| {
-        CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
-    })?;
-
-    let object_type = payload_string(payload, OBJECT_TYPE_FIELD)?
-        .parse()
-        .map_err(|error| {
-            CustomError::DatabaseError(format!("Invalid Qdrant object_type: {error}"))
-        })?;
-    let surface = payload_string(payload, SURFACE_FIELD)?
-        .parse()
-        .map_err(|error| CustomError::DatabaseError(format!("Invalid Qdrant surface: {error}")))?;
-
-    Ok(VectorCandidateMatch::new(
-        object_id,
-        object_type,
-        surface,
-        score,
-    ))
-}
-
-fn qdrant_point_id(record: &crate::models::vector::VectorRecord) -> uuid::Uuid {
-    let mut first = 0xcbf29ce484222325_u64;
-    let mut second = 0x9e3779b97f4a7c15_u64;
-    let surface = record.surface.to_string();
-
-    for byte in record
-        .object_id
-        .as_bytes()
-        .iter()
-        .copied()
-        .chain(surface.as_bytes().iter().copied())
-    {
-        first ^= u64::from(byte);
-        first = first.wrapping_mul(0x100000001b3);
-        second ^= u64::from(byte).wrapping_add(0x9e3779b97f4a7c15);
-        second = second.rotate_left(5).wrapping_mul(0x517cc1b727220a95);
-    }
-
-    let mut bytes = [0_u8; 16];
-    bytes[..8].copy_from_slice(&first.to_be_bytes());
-    bytes[8..].copy_from_slice(&second.to_be_bytes());
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    uuid::Uuid::from_bytes(bytes)
-}
-
-fn payload_string(
-    payload: &HashMap<String, qdrant_client::qdrant::Value>,
-    field: &str,
-) -> Result<String, CustomError> {
-    match payload.get(field).and_then(|value| value.kind.as_ref()) {
-        Some(Kind::StringValue(value)) => Ok(value.clone()),
-        _ => Err(CustomError::DatabaseError(format!(
-            "Missing or invalid string field in Qdrant payload: {field}"
-        ))),
-    }
+    read_candidate_match("qdrant", score, |field| {
+        payload
+            .get(field.name())
+            .and_then(|value| value.kind.as_ref())
+            .and_then(|kind| match kind {
+                qdrant_client::qdrant::value::Kind::StringValue(value) => Some(value.as_str()),
+                _ => None,
+            })
+    })
+    .map_err(CustomError::VectorDatabaseError)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::qdrant::payload::SURFACE_FIELD;
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::domain::{ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{CanonicalCandidates, VectorRecord, VectorRecordEmbedding};
@@ -608,6 +600,19 @@ mod tests {
         point_id::PointIdOptions, value::Kind, vector, vectors, DeleteCollectionBuilder, PointId,
         Value, VectorParamsMap,
     };
+
+    fn payload_string<'a>(
+        payload: &'a HashMap<String, qdrant_client::qdrant::Value>,
+        field: &str,
+    ) -> Option<&'a str> {
+        payload
+            .get(field)
+            .and_then(|value| value.kind.as_ref())
+            .and_then(|kind| match kind {
+                Kind::StringValue(value) => Some(value.as_str()),
+                _ => None,
+            })
+    }
     use std::env;
     use std::time::Instant;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -678,7 +683,13 @@ mod tests {
         assert_eq!(qdrant_scroll_fetch_limit(backend_max).unwrap(), u32::MAX);
 
         if let Some(too_large) = backend_max.checked_add(1) {
-            assert!(qdrant_scroll_fetch_limit(too_large).is_err());
+            assert!(matches!(
+                qdrant_scroll_fetch_limit(too_large),
+                Err(CustomError::VectorDatabaseError(VectorDatabaseError {
+                    kind: VectorDatabaseErrorKind::PayloadDeserialization,
+                    ..
+                }))
+            ));
         }
     }
 
@@ -1009,6 +1020,20 @@ mod tests {
         .expect("points build");
 
         assert_ne!(points[0].id, points[1].id);
+        assert_eq!(
+            points[0]
+                .id
+                .as_ref()
+                .and_then(|id| id.point_id_options.as_ref()),
+            Some(&PointIdOptions::Uuid(qdrant_point_id(&summary).to_string()))
+        );
+        assert_eq!(
+            points[1]
+                .id
+                .as_ref()
+                .and_then(|id| id.point_id_options.as_ref()),
+            Some(&PointIdOptions::Uuid(qdrant_point_id(&text).to_string()))
+        );
         assert_eq!(
             payload_string(&points[0].payload, OBJECT_ID_FIELD).unwrap(),
             object_id.to_string()

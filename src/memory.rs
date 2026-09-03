@@ -175,12 +175,12 @@ mod tests {
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
-        FakeVectorCandidateStore,
+        TemporaryVectorCandidateStore,
     };
 
     #[tokio::test]
     async fn injected_facade_remembers_through_the_write_plan_path() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let entity_id = id("550e8400-e29b-41d4-a716-446655445001");
         let mut entity = EntityDraft::new(EntityType::User, "Kohta");
         entity.id = Some(entity_id);
@@ -201,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn remember_surfaces_write_plan_validation_warnings() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let episode_id = id("550e8400-e29b-41d4-a716-446655445011");
         let mut episode = EpisodeDraft::new("echoed source content");
         episode.id = Some(episode_id);
@@ -250,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_and_validate_plan_do_not_persist() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
 
         let plan = memory
             .prepare(
@@ -283,7 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn commit_revalidates_against_current_graph_state() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let missing_entity_id = id("550e8400-e29b-41d4-a716-446655445021");
         let plan = memory
             .prepare(
@@ -307,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn remember_returns_structured_validation_rejection() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let missing_entity_id = id("550e8400-e29b-41d4-a716-446655445022");
 
         let error = memory
@@ -327,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn commit_retry_is_idempotent_and_rejects_divergent_content() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let mut plan = memory
             .prepare(
                 RememberInput::new("same content"),
@@ -406,7 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn injected_facade_links_canonical_relationships() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let from_id = id("550e8400-e29b-41d4-a716-446655445010");
         let to_id = id("550e8400-e29b-41d4-a716-446655445011");
         let mut draft = MemoryLinkDraft::new(
@@ -460,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_rejects_an_empty_configured_object_type_scope_at_the_boundary() {
-        let memory = injected_memory();
+        let memory = injected_memory().await;
         let mut context = RetrievalContext::new("invalid empty scope");
         context.object_type_defaults.clear();
 
@@ -854,10 +854,10 @@ mod tests {
         ));
     }
 
-    fn injected_memory() -> CharacterMemory {
+    async fn injected_memory() -> CharacterMemory {
         CharacterMemory::from_parts(
             Box::new(FakeGraphAuthorityStore::new()),
-            Box::new(FakeVectorCandidateStore::new()),
+            Box::new(TemporaryVectorCandidateStore::open(8).await),
             Box::new(DeterministicMemoryEmbedder::new(8)),
         )
     }
@@ -901,7 +901,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let objects = [
             MemoryObject::Episode(fixtures.episode.clone()),
             MemoryObject::Observation(fixtures.salient_observation.clone()),

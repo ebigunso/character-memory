@@ -1,6 +1,6 @@
 # v0.1.6 Design: Embedded Vector Candidate Recall
 
-Status: decided 2026-09-02, revised 2026-09-03 (ADR-I-0023 through ADR-I-0027); supersedes the 2026-07 draft of this document; the embedded engine ruling (Qdrant Edge over an in-house scan) was taken the same day on two feasibility spikes.
+Status: finished 2026-09-04 (ADR-I-0023 through ADR-I-0027); supersedes the 2026-07 draft of this document. The embedded engine ruling (Qdrant Edge over an in-house scan) was taken on two feasibility spikes; companion-repository evaluation evidence that was not yet produced at closeout remains explicitly pending in that repository.
 
 ## Version intent
 

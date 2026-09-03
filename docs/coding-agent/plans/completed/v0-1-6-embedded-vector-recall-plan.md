@@ -1,8 +1,8 @@
 # Plan: v0.1.6 Embedded Vector Candidate Recall
 
-- status: approved
+- status: done
 - generated: 2026-09-02
-- last_updated: 2026-09-03
+- last_updated: 2026-09-04
 - work_type: mixed
 
 ## Goal
@@ -175,7 +175,14 @@
 - owns:
   - src/test_support.rs
   - src/**/tests (fake stores only)
-  - docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md
+  - src/api/types/retrieval.rs (doc comments only)
+  - src/ports/vector_candidate.rs (doc comments only)
+  - src/adapters/qdrant/store.rs, src/adapters/qdrant/payload.rs, src/adapters/qdrant_edge/mod.rs (Task_8 audit dispositions only)
+  - src/models/vector/candidate_record.rs (header comment only)
+  - tests/vector_port_contract_tests.rs, tests/support/** (point-id parity fixture and fake-retirement fallout)
+  - README.md (stale filtering line)
+  - docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md (closeout status)
+  - docs/coding-agent/plans/**
   - docs/coding-agent/lessons.md
   - docs/roadmap/development_roadmap.md
   - Cargo.toml
@@ -186,6 +193,8 @@
 - acceptance:
   - Zero-hit census for the retired fake and record type.
   - All five checklist rows cite evidence in the Progress Log.
+  - Task_8 audit dispositions landed: one point-identity derivation (the v5 derivation) shared by both adapters with a parity assertion and no compat shim; one shared read function for the record contract returning the closed error vocabulary, with the service adapter's stringly database errors for payload and scroll-limit faults removed; the canary pins that an indexed shard searched exactly returns the exhaustive result; the service zero-norm verdict's `scanned` comes from the scope count or the loop invariant is stated; the duplicate vector-config validation is reduced to one or justified in place; the stale header comments and README line are corrected.
+  - The public completeness type documents all four verdict meanings and the `scanned` and `fetched` counters, stating that a closed boundary verdict is deterministic only for the index-returned prefix, never population-level completeness; the port trait's doc comment states the verdict guarantees (tie closure through the shared loop; exhaustive only on an unindexed shard with a closed cohort; open at the bound) so a future adapter cannot label an indexed prefix exhaustive (deferred from the Task_2 review to avoid re-cascading the stack mid-wave).
 - validation:
   - kind: command
     required: true
@@ -238,6 +247,19 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
 - 2026-09-04 Wave 1 done: Task_1 (a633b2e, PR #74) and Task_2 (5b30856, PR #75) approved by the Tier D reviewer; Task_2 needed one revision (checked backend-limit conversion with a BoundaryTieOpen regression at the u32 cap; public re-exports) and carries one post-review fix (dimension check before the zero-norm scroll). PRs stacked on the planning PR as stack #76; merges pending. Wave 2 (Task_3) dispatched on a branch stacked on Task_2.
 - 2026-09-04 Wave 2 done: Task_3 (36ef8c8, PR #77) approved by the Tier D reviewer after two revisions on the zero-norm rejected-record fixture (final shape: one definition behind the non-default `test-fixtures` feature, enabled for integration tests by a self dev-dependency, doc-hidden). The evaluation repository's exhaustive error-vocabulary conversion is recorded as its re-pin obligation (ADR-I-0023), not a finding. PR appended to stack #76.
 - 2026-09-04 — Merge shape refined: the stack (planning PR at the bottom, one PR per wave above it) is merged in one go at phase end; GitHub's bottom-up stack order blocks interim merges of wave PRs while the planning PR is a draft, which is the intended shape. Waves proceed by branching from the previous wave's approved tip.
+- 2026-09-04 Wave 3 done: Task_4 (01de5d0, PR #78) approved by the Tier D reviewer with no findings after one revision (both-adapter zero-norm parity through the shared fixture; a populated-shard canary leg). During the review the stack's base was found to predate main's Rust 1.97 bump; the planning branch was rebased onto main and the stack cascaded (content-identical by range-diff), so the toolchain pin is 1.97 everywhere. Measured: exhaustive scan 3/11/48 ms at 100/1000/5000 records of 1536 dimensions; release footprint delta about 24.3 MB; no crate features to trim. Stack #76 is #72, #74, #75, #77, #78.
+- 2026-09-04 — Task_8 altitude audit (Claude, stack tip 01de5d0): APPROVED; ADR-I-0023/0024/0025/0027 boundaries verified holding by reading; zero hint-field re-entry; zero store-private knowledge exported.
+  - Findings: MEDIUM point identity derived twice (service in-house hash vs embedded v5 derivation; a shard-to-server sync would double points); MEDIUM record read side implemented twice with divergent error classification (service stringly `DatabaseError` escapes the closed vocabulary); LOW filter convention structurally different but equivalent; LOW service zero-norm `scanned` taken from rows returned; LOW embedded exactness rests on `exact: true`, not on the persisted optimizer config; LOW stale header comments and README line.
+  - Design-value: every phase addition EARNS-ITS-PLACE except the duplicate vector-config validation (OVERSIZED, minor), the `test-fixtures` feature (OVERSIZED advisory; shape ruled in Wave 2, kept), the in-house point-id hash (DELETE advisory), and the scoring fake (DELETE, already Task_7).
+  - Disposition: all findings folded into Task_7 (owns and acceptance extended above); the point-identity unification is a behaviour change for existing service collections, acceptable under the Compatibility Policy (rebuild from graph authority), pending the decider's veto.
+- 2026-09-04 Task_7 implementation closeout: the deterministic scoring fake, its embedding-bearing `VectorCandidateRecord`, conversion hooks, and fake-only tests were deleted; all former success-path users now open the embedded adapter in a temporary shard fixture, while recording and failure-injection fakes remain. `rg -n "FakeVectorCandidateStore|VectorCandidateRecord|cosine_similarity" src tests` returned zero hits. Both adapters now use the single v5 point-ID derivation and the single typed payload reader in `qdrant/payload.rs`; the service zero-norm path counts its exact filtered scope; the embedded canary compares an indexed `exact: true` search with the exhaustive result; and the retained pre-open vector-config validation is justified because it avoids retrying an incompatible shard.
+- 2026-09-04 Deferral-reconfirmation checklist evidence:
+  1. Canonical-candidates newtype survival: `rg -n "CanonicalCandidates" src tests` shows the newtype remains the `VectorCandidateRecall.candidates` envelope field and is constructed only at adapter/tie-closure and deliberate test-double boundaries; `canonical_candidates_dedupe_identity_at_highest_score_and_totally_order_ties` remains in the service-free suite.
+  2. Dual text columns: `rg -n "content_text|embedding_text|CONTENT_TEXT|EMBEDDING_TEXT" src tests` shows no `content_text` column in this repository and only the required five-field `embedding_text` record/provenance path. The companion repository still has its direct Qdrant `content_text` reader, so its before/after vector-only identity-and-text A/B evidence is explicitly pending in that repository.
+  3. Search completeness: `backend_fetch_cap_reports_an_open_boundary_without_allocating_rows`, `retrieval_telemetry_preserves_every_vector_recall_completeness_verdict`, the live service boundary tests, and `service_and_embedded_admit_identical_candidates_in_identical_order` cover open, telemetry, closed, and cross-adapter exhaustive-versus-closed behavior through the shared tie loop.
+  4. Hint filter semantics: `rg -n "VectorCandidateFilter|CandidateFilter|match_or_unknown|matches_or_unknown|MatchUnknown" src tests` returned zero hits; the query carries only object-type scope, with its empty-scope behavior and predicate rules pinned by ADR-I-0024 and the port contract tests.
+  5. Evaluation baseline capability: this repository exposes singleton-scoped traced candidates, completeness telemetry, and `max_embedding_surfaces`; `rg -n "SearchPointsBuilder|QDRANT_OBJECT_ID_FIELD|QDRANT_OBJECT_TYPE_FIELD|QDRANT_CONTENT_TEXT_FIELD" crates/cmem-eval-adapter-cmem/src/lib.rs` still finds the companion repository's direct Qdrant baseline, so its trace migration, row-level identity/rank A/B diff, and post-switch zero-hit census are explicitly pending in that repository.
+- 2026-09-04 Task_7 validation closeout: `cargo fmt --all -- --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed on Rust 1.97; bare `cargo test` passed 395 library tests, 31 integration tests, and one doc test with five intentional ignores after the point-identity fixture was added; the live-switch `cargo test` passed the same suite with both service/embedded parity tests executing; and the four ignored service-Qdrant tests passed explicitly under the live endpoint. The package is 0.1.6, the phase and roadmap are finished, and this plan is moved to completed. Independent reviewer approval and stack merge remain Orchestrator gates.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

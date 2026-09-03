@@ -1303,7 +1303,7 @@ mod tests {
     use crate::ports::vector_candidate::VectorCandidateRecall;
     use crate::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
-        FakeVectorCandidateStore,
+        TemporaryVectorCandidateStore,
     };
     use crate::usecases::RetrievePipeline;
 
@@ -1416,7 +1416,7 @@ mod tests {
             ])
             .await
             .unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -1461,7 +1461,7 @@ mod tests {
             ])
             .await
             .unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let draft = stateful_correction_draft(&ids, "Stable corrected payload.");
@@ -1564,7 +1564,7 @@ mod tests {
         let ids = fixed_ids();
         let old = old_memory(&ids);
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old.clone())]);
-        let vector = OneShotDeleteFailingVectorStore::new();
+        let vector = OneShotDeleteFailingVectorStore::new().await;
         let old_record = memory_object_vector_record(&MemoryObject::DerivedMemory(old)).unwrap();
         vector
             .inner
@@ -1700,7 +1700,7 @@ mod tests {
             ])
             .await
             .unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let first_ancestor = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8201);
@@ -2330,7 +2330,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let replacement_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9100);
@@ -2426,7 +2426,7 @@ mod tests {
         objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
         graph.upsert_objects(&objects).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let replacement_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9102);
@@ -2593,7 +2593,7 @@ mod tests {
             "Establish current replacement.",
         ));
         graph.upsert_links(&links).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut replacement = ReplacementDerivedMemoryDraft::new(
@@ -2658,7 +2658,7 @@ mod tests {
             "Establish current replacement.",
         ));
         graph.upsert_links(&links).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2703,7 +2703,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = ForgetMemoryDraft::suppress(
@@ -2735,7 +2735,7 @@ mod tests {
         }
         graph.upsert_objects(&objects).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2800,7 +2800,7 @@ mod tests {
         objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
         graph.upsert_objects(&objects).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2837,7 +2837,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = ForgetMemoryDraft::suppress(
@@ -2889,7 +2889,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = ForgetMemoryDraft::suppress(
@@ -2924,7 +2924,7 @@ mod tests {
         let fixtures = representative_fixtures();
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2960,7 +2960,7 @@ mod tests {
         let fixtures = representative_fixtures();
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft =
@@ -3038,7 +3038,7 @@ mod tests {
             .upsert_objects(&[MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
             .unwrap();
-        let vector = DeleteFailingVectorStore::new();
+        let vector = DeleteFailingVectorStore::new().await;
         vector
             .inner
             .upsert_vector_records(&[VectorRecordEmbedding::new(
@@ -3087,7 +3087,7 @@ mod tests {
         let graph = FakeGraphAuthorityStore::new();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = DeleteFailingVectorStore::new();
+        let vector = DeleteFailingVectorStore::new().await;
         let embedder = DeterministicMemoryEmbedder::new(4);
         for object in [
             MemoryObject::Episode(fixtures.episode.clone()),
@@ -3643,14 +3643,14 @@ mod tests {
 
     #[derive(Debug)]
     struct OneShotDeleteFailingVectorStore {
-        inner: FakeVectorCandidateStore,
+        inner: TemporaryVectorCandidateStore,
         fail_next_delete: Mutex<bool>,
     }
 
     impl OneShotDeleteFailingVectorStore {
-        fn new() -> Self {
+        async fn new() -> Self {
             Self {
-                inner: FakeVectorCandidateStore::new(),
+                inner: TemporaryVectorCandidateStore::open(4).await,
                 fail_next_delete: Mutex::new(true),
             }
         }
@@ -3750,13 +3750,13 @@ mod tests {
 
     #[derive(Debug)]
     struct DeleteFailingVectorStore {
-        inner: FakeVectorCandidateStore,
+        inner: TemporaryVectorCandidateStore,
     }
 
     impl DeleteFailingVectorStore {
-        fn new() -> Self {
+        async fn new() -> Self {
             Self {
-                inner: FakeVectorCandidateStore::new(),
+                inner: TemporaryVectorCandidateStore::open(4).await,
             }
         }
     }

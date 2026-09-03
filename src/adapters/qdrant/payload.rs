@@ -3,8 +3,9 @@
 use qdrant_client::qdrant::FieldType;
 
 use crate::domain::schema::require_current_schema_version;
-use crate::errors::CustomError;
-use crate::models::vector::VectorRecord;
+use crate::domain::MemoryId;
+use crate::errors::{CustomError, VectorDatabaseError, VectorDatabaseErrorKind};
+use crate::models::vector::{VectorCandidateMatch, VectorRecord};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QdrantPayloadKind {
@@ -106,7 +107,61 @@ const fn schema(
 
 pub(crate) const OBJECT_ID_FIELD: &str = QdrantPayloadField::ObjectId.name();
 pub(crate) const OBJECT_TYPE_FIELD: &str = QdrantPayloadField::ObjectType.name();
+#[cfg(test)]
 pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
+
+pub(crate) fn qdrant_point_id(record: &VectorRecord) -> MemoryId {
+    MemoryId::new_v5(&record.object_id, record.surface.to_string().as_bytes())
+}
+
+pub(crate) fn read_candidate_match<'a>(
+    backend: &'static str,
+    score: f32,
+    fields: impl Fn(QdrantPayloadField) -> Option<&'a str>,
+) -> Result<VectorCandidateMatch, VectorDatabaseError> {
+    let required = |field| {
+        fields(field).ok_or_else(|| {
+            payload_deserialization_error(
+                backend,
+                format!("missing or invalid string field {}", field.name()),
+            )
+        })
+    };
+    let object_id = required(QdrantPayloadField::ObjectId)?
+        .parse()
+        .map_err(|error| {
+            payload_deserialization_error(backend, format!("invalid object_id UUID: {error}"))
+        })?;
+    let object_type = required(QdrantPayloadField::ObjectType)?
+        .parse()
+        .map_err(|error| {
+            payload_deserialization_error(backend, format!("invalid object_type: {error}"))
+        })?;
+    let surface = required(QdrantPayloadField::Surface)?
+        .parse()
+        .map_err(|error| {
+            payload_deserialization_error(backend, format!("invalid surface: {error}"))
+        })?;
+
+    Ok(VectorCandidateMatch::new(
+        object_id,
+        object_type,
+        surface,
+        score,
+    ))
+}
+
+pub(crate) fn payload_deserialization_error(
+    backend: &'static str,
+    message: impl Into<String>,
+) -> VectorDatabaseError {
+    VectorDatabaseError::new(
+        backend,
+        VectorDatabaseErrorKind::PayloadDeserialization,
+        None,
+        message,
+    )
+}
 
 pub(crate) fn qdrant_payload_map(
     record: &VectorRecord,
@@ -256,5 +311,30 @@ mod tests {
                 actual,
             } if actual == "future_schema"
         ));
+    }
+
+    #[test]
+    fn point_identity_is_the_surface_namespaced_object_identity() {
+        let record = VectorRecord::new(
+            MemoryId::from_u128(7),
+            ObjectType::Episode,
+            VectorSurface::Summary,
+            DEFAULT_SCHEMA_VERSION,
+            "Episode summary",
+        );
+
+        assert_eq!(
+            qdrant_point_id(&record),
+            MemoryId::new_v5(&record.object_id, b"summary")
+        );
+    }
+
+    #[test]
+    fn candidate_reader_uses_the_closed_payload_error_vocabulary() {
+        let error =
+            read_candidate_match("qdrant", 1.0, |_| None).expect_err("missing identity must fail");
+
+        assert_eq!(error.kind, VectorDatabaseErrorKind::PayloadDeserialization);
+        assert!(error.message.contains(OBJECT_ID_FIELD));
     }
 }

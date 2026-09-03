@@ -1352,12 +1352,12 @@ mod tests {
         ContinuitySectionLimits, RetrievalCandidateLimits, RetrievalLifecyclePolicy,
     };
     use crate::domain::RetentionState;
-    use crate::models::vector::{CanonicalCandidates, VectorCandidateRecord};
+    use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
     use crate::policy::RetrievalSelectivityPolicy;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
         high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
-        FakeVectorCandidateStore,
+        TemporaryVectorCandidateStore,
     };
 
     #[tokio::test]
@@ -2574,14 +2574,13 @@ mod tests {
     async fn graph_authority_filters_lifecycle_state_after_vector_recall() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
-        let vector = FakeVectorCandidateStore::new();
+        let vector = TemporaryVectorCandidateStore::open(2).await;
+        let record = crate::policy::memory_object_vector_record(&MemoryObject::DerivedMemory(
+            fixtures.user_preference.clone(),
+        ))
+        .unwrap();
         vector
-            .upsert_candidates(&[VectorCandidateRecord::new(
-                fixtures.user_preference.id,
-                ObjectType::DerivedMemory,
-                VectorSurface::DerivedText,
-                vec![1.0, 0.0],
-            )])
+            .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, 0.0])])
             .await
             .unwrap();
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);

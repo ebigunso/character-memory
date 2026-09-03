@@ -1,13 +1,12 @@
 // Deterministic test harness shared by pipeline, adapter, and facade tests.
 
-use std::collections::HashSet;
 use std::sync::{Mutex, MutexGuard};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::api::types::retrieval::VectorRecallCompleteness;
+use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
@@ -15,8 +14,7 @@ use crate::domain::{
 };
 use crate::errors::{CustomError, GraphQueryError};
 use crate::models::vector::{
-    CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateRecord,
-    VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
+    EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
 };
 use crate::policy::graph_expansion::{
     bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
@@ -28,113 +26,48 @@ use crate::ports::graph_authority::{
 };
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
-#[derive(Debug, Default)]
-pub(crate) struct FakeVectorCandidateStore {
-    records: Mutex<Vec<VectorCandidateRecord>>,
+#[derive(Debug)]
+pub(crate) struct TemporaryVectorCandidateStore {
+    store: QdrantEdgeVectorCandidateStore,
+    _directory: tempfile::TempDir,
 }
 
-impl FakeVectorCandidateStore {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) async fn upsert_candidates(
-        &self,
-        candidates: &[VectorCandidateRecord],
-    ) -> Result<(), CustomError> {
-        self.replace_candidates(candidates)
-    }
-
-    fn replace_candidates(&self, candidates: &[VectorCandidateRecord]) -> Result<(), CustomError> {
-        let mut records = lock(&self.records)?;
-
-        for candidate in candidates {
-            records.retain(|record| {
-                record.object_id != candidate.object_id || record.surface != candidate.surface
-            });
-            records.push(candidate.clone());
+impl TemporaryVectorCandidateStore {
+    pub(crate) async fn open(vector_size: usize) -> Self {
+        let directory = tempfile::TempDir::new().expect("temporary vector directory");
+        let store = QdrantEdgeVectorCandidateStore::open(
+            directory.path(),
+            format!("test_{}", Uuid::new_v4().simple()),
+            vector_size,
+        )
+        .await
+        .expect("temporary embedded vector store");
+        Self {
+            store,
+            _directory: directory,
         }
-
-        Ok(())
     }
 }
 
 #[async_trait]
-impl VectorCandidateStore for FakeVectorCandidateStore {
+impl VectorCandidateStore for TemporaryVectorCandidateStore {
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError> {
-        let candidates = records
-            .iter()
-            .map(|record| record.to_candidate_record())
-            .collect::<Vec<_>>();
-        self.replace_candidates(&candidates)
+        self.store.upsert_vector_records(records).await
     }
 
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError> {
-        if query.limit == 0 || query.object_types.is_empty() {
-            return Ok(VectorCandidateRecall {
-                candidates: CanonicalCandidates::new([]),
-                completeness: VectorRecallCompleteness::NotRequested,
-            });
-        }
-
-        let records = lock(&self.records)?;
-        let matches: Vec<_> = records
-            .iter()
-            .filter(|record| query.object_types.contains(&record.object_type))
-            .map(|record| {
-                VectorCandidateMatch::new(
-                    record.object_id,
-                    record.object_type,
-                    record.surface,
-                    cosine_similarity(&query.query_embedding, &record.embedding),
-                )
-            })
-            .collect();
-
-        let scanned = matches.len();
-        Ok(VectorCandidateRecall {
-            candidates: CanonicalCandidates::new(matches).truncated(query.limit),
-            completeness: VectorRecallCompleteness::Exhaustive { scanned },
-        })
+        self.store.search_candidates(query).await
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        let delete_ids: HashSet<_> = object_ids.iter().copied().collect();
-        lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
-        Ok(())
+        self.store.delete_candidates(object_ids).await
     }
-}
-
-pub(crate) fn zero_norm_vector_fixture() -> (Vec<VectorCandidateRecord>, VectorCandidateSearch) {
-    (
-        vec![
-            VectorCandidateRecord::new(
-                Uuid::from_u128(1),
-                ObjectType::Episode,
-                VectorSurface::Summary,
-                vec![1.0, 0.0],
-            ),
-            VectorCandidateRecord::new(
-                Uuid::from_u128(2),
-                ObjectType::Episode,
-                VectorSurface::Summary,
-                vec![0.0, 1.0],
-            ),
-            VectorCandidateRecord::new(
-                Uuid::from_u128(3),
-                ObjectType::Observation,
-                VectorSurface::Text,
-                vec![1.0, 0.0],
-            ),
-        ],
-        VectorCandidateSearch::new(vec![0.0, 0.0], 10, vec![ObjectType::Episode]),
-    )
 }
 
 #[derive(Debug, Default)]
@@ -962,26 +895,6 @@ mod lifecycle_tests {
     }
 }
 
-fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
-    if left.len() != right.len() {
-        return 0.0;
-    }
-
-    let dot_product: f32 = left
-        .iter()
-        .zip(right.iter())
-        .map(|(left, right)| left * right)
-        .sum();
-    let left_magnitude = left.iter().map(|value| value * value).sum::<f32>().sqrt();
-    let right_magnitude = right.iter().map(|value| value * value).sum::<f32>().sqrt();
-
-    if left_magnitude == 0.0 || right_magnitude == 0.0 {
-        0.0
-    } else {
-        dot_product / (left_magnitude * right_magnitude)
-    }
-}
-
 fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32> {
     let mut embedding = vec![0.0; dimensions];
     if dimensions == 0 {
@@ -1016,154 +929,6 @@ mod tests {
         GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
         GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
     };
-
-    #[tokio::test]
-    async fn vector_fake_upserts_searches_and_deletes_deterministically() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-
-        store
-            .upsert_candidates(&[
-                VectorCandidateRecord::new(
-                    fixtures.episode.id,
-                    ObjectType::Episode,
-                    VectorSurface::Summary,
-                    vec![1.0, 0.0],
-                ),
-                VectorCandidateRecord::new(
-                    fixtures.salient_observation.id,
-                    ObjectType::Observation,
-                    VectorSurface::Text,
-                    vec![0.0, 1.0],
-                ),
-            ])
-            .await
-            .unwrap();
-
-        let query = VectorCandidateSearch::new(
-            vec![1.0, 0.0],
-            10,
-            vec![ObjectType::Episode, ObjectType::Observation],
-        );
-        let first_result = store.search_candidates(&query).await.unwrap();
-        let second_result = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(first_result, second_result);
-        assert_eq!(
-            first_result.completeness,
-            VectorRecallCompleteness::Exhaustive { scanned: 2 }
-        );
-        assert_eq!(first_result.candidates[0].object_id, fixtures.episode.id);
-        assert_eq!(first_result.candidates[0].object_type, ObjectType::Episode);
-        assert_eq!(first_result.candidates[0].surface, VectorSurface::Summary);
-
-        store
-            .delete_candidates(&[fixtures.episode.id])
-            .await
-            .unwrap();
-        let after_delete = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(after_delete.candidates.len(), 1);
-        assert_eq!(
-            after_delete.candidates[0].object_id,
-            fixtures.salient_observation.id
-        );
-    }
-
-    #[tokio::test]
-    async fn vector_fake_canonicalizes_equal_scores_before_limit_across_insertion_orders() {
-        let first_store = FakeVectorCandidateStore::new();
-        let second_store = FakeVectorCandidateStore::new();
-        let first_episode_id = Uuid::from_u128(2);
-        let second_episode_id = Uuid::from_u128(3);
-        let observation_id = Uuid::from_u128(1);
-        let candidates = vec![
-            VectorCandidateRecord::new(
-                observation_id,
-                ObjectType::Observation,
-                VectorSurface::Text,
-                vec![1.0, 0.0],
-            ),
-            VectorCandidateRecord::new(
-                second_episode_id,
-                ObjectType::Episode,
-                VectorSurface::Summary,
-                vec![1.0, 0.0],
-            ),
-            VectorCandidateRecord::new(
-                first_episode_id,
-                ObjectType::Episode,
-                VectorSurface::Summary,
-                vec![1.0, 0.0],
-            ),
-        ];
-        let mut reversed = candidates.clone();
-        reversed.reverse();
-
-        first_store.upsert_candidates(&candidates).await.unwrap();
-        second_store.upsert_candidates(&reversed).await.unwrap();
-
-        let query = VectorCandidateSearch::new(
-            vec![1.0, 0.0],
-            2,
-            vec![ObjectType::Episode, ObjectType::Observation],
-        );
-        let first = first_store.search_candidates(&query).await.unwrap();
-        let second = second_store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(first, second);
-        assert_eq!(
-            first
-                .candidates
-                .iter()
-                .map(|candidate| candidate.object_id)
-                .collect::<Vec<_>>(),
-            vec![first_episode_id, second_episode_id]
-        );
-    }
-
-    #[tokio::test]
-    async fn vector_fake_upserts_full_records_through_store_contract() {
-        let store = FakeVectorCandidateStore::new();
-        let fixtures = representative_fixtures();
-        let record = crate::policy::episode_vector_record(&fixtures.episode);
-        let records = vec![VectorRecordEmbedding::new(&record, &[1.0, 0.0])];
-
-        store.upsert_vector_records(&records).await.unwrap();
-
-        let matches = store
-            .search_candidates(&VectorCandidateSearch::new(
-                vec![1.0, 0.0],
-                10,
-                vec![ObjectType::Episode],
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(matches.candidates.len(), 1);
-        assert_eq!(matches.candidates[0].object_id, fixtures.episode.id);
-        assert_eq!(matches.candidates[0].object_type, ObjectType::Episode);
-        assert_eq!(matches.candidates[0].surface, VectorSurface::Summary);
-    }
-
-    #[tokio::test]
-    async fn vector_fake_zero_norm_fixture_scores_every_scoped_candidate_zero() {
-        let store = FakeVectorCandidateStore::new();
-        let (records, query) = zero_norm_vector_fixture();
-        store.upsert_candidates(&records).await.unwrap();
-
-        let recall = store.search_candidates(&query).await.unwrap();
-
-        assert_eq!(recall.candidates.len(), 2);
-        assert!(recall
-            .candidates
-            .iter()
-            .all(|candidate| candidate.score == 0.0));
-        assert_eq!(
-            recall.completeness,
-            VectorRecallCompleteness::Exhaustive { scanned: 2 }
-        );
-    }
 
     #[tokio::test]
     async fn graph_fake_preserves_objects_links_lifecycle_and_raw_refs() {
@@ -1512,10 +1277,5 @@ mod tests {
             .hub_links
             .iter()
             .any(|link| link.from_id == fixtures.hub_entity.id));
-    }
-
-    #[test]
-    fn cosine_similarity_rejects_mismatched_dimensions() {
-        assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0, 0.0]), 0.0);
     }
 }
