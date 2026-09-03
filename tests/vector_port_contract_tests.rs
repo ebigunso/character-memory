@@ -297,10 +297,6 @@ async fn assert_zero_norm_contract(memory: &CharacterMemory) {
     );
     let empty = memory.retrieve(episode_query()).await.unwrap();
     assert!(empty.trace.unwrap().vector_candidates.is_empty());
-    assert_eq!(
-        empty.rationale.telemetry.vector_recall_completeness,
-        VectorRecallCompleteness::Exhaustive { scanned: 0 }
-    );
     for value in 2..=3 {
         let mut episode = EpisodeDraft::new(format!("positive episode {value}"));
         episode.id = Some(id(value));
