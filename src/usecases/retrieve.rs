@@ -33,7 +33,7 @@ use crate::ports::graph_authority::{
     GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
-use crate::ports::vector_candidate::VectorCandidateStore;
+use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
 where
@@ -85,14 +85,18 @@ where
         &self,
         context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
+        context.validate()?;
         let query_embedding = self.embed_query(&context).await?;
         let query_embedding_dimension = query_embedding.len();
         let vector_search = VectorCandidateSearch::new(
             query_embedding,
             context.candidate_limits.max_vector_candidates,
-        )
-        .with_object_types(context.object_type_defaults.clone());
-        let vector_candidates = self.vector_store.search_candidates(&vector_search).await?;
+            context.object_type_defaults.clone(),
+        );
+        let VectorCandidateRecall {
+            candidates: vector_candidates,
+            completeness: vector_recall_completeness,
+        } = self.vector_store.search_candidates(&vector_search).await?;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
 
         let root_selection =
@@ -218,6 +222,7 @@ where
             configured_lifecycle_policy: context.lifecycle_policy,
             query_embedding_dimension,
             returned_vector_candidate_count: vector_candidates.len(),
+            vector_recall_completeness,
             unique_graph_root_candidate_count: root_selection.unique_count,
             selected_graph_root_count: candidate_roots.len(),
             graph_root_omission_count: root_selection.omitted_count,
@@ -1356,6 +1361,7 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
+    use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::{
         ContinuitySectionLimits, RetrievalCandidateLimits, RetrievalLifecyclePolicy,
     };
@@ -1645,6 +1651,38 @@ mod tests {
                 && entry.retained_count == 0
                 && entry.omitted_by_fanout_count > 0
         }));
+    }
+
+    #[tokio::test]
+    async fn retrieval_telemetry_preserves_every_vector_recall_completeness_verdict() {
+        let cases = [
+            VectorRecallCompleteness::NotRequested,
+            VectorRecallCompleteness::Exhaustive { scanned: 7 },
+            VectorRecallCompleteness::BoundaryTieClosed { fetched: 9 },
+            VectorRecallCompleteness::BoundaryTieOpen {
+                fetched: 16,
+                fetch_bound: 16,
+            },
+        ];
+
+        for completeness in cases {
+            let graph = FakeGraphAuthorityStore::new();
+            let vector = RecordingVectorStore::with_completeness(Vec::new(), completeness);
+            let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+            let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
+                .retrieve(RetrievalContext::new("completeness telemetry"))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                outcome.rationale.telemetry.vector_recall_completeness,
+                completeness
+            );
+            assert_eq!(
+                outcome.rationale.telemetry.returned_vector_candidate_count,
+                0
+            );
+        }
     }
 
     #[tokio::test]
@@ -2527,11 +2565,10 @@ mod tests {
             RecordingVectorStore::new(vec![candidate(object_id, ObjectType::MemoryLink, 0.99)]);
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut context = RetrievalContext::new("propagate graph errors");
+        context.object_type_defaults.push(ObjectType::MemoryLink);
 
-        let error = pipeline
-            .retrieve(RetrievalContext::new("propagate graph errors"))
-            .await
-            .unwrap_err();
+        let error = pipeline.retrieve(context).await.unwrap_err();
 
         assert!(
             matches!(error, CustomError::MemoryValidation(message) if message.contains("unsupported root"))
@@ -2929,11 +2966,25 @@ mod tests {
     #[derive(Debug)]
     struct RecordingVectorStore {
         candidates: Vec<VectorCandidateMatch>,
+        completeness: Option<VectorRecallCompleteness>,
     }
 
     impl RecordingVectorStore {
         fn new(candidates: Vec<VectorCandidateMatch>) -> Self {
-            Self { candidates }
+            Self {
+                candidates,
+                completeness: None,
+            }
+        }
+
+        fn with_completeness(
+            candidates: Vec<VectorCandidateMatch>,
+            completeness: VectorRecallCompleteness,
+        ) -> Self {
+            Self {
+                candidates,
+                completeness: Some(completeness),
+            }
         }
     }
 
@@ -2949,8 +3000,26 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            if query.limit == 0 || query.object_types.is_empty() {
+                return Ok(VectorCandidateRecall {
+                    candidates: CanonicalCandidates::new([]),
+                    completeness: VectorRecallCompleteness::NotRequested,
+                });
+            }
+            let candidates = self
+                .candidates
+                .iter()
+                .filter(|candidate| query.object_types.contains(&candidate.object_type))
+                .cloned()
+                .collect::<Vec<_>>();
+            let scanned = candidates.len();
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new(candidates).truncated(query.limit),
+                completeness: self
+                    .completeness
+                    .unwrap_or(VectorRecallCompleteness::Exhaustive { scanned }),
+            })
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

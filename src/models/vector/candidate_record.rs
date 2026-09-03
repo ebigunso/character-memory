@@ -71,17 +71,20 @@ pub(crate) struct VectorCandidateSearch {
 }
 
 impl VectorCandidateSearch {
-    pub(crate) fn new(query_embedding: Vec<f32>, limit: usize) -> Self {
+    pub(crate) fn new(
+        query_embedding: Vec<f32>,
+        limit: usize,
+        object_types: Vec<ObjectType>,
+    ) -> Self {
         Self {
             query_embedding,
             limit,
-            object_types: Vec::new(),
+            object_types,
         }
     }
 
-    pub(crate) fn with_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
-        self.object_types = object_types;
-        self
+    pub(crate) fn is_zero_norm(&self) -> bool {
+        self.query_embedding.iter().all(|value| *value == 0.0)
     }
 }
 
@@ -205,8 +208,11 @@ mod tests {
 
     #[test]
     fn vector_candidate_search_can_scope_by_canonical_object_types() {
-        let search = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(vec![ObjectType::Episode, ObjectType::DerivedMemory]);
+        let search = VectorCandidateSearch::new(
+            vec![1.0, 0.0],
+            10,
+            vec![ObjectType::Episode, ObjectType::DerivedMemory],
+        );
 
         assert_eq!(search.query_embedding, vec![1.0, 0.0]);
         assert_eq!(search.limit, 10);

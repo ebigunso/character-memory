@@ -5,6 +5,7 @@ use crate::domain::{
     GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
     RelationType, RetentionState, ThreadStatus,
 };
+use crate::errors::{ConfigValidationError, ConfigValidationReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
@@ -34,6 +35,20 @@ impl RetrievalContext {
     pub fn with_trace(mut self) -> Self {
         self.include_trace = true;
         self
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.object_type_defaults.is_empty() {
+            return Err(ConfigValidationError {
+                keys: vec!["object_type_defaults"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "at least one retrieval object type",
+                    actual: "[]".to_owned(),
+                },
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -254,12 +269,30 @@ pub struct RetrievalTelemetry {
     pub configured_lifecycle_policy: RetrievalLifecyclePolicy,
     pub query_embedding_dimension: usize,
     pub returned_vector_candidate_count: usize,
+    pub vector_recall_completeness: VectorRecallCompleteness,
     pub unique_graph_root_candidate_count: usize,
     pub selected_graph_root_count: usize,
     pub graph_root_omission_count: usize,
     pub graph_expansion: GraphExpansionTelemetry,
     pub selectivity: SelectivityTelemetry,
     pub section_pressure: Vec<SectionPressureSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VectorRecallCompleteness {
+    #[default]
+    NotRequested,
+    Exhaustive {
+        scanned: usize,
+    },
+    BoundaryTieClosed {
+        fetched: usize,
+    },
+    BoundaryTieOpen {
+        fetched: usize,
+        fetch_bound: usize,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
