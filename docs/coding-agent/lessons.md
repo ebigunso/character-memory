@@ -498,3 +498,25 @@ Prevention:
 
 Evidence:
 - Monitor output file for the PR #77 watcher on 2026-09-04: eighteen consecutive `jq: command not found` lines and no events, while Copilot's "approval recommended" review was already posted.
+
+## 2026-09-04 — Edit Only Through Absolute Worktree Paths, And Run Broad Suites Only After The Live Window Is Granted  [tags: workflow, worktrees, live-mutex, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_4 / Wave 3
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- A relative-path patch briefly modified files in the shared main checkout instead of the task worktree before being reverted; and a full test suite started before the exclusive service window was confirmed, so service-backed tests could have collided with another agent's run.
+
+Root cause:
+- Relative paths resolve against whatever the current directory happens to be, and several checkouts of the same repository share identical relative paths; the live-window protocol grants exclusivity only on the explicit `WINDOW_YOURS` reply, not on sending `LIVE_START`.
+
+Fix applied:
+- The stray edits were reverted and verified clean; the suite was re-run inside the granted window.
+
+Prevention:
+- Every edit and every git command names an absolute path inside the task worktree, and the current directory is checked before each edit; a suite that may reach a shared service starts only after `WINDOW_YOURS` is observed, otherwise run the service-free command.
+
+Evidence:
+- Worker Task_4 report of 2026-09-03 (commit d232830) and the orchestrator's clean `git status` check on the main checkout.
