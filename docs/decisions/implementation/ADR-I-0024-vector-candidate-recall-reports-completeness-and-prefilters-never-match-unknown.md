@@ -42,8 +42,8 @@ The verdict distinguishes four situations: no search was issued because the limi
 Adapters state the verdict truthfully: exhaustive only when the adapter knows the shard is unindexed and the cutoff cohort was closed, with the scanned count taken from the scope rather than the rows returned; an exhaustive scan whose cohort stays open at the bound reports open.
 The retrieval pipeline records the verdict in retrieval telemetry beside the returned candidate count and never repairs, retries, or fails on it.
 
-A vector-layer predicate may be evaluated only over stored values that are immutable or synchronised on every mutation, and an unknown or missing stored value never satisfies a positive predicate.
-A predicate that needs a stored value the write paths do not keep current is not a prefilter; it is a graph-authority question.
+A vector-layer predicate may be evaluated only over a column that is fully populated for every searchable record (backfilled from graph authority before the predicate is enabled, per ADR-I-0025) and that is immutable or synchronised on every mutation; under those two conditions a missing or unknown value is a defect, not a state, and it never satisfies a positive predicate, so the rule produces no false negative on a correctly populated column and turns an incorrectly populated one into a visible failure rather than a silent widening.
+A predicate that needs a stored value the write paths do not keep current, or that is not populated for every record, is not a prefilter; it is a graph-authority question.
 
 ## Character Memory Relevance
 
@@ -79,12 +79,12 @@ Option 5 recreates a prefilter over values that only the upsert path wrote, whic
 ## Consequences
 
 - Positive: top-K determinism is observable per retrieval and per adapter.
-- Positive: any future prefilter has one admission test — is the value it reads always current — instead of a case-by-case argument.
+- Positive: any future prefilter has one admission test — is the column populated for every record and always current — instead of a case-by-case argument.
 - Negative / tradeoffs: callers wanting a scoped or time-bounded semantic search wait for a synchronised or immutable column rather than filtering on what happens to be stored.
 
 ## Decision Boundary
 
-Invariant: the search result carries a completeness verdict stated truthfully by the adapter, and the pipeline never repairs, retries, or fails on it; a vector-layer predicate reads only immutable or synchronised values, and an unknown value never satisfies a positive predicate.
+Invariant: the search result carries a completeness verdict stated truthfully by the adapter, and the pipeline never repairs, retries, or fails on it; a vector-layer predicate reads only a fully populated column that is immutable or synchronised, and an unknown value never satisfies a positive predicate.
 
 Not covered: the current query shape (an embedding, a limit, and an object-type scope, with an empty scope selecting zero — a current state, not a rule), the verdict's type and wire shape (the appendix is a reference, not a contract), the telemetry field name, and the service adapter's overfetch bound.
 
