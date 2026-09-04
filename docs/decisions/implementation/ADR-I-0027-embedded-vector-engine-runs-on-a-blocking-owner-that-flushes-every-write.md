@@ -6,7 +6,7 @@ deciders: ["ebigunso"]
 consulted: ["Claude Fable 5.1"]
 informed: []
 warrant:
-  warranted_by: "without this record, future work would likely call the embedded engine directly from the async retrieval path (it is a plain synchronous API and the first implementation compiles), and would rely on the shard's final drop for persistence because the engine's write call returns success before anything is durable; both were the natural first draft of this phase"
+  warranted_by: "without this record, future work would likely call the embedded engine directly from the async retrieval path (it is a plain synchronous API and the first implementation compiles), and would rely on the shard's final drop for persistence because the engine's write call returns success before anything is durable; both appeared in the implementation draft reviewed on 2026-09-03"
   detected_signals: "cross-boundary contract shape (an engine with synchronous, non-durable writes inside an async host); premises likely to expire (the engine is beta and its persistence model may change); costly to detect (lost writes surface as a character forgetting after a crash, long after the cause)"
   cost_of_violation: "an engine call on an executor thread stalls every other retrieval in the process for the duration of a scan, build, or flush; a write acknowledged before its flush is lost on any exit that skips the shard's drop, and the loss is silent — the store reopens cleanly and simply lacks the memories"
   cost_of_wrong_preservation: "if the engine starts replaying its log on load or persisting on write and this record is preserved, every write keeps paying a synchronous disk sync it no longer needs"
@@ -89,7 +89,7 @@ Not covered: the channel and thread mechanics, the backoff bound, and the batchi
 
 - The engine persists on write or replays its log on load (the canary fails in that direction) — the per-write flush becomes optional and this record is revised.
 - The write-burst measurement shows the per-write flush dominating ingestion cost — batch flushes behind an explicit acknowledgement rather than weakening the durability rule.
-- The engine's directory lock changes semantics (the canary fails in that direction) — the constructor's wait-for-release rule is re-derived before the pin moves.
+- The engine's directory lock changes semantics (the canary fails in that direction) — the constructor's wait-for-release rule is re-derived before adopting a different engine pin.
 - A multi-process deployment shape is designed — the single-owner lock discipline is reconsidered with the graph and statistics stores, never alone.
 
 ## Consultation impact

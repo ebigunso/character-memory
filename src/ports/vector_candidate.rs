@@ -25,9 +25,9 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
     /// The shared fetch loop closes every score tie that crosses the requested
     /// limit. `Exhaustive` is reported only when every record in the requested
     /// scope was scored through a path the adapter knows to be exhaustive and the
-    /// cutoff cohort closed; `scanned` is the scope count. This includes an unindexed
-    /// scan or a full-scope scroll. An index-produced result prefix reports whether
-    /// its boundary tie closed or remained open at the fetch bound.
+    /// cutoff cohort closed; `scanned` is the number of scoped records actually scored
+    /// by that path. An index-produced result prefix reports whether its boundary tie
+    /// closed or remained open at the fetch bound.
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,

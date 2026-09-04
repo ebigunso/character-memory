@@ -5,10 +5,10 @@ use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    points_selector::PointsSelectorOneOf, vectors_config, Condition, CountPointsBuilder,
-    CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
-    Filter, PointStruct, ScoredPoint, ScrollPointsBuilder, SearchPointsBuilder,
-    UpsertPointsBuilder, VectorParams, VectorsConfig,
+    points_selector::PointsSelectorOneOf, vectors_config, Condition, CreateCollectionBuilder,
+    CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance, Filter, PointStruct,
+    ScoredPoint, ScrollPointsBuilder, SearchPointsBuilder, UpsertPointsBuilder, VectorParams,
+    VectorsConfig,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
@@ -187,36 +187,6 @@ impl QdrantVectorCandidateStore {
             .map(|point| qdrant_payload_to_match(&point.payload, 0.0))
             .collect()
     }
-
-    async fn scoped_count(&self, query: &VectorCandidateSearch) -> Result<usize, CustomError> {
-        let request = CountPointsBuilder::new(&self.collection_name)
-            .filter(qdrant_candidate_filter(query))
-            .exact(true)
-            .build();
-        let count = self
-            .client
-            .count(request)
-            .await
-            .map_err(qdrant_error)?
-            .result
-            .ok_or_else(|| {
-                CustomError::VectorDatabaseError(VectorDatabaseError::new(
-                    "qdrant",
-                    VectorDatabaseErrorKind::Response,
-                    None,
-                    "Qdrant count response was missing result",
-                ))
-            })?
-            .count;
-        usize::try_from(count).map_err(|_| {
-            CustomError::VectorDatabaseError(VectorDatabaseError::new(
-                "qdrant",
-                VectorDatabaseErrorKind::Conversion,
-                None,
-                format!("Qdrant scope count {count} exceeds the platform maximum"),
-            ))
-        })
-    }
 }
 
 fn validate_collection_vector_config(
@@ -316,11 +286,6 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         } else {
             usize::MAX
         };
-        let scanned = if zero_norm {
-            Some(self.scoped_count(query).await?)
-        } else {
-            None
-        };
         let closed = close_tie_cohort(query.limit, fetch_limit_cap, |fetch_limit| async move {
             if zero_norm {
                 self.scroll_zero_norm_candidate_batch(query, fetch_limit)
@@ -330,6 +295,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
             }
         })
         .await?;
+        let scanned = zero_norm.then_some(closed.fetched);
         let completeness = closed.completeness(scanned);
         Ok(VectorCandidateRecall {
             candidates: closed.candidates,
@@ -1182,7 +1148,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
-    async fn qdrant_candidate_store_live_scores_zero_norm_query_candidates_zero() {
+    async fn qdrant_candidate_store_live_reports_the_zero_norm_scored_scope() {
         let url = env::var("QDRANT_CONNECTION_STRING")
             .expect("QDRANT_CONNECTION_STRING is required for live Qdrant regression");
         let collection_name = format!("cm_zero_norm_{}", Uuid::new_v4().simple());
@@ -1219,7 +1185,9 @@ mod tests {
             .all(|candidate| candidate.score == 0.0));
         assert_eq!(
             recall.completeness,
-            VectorRecallCompleteness::Exhaustive { scanned: 2 }
+            VectorRecallCompleteness::Exhaustive {
+                scanned: recall.candidates.len(),
+            }
         );
         let _ = store.client.delete_collection(&collection_name).await;
     }

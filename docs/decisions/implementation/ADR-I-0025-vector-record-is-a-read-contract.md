@@ -6,7 +6,7 @@ deciders: ["ebigunso"]
 consulted: ["Claude Fable 5.1"]
 informed: []
 warrant:
-  warranted_by: "without this record, future work would likely re-add relationship, lifecycle, time, or readable-text columns to the vector record because the earlier payload design lists them as intended, or delete the embedded-text column as unread once surfaces become generated"
+  warranted_by: "without this record, future work would likely re-add relationship, lifecycle, time, or readable-text columns to the vector record because the earlier payload design lists them as intended, or delete the embedded-text column as unread when surfaces are generated"
   detected_signals: "cross-boundary contract shape (two adapters mirror one record); rejected alternative likely to be re-proposed; premises likely to expire (a retrieval route may need a prefilter); cross-repository obligation (the evaluation baseline read a payload column)"
   cost_of_violation: "every column that returns without a reader is mirrored across two adapters, indexed at every collection initialisation, and carried stale by write paths that never update it; a column deleted as unread would erase the only record of what a generated vector embedded"
   cost_of_wrong_preservation: "if a retrieval route needs a prefilter and the five-column rule is preserved as prohibition rather than current state, the predicate is blocked instead of landing through the named re-entry path"
@@ -49,7 +49,7 @@ There is no readable-text column (`content_text`).
 The relationship refs (episode, observation, thread, entity, participant, speaker, supersedes), the lifecycle and currentness flags, the time hints, the ranking and salience hints, the object-specific hints, the graph URI, and the raw source reference are not part of the vector record.
 Dropping the graph URI partially supersedes ADR-I-0001's clause that every vector payload carries it: the stable object id remains the cross-store identity and the graph URI is derived from it by graph authority, so the pointer was a redundant copy of the id; ADR-I-0001's stable-id decision itself is unchanged.
 The typed field manifest is the single source of both adapters' column sets and holds exactly the five entries.
-ADR-I-0024 rules that a predicate reads only synchronised or immutable values and notes the two candidate predicates (a synchronised scope id; an immutable time window over `created_at` and `observed_at` backfilled from graph authority), so a returning column arrives with its predicate and its reader.
+ADR-I-0028 rules that a predicate reads only a fully populated, synchronised or immutable value and notes the two candidate predicates (a synchronised scope id; an immutable time window over `created_at` and `observed_at` backfilled from graph authority), so a returning column arrives with its predicate and its reader.
 
 ## Implementation Impact
 
@@ -61,7 +61,7 @@ ADR-I-0024 rules that a predicate reads only synchronised or immutable values an
 
 ## Considered Options
 
-1. Five-column read contract; keep `embedding_text` only; no hint families, with the candidate predicates noted in ADR-I-0024.
+1. Five-column read contract; keep `embedding_text` only; no hint families, with the candidate predicates noted in ADR-I-0028.
 2. Keep both text columns.
 3. Drop both text columns.
 4. Keep the unread hints for the planned phases.
@@ -76,18 +76,18 @@ It stores what is read, keeps the one column that ceases to be re-derivable when
 
 Option 2: `content_text` is a deterministic function of graph object fields at every surface builder, so it never carries information graph authority lacks, and its one reader has its own ingest records; rejected outright.
 Option 3: `embedding_text` is cheap and is the only record of what a generated or caller-supplied vector embeds; rejected outright.
-Option 4: no planned phase names a vector-layer predicate the existing fields could serve without new synchronisation work — scoped retrieval needs a scope id kept in sync by linking, temporal validity is a ranking property of new claim objects, salience evolves by reinforcement, and lifecycle hints describe vectors the write path deletes; reopened only under ADR-I-0024's prefilter rule.
+Option 4: no planned phase names a vector-layer predicate the existing fields could serve without new synchronisation work — scoped retrieval needs a scope id kept in sync by linking, temporal validity is a ranking property of new claim objects, salience evolves by reinforcement, and lifecycle hints describe vectors the write path deletes; reopened only under ADR-I-0028's prefilter rule.
 Option 5 is the only subset with a forward-looking case that survives the synchronisation test; it was declined because no phase document asks for the predicate and the columns backfill cheaply when one does.
 
 ## Consequences
 
 - Positive: both adapters mirror one five-field manifest; the embedded shard stores those fields as payload beside the vector with keyword indexes on object id (the delete selector) and object type (the scope predicate); ADR-I-0023 owns the physical layout.
-- Positive: the embedded surface is preserved as vector provenance, which matters once surfaces are generated rather than derived.
-- Negative / tradeoffs: a scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the candidate predicates noted in ADR-I-0024 make that step predictable.
+- Positive: the embedded surface is preserved as vector provenance, which matters when surfaces are generated rather than derived.
+- Negative / tradeoffs: a scoped or time-bounded prefilter requires a backfill and a schema-version step rather than a query-only change; the candidate predicates noted in ADR-I-0028 make that step predictable.
 
 ## Decision Boundary
 
-Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance and the schema version ADR-I-0007 requires; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture under ADR-I-0024's prefilter rule.
+Invariant: the vector record carries only fields a reader consumes, plus the embedded surface as provenance and the schema version ADR-I-0007 requires; readable content is hydrated from graph authority by object id; a returning hint arrives with its predicate and parity fixture under ADR-I-0028's prefilter rule.
 
 Not covered: the physical encoding of each column per adapter, and graph authority's own denormalised fields.
 
@@ -99,8 +99,8 @@ Not covered: the physical encoding of each column per adapter, and graph authori
 
 ## Revisit When
 
-- A retrieval route needs a scoped or time-bounded semantic search — add the column under ADR-I-0024's prefilter rule; this record's invariant is satisfied by a column that arrives with its reader.
-- The assisted-remember phase makes the embedding surface a graph-authoritative provenance artifact — the vector copy becomes a cache and this record's provenance argument moves to the graph.
+- A retrieval route needs a scoped or time-bounded semantic search — add the column under ADR-I-0028's prefilter rule; this record's invariant is satisfied by a column that arrives with its reader.
+- The assisted-remember phase makes the embedding surface a graph-authoritative provenance artifact — the vector copy becomes a cache and graph authority owns the provenance argument under that decision.
 - A re-indexing workflow appears that cannot rebuild from graph authority — the readable-text question reopens with that workflow as its reader.
 
 ## Consultation impact
@@ -111,4 +111,4 @@ Question asked: whether the unread hint families and the readable text column sh
 
 - ADR-I-0005 remains authoritative for graph authority over relationships; this record supersedes its payload field list and its "payload metadata as candidate filter" implementation guidance.
 - ADR-I-0002 remains authoritative for natural-language embedding surfaces; this record supersedes only its note to persist both text columns.
-- ADR-I-0024 (completeness verdict and prefilter rule), ADR-I-0023 (embedded shard layout), ADR-I-0026 (evaluation baseline reader).
+- ADR-I-0024 (completeness verdict), ADR-I-0028 (prefilter admission), ADR-I-0023 (embedded shard layout), ADR-I-0026 (evaluation baseline reader).

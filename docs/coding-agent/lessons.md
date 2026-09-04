@@ -650,7 +650,7 @@ Root cause:
 - Documentation generalized one implementation path into the verdict's semantic condition instead of checking every branch that produces the public enum.
 
 Fix applied:
-- State that exhaustive means every requested-scope record was scored through a known-exhaustive path, the cutoff cohort closed, and `scanned` came from the scope count; name unindexed scans and full-scope scrolls as examples.
+- State that exhaustive means every requested-scope record was scored through a known-exhaustive path, the cutoff cohort closed, and `scanned` came from the records that path actually scored; name unindexed scans and full-scope scrolls as examples.
 
 Prevention:
 - Define public verdicts from observable proof conditions and audit every constructor branch before documenting implementation examples.
@@ -727,3 +727,49 @@ Prevention:
 
 Evidence:
 - Reviewer item 6; the bare full-suite census held at 149 before and after, and the `REQUIRE_QDRANT_TESTS=1` full-suite census held at 149 before and after.
+
+## 2026-09-04 — Derive Exhaustive Counters From The Records Actually Scored  [tags: review, concurrency, telemetry, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 Copilot follow-up
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- The service zero-norm path used a separate filtered count request for `scanned`, so a concurrent write between that request and the full-scope scroll could make the verdict report a population different from the records it scored.
+
+Root cause:
+- The counter was treated as a scope snapshot instead of evidence about the exhaustive operation that produced the candidates.
+
+Fix applied:
+- Derive `scanned` from the final closed scroll response, which is the exact scoped record set scored by the zero-norm path.
+
+Prevention:
+- A telemetry counter describing completed work must come from that operation's result, not a separate query that can observe different state.
+- Residual risk / waiver: none.
+
+Evidence:
+- Copilot finding on PR #79 and the service zero-norm live regression.
+
+## 2026-09-04 — Keep One Governing Claim Per Decision Record  [tags: review, adr, durable-docs, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 Copilot follow-up
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- ADR-I-0024 combined recall-completeness semantics with vector-prefilter admission, and the decision set retained unanchored time-relative wording.
+
+Root cause:
+- Two nearby port concerns were recorded together without applying the one-decision warrant test or the durable-wording sweep independently to each claim.
+
+Fix applied:
+- Keep completeness in ADR-I-0024, move prefilter admission into ADR-I-0028 with its own warrant and revisit conditions, and remove unanchored time-relative wording from ADR-I-0023 through ADR-I-0028.
+
+Prevention:
+- Before finalising an ADR cluster, state one governing claim per record and run a time-relative-word census across every record in the cluster.
+- Residual risk / waiver: none.
+
+Evidence:
+- Copilot findings on planning PR #72 and the post-split ADR census.

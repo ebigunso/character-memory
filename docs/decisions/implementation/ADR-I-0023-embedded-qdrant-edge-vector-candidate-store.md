@@ -89,7 +89,7 @@ It is the only candidate that offers, in one engine, the capabilities the decade
 
 ### Rejected Alternatives
 
-Option 2 (in-house exact scan) violates the library-over-in-house driver: the library would own distance computation, blob encoding, and scan scheduling, and every capability the decade standard needs (index, quantization, named vectors) would have to be written or migrated to later; it is rejected outright, not deferred.
+Option 2 (in-house exact scan) violates the library-over-in-house driver: the library would own distance computation, blob encoding, and scan scheduling, and every capability the decade standard needs (index, quantization, named vectors) would require independent implementation or migration; it is rejected outright, not deferred.
 Option 3 (sqlite-vec 0.1.9) measured well — builds on Rust 1.95 and 1.97, 19 additional tree lines, about 6.2 MB unstripped, deterministic ties across fresh files and processes, parity five of five with score delta at or below 1.6e-7 — but its stable release is exhaustive-only with approximate indexing existing only in a pre-release, it carries limits on dimensions, result count, and metadata columns, and it is a pre-1.0 binding with a single maintainer; at decade scale its future is a second migration, so it is rejected for this role and reopened only if the chosen engine fails its Revisit When triggers and the extension has shipped a stable approximate index.
 Option 4 (LanceDB) was rejected on dependency weight relative to the chosen engine without a spike, since the chosen engine covers its capabilities; it is reopened only alongside Option 3's reopening.
 Option 5 fails restart safety, which the persistent-graph-authority phase made a requirement for every store that survives a process; rejected outright.
@@ -98,7 +98,7 @@ Option 6 defers a decision whose deciding evidence the same change produces: the
 ## Consequences
 
 - Positive: a fully self-contained local deployment exists; the default test path needs no running service; both adapters are held to one contract by one suite; the embedded store can grow into indexed, quantized, and memory-mapped operation without an engine switch.
-- Positive: shared engine family means payload and filter conventions are written once and the service parity result (score delta 0.0) is structural, not coincidental.
+- Positive: the shared engine family gives both adapters one payload and filter convention, and the service parity result (score delta 0.0) is structural, not coincidental.
 - Negative / tradeoffs: the engine is beta and its API may change; the canary test and the pinned version turn that into a build-time failure rather than a runtime one.
 - Negative / tradeoffs: about 30.5 MB of unstripped binary and a higher toolchain floor; the weight deliverable exists to establish the real number.
 - Negative / tradeoffs: two adapters must be kept in parity for every port change; the parity suite is the cost of that guarantee.

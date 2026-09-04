@@ -1,6 +1,6 @@
 # v0.1.6 Design: Embedded Vector Candidate Recall
 
-Status: finished 2026-09-04 (ADR-I-0023 through ADR-I-0027); supersedes the 2026-07 draft of this document. The embedded engine ruling (Qdrant Edge over an in-house scan) was taken on two feasibility spikes; companion-repository evaluation evidence that was not yet produced at closeout remains explicitly pending in that repository.
+Status: finished 2026-09-04 (ADR-I-0023 through ADR-I-0028); supersedes the 2026-07 draft of this document. The embedded engine ruling (Qdrant Edge over an in-house scan) was taken on two feasibility spikes; companion-repository evaluation evidence that was not yet produced at closeout remains explicitly pending in that repository.
 
 ## Version intent
 
@@ -21,12 +21,12 @@ The embedded engine is the same family as the service backend, so payload and fi
 
 ## Design direction
 
-### The port contract (ADR-I-0024, ADR-I-0025)
+### The port contract (ADR-I-0024, ADR-I-0025, ADR-I-0028)
 
 This phase fixes the port contract deliberately, because two adapters cannot be held to an implicit one.
 
 Query: the embedding, the limit, and an object-type scope, and nothing else; an empty scope selects zero candidates, and the retrieval context rejects an empty configured object-type set at the boundary.
-A vector-layer predicate reads only immutable or synchronised stored values, and an unknown or missing value never satisfies a positive predicate (ADR-I-0024); a future predicate lands in both adapters with a parity fixture, as every port change does.
+A vector-layer predicate is enabled only after its stored column is fully populated for every searchable record, including any required backfill, and only when the value is immutable or synchronised on every mutation; an unknown or missing value never satisfies a positive predicate (ADR-I-0028). A future predicate lands in both adapters with a parity fixture, as every port change does.
 
 Result: a completeness envelope, the canonical candidates plus a typed verdict — not requested (the limit was zero or the scope was empty, so no search was issued), exhaustive (every scoped record was scored, so the requested top-K is determinate), boundary tie closed (an index returned a prefix and the cutoff cohort within that prefix was verified closed), or boundary tie open (the overfetch bound was reached with the cohort within the prefix still open).
 The boundary verdicts describe the index's answer, not global recall: an approximate index may omit records it never surfaced, so only the exhaustive verdict asserts determinate membership over the scoped population, while the boundary verdicts assert that the returned set is deterministic for a given index state and whether its cutoff cohort was closed.
@@ -52,7 +52,7 @@ This phase ships the threshold at its exact-scan setting (the spike confirmed th
 
 Shard: cosine distance at the configured vector size; the five-field payload with keyword indexes on object id (the delete selector removes every surface of an object by it) and on object type (the scope predicate); the object-type scope expressed as a filter; the general shard type only (the update-only shard type carries an unimplemented path); object payloads only (the engine's point constructor panics on any other JSON shape).
 Search: the query runs through the service adapter's tie-closure loop and the canonical constructor, because the spike found identical-vector cohorts stable within a shard and across reopen but not across freshly built shards — deterministic admission comes from closing the cutoff cohort and ordering it canonically, never from engine order.
-Verdict mapping: exhaustive when the shard is unindexed (known from the adapter's own threshold configuration) and the shared loop closed the cutoff cohort, with the scanned count taken from a filtered count of the scope rather than from the rows returned, so every exact scan with a closed cutoff reports exhaustive regardless of population size; boundary tie closed when an indexed shard's cutoff cohort closed (a statement about the index's returned prefix, not about global recall); boundary tie open whenever the bound is reached with the cohort still open, on an exact scan too; not requested at limit zero or empty scope.
+Verdict mapping: exhaustive when the shard is unindexed (known from the adapter's own threshold configuration) and the shared loop closed the cutoff cohort, with `scanned` equal to the number of scoped records actually scored and never a truncated prefix, so every exact scan with a closed cutoff reports exhaustive regardless of population size; boundary tie closed when an indexed shard's cutoff cohort closed (a statement about the index's returned prefix, not about global recall); boundary tie open whenever the bound is reached with the cohort still open, on an exact scan too; not requested at limit zero or empty scope.
 Delete: remove every surface of each object id, matching the service adapter's selector.
 Restart safety: opening an existing shard validates its recorded vector size and distance against the configured embedding model and the adapter-owned marker's record schema version against the supported version before any query, raising the collection-compatibility error or the clear unsupported-schema failure ADR-I-0007 requires.
 Blocking discipline and durability (ADR-I-0027): every engine call — shard open and load with the lock backoff, payload index creation, upsert and delete, search, the filtered scope count behind the exhaustive verdict, index build, and the final drop — runs on a dedicated blocking owner the adapter creates at construction and that opens the shard itself, so the async composition entry point never touches the engine; the owner acknowledges a write only after the engine's flush, because the pinned engine persists only on flush and does not replay its log on load (writers that skipped the drop reopened with zero of two hundred points); the facade drop only signals the owner and no port or facade method is added.
@@ -122,7 +122,7 @@ named-vector coexistence of two embedding spaces (an engine capability this deci
 migration tooling between modes or between record shapes (rebuild-from-graph-authority is the documented path)
 multi-process access to the embedded store (same single-process expectation as embedded graph storage)
 synchronisation between an embedded shard and a service collection (an engine capability; not exercised this phase)
-any vector-layer predicate beyond the object-type scope (the candidate predicates noted in ADR-I-0024 belong to later phases)
+any vector-layer predicate beyond the object-type scope (the candidate predicates noted in ADR-I-0028 belong to subsequent phases)
 any new public facade method (the evaluation baseline consumes the retrieval trace)
 reconciliation diagnostics (the reconciliation slice was deleted in the structured-verdict phase; graph verification is the guard)
 ```
@@ -188,7 +188,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 4. Hint filter semantics.
    Parked claim: query-side hint semantics belong to the port contract.
    Re-verified: the filter type and both match-or-unknown implementations were deleted in the structured-verdict phase, and no consumer asks for a vector-layer predicate (the evaluation surface policy carries object types and budgets only).
-   Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prefilter rule and candidate predicates are recorded in ADR-I-0024.
+   Evidence: zero-hit census for the filter type and for empty-or-null match conditions in the service adapter; the prefilter rule and candidate predicates are recorded in ADR-I-0028.
 5. Evaluation baseline capability.
    Parked claim: the baseline re-implements a hidden raw-vector capability against the payload schema.
    Re-verified: one singleton-scoped traced retrieval per measured kind reproduces the direct per-kind search exactly, which a sliced mixed-kind top-K would not; each retrieval's completeness verdict reports whether that kind's top-K was determinate over the scoped population (exhaustive) or only closed within the index's returned prefix (boundary verdicts), and the baseline records which; the evaluation adapter can hold item text from ingest.
@@ -204,6 +204,6 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 - Dependency weight: the unstripped delta is recorded; the stripped delta and feature trimming are measured in-phase, and a material change reopens ADR-I-0023.
 - Parity suite placement: contract parity in the library, behaviour parity in the evaluation repository (above).
 - Settings shape: separate mode and path keys with `collection_name` as the backend-neutral namespace key naming one shard directory per collection, not a connection string interpreted by mode (ADR-I-0023).
-- Hint families: all dropped from the vector record, with the two candidate predicates noted (ADR-I-0024, ADR-I-0025).
+- Hint families: all dropped from the vector record, with the two candidate predicates noted (ADR-I-0025, ADR-I-0028).
 - Text columns: readable text dropped, embedded text kept as provenance, governed by the three sentences in ADR-I-0025.
 - Evaluation baseline: trace-sourced, no facade change (ADR-I-0026).

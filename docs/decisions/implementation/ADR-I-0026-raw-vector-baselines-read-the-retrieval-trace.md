@@ -8,7 +8,7 @@ informed: []
 warrant:
   warranted_by: "without this record, future work would likely add a public raw vector search to the facade for the evaluation baseline, or let evaluation tooling read a store's physical schema directly again, because each is the shortest path to a number"
   detected_signals: "externally observable contract shape with a tempting alternative; rejected alternative likely to be re-proposed; cross-repository obligation; deliberately bounded scope (no product use case for raw recall exists)"
-  cost_of_violation: "a raw-recall facade makes the library a vector-database abstraction and exposes unverified candidates as if they were memory; a schema-reading baseline breaks silently the moment a second vector adapter ships a different physical schema, and it reimplements canonical ordering the library already owns"
+  cost_of_violation: "a raw-recall facade makes the library a vector-database abstraction and exposes unverified candidates as if they were memory; a schema-reading baseline breaks silently the moment a second vector adapter ships a different physical schema, and it reimplements canonical ordering owned by the library"
   cost_of_wrong_preservation: "if a product use case for candidate-level recall arrives and this record is preserved as a blanket prohibition, the diagnostic surface the observability phase plans would be blocked instead of designed"
   cost_of_over_extension: "reading this record as forbidding evaluation tooling from using the trace at all would leave the baseline with no honest data source"
 depends_on: [implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md]

@@ -6,14 +6,14 @@
 - work_type: mixed
 
 ## Goal
-- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0027: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the default vector mode with the service adapter retained as the explicit service mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there and consumed here as closeout evidence.
+- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0028: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the default vector mode with the service adapter retained as the explicit service mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there and consumed here as closeout evidence.
 
 ## Definition of Done
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
 - Every row of the phase document's deferral-reconfirmation checklist has its evidence produced and cited in the Progress Log.
 - Every deletion listed under "Deletions that are deliverables" is gone, with a zero-hit census.
 - Both repositories' service-gated suites execute (not skip) under the service-backed CI job.
-- One PR per wave in this repository, merged by the decider; the evaluation repository's cross-mode comparison is available as consumed evidence at closeout.
+- One or more PRs per wave in this repository, stacked on the planning PR and merged by the decider; the evaluation repository's cross-mode comparison is available as consumed evidence at closeout.
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
@@ -174,12 +174,17 @@
 - type: chore
 - owns:
   - src/test_support.rs
-  - src/**/tests (fake stores only)
+  - src/memory.rs (inline fake-store tests only)
+  - src/models/vector.rs (fake-only re-export)
+  - src/models/vector/candidate_record.rs (fake type retirement and inline tests)
+  - src/models/vector/record.rs (fake-only conversions and inline tests)
+  - src/policy.rs (fake-only test re-export)
+  - src/usecases/correct_forget.rs (inline fake-store tests only)
+  - src/usecases/retrieve.rs (inline fake-store tests only)
   - src/api/types/retrieval.rs (doc comments only)
   - src/ports/vector_candidate.rs (doc comments only)
   - src/composition.rs, src/config/app_settings.rs (public constructor doc comments only; deferred from the Task_4 Copilot review)
   - src/adapters/qdrant/store.rs, src/adapters/qdrant/payload.rs, src/adapters/qdrant_edge/mod.rs (Task_8 audit dispositions only)
-  - src/models/vector/candidate_record.rs (header comment only)
   - tests/vector_port_contract_tests.rs, tests/support/** (point-id parity fixture and fake-retirement fallout)
   - README.md (stale filtering line)
   - docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md (closeout status)
@@ -194,8 +199,8 @@
 - acceptance:
   - Zero-hit census for the retired fake and record type.
   - All five checklist rows cite evidence in the Progress Log.
-  - Task_8 audit dispositions landed: one point-identity derivation (the v5 derivation) shared by both adapters with a parity assertion and no compat shim; one shared read function for the record contract returning the closed error vocabulary, with the service adapter's stringly database errors for payload and scroll-limit faults removed; the canary pins that an indexed shard searched exactly returns the exhaustive result; the service zero-norm verdict's `scanned` comes from the scope count or the loop invariant is stated; the duplicate vector-config validation is reduced to one or justified in place; the stale header comments and README line are corrected; the public facade constructor and `Settings::new` rustdoc describe both vector-store modes in backend-neutral terms (embedded default with a store path; explicit service mode with a connection string).
-  - The public completeness type documents all four verdict meanings and the `scanned` and `fetched` counters, stating that a closed boundary verdict is deterministic only for the index-returned prefix, never population-level completeness; the port trait's doc comment states the verdict guarantees (tie closure through the shared loop; exhaustive only when every scoped record was scored through a path the adapter knows to be exhaustive, including an unindexed scan or a full-scope scroll, with a closed cohort and `scanned` from the scope count; open at the bound) so a future adapter cannot label an index-produced prefix exhaustive (deferred from the Task_2 review to avoid re-cascading the stack mid-wave).
+  - Task_8 audit dispositions landed: one point-identity derivation (the v5 derivation) shared by both adapters with a parity assertion and no compat shim; one shared read function for the record contract returning the closed error vocabulary, with the service adapter's stringly database errors for payload and scroll-limit faults removed; the canary pins that an indexed shard searched exactly returns the exhaustive result; the service zero-norm verdict's `scanned` is the size of the final scroll response whose records were actually scored; the duplicate vector-config validation is reduced to one or justified in place; the stale header comments and README line are corrected; the public facade constructor and `Settings::new` rustdoc describe both vector-store modes in backend-neutral terms (embedded default with a store path; explicit service mode with a connection string).
+  - The public completeness type documents all four verdict meanings and the `scanned` and `fetched` counters, stating that `scanned` is the number of scoped records actually scored and `fetched` is the final prefix size rather than a cumulative count, and that a closed boundary verdict is deterministic only for the index-returned prefix, never population-level completeness; the port trait's doc comment states the verdict guarantees (tie closure through the shared loop; exhaustive only when every scoped record was scored through a path the adapter knows to be exhaustive, including an unindexed scan or a full-scope scroll, with a closed cohort; open at the bound) so a future adapter cannot label an index-produced prefix exhaustive (deferred from the Task_2 review to avoid re-cascading the stack mid-wave).
 - validation:
   - kind: command
     required: true
@@ -258,11 +263,12 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
   1. Canonical-candidates newtype survival: `rg -n "CanonicalCandidates" src tests` shows the newtype remains the `VectorCandidateRecall.candidates` envelope field and is constructed only at adapter/tie-closure and deliberate test-double boundaries; `canonical_candidates_dedupe_identity_at_highest_score_and_totally_order_ties` remains in the service-free suite.
   2. Dual text columns: `rg -n "content_text|embedding_text|CONTENT_TEXT|EMBEDDING_TEXT" src tests` shows no `content_text` column in this repository and only the required five-field `embedding_text` record/provenance path. The companion repository still has its direct Qdrant `content_text` reader, so its before/after vector-only identity-and-text A/B evidence is explicitly pending in that repository.
   3. Search completeness: `backend_fetch_cap_reports_an_open_boundary_without_allocating_rows`, `retrieval_telemetry_preserves_every_vector_recall_completeness_verdict`, the live service boundary tests, and `service_and_embedded_admit_identical_candidates_in_identical_order` cover open, telemetry, closed, and cross-adapter exhaustive-versus-closed behavior through the shared tie loop.
-  4. Hint filter semantics: `rg -n "VectorCandidateFilter|CandidateFilter|match_or_unknown|matches_or_unknown|MatchUnknown" src tests` returned zero hits; the query carries only object-type scope, with its empty-scope behavior and predicate rules pinned by ADR-I-0024 and the port contract tests.
+  4. Hint filter semantics: `rg -n "VectorCandidateFilter|CandidateFilter|match_or_unknown|matches_or_unknown|MatchUnknown" src tests` returned zero hits; the query carries only object-type scope, with its empty-scope behavior pinned by ADR-I-0024, its predicate rules pinned by ADR-I-0028, and its behavior covered by the port contract tests.
   5. Evaluation baseline capability: this repository exposes singleton-scoped traced candidates, completeness telemetry, and `max_embedding_surfaces`; `rg -n "SearchPointsBuilder|QDRANT_OBJECT_ID_FIELD|QDRANT_OBJECT_TYPE_FIELD|QDRANT_CONTENT_TEXT_FIELD" crates/cmem-eval-adapter-cmem/src/lib.rs` still finds the companion repository's direct Qdrant baseline, so its trace migration, row-level identity/rank A/B diff, and post-switch zero-hit census are explicitly pending in that repository.
 - 2026-09-04 Task_7 validation closeout: `cargo fmt --all -- --check` passed; `cargo clippy --all-targets --all-features -- -D warnings` passed on Rust 1.97; bare `cargo test` passed 396 library tests, 31 integration tests, and one doc test with five intentional ignores after the point-identity and temporary-directory-cleanup fixtures were added; the live-switch `cargo test` passed with both service/embedded parity tests executing; and the four ignored service-Qdrant tests passed explicitly under the live endpoint. The package is 0.1.6, the phase and roadmap are finished, and this plan is moved to completed. Independent reviewer approval and stack merge remain Orchestrator gates.
 - 2026-09-04 Task_7 review revision: the service scroll-width overflow now returns the typed `Conversion` kind; `rg -n "SURFACE_FIELD" src tests` returns zero hits; completeness docs and ADR-I-0024 define exhaustive recall by proving every scoped record was scored through a known-exhaustive path; the test close acknowledgment follows the `EdgeShard` destructor; and every embedded vector-port integration fixture performs bounded root cleanup after dropping its facade. The service-free suite, strict clippy, strict rustdoc generation, and formatting gate all pass; the final full-suite Windows `.tmp*` census was 148 before and 148 after (zero delta). No live rerun was needed because the delta changes local conversion classification, documentation, and embedded test lifecycles only.
 - 2026-09-04 Task_7 service-up cleanup revision: the indexed exact-recall canary awaits both direct-store closes before removing and asserting its temporary root, and the remaining direct point-identity and zero-norm adapter stores also close explicitly. The focused canary, bare full suite, service-up full suite with `REQUIRE_QDRANT_TESTS=1`, strict clippy, strict rustdoc generation, and formatting gate pass; the final Windows `.tmp*` censuses were 149 before and 149 after for both full-suite modes (zero delta).
+- 2026-09-04 Task_7 telemetry and decision-record follow-up: the service zero-norm path derives `scanned` from the final scroll response whose scoped records it scored, with no concurrent count request; `fetched` is documented as the final prefix size rather than a cumulative total. ADR-I-0024 now governs completeness only, while accepted ADR-I-0028 governs prefilters and requires fully populated or backfilled current columns before activation. `Settings::new` documents that facade construction consumes and validates the retained vector location, and the Orchestrator rule metadata carries the review date. The ADR-I-0023 through ADR-I-0028 temporal-word census and stale-reference census returned zero hits. Formatting, strict all-target/all-feature clippy, and strict all-feature rustdoc passed. The final bare and service-up full suites each passed 396 library tests, 31 integration tests, and one doc test with five intentional ignores; the changed ignored live zero-norm regression also passed explicitly. The recursive `.tmp*` census stayed 4 before and 4 after the final bare run and 0 before and 0 after the service-up run. Two earlier bare runs exposed unrelated load-sensitive SQLite and Edge lock timing failures; each exact rerun passed, followed by the clean full-suite run recorded here.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -289,6 +295,11 @@ Append-only editing rule (applies to both logs below): when appending an entry, 
   - The blocking-owner and per-write-flush rules moved out of ADR-I-0023 into ADR-I-0027 as their own decision.
   - ADR-I-0024 narrowed to the completeness verdict and the prefilter rule (unknown never matches); the scope-only query is a current state, the type shape is a non-binding appendix, and the two predicate paths are notes binding on no phase.
 - 2026-09-03 — Merge shape: the records and plan are not merged ahead of the implementation, because ADR-I-0023's embedded default rests on evidence the implementation produces. Implementation waves land as PRs against the planning branch (`plan/v0-1-6-embedded-vector-recall`), which stays the readable home of the records; the phase merges to main as one change once the decision is solidified by its evidence.
+- 2026-09-04 — ADR-I-0024 split by governing claim.
+  - Trigger / new insight: completeness evidence and prefilter admission have different warrants, failure modes, and revisit triggers; keeping both in one record obscured which rule governed a change.
+  - Plan delta: ADR-I-0024 now decides completeness verdicts and counters only; accepted ADR-I-0028 decides that prefilters never match unknown and may activate only after their current columns are fully populated or backfilled. Phase, payload, roadmap, and ADR cross-references follow that boundary.
+  - Tradeoff: one additional decision record and explicit dependency links in exchange for independent amendment and auditability.
+  - User approval: yes, 2026-09-04.
 
 ## Notes
 - Risks: the row/summary schema move in the evaluation repository (typed backend identity) is a clean break under its compatibility policy and must not touch sealed evidence; the latency guidance and the stripped dependency weight must be measured, not assumed; the engine is beta, so its pin is exact and its bump is gated by the canary.
