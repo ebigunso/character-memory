@@ -14,8 +14,8 @@ warrant:
 depends_on: [implementation/ADR-I-0018-responsibility-boundary-modules-with-enforced-dependency-direction.md, implementation/ADR-I-0022-retain-measured-retrieval-defaults.md]
 implements: []
 supersedes: []
-superseded_by: null
-supersession_scope: null
+superseded_by: implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md
+supersession_scope: partial   # the prefilter-admission clause moved to ADR-I-0028; this record stays authoritative for completeness reporting
 ---
 
 # ADR-I-0024: Vector candidate recall reports its completeness

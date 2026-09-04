@@ -13,7 +13,7 @@
 - Every row of the phase document's deferral-reconfirmation checklist has its evidence produced and cited in the Progress Log.
 - Every deletion listed under "Deletions that are deliverables" is gone, with a zero-hit census.
 - Both repositories' service-gated suites execute (not skip) under the service-backed CI job.
-- One or more PRs per wave in this repository, stacked on the planning PR and merged by the decider; the evaluation repository's cross-mode comparison is available as consumed evidence at closeout.
+- One or more PRs per wave in this repository, stacked on the planning PR and merged by the decider; the evaluation repository's cross-mode comparison is consumed as evidence when that repository produces it; by decider ruling (ADR-I-0023, 2026-09-03) it is a revisit trigger for the embedded default, not a closeout gate, so its pending state does not hold this plan open.
 
 ## Scope / Non-goals
 - Scope: the phase document's deliverables and deletions, all in this repository.
