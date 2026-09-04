@@ -840,6 +840,8 @@ async fn try_setup_persistent_character_memory(
             .map_err(base::config_error)?
             .set_override("embedding_model", embedding_model)
             .map_err(base::config_error)?
+            .set_override("vector_store_mode", "service")
+            .map_err(base::config_error)?
             .set_override("graph_store_mode", "persistent")
             .map_err(base::config_error)?
             .set_override("retrieval_stats_store_mode", "sqlite")
@@ -878,6 +880,8 @@ fn load_in_memory_settings() -> Result<Settings, CustomError> {
         .set_override("openai_api_key", base_settings.get_openai_api_key())
         .map_err(base::config_error)?
         .set_override("embedding_model", embedding_model)
+        .map_err(base::config_error)?
+        .set_override("vector_store_mode", "service")
         .map_err(base::config_error)?
         .set_override("graph_store_mode", "in_memory")
         .map_err(base::config_error)?

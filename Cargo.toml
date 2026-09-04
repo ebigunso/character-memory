@@ -20,6 +20,7 @@ secrecy = { version = "0.10.3", features = ["serde"] }
 
 # Database
 qdrant-client = "1.19.0"
+qdrant-edge = "=0.8.0"
 oxigraph = { version = "0.5.7", default-features = false, features = ["rocksdb"] }
 serde_json = "1.0.138"
 rusqlite = { version = "0.32.1", features = ["bundled"] }

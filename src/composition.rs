@@ -2,12 +2,14 @@ use async_trait::async_trait;
 
 use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
-use crate::adapters::{OpenAIEmbeddingProvider, QdrantVectorCandidateStore};
+use crate::adapters::{
+    OpenAIEmbeddingProvider, QdrantEdgeVectorCandidateStore, QdrantVectorCandidateStore,
+};
 use crate::api::embedding::EmbeddingProvider;
 use crate::config::{
     EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
-    Settings,
+    Settings, VectorStoreMode,
 };
 use crate::errors::{CustomError, EmbeddingError, RetrievalStatsHealthCause};
 use crate::memory::CharacterMemory;
@@ -138,12 +140,25 @@ impl CharacterMemory {
             ConfigGraphStoreMode::InMemory => None,
         };
 
-        let vector_store = QdrantVectorCandidateStore::new(
-            settings.get_qdrant_connection(),
-            collection_name,
-            expected_vector_size as u64,
-        )?;
-        vector_store.init_collection().await?;
+        let vector_store: Box<dyn VectorCandidateStore> = match settings.get_vector_store_mode() {
+            VectorStoreMode::Embedded => Box::new(
+                QdrantEdgeVectorCandidateStore::open(
+                    settings.get_vector_store_path()?,
+                    collection_name,
+                    expected_vector_size,
+                )
+                .await?,
+            ),
+            VectorStoreMode::Service => {
+                let store = QdrantVectorCandidateStore::new(
+                    settings.get_service_qdrant_connection()?,
+                    collection_name,
+                    expected_vector_size as u64,
+                )?;
+                store.init_collection().await?;
+                Box::new(store)
+            }
+        };
         let graph_store = match persistent_graph_path {
             Some(path) => Box::new(OxigraphGraphAuthorityStore::new_persistent(path)?)
                 as Box<dyn GraphAuthorityStore>,
@@ -161,7 +176,7 @@ impl CharacterMemory {
 
         Ok(Self::from_parts_with_stats(
             graph_store,
-            Box::new(vector_store),
+            vector_store,
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
             stats_store,
             selectivity_policy,
