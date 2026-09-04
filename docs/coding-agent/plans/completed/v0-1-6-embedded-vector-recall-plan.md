@@ -24,7 +24,7 @@
 - As-built port: `src/ports/vector_candidate.rs`, `src/models/vector/candidate_record.rs`, `src/models/vector/record.rs`, `src/adapters/qdrant/{store,payload}.rs`, `src/policy/embedding_surface.rs`, `src/usecases/retrieve.rs`, `src/api/types/retrieval.rs`, `src/composition.rs`, `src/config/app_settings.rs`, `src/test_support.rs`.
 - Prerequisite in this repository, landed: the toolchain pin moved to the embedded engine's minimum (Rust 1.97.0) in its own change, merged 2026-09-02 as a88c117.
 - Prerequisite tracked in the evaluation repository: its evidence-integrity fixes must be merged before this phase cites any harness measurement.
-- Repo reference docs consulted: the five ADRs; ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
+- Repo reference docs consulted: the six ADRs (ADR-I-0023 through ADR-I-0028); ADR-I-0018 (dependency direction; ports may import the public retrieval vocabulary under its named exception); ADR-I-0007 (schema versioning); ADR-I-0021 (embedded default pattern); rules in `docs/coding-agent/rules/`.
 
 ## Open Questions (max 3)
 - none (the draft's five open questions were ruled by the decider on 2026-09-02 and are recorded in the phase document and the ADRs).

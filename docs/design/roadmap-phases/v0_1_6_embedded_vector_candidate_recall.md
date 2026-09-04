@@ -98,7 +98,7 @@ restart-safety test for the embedded store; pipeline test over the embedded adap
 dependency-weight report: unstripped and stripped release deltas, effect of feature trimming
 latency benchmark: exhaustive scan across corpus sizes at the configured dimension; executor responsiveness under a concurrent scan
 documentation: settings, single-process expectation, threshold semantics, measured latency guidance, rebuild-from-graph-authority as the path between modes
-five implementation ADRs (ADR-I-0023 through ADR-I-0027) with reciprocal partial-supersession frontmatter on ADR-I-0001, ADR-I-0002, ADR-I-0003, and ADR-I-0005
+six implementation ADRs (ADR-I-0023 through ADR-I-0028) with reciprocal partial-supersession frontmatter on ADR-I-0001, ADR-I-0002, ADR-I-0003, and ADR-I-0005
 ```
 
 Deletions that are deliverables, not side effects:
