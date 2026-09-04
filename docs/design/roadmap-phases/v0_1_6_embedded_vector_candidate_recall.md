@@ -151,7 +151,7 @@ A zero-norm record embedding is rejected at indexing as a typed per-record failu
 The engine contract canary passes on the pinned version.
 The dependency-weight report records unstripped and stripped release deltas and the effect of feature trimming.
 The default test path requires no vector service; service-gated suites continue to pass unchanged.
-Both adapters persist exactly the five-field read contract; a census of both repositories shows no reader of a dropped field.
+Both adapters persist exactly the five-field read contract; a census of this repository shows no reader of a dropped field; the evaluation repository retires its own reader under its plan, and its census is consumed when that repository produces it and is not a closeout gate.
 Documentation states the single-process expectation, the threshold semantics, the latency guidance, and the rebuild-from-authority path.
 No public facade change beyond the telemetry field and the published maximum-surfaces-per-object-kind policy value; no retrieval behaviour change in service mode for non-empty scopes and non-degenerate queries (an empty object-type scope now selects zero instead of searching unfiltered, and an empty configured scope is rejected at the boundary, both intended).
 ```
@@ -171,7 +171,7 @@ How that configuration is built and run is planned in the evaluation repository;
 
 ## Deferral-reconfirmation checklist
 
-Each item was parked on this phase by the structured-verdict phase; each row states the parked claim, what was re-verified at design time, and the evidence the implementation must produce.
+Each item was parked on this phase by the structured-verdict phase; each row states the parked claim, what was re-verified at design time, and the evidence the implementation must produce for the rows this repository owns, while rows owned by the evaluation repository are recorded as pending there and consumed when produced.
 
 1. Canonical-candidates newtype survival.
    Parked claim: the newtype survives the port redesign or is absorbed into its result envelope.
@@ -180,7 +180,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 2. Dual text columns.
    Parked claim: the text columns' fate depends on the port's read contract.
    Re-verified: the readable text column had exactly one reader (the evaluation baseline) and the embedded text column none; the evaluation repository can source item text from its own ingest.
-   Evidence: zero-hit census for the readable text column across both repositories; a vector-only run before and after produces identical item identities and text.
+   Evidence: zero-hit census for the readable text column in this repository now; the evaluation repository's census and its before/after vector-only run (identical item identities and text) are consumed when that repository produces them and are not a closeout gate.
 3. Search completeness.
    Parked claim: the port cannot express whether the top-K was determinate.
    Re-verified: the only degradation site is the service adapter's fetch bound; no pipeline path inspects or retries on it; the embedded engine's own tie order is not stable across fresh shards, which makes the shared loop a requirement for both adapters rather than a service-only workaround.

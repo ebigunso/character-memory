@@ -12,7 +12,7 @@
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
 - Every row of the phase document's deferral-reconfirmation checklist is dispositioned in the Progress Log: its evidence is produced and cited, or, for the rows the evaluation repository owns, it is recorded as pending there under the decider's ruling (the evaluation repository plans and tracks its own work; ADR-I-0023 records the cross-mode comparison as a revisit trigger, not a closeout gate).
 - Every deletion listed under "Deletions that are deliverables" is gone, with a zero-hit census.
-- Both repositories' service-gated suites execute (not skip) under the service-backed CI job.
+- This repository's service-gated suites execute (not skip) under the service-backed CI job; the evaluation repository's equivalent gate is its own plan's concern.
 - One or more PRs per wave in this repository, stacked on the planning PR and merged by the decider; the evaluation repository's cross-mode comparison is consumed as evidence when that repository produces it; by decider ruling (ADR-I-0023, 2026-09-03) it is a revisit trigger for the embedded default, not a closeout gate, so its pending state does not hold this plan open.
 
 ## Scope / Non-goals
@@ -120,7 +120,7 @@
   Shrink the record and the typed manifest to the five fields; drop the hint carriers, the readable text column, the per-field index creation for dropped fields, the test-only field constants and the prose-assertion note constant; replace the service adapter's private enum token mappers and the pipeline's copy with one Display/FromStr per enum in the domain. Also own ADR-I-0024's zero-norm rule on the write side: the vector indexing service rejects a zero-norm record embedding as a typed per-record indexing failure (adding the error-vocabulary variant it needs) before any adapter sees it, with a unit test on the service and a parity-suite fixture that Task_4 inherits, so no adapter ever normalises a zero vector. Consolidating the surface enum to one domain definition touches its internal definition and re-export and the public copy, all owned here. Publish the maximum number of embedding surfaces per object kind as public policy next to the surface policy that defines it (ADR-I-0026), with a test that the published value matches the builders. Update the database documentation that advertises the old record: the schema cheat sheet, the database README, and the graph schema design note's cross-store section lose the hint fields, the graph URI, the lifecycle-hint drift diagnostics, and the readable text column, and point at the five-field contract. Schema version ruling: the stored schema version is retained, because every field the new contract reads is present in records written under the current version and the removal only drops fields no reader consumes; existing stored payloads with extra fields are tolerated unread. A version bump is required only if a later change adds a read field that older records lack (the re-entry paths in ADR-I-0024), and that change owns the bump and its backfill.
 - acceptance:
   - The manifest test asserts exactly five entries; both text-column producers except `embedding_text` are gone.
-  - Zero-hit census across both repositories for the dropped fields and for `content_text` readers (the evaluation repository removes its reader under its own plan; its zero-hit census is consumed when that repository produces it and is not a closeout gate, not ordered here).
+  - Zero-hit census in this repository for the dropped fields and for `content_text` readers; the evaluation repository removes its reader under its own plan, and its census is consumed when that repository produces it and is not a closeout gate (not ordered here).
   - One token mapping per enum; census shows no copy in adapters or use cases.
   - A zero-norm record embedding yields a typed per-record indexing failure and never reaches an adapter (ADR-I-0024); unit test present.
 - validation:
@@ -195,7 +195,7 @@
   - Cargo.lock
 - depends_on: [Task_4]
 - description: |
-  Retire the deterministic vector fake and its embedding-bearing record type in favour of the embedded adapter opened on a temporary shard directory, as the phase document specifies, so tests exercise the persistence path (failure-injecting and recording fakes stay); collect the deferral-reconfirmation evidence for all five checklist rows; bump the package version to 0.1.6 in the manifest and lockfile as prior milestone closeouts did; mark the roadmap row finished; move the plan to completed.
+  Retire the deterministic vector fake and its embedding-bearing record type in favour of the embedded adapter opened on a temporary shard directory, as the phase document specifies, so tests exercise the persistence path (failure-injecting and recording fakes stay); disposition all five deferral-reconfirmation checklist rows (evidence for the rows this repository owns; a pending-there note for the rows the evaluation repository owns, consumed when produced); bump the package version to 0.1.6 in the manifest and lockfile as prior milestone closeouts did; mark the roadmap row finished; move the plan to completed.
 - acceptance:
   - Zero-hit census for the retired fake and record type.
   - All five checklist rows cite evidence in the Progress Log.

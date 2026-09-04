@@ -93,7 +93,7 @@ Not covered: the physical encoding of each column per adapter, and graph authori
 
 ## Validation
 
-- A census of both repositories shows no reader of the dropped fields and no reader of `content_text`.
+- A census of this repository shows no reader of the dropped fields and no reader of `content_text`; the evaluation repository's census is its own plan's evidence.
 - The manifest test asserts the five entries; the parity suite serialises and reads them through both adapters.
 - The evaluation baseline reproduces its results with text sourced from ingest records.
 
