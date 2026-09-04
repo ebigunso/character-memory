@@ -6,7 +6,7 @@
 - work_type: mixed
 
 ## Goal
-- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0028: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the default vector mode with the service adapter retained as the explicit service mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there and consumed here as closeout evidence.
+- Deliver the phase described in `docs/design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md` under ADR-I-0023 through ADR-I-0028: a redesigned vector port contract, a five-field vector record, an embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) as the default vector mode with the service adapter retained as the explicit service mode, and a shared contract suite over both adapters; the evaluation repository's move of its vector-only baseline onto the retrieval trace is planned there; its outputs are consumed here when that repository produces them and are not a closeout gate (decider ruling, ADR-I-0023).
 
 ## Definition of Done
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
@@ -31,7 +31,7 @@
 
 ## Assumptions
 - A1: The embedded engine is `qdrant-edge` pinned exactly at 0.8.0 (beta); its API is guarded by a contract canary, and the pin is bumped only with a re-run of the canary and the parity suite.
-- A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison consumed as closeout evidence and as a revisit trigger for the embedded default.
+- A2: The evaluation repository plans and tracks its own work; this plan consumes two of its outputs only, when that repository produces them: the trace-sourced baseline's A/B evidence (deferral-reconfirmation row 5) and the cross-mode comparison, which is a revisit trigger for the embedded default; neither is a closeout gate.
 
 ## Tasks
 
