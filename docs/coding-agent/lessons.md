@@ -667,17 +667,40 @@ Context:
 - Roles involved: Worker | Reviewer
 
 Symptom:
-- The embedded test fixture dropped its temporary directory immediately after the store destructor only signalled the shard-owner thread, so Windows could attempt deletion while shard files remained open and `TempDir` would ignore the cleanup error.
+- The embedded test fixture could drop its temporary directory while the shard still held Windows file handles, and `TempDir` would ignore the cleanup error.
 
 Root cause:
-- The fixture relied on field drop order but did not distinguish a shutdown signal from an acknowledged owner shutdown.
+- The fixture first relied on a shutdown signal; the initial correction then relied on a reply that the owner sent after flush but before the `EdgeShard` destructor released its handles.
 
 Fix applied:
-- The fixture destructor moves the store to a helper thread, awaits the adapter's test-only acknowledged close there, joins the helper, and only then lets the temporary directory drop.
+- The owner now drops `EdgeShard` before sending the test-only close reply; the fixture waits for that reply on a helper thread, joins it, and only then lets the temporary directory drop.
 
 Prevention:
-- A temporary fixture that owns a background resource must wait for that resource's shutdown acknowledgement before filesystem cleanup, and a test must assert the directory is actually removed.
+- A shutdown acknowledgment must be emitted after the owned resource's destructor completes, not merely after its final flush; filesystem tests must also assert the directory is actually removed.
 - Residual risk / waiver: none.
 
 Evidence:
 - Reviewer finding on Task_7 and `temporary_vector_store_removes_its_directory_on_drop`.
+
+## 2026-09-04 — Explicitly Clean Integration Roots Around Signal-Only Production Drop  [tags: review, cleanup, windows, integration-tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The restart contract test let a reopened `CharacterMemory` and its `TempDir` fall out of scope together, so the facade's intentionally signal-only production destructor could race directory deletion and leave one `.tmp*` root on Windows.
+
+Root cause:
+- The integration fixture did not own the shutdown-to-cleanup lifecycle explicitly, and sibling embedded cases used the same scope-drop pattern.
+
+Fix applied:
+- All embedded `TempDir` cases in the vector-port integration file now drop the facade, retry root removal with a ten-second bound while the owner releases its handles, and assert the root is gone.
+
+Prevention:
+- Integration tests around signal-only production destructors must keep the temporary path, perform bounded cleanup after dropping the facade, and include a before/after temporary-root census for the full suite.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and the full-suite `.tmp*` before/after census recorded in the completed plan.

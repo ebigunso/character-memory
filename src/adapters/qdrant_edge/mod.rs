@@ -357,6 +357,7 @@ fn owner_loop(shard: EdgeShard, commands: mpsc::Receiver<Command>) {
             }
             Command::Shutdown { reply } => {
                 let result = shard.flush().map_err(edge_error);
+                drop(shard);
                 if let Some(reply) = reply {
                     let _ = reply.send(result);
                 }
