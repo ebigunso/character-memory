@@ -776,6 +776,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(point.id.to_string(), qdrant_point_id(&record).to_string());
+        store.close().await.unwrap();
     }
 
     async fn upsert(
@@ -921,6 +922,7 @@ mod tests {
             result.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 4 }
         );
+        store.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -1114,6 +1116,7 @@ mod tests {
     #[tokio::test]
     async fn indexed_test_configuration_reports_boundary_and_matches_exact_recall() {
         let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
         let (records, embeddings) = records(200, &[1.0, 0.0]);
         let exact = QdrantEdgeVectorCandidateStore::open(temp.path(), "exact", 2)
             .await
@@ -1142,6 +1145,10 @@ mod tests {
             indexed_result.completeness,
             VectorRecallCompleteness::BoundaryTieClosed { .. }
         ));
+        exact.close().await.unwrap();
+        indexed.close().await.unwrap();
+        temp.close().unwrap();
+        assert!(!path.exists());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

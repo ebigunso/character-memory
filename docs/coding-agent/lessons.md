@@ -704,3 +704,26 @@ Prevention:
 
 Evidence:
 - Reviewer finding on Task_7 and the full-suite `.tmp*` before/after census recorded in the completed plan.
+
+## 2026-09-04 — Close Every Direct Background-Owner Test Fixture Explicitly  [tags: review, cleanup, windows, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The service-up full suite left one 112 MB `.tmp*` root named `indexed` after the indexed exact-recall adapter test.
+
+Root cause:
+- The earlier cleanup audit covered the shared fixture and integration facade cases but missed direct adapter stores whose background owners still held the temporary directory when it dropped.
+
+Fix applied:
+- The indexed exact-recall test now awaits both direct-store closes before explicitly closing and asserting removal of its temporary root; the remaining direct point-identity and zero-norm stores also close explicitly.
+
+Prevention:
+- Audit every `TempDir`/store pair, require each background owner to acknowledge close before its directory is removed, and compare exact temporary-root counts around both bare and live-switch full suites.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer item 6; the bare full-suite census held at 149 before and after, and the `REQUIRE_QDRANT_TESTS=1` full-suite census held at 149 before and after.
