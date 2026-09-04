@@ -10,7 +10,7 @@
 
 ## Definition of Done
 - Every acceptance criterion in the phase document's "Acceptance criteria" section holds with recorded evidence.
-- Every row of the phase document's deferral-reconfirmation checklist has its evidence produced and cited in the Progress Log.
+- Every row of the phase document's deferral-reconfirmation checklist is dispositioned in the Progress Log: its evidence is produced and cited, or, for the rows the evaluation repository owns, it is recorded as pending there under the decider's ruling (the evaluation repository plans and tracks its own work; ADR-I-0023 records the cross-mode comparison as a revisit trigger, not a closeout gate).
 - Every deletion listed under "Deletions that are deliverables" is gone, with a zero-hit census.
 - Both repositories' service-gated suites execute (not skip) under the service-backed CI job.
 - One or more PRs per wave in this repository, stacked on the planning PR and merged by the decider; the evaluation repository's cross-mode comparison is consumed as evidence when that repository produces it; by decider ruling (ADR-I-0023, 2026-09-03) it is a revisit trigger for the embedded default, not a closeout gate, so its pending state does not hold this plan open.
