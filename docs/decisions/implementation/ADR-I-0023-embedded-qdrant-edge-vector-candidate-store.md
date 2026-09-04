@@ -45,7 +45,7 @@ Add an embedded vector candidate store mode behind the existing vector candidate
 Embedded mode is the default vector mode.
 The service adapter remains fully supported as the service and cloud mode, selected explicitly; this decision adds a mode and deprecates nothing.
 The evidence that licenses the default is produced by the same change that introduces the mode: the shared parity suite proves both adapters identical below their indexing thresholds, including identical-vector tie cohorts, and the library's integration suite runs on the embedded adapter without a service, so the shipped default is the validated path (ADR-I-0021's rule).
-The companion evaluation repository's cross-mode run is closeout evidence and a revisit trigger, not a gate: a difference between modes on its continuity suite reopens this record.
+The companion evaluation repository's cross-mode run is a revisit trigger consumed when that repository produces it, not a gate: a difference between modes on its continuity suite reopens this record.
 The embedded store is single-process, matching the embedded graph store's expectation.
 
 Exactness is a threshold property, not a promise: below the configured indexing threshold a shard answers by exhaustive scan, above it the index answers, and in both cases the completeness verdict (ADR-I-0024) reports the boundary state of the returned top-K.

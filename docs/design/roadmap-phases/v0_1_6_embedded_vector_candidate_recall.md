@@ -161,13 +161,13 @@ No public facade change beyond the telemetry field and the published maximum-sur
 The companion evaluation repository is a development aid; its own work is planned and tracked there, and this document records only what its measurements let this phase decide.
 
 - The library exposes, through an ordinary traced retrieval, everything a raw-vector baseline needs: the vector candidates with scores and the completeness verdict in telemetry; the honest way to use them is one singleton-scoped traced retrieval per measured object kind with a limit of the section budget multiplied by the maximum surfaces per object, deduplicated by object.
-- The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is closeout evidence and a revisit trigger for the embedded default recorded in ADR-I-0023 (a difference between modes reopens it); it is consumed at the closeout task, not produced by this plan.
+- The cross-mode comparison (service mode against embedded mode on the continuity suite, identical baselines expected under the parity contract) is a revisit trigger for the embedded default recorded in ADR-I-0023 (a difference between modes reopens it); it is consumed when the evaluation repository produces it and is not a closeout gate, and it is not produced by this plan.
 - No candidate-search facade or configuration surface is added for the evaluation repository; the one public addition made for its trace reading is the published maximum-surfaces-per-object-kind policy value (ADR-I-0026), and if its measurements ever require more, that is a library decision taken on its own record.
 
 ## Evaluation tie-in
 
 The evaluation repository is expected to run its continuity suite in both vector modes; identical scenario results are what the parity contract predicts, and a difference between modes is a revisit trigger for the embedded default (ADR-I-0023).
-How that configuration is built and run is planned in the evaluation repository; this phase consumes the comparison at closeout and cites nothing else from it.
+How that configuration is built and run is planned in the evaluation repository; this phase consumes the comparison when that repository produces it, not as a closeout gate, and cites nothing else from it.
 
 ## Deferral-reconfirmation checklist
 
