@@ -102,7 +102,7 @@ future interactions become more continuous
 By default, this uses:
 
 - OpenAI for embeddings
-- Embedded Qdrant Edge for local vector candidate recall and payload filtering
+- Embedded Qdrant Edge for local vector candidate recall with object-type scope filtering
 - Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust

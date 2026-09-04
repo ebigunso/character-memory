@@ -1,5 +1,4 @@
-// Vector candidate recall contract. Qdrant is the default adapter, while
-// tests use deterministic fake stores.
+// Vector candidate recall contract shared by the embedded and service adapters.
 use async_trait::async_trait;
 
 use crate::api::types::retrieval::VectorRecallCompleteness;
@@ -22,6 +21,13 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
 
     /// Returns at most `query.limit` unique object/surface matches in canonical
     /// score-descending, object-type, object-id, surface order.
+    ///
+    /// The shared fetch loop closes every score tie that crosses the requested
+    /// limit. `Exhaustive` is reported only when every record in the requested
+    /// scope was scored through a path the adapter knows to be exhaustive and the
+    /// cutoff cohort closed; `scanned` is the number of scoped records actually scored
+    /// by that path. An index-produced result prefix reports whether its boundary tie
+    /// closed or remained open at the fetch bound.
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,

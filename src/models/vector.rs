@@ -6,8 +6,6 @@ mod record;
 pub(crate) use crate::domain::VectorSurface;
 #[cfg(any(test, feature = "test-fixtures"))]
 use crate::domain::{MemoryId, MemoryObjectRef, ObjectType, DEFAULT_SCHEMA_VERSION};
-#[cfg(test)]
-pub(crate) use candidate_record::VectorCandidateRecord;
 pub(crate) use candidate_record::{
     CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
 };

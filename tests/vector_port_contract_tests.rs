@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, io::ErrorKind, path::Path, time::Duration};
 
 use async_trait::async_trait;
 use character_memory::{
@@ -52,6 +52,7 @@ async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() 
     drop(memory);
     let reopened = open_embedded(temp.path(), collection).await.unwrap();
     assert_eq!(ids(&episode_snapshot(&reopened).await), vec![id(2), id(3)]);
+    drop_embedded_and_remove_root(reopened, temp).await;
 }
 
 #[tokio::test]
@@ -87,6 +88,7 @@ async fn embedded_zero_norm_contract_rejects_records_and_exhaustively_scores_que
         .unwrap();
 
     assert_zero_norm_contract(&memory).await;
+    drop_embedded_and_remove_root(memory, temp).await;
 }
 
 #[tokio::test]
@@ -109,6 +111,7 @@ async fn service_and_embedded_share_the_zero_norm_contract() {
     }
     .await;
 
+    drop_embedded_and_remove_root(embedded, temp).await;
     test_support::cleanup_collection(&collection).await;
     result
 }
@@ -142,8 +145,31 @@ async fn service_and_embedded_admit_identical_candidates_in_identical_order() {
     }
     .await;
 
+    drop_embedded_and_remove_root(embedded, temp).await;
     test_support::cleanup_collection(&collection).await;
     result
+}
+
+async fn drop_embedded_and_remove_root(memory: CharacterMemory, temp: TempDir) {
+    let path = temp.keep();
+    drop(memory);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match fs::remove_dir_all(&path) {
+            Ok(()) => break,
+            Err(error) if error.kind() == ErrorKind::NotFound => break,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!(
+                "embedded vector root {} remained locked after shutdown: {error}",
+                path.display()
+            ),
+        }
+    }
+
+    assert!(!path.exists());
 }
 
 async fn open_embedded(path: &Path, collection: &str) -> Result<CharacterMemory, CustomError> {

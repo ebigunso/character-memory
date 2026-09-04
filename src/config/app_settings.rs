@@ -223,22 +223,28 @@ impl Settings {
     ///
     /// # Description
     ///
-    /// Primary constructor for creating a Settings instance. Takes a pre-configured Config object that defines all required settings.
-    /// This allows for flexible configuration sourcing while maintaining a clean initialization interface.
+    /// Primary constructor for creating a Settings instance. Takes a pre-configured Config object
+    /// that defines all required settings. This allows for flexible configuration sourcing while
+    /// maintaining a clean initialization interface.
     ///
     /// # Parameters
     ///
-    /// - `config`: A `config::Config` instance containing all required settings:
-    ///     - `qdrant_connection_string`: Connection string for Qdrant database
+    /// - `config`: A `config::Config` instance containing settings required by the selected modes:
+    ///     - `vector_store_mode`: Optional vector mode selector; defaults to embedded
+    ///     - `vector_store_path`: Local directory required by the default embedded vector mode
+    ///     - `qdrant_connection_string`: Connection string required only in explicit service mode
     ///     - `oxigraph_path`: Local filesystem path for the Oxigraph database
     ///     - `openai_api_key`: API key for OpenAI services
+    ///
+    /// The selected vector mode's location is retained here, then consumed and validated when the
+    /// `CharacterMemory` facade is constructed; this constructor does not validate that location.
     ///
     /// # Returns
     ///
     /// A `Result` which is:
     ///
     /// - `Ok`: A new `Settings` instance with the provided configuration
-    /// - `Err`: A `CustomError` if any required settings are missing or invalid
+    /// - `Err`: A `CustomError` if the configuration cannot be parsed or its general settings are invalid
     pub fn new(config: Config) -> Result<Self, CustomError> {
         let raw: RawSettings = config.try_deserialize().map_err(|e| {
             CustomError::ConfigParseError(format!("Failed to parse external configuration: {e}"))

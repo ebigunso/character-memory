@@ -520,3 +520,256 @@ Prevention:
 
 Evidence:
 - Worker Task_4 report of 2026-09-03 (commit d232830) and the orchestrator's clean `git status` check on the main checkout.
+
+## 2026-09-04 — Include Unit Assertions In Deleted-Helper Call-Site Censuses  [tags: validation, refactor, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker
+
+Symptom:
+- The first focused compile after consolidating Qdrant payload reads failed because service-adapter unit assertions still called the deleted local payload helper and relied on its removed surface-field import.
+
+Root cause:
+- The pre-edit trace found the production callers but did not census the helper's unit-test callers before deleting it.
+
+Fix applied:
+- Route the assertions through a test-only raw string accessor and import the surface field in the test module, then rerun the focused compile.
+
+Prevention:
+- Before deleting or moving a shared helper, run an exact-symbol census across the whole repository, including inline unit-test modules, and resolve every hit in the same patch.
+- Residual risk / waiver: none.
+
+Evidence:
+- `cargo test adapters::qdrant::payload::tests --lib` reported all remaining `payload_string` and `SURFACE_FIELD` test references before the correction.
+
+## 2026-09-04 — Compare Recall Results At The Same Contract Boundary  [tags: validation, tests, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker
+
+Symptom:
+- The first library-suite run failed because the new indexed-exact canary compared 200 raw backend rows with the port's canonical 20-candidate result.
+
+Root cause:
+- The assertion crossed the backend-fetch and port-result boundaries without applying the port's canonicalization and requested limit.
+
+Fix applied:
+- Canonicalize and truncate the indexed exact rows to the request limit before comparing them with the unindexed port result.
+
+Prevention:
+- When a test compares backend rows with a port result, explicitly apply the port's ordering, deduplication, and limit rules before asserting equality.
+- Residual risk / waiver: none.
+
+Evidence:
+- `cargo test --lib` passed 393 tests before failing only `indexed_test_configuration_reports_boundary_and_matches_exact_recall` on the 200-row versus 20-row comparison.
+
+## 2026-09-04 — Export The Endpoint For Ignored Qdrant Unit Tests  [tags: validation, qdrant, environment, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/active/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5
+- Roles involved: Worker | Orchestrator
+
+Symptom:
+- The first ignored service-Qdrant run failed three tests with `QDRANT_CONNECTION_STRING is required`, while the idle-channel test passed through its separate setup path.
+
+Root cause:
+- The integration tests load `.env`, but the ignored service-adapter unit tests read `QDRANT_CONNECTION_STRING` directly; setting only `REQUIRE_QDRANT_TESTS=1` was insufficient.
+
+Fix applied:
+- Export the existing `.env` endpoint into the test process together with `REQUIRE_QDRANT_TESTS=1`; all four ignored service-Qdrant tests then passed.
+
+Prevention:
+- The live-gate command for ignored Qdrant unit tests must explicitly export both `QDRANT_CONNECTION_STRING` and `REQUIRE_QDRANT_TESTS=1`; do not assume unit tests load `.env`.
+- Residual risk / waiver: none.
+
+Evidence:
+- Corrected ignored run: 4 passed, 0 failed, 396 filtered out; the exclusive Qdrant window was then released.
+
+## 2026-09-04 — Classify Boundary Conversions By Operation, Not Nearby Helper  [tags: review, errors, conversion, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The service adapter classified a `usize`-to-`u32` scroll-limit overflow as `PayloadDeserialization`.
+
+Root cause:
+- The closeout reused the nearby payload-error helper while replacing a stringly error, without checking the semantic kind already used for scope-count width conversion.
+
+Fix applied:
+- Construct the existing typed `Conversion` error directly and update the boundary test to require that kind.
+
+Prevention:
+- When replacing a stringly error, classify the failed operation first and compare sibling conversions before selecting an existing helper.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 at `src/adapters/qdrant/store.rs`; the corrected overflow assertion requires `VectorDatabaseErrorKind::Conversion`.
+
+## 2026-09-04 — Give Every Deletion Deliverable Its Own Exact Census  [tags: review, deletion, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The fake/type/helper census passed, but the separately required zero test-only payload-field constants still had a `SURFACE_FIELD` alias.
+
+Root cause:
+- The closeout census covered named fake artifacts but did not translate every independent deletion requirement into an exact symbol search.
+
+Fix applied:
+- Delete `SURFACE_FIELD` and have tests use `QdrantPayloadField::Surface.name()` directly.
+
+Prevention:
+- List each deletion deliverable separately and record an exact zero-hit census for each; do not treat one representative census as covering adjacent deletions.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and `rg -n "SURFACE_FIELD" src tests` after the correction.
+
+## 2026-09-04 — Define Completeness By Proven Work, Not Index State  [tags: review, docs, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- Public and decision-record wording said `Exhaustive` was available only on an unindexed shard, although the service zero-norm full-scope scroll correctly reports it too.
+
+Root cause:
+- Documentation generalized one implementation path into the verdict's semantic condition instead of checking every branch that produces the public enum.
+
+Fix applied:
+- State that exhaustive means every requested-scope record was scored through a known-exhaustive path, the cutoff cohort closed, and `scanned` came from the records that path actually scored; name unindexed scans and full-scope scrolls as examples.
+
+Prevention:
+- Define public verdicts from observable proof conditions and audit every constructor branch before documenting implementation examples.
+- Residual risk / waiver: none.
+
+Evidence:
+- Orchestrator ruling during Task_7 review and the service zero-norm parity test that reports `Exhaustive` from a full-scope scroll.
+
+## 2026-09-04 — Shut Down Background Owners Before Temporary Directories Drop  [tags: review, cleanup, windows, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The embedded test fixture could drop its temporary directory while the shard still held Windows file handles, and `TempDir` would ignore the cleanup error.
+
+Root cause:
+- The fixture first relied on a shutdown signal; the initial correction then relied on a reply that the owner sent after flush but before the `EdgeShard` destructor released its handles.
+
+Fix applied:
+- The owner now drops `EdgeShard` before sending the test-only close reply; the fixture waits for that reply on a helper thread, joins it, and only then lets the temporary directory drop.
+
+Prevention:
+- A shutdown acknowledgment must be emitted after the owned resource's destructor completes, not merely after its final flush; filesystem tests must also assert the directory is actually removed.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and `temporary_vector_store_removes_its_directory_on_drop`.
+
+## 2026-09-04 — Explicitly Clean Integration Roots Around Signal-Only Production Drop  [tags: review, cleanup, windows, integration-tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The restart contract test let a reopened `CharacterMemory` and its `TempDir` fall out of scope together, so the facade's intentionally signal-only production destructor could race directory deletion and leave one `.tmp*` root on Windows.
+
+Root cause:
+- The integration fixture did not own the shutdown-to-cleanup lifecycle explicitly, and sibling embedded cases used the same scope-drop pattern.
+
+Fix applied:
+- All embedded `TempDir` cases in the vector-port integration file now drop the facade, retry root removal with a ten-second bound while the owner releases its handles, and assert the root is gone.
+
+Prevention:
+- Integration tests around signal-only production destructors must keep the temporary path, perform bounded cleanup after dropping the facade, and include a before/after temporary-root census for the full suite.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer finding on Task_7 and the full-suite `.tmp*` before/after census recorded in the completed plan.
+
+## 2026-09-04 — Close Every Direct Background-Owner Test Fixture Explicitly  [tags: review, cleanup, windows, tests, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 review revision
+- Roles involved: Worker | Reviewer
+
+Symptom:
+- The service-up full suite left one 112 MB `.tmp*` root named `indexed` after the indexed exact-recall adapter test.
+
+Root cause:
+- The earlier cleanup audit covered the shared fixture and integration facade cases but missed direct adapter stores whose background owners still held the temporary directory when it dropped.
+
+Fix applied:
+- The indexed exact-recall test now awaits both direct-store closes before explicitly closing and asserting removal of its temporary root; the remaining direct point-identity and zero-norm stores also close explicitly.
+
+Prevention:
+- Audit every `TempDir`/store pair, require each background owner to acknowledge close before its directory is removed, and compare exact temporary-root counts around both bare and live-switch full suites.
+- Residual risk / waiver: none.
+
+Evidence:
+- Reviewer item 6; the bare full-suite census held at 149 before and after, and the `REQUIRE_QDRANT_TESTS=1` full-suite census held at 149 before and after.
+
+## 2026-09-04 — Derive Exhaustive Counters From The Records Actually Scored  [tags: review, concurrency, telemetry, vector-recall, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 Copilot follow-up
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- The service zero-norm path used a separate filtered count request for `scanned`, so a concurrent write between that request and the full-scope scroll could make the verdict report a population different from the records it scored.
+
+Root cause:
+- The counter was treated as a scope snapshot instead of evidence about the exhaustive operation that produced the candidates.
+
+Fix applied:
+- Derive `scanned` from the final closed scroll response, which is the exact scoped record set scored by the zero-norm path.
+
+Prevention:
+- A telemetry counter describing completed work must come from that operation's result, not a separate query that can observe different state.
+- Residual risk / waiver: none.
+
+Evidence:
+- Copilot finding on PR #79 and the service zero-norm live regression.
+
+## 2026-09-04 — Keep One Governing Claim Per Decision Record  [tags: review, adr, durable-docs, worker]
+
+Context:
+- Plan: `docs/coding-agent/plans/completed/v0-1-6-embedded-vector-recall-plan.md`
+- Task/Wave: Task_7 / Wave 5 Copilot follow-up
+- Roles involved: Worker | Reviewer | Orchestrator
+
+Symptom:
+- ADR-I-0024 combined recall-completeness semantics with vector-prefilter admission, and the decision set retained unanchored time-relative wording.
+
+Root cause:
+- Two nearby port concerns were recorded together without applying the one-decision warrant test or the durable-wording sweep independently to each claim.
+
+Fix applied:
+- Keep completeness in ADR-I-0024, move prefilter admission into ADR-I-0028 with its own warrant and revisit conditions, and remove unanchored time-relative wording from ADR-I-0023 through ADR-I-0028.
+
+Prevention:
+- Before finalising an ADR cluster, state one governing claim per record and run a time-relative-word census across every record in the cluster.
+- Residual risk / waiver: none.
+
+Evidence:
+- Copilot findings on planning PR #72 and the post-split ADR census.

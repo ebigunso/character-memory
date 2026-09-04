@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "orchestrator"
-last_updated: "2026-07-23"
+last_updated: "2026-09-04"
 ---
 
 # Orchestrator Repository Rules
