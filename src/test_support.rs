@@ -55,16 +55,26 @@ impl TemporaryVectorCandidateStore {
 
 impl Drop for TemporaryVectorCandidateStore {
     fn drop(&mut self) {
-        let store = self.store.take().expect("temporary vector store is open");
-        std::thread::spawn(move || {
+        // During unwinding the shutdown is best effort: a second panic here
+        // would abort the process and hide the test's own failure.
+        let unwinding = std::thread::panicking();
+        let Some(store) = self.store.take() else {
+            assert!(unwinding, "temporary vector store is open");
+            return;
+        };
+        let shutdown = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .build()
-                .expect("temporary vector shutdown runtime")
+                .map_err(|error| error.to_string())?
                 .block_on(store.close())
-                .expect("temporary vector store shutdown");
+                .map_err(|error| error.to_string())
         })
-        .join()
-        .expect("temporary vector shutdown thread");
+        .join();
+        if !unwinding {
+            shutdown
+                .expect("temporary vector shutdown thread")
+                .expect("temporary vector store shutdown");
+        }
     }
 }
 
