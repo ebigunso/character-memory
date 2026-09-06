@@ -900,12 +900,8 @@ mod tests {
 
     #[tokio::test]
     async fn relative_parent_path_survives_restart() {
-        let base = env::current_dir().unwrap().join(".agent-work");
-        fs::create_dir_all(&base).unwrap();
-        let temp = TempDir::new_in(&base).unwrap();
-        let relative = Path::new(".agent-work")
-            .join(temp.path().file_name().unwrap())
-            .join("nested/../vectors");
+        let temp = TempDir::new_in(env::current_dir().unwrap()).unwrap();
+        let relative = Path::new(temp.path().file_name().unwrap()).join("nested/../vectors");
         assert!(relative.is_relative());
         assert_path_survives_restart(&relative).await;
         let path = temp.path().to_path_buf();
