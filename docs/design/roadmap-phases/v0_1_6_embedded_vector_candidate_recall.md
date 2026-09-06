@@ -201,7 +201,7 @@ Each item was parked on this phase by the structured-verdict phase; each row sta
 - Default mode: embedded from this phase, licensed by the phase's own parity suite and service-free integration path under the defaults-match-evidence rule (ADR-I-0021); the evaluation repository's cross-mode run is a revisit trigger, not a gate (ADR-I-0023).
 - Engine discipline: every engine call on a dedicated blocking owner; a write acknowledged only after the engine's flush; signal-only facade drop (ADR-I-0027).
 - Latency guidance: measured in-phase by a benchmark over a synthetic corpus at the configured dimension, published in documentation, revised through documentation.
-- Dependency weight: the unstripped delta is recorded; the stripped delta and feature trimming are measured in-phase, and a material change reopens ADR-I-0023.
+- Dependency weight: the unstripped delta is recorded; the stripped delta and feature trimming are measured in-phase, and a material change reopens ADR-I-0023. The embedded engine (`qdrant-edge`) enables `serde_json::preserve_order` through Cargo feature unification, so consumers sharing that dependency get insertion-ordered `serde_json::Value` maps and must explicitly sort keys when producing canonical bytes.
 - Parity suite placement: contract parity in the library, behaviour parity in the evaluation repository (above).
 - Settings shape: separate mode and path keys with `collection_name` as the backend-neutral namespace key naming one shard directory per collection, not a connection string interpreted by mode (ADR-I-0023).
 - Hint families: all dropped from the vector record, with the two candidate predicates noted (ADR-I-0025, ADR-I-0028).

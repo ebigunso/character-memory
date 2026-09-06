@@ -101,6 +101,7 @@ Option 6 defers a decision whose deciding evidence the same change produces: the
 - Positive: the shared engine family gives both adapters one payload and filter convention, and the service parity result (score delta 0.0) is structural, not coincidental.
 - Negative / tradeoffs: the engine is beta and its API may change; the canary test and the pinned version turn that into a build-time failure rather than a runtime one.
 - Negative / tradeoffs: about 30.5 MB of unstripped binary and a higher toolchain floor; the weight deliverable exists to establish the real number.
+- Negative / tradeoffs: the embedded engine (`qdrant-edge`) enables `serde_json`'s `preserve_order` feature, and Cargo feature unification enables it for consumers sharing that dependency, so `serde_json::Value` maps retain insertion order instead of sorting keys; consumers that rely on default key ordering for canonical bytes must sort keys explicitly, as the public companion evaluation repository discovered on re-pin while running its development-aid evaluation tooling.
 - Negative / tradeoffs: two adapters must be kept in parity for every port change; the parity suite is the cost of that guarantee.
 - Negative / tradeoffs: consumers who followed the service-first setup must set the store path or select service mode explicitly; with no external consumers (Compatibility Policy) no migration hint is carried.
 

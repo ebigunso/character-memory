@@ -374,6 +374,7 @@ fn open_shard(
     indexing_threshold_kb: usize,
 ) -> Result<EdgeShard, CustomError> {
     fs::create_dir_all(root).map_err(io_error)?;
+    let root = fs::canonicalize(root).map_err(io_error)?;
     let path = root.join(collection_name);
     fs::create_dir_all(&path).map_err(io_error)?;
     let existing = path.join(EDGE_CONFIG_FILE).is_file();
@@ -893,6 +894,59 @@ mod tests {
         assert_eq!(
             result.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 5 }
+        );
+        reopened.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn relative_parent_path_survives_restart() {
+        let base = env::current_dir().unwrap().join(".agent-work");
+        fs::create_dir_all(&base).unwrap();
+        let temp = TempDir::new_in(&base).unwrap();
+        let relative = Path::new(".agent-work")
+            .join(temp.path().file_name().unwrap())
+            .join("nested/../vectors");
+        assert!(relative.is_relative());
+        assert_path_survives_restart(&relative).await;
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn long_windows_path_survives_restart() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("nested-directory/".repeat(20));
+        assert!(root.as_os_str().len() > 260);
+        assert_path_survives_restart(&root).await;
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
+    }
+
+    async fn assert_path_survives_restart(root: &Path) {
+        let (records, embeddings) = records(3, &[1.0, 0.0]);
+        let store = QdrantEdgeVectorCandidateStore::open(root, "path_restart", 2)
+            .await
+            .unwrap();
+        upsert(&store, &records, &embeddings).await;
+        store.close().await.unwrap();
+
+        let reopened = QdrantEdgeVectorCandidateStore::open(root, "path_restart", 2)
+            .await
+            .unwrap();
+        let result = reopened.search_candidates(&query(10)).await.unwrap();
+        assert_eq!(result.candidates.len(), records.len());
+        for record in &records {
+            assert!(result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.object_id == record.object_id));
+        }
+        assert_eq!(
+            result.completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 3 }
         );
         reopened.close().await.unwrap();
     }

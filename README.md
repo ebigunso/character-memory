@@ -170,6 +170,8 @@ Embedded vector storage is single-process. It ships with Qdrant Edge's indexing 
 
 On the 2026-09-04 Windows x86-64 development run at 1,536 dimensions, the reproducible ignored benchmark measured exhaustive query latency of 3 ms for 100 records, 11 ms for 1,000 records, and 48 ms for 5,000 records. Treat these as local guidance, not a performance guarantee; run `cargo test benchmark_configured_dimension_and_owner_responsiveness -- --ignored --nocapture --test-threads=1` on the deployment target before setting corpus expectations.
 
+The embedded engine (`qdrant-edge`) enables `serde_json::preserve_order` through Cargo feature unification, so consumers sharing that dependency get insertion-ordered `serde_json::Value` maps and must explicitly sort keys when producing canonical bytes.
+
 To use a Qdrant service instead, select it explicitly and supply its gRPC endpoint:
 
 ```text
