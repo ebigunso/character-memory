@@ -70,6 +70,10 @@ impl Drop for TemporaryVectorCandidateStore {
 
 #[async_trait]
 impl VectorCandidateStore for TemporaryVectorCandidateStore {
+    async fn close(&self) -> Result<(), CustomError> {
+        self.store().close().await
+    }
+
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],

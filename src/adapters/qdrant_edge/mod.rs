@@ -49,7 +49,8 @@ pub(crate) struct QdrantEdgeVectorCandidateStore {
     vector_size: usize,
     exact_scan: bool,
     commands: Sender<Command>,
-    operation: Mutex<()>,
+    // Serializes operations and records successful shutdown.
+    operation: Mutex<bool>,
 }
 
 enum Command {
@@ -129,7 +130,7 @@ impl QdrantEdgeVectorCandidateStore {
             vector_size,
             exact_scan: indexing_threshold_kb == 0,
             commands,
-            operation: Mutex::new(()),
+            operation: Mutex::new(false),
         })
     }
 
@@ -141,12 +142,16 @@ impl QdrantEdgeVectorCandidateStore {
         receive(receiver).await
     }
 
-    #[cfg(test)]
     pub(crate) async fn close(&self) -> Result<(), CustomError> {
-        let _operation = self.operation.lock().await;
+        let mut closed = self.operation.lock().await;
+        if *closed {
+            return Ok(());
+        }
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Shutdown { reply: Some(reply) })?;
-        receive(receiver).await
+        receive(receiver).await?;
+        *closed = true;
+        Ok(())
     }
 
     fn send(&self, command: Command) -> Result<(), CustomError> {
@@ -200,6 +205,10 @@ impl QdrantEdgeVectorCandidateStore {
 
 #[async_trait]
 impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
+    async fn close(&self) -> Result<(), CustomError> {
+        Self::close(self).await
+    }
+
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],
@@ -1038,6 +1047,21 @@ mod tests {
                 actual,
             } if actual == "future"
         ));
+    }
+
+    #[tokio::test]
+    async fn close_is_idempotent_and_releases_the_directory() {
+        let temp = TempDir::new().unwrap();
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "close", 2)
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(store.close(), store.close());
+        first.unwrap();
+        second.unwrap();
+        store.close().await.unwrap();
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
     }
 
     #[tokio::test]

@@ -773,3 +773,20 @@ Prevention:
 
 Evidence:
 - Copilot findings on planning PR #72 and the post-split ADR census.
+
+## 2026-09-06 — Separate Write Durability From Deterministic Store Release [tags: review, lifecycle, cleanup, windows]
+
+Symptom:
+- The public companion evaluation repository dropped a facade and immediately deleted its store directories, racing the embedded vector owner's signal-only shutdown on Windows.
+
+Root cause:
+- The close decision considered crash durability but omitted deterministic resource release; internal tests had an awaitable close that consumers could not call.
+
+Fix applied:
+- Expose a consuming awaitable facade close through the vector port, retain per-write flush and signal-only drop, and replace integration cleanup retries with close followed by immediate removal.
+
+Prevention:
+- Assess durability and resource-release ordering separately; exercise consumer cleanup through the public API, including all persistent stores, rather than relying on a test-only shutdown method.
+
+Evidence:
+- The repeated-close adapter test and the public close/removal/fresh-reopen test passed on Windows with persistent vector, graph, and SQLite statistics stores.

@@ -14,6 +14,11 @@ pub(crate) struct VectorCandidateRecall {
 
 #[async_trait]
 pub(crate) trait VectorCandidateStore: Send + Sync {
+    /// Releases local resources; stores without a local owner need no shutdown.
+    async fn close(&self) -> Result<(), CustomError> {
+        Ok(())
+    }
+
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],
@@ -38,6 +43,10 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
 
 #[async_trait]
 impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
+    async fn close(&self) -> Result<(), CustomError> {
+        (**self).close().await
+    }
+
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],

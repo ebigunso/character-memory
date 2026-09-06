@@ -23,6 +23,18 @@ pub struct CharacterMemory {
 }
 
 impl CharacterMemory {
+    /// Releases the local stores so their directories can be removed or reopened
+    /// deterministically. Service vector storage requires no shutdown.
+    ///
+    /// This is not required for durability: acknowledged writes are already durable.
+    /// Dropping without calling `close` remains valid and does not wait for the
+    /// embedded vector owner's shutdown. Await this method before deleting stores.
+    pub async fn close(self) -> Result<(), CustomError> {
+        let result = self.memory_composition.vector_store.close().await;
+        drop(self);
+        result
+    }
+
     /// Prepares a remember write plan without persisting graph, vector, or stats data.
     ///
     /// The default facade path uses fresh operation defaults, so repeated calls with
