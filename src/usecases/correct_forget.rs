@@ -1300,6 +1300,7 @@ mod tests {
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState,
     };
+    use crate::ports::vector_candidate::VectorCandidateRecall;
     use crate::test_support::{
         representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
         FakeVectorCandidateStore,
@@ -1586,13 +1587,15 @@ mod tests {
         assert!(first.vector_maintenance_failure.is_some());
         let graph_writes_after_first = graph_write_count(&graph.calls());
         let candidates_after_first = vector
-            .search_candidates(
-                &VectorCandidateSearch::new(vec![1.0, 0.0, 0.0, 0.0], 10)
-                    .with_object_types(vec![ObjectType::DerivedMemory]),
-            )
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0, 0.0, 0.0, 0.0],
+                10,
+                vec![ObjectType::DerivedMemory],
+            ))
             .await
             .unwrap();
         assert!(candidates_after_first
+            .candidates
             .iter()
             .any(|candidate| candidate.object_id == ids.old));
 
@@ -1613,16 +1616,19 @@ mod tests {
         assert!(maintained_ids.contains(&ids.old));
         assert!(maintained_ids.contains(&replacement_id));
         let candidates_after_retry = vector
-            .search_candidates(
-                &VectorCandidateSearch::new(vec![1.0, 0.0, 0.0, 0.0], 10)
-                    .with_object_types(vec![ObjectType::DerivedMemory]),
-            )
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0, 0.0, 0.0, 0.0],
+                10,
+                vec![ObjectType::DerivedMemory],
+            ))
             .await
             .unwrap();
         assert!(!candidates_after_retry
+            .candidates
             .iter()
             .any(|candidate| candidate.object_id == ids.old));
         assert!(candidates_after_retry
+            .candidates
             .iter()
             .any(|candidate| candidate.object_id == replacement_id));
     }
@@ -3516,9 +3522,18 @@ mod tests {
 
         async fn search_candidates(
             &self,
-            _query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new([]))
+            query: &VectorCandidateSearch,
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new([]),
+                completeness: if query.limit == 0 || query.object_types.is_empty() {
+                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
+                } else {
+                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
+                        scanned: 0,
+                    }
+                },
+            })
         }
 
         async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -3653,7 +3668,7 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
+        ) -> Result<VectorCandidateRecall, CustomError> {
             self.inner.search_candidates(query).await
         }
 
@@ -3758,7 +3773,7 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
+        ) -> Result<VectorCandidateRecall, CustomError> {
             self.inner.search_candidates(query).await
         }
 

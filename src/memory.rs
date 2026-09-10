@@ -160,7 +160,7 @@ mod tests {
     use crate::config::Settings;
     use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
-    use crate::ports::vector_candidate::VectorCandidateStore;
+    use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
     use crate::*;
     use async_trait::async_trait;
     use secrecy::SecretString;
@@ -456,6 +456,26 @@ mod tests {
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert_eq!(outcome.rationale.graph_verified_count, 1);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn retrieve_rejects_an_empty_configured_object_type_scope_at_the_boundary() {
+        let memory = injected_memory();
+        let mut context = RetrievalContext::new("invalid empty scope");
+        context.object_type_defaults.clear();
+
+        let error = memory.retrieve(context).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "at least one retrieval object type",
+                    actual,
+                },
+            }) if keys == vec!["object_type_defaults"] && actual == "[]"
+        ));
     }
 
     #[tokio::test]
@@ -1070,8 +1090,27 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            if query.limit == 0 || query.object_types.is_empty() {
+                return Ok(VectorCandidateRecall {
+                    candidates: CanonicalCandidates::new([]),
+                    completeness:
+                        crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
+                });
+            }
+            let candidates = self
+                .candidates
+                .iter()
+                .filter(|candidate| query.object_types.contains(&candidate.object_type))
+                .cloned()
+                .collect::<Vec<_>>();
+            let scanned = candidates.len();
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new(candidates).truncated(query.limit),
+                completeness: crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
+                    scanned,
+                },
+            })
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -1098,9 +1137,18 @@ mod tests {
 
         async fn search_candidates(
             &self,
-            _query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new([]))
+            query: &VectorCandidateSearch,
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new([]),
+                completeness: if query.limit == 0 || query.object_types.is_empty() {
+                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
+                } else {
+                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
+                        scanned: 0,
+                    }
+                },
+            })
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

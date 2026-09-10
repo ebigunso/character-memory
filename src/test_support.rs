@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::api::types::retrieval::VectorRecallCompleteness;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
@@ -25,7 +26,7 @@ use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
     GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
 };
-use crate::ports::vector_candidate::VectorCandidateStore;
+use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 #[derive(Debug, Default)]
 pub(crate) struct FakeVectorCandidateStore {
@@ -74,13 +75,18 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<CanonicalCandidates, CustomError> {
+    ) -> Result<VectorCandidateRecall, CustomError> {
+        if query.limit == 0 || query.object_types.is_empty() {
+            return Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new([]),
+                completeness: VectorRecallCompleteness::NotRequested,
+            });
+        }
+
         let records = lock(&self.records)?;
         let matches: Vec<_> = records
             .iter()
-            .filter(|record| {
-                query.object_types.is_empty() || query.object_types.contains(&record.object_type)
-            })
+            .filter(|record| query.object_types.contains(&record.object_type))
             .map(|record| {
                 VectorCandidateMatch::new(
                     record.object_id,
@@ -91,7 +97,11 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
             })
             .collect();
 
-        Ok(CanonicalCandidates::new(matches).truncated(query.limit))
+        let scanned = matches.len();
+        Ok(VectorCandidateRecall {
+            candidates: CanonicalCandidates::new(matches).truncated(query.limit),
+            completeness: VectorRecallCompleteness::Exhaustive { scanned },
+        })
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -99,6 +109,32 @@ impl VectorCandidateStore for FakeVectorCandidateStore {
         lock(&self.records)?.retain(|record| !delete_ids.contains(&record.object_id));
         Ok(())
     }
+}
+
+pub(crate) fn zero_norm_vector_fixture() -> (Vec<VectorCandidateRecord>, VectorCandidateSearch) {
+    (
+        vec![
+            VectorCandidateRecord::new(
+                Uuid::from_u128(1),
+                ObjectType::Episode,
+                VectorSurface::Summary,
+                vec![1.0, 0.0],
+            ),
+            VectorCandidateRecord::new(
+                Uuid::from_u128(2),
+                ObjectType::Episode,
+                VectorSurface::Summary,
+                vec![0.0, 1.0],
+            ),
+            VectorCandidateRecord::new(
+                Uuid::from_u128(3),
+                ObjectType::Observation,
+                VectorSurface::Text,
+                vec![1.0, 0.0],
+            ),
+        ],
+        VectorCandidateSearch::new(vec![0.0, 0.0], 10, vec![ObjectType::Episode]),
+    )
 }
 
 #[derive(Debug, Default)]
@@ -1004,14 +1040,22 @@ mod tests {
             .await
             .unwrap();
 
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10);
+        let query = VectorCandidateSearch::new(
+            vec![1.0, 0.0],
+            10,
+            vec![ObjectType::Episode, ObjectType::Observation],
+        );
         let first_result = store.search_candidates(&query).await.unwrap();
         let second_result = store.search_candidates(&query).await.unwrap();
 
         assert_eq!(first_result, second_result);
-        assert_eq!(first_result[0].object_id, fixtures.episode.id);
-        assert_eq!(first_result[0].object_type, ObjectType::Episode);
-        assert_eq!(first_result[0].surface, VectorSurface::Summary);
+        assert_eq!(
+            first_result.completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 2 }
+        );
+        assert_eq!(first_result.candidates[0].object_id, fixtures.episode.id);
+        assert_eq!(first_result.candidates[0].object_type, ObjectType::Episode);
+        assert_eq!(first_result.candidates[0].surface, VectorSurface::Summary);
 
         store
             .delete_candidates(&[fixtures.episode.id])
@@ -1019,8 +1063,11 @@ mod tests {
             .unwrap();
         let after_delete = store.search_candidates(&query).await.unwrap();
 
-        assert_eq!(after_delete.len(), 1);
-        assert_eq!(after_delete[0].object_id, fixtures.salient_observation.id);
+        assert_eq!(after_delete.candidates.len(), 1);
+        assert_eq!(
+            after_delete.candidates[0].object_id,
+            fixtures.salient_observation.id
+        );
     }
 
     #[tokio::test]
@@ -1056,13 +1103,18 @@ mod tests {
         first_store.upsert_candidates(&candidates).await.unwrap();
         second_store.upsert_candidates(&reversed).await.unwrap();
 
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 2);
+        let query = VectorCandidateSearch::new(
+            vec![1.0, 0.0],
+            2,
+            vec![ObjectType::Episode, ObjectType::Observation],
+        );
         let first = first_store.search_candidates(&query).await.unwrap();
         let second = second_store.search_candidates(&query).await.unwrap();
 
         assert_eq!(first, second);
         assert_eq!(
             first
+                .candidates
                 .iter()
                 .map(|candidate| candidate.object_id)
                 .collect::<Vec<_>>(),
@@ -1080,14 +1132,37 @@ mod tests {
         store.upsert_vector_records(&records).await.unwrap();
 
         let matches = store
-            .search_candidates(&VectorCandidateSearch::new(vec![1.0, 0.0], 10))
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0, 0.0],
+                10,
+                vec![ObjectType::Episode],
+            ))
             .await
             .unwrap();
 
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].object_id, fixtures.episode.id);
-        assert_eq!(matches[0].object_type, ObjectType::Episode);
-        assert_eq!(matches[0].surface, VectorSurface::Summary);
+        assert_eq!(matches.candidates.len(), 1);
+        assert_eq!(matches.candidates[0].object_id, fixtures.episode.id);
+        assert_eq!(matches.candidates[0].object_type, ObjectType::Episode);
+        assert_eq!(matches.candidates[0].surface, VectorSurface::Summary);
+    }
+
+    #[tokio::test]
+    async fn vector_fake_zero_norm_fixture_scores_every_scoped_candidate_zero() {
+        let store = FakeVectorCandidateStore::new();
+        let (records, query) = zero_norm_vector_fixture();
+        store.upsert_candidates(&records).await.unwrap();
+
+        let recall = store.search_candidates(&query).await.unwrap();
+
+        assert_eq!(recall.candidates.len(), 2);
+        assert!(recall
+            .candidates
+            .iter()
+            .all(|candidate| candidate.score == 0.0));
+        assert_eq!(
+            recall.completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 2 }
+        );
     }
 
     #[tokio::test]

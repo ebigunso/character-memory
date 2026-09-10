@@ -26,7 +26,7 @@ mod tests {
         GraphExpansionFanoutOverride, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
         GraphExpansionQuery, GraphObjectQuery,
     };
-    use crate::ports::vector_candidate::VectorCandidateStore;
+    use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
     use crate::test_support::{
         high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
     };
@@ -1894,8 +1894,27 @@ mod tests {
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
-        ) -> Result<CanonicalCandidates, CustomError> {
-            Ok(CanonicalCandidates::new(self.candidates.clone()).truncated(query.limit))
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            if query.limit == 0 || query.object_types.is_empty() {
+                return Ok(VectorCandidateRecall {
+                    candidates: CanonicalCandidates::new([]),
+                    completeness:
+                        crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
+                });
+            }
+            let candidates = self
+                .candidates
+                .iter()
+                .filter(|candidate| query.object_types.contains(&candidate.object_type))
+                .cloned()
+                .collect::<Vec<_>>();
+            let scanned = candidates.len();
+            Ok(VectorCandidateRecall {
+                candidates: CanonicalCandidates::new(candidates).truncated(query.limit),
+                completeness: crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
+                    scanned,
+                },
+            })
         }
 
         async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {

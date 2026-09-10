@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use qdrant_client::qdrant::{
     points_selector::PointsSelectorOneOf, value::Kind, vectors_config, Condition,
     CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
-    Filter, PointStruct, ScoredPoint, SearchPointsBuilder, UpsertPointsBuilder, VectorParams,
-    VectorsConfig,
+    Filter, PointStruct, ScoredPoint, ScrollPointsBuilder, SearchPointsBuilder,
+    UpsertPointsBuilder, VectorParams, VectorsConfig,
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
@@ -18,18 +18,16 @@ use crate::errors::{
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use crate::models::vector::{
-    CanonicalCandidates, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
-    VectorSurface,
+    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
 };
-use crate::ports::vector_candidate::VectorCandidateStore;
+use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 use super::payload::{
     qdrant_payload_map, QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD,
 };
+use super::tie_closure::close_tie_cohort;
 
 const QDRANT_CANDIDATE_TIMEOUT_SECS: u64 = 30;
-const QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES: usize = 4_096;
-const QDRANT_TIE_COHORT_LIMIT_MULTIPLIER: usize = 16;
 const QDRANT_CONNECT_FAILURE_PREFIX: &str = "Failed to connect to ";
 
 pub(crate) struct QdrantVectorCandidateStore {
@@ -155,9 +153,7 @@ impl QdrantVectorCandidateStore {
         .with_payload(true)
         .with_vectors(false);
 
-        if let Some(filter) = qdrant_candidate_filter(query) {
-            builder = builder.filter(filter);
-        }
+        builder = builder.filter(qdrant_candidate_filter(query));
 
         let response = self
             .client
@@ -170,48 +166,28 @@ impl QdrantVectorCandidateStore {
             .map(scored_point_to_match)
             .collect()
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TieCohortFetchDecision {
-    Return,
-    ReturnAtBound,
-    Grow(usize),
-}
-
-fn tie_cohort_fetch_bound(limit: usize) -> usize {
-    limit
-        .saturating_mul(QDRANT_TIE_COHORT_LIMIT_MULTIPLIER)
-        .max(limit.saturating_add(QDRANT_TIE_COHORT_MIN_EXTRA_CANDIDATES))
-}
-
-fn tie_cohort_fetch_decision(
-    admitted_limit: usize,
-    fetch_limit: usize,
-    fetch_bound: usize,
-    fetched_count: usize,
-    candidates: &[VectorCandidateMatch],
-) -> TieCohortFetchDecision {
-    if fetched_count < fetch_limit || tie_cohort_is_closed(candidates, admitted_limit) {
-        return TieCohortFetchDecision::Return;
+    async fn scroll_zero_norm_candidate_batch(
+        &self,
+        query: &VectorCandidateSearch,
+        fetch_limit: usize,
+    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        let backend_limit = qdrant_scroll_fetch_limit(fetch_limit)?;
+        let request = ScrollPointsBuilder::new(&self.collection_name)
+            .filter(qdrant_candidate_filter(query))
+            .limit(backend_limit)
+            .with_payload(true)
+            .with_vectors(false)
+            .build();
+        self.client
+            .scroll(request)
+            .await
+            .map_err(qdrant_error)?
+            .result
+            .into_iter()
+            .map(|point| qdrant_payload_to_match(&point.payload, 0.0))
+            .collect()
     }
-    if fetch_limit >= fetch_bound {
-        return TieCohortFetchDecision::ReturnAtBound;
-    }
-
-    TieCohortFetchDecision::Grow(fetch_limit.saturating_mul(2).min(fetch_bound))
-}
-
-fn tie_cohort_is_closed(candidates: &[VectorCandidateMatch], admitted_limit: usize) -> bool {
-    if admitted_limit == 0 || candidates.len() <= admitted_limit {
-        return false;
-    }
-
-    candidates.last().is_some_and(|tail| {
-        tail.score
-            .total_cmp(&candidates[admitted_limit - 1].score)
-            .is_lt()
-    })
 }
 
 fn validate_collection_vector_config(
@@ -285,37 +261,46 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,
-    ) -> Result<CanonicalCandidates, CustomError> {
-        if query.limit == 0 {
-            return Ok(CanonicalCandidates::new([]));
+    ) -> Result<VectorCandidateRecall, CustomError> {
+        if query.limit == 0 || query.object_types.is_empty() {
+            return Ok(VectorCandidateRecall {
+                candidates: crate::models::vector::CanonicalCandidates::new([]),
+                completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
+            });
         }
 
-        // Fetch past K until the boundary tie is closed. Growth is bounded by
-        // max(K * 16, K + 4096), which avoids unbounded reads when an entire
-        // collection ties. At the bound, results are canonical and deterministic
-        // for the fetched set, but membership can still vary if the equal-score
-        // cohort itself exceeds the bound. A future adapter-observability channel
-        // in the RetrievalTrace family should surface that degradation.
-        let fetch_bound = tie_cohort_fetch_bound(query.limit);
-        let mut fetch_limit = query.limit.saturating_add(1).min(fetch_bound);
-        loop {
-            let fetched = self.search_candidate_batch(query, fetch_limit).await?;
-            let fetched_count = fetched.len();
-            let candidates = CanonicalCandidates::new(fetched);
-
-            match tie_cohort_fetch_decision(
-                query.limit,
-                fetch_limit,
-                fetch_bound,
-                fetched_count,
-                &candidates,
-            ) {
-                TieCohortFetchDecision::Grow(next_limit) => fetch_limit = next_limit,
-                TieCohortFetchDecision::Return | TieCohortFetchDecision::ReturnAtBound => {
-                    return Ok(candidates.truncated(query.limit));
-                }
+        let actual_vector_size = u64::try_from(query.query_embedding.len()).unwrap_or(u64::MAX);
+        if actual_vector_size != self.vector_size {
+            return Err(CollectionCompatibilityError {
+                collection: self.collection_name.clone(),
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: self.vector_size,
+                    actual: actual_vector_size,
+                },
             }
+            .into());
         }
+
+        let zero_norm = query.is_zero_norm();
+        let fetch_limit_cap = if zero_norm {
+            usize::try_from(u32::MAX).unwrap_or(usize::MAX)
+        } else {
+            usize::MAX
+        };
+        let closed = close_tie_cohort(query.limit, fetch_limit_cap, |fetch_limit| async move {
+            if zero_norm {
+                self.scroll_zero_norm_candidate_batch(query, fetch_limit)
+                    .await
+            } else {
+                self.search_candidate_batch(query, fetch_limit).await
+            }
+        })
+        .await?;
+        let completeness = closed.completeness(zero_norm.then_some(closed.fetched));
+        Ok(VectorCandidateRecall {
+            candidates: closed.candidates,
+            completeness,
+        })
     }
 
     async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
@@ -498,13 +483,20 @@ fn qdrant_candidate_config(url: &str) -> QdrantConfig {
         .keep_alive_while_idle()
 }
 
-fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Option<Filter> {
-    (!query.object_types.is_empty()).then(|| {
-        Filter::must([any_field_matches(
-            OBJECT_TYPE_FIELD,
-            query.object_types.iter().copied().map(object_type_name),
-        )])
+fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
+    u32::try_from(fetch_limit).map_err(|_| {
+        CustomError::DatabaseError(format!(
+            "Qdrant scroll limit {fetch_limit} exceeds the backend maximum {}",
+            u32::MAX
+        ))
     })
+}
+
+fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Filter {
+    Filter::must([any_field_matches(
+        OBJECT_TYPE_FIELD,
+        query.object_types.iter().copied().map(object_type_name),
+    )])
 }
 
 fn any_field_matches(
@@ -540,19 +532,26 @@ fn qdrant_point_structs(
 }
 
 fn scored_point_to_match(point: ScoredPoint) -> Result<VectorCandidateMatch, CustomError> {
-    let object_id = payload_string(&point.payload, OBJECT_ID_FIELD)?;
+    qdrant_payload_to_match(&point.payload, point.score)
+}
+
+fn qdrant_payload_to_match(
+    payload: &HashMap<String, qdrant_client::qdrant::Value>,
+    score: f32,
+) -> Result<VectorCandidateMatch, CustomError> {
+    let object_id = payload_string(payload, OBJECT_ID_FIELD)?;
     let object_id = uuid::Uuid::parse_str(&object_id).map_err(|error| {
         CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
     })?;
 
-    let object_type = parse_object_type(payload_string(&point.payload, OBJECT_TYPE_FIELD)?)?;
-    let surface = parse_vector_surface(payload_string(&point.payload, SURFACE_FIELD)?)?;
+    let object_type = parse_object_type(payload_string(payload, OBJECT_TYPE_FIELD)?)?;
+    let surface = parse_vector_surface(payload_string(payload, SURFACE_FIELD)?)?;
 
     Ok(VectorCandidateMatch::new(
         object_id,
         object_type,
         surface,
-        point.score,
+        score,
     ))
 }
 
@@ -647,9 +646,11 @@ mod tests {
         CONTENT_TEXT_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, RETENTION_STATE_FIELD,
     };
     use super::*;
+    use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::domain::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{
-        VectorRecord, VectorRecordEmbedding, VectorRelationshipHints, VectorSurface,
+        CanonicalCandidates, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
+        VectorSurface,
     };
     use qdrant_client::qdrant::condition::ConditionOneOf;
     use qdrant_client::qdrant::{
@@ -675,16 +676,59 @@ mod tests {
 
     #[test]
     fn candidate_filter_maps_live_object_type_scope() {
-        assert!(qdrant_candidate_filter(&VectorCandidateSearch::new(vec![1.0, 0.0], 10)).is_none());
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10)
-            .with_object_types(vec![ObjectType::Episode]);
-        let filter = qdrant_candidate_filter(&query).expect("object-type scope should build");
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10, vec![ObjectType::Episode]);
+        let filter = qdrant_candidate_filter(&query);
         let Some(ConditionOneOf::Field(field)) = &filter.must[0].condition_one_of else {
             panic!("single object type should map to a field condition");
         };
 
         assert_eq!(field.key, OBJECT_TYPE_FIELD);
+    }
+
+    #[tokio::test]
+    async fn empty_scope_and_zero_limit_return_without_contacting_qdrant() {
+        let store =
+            QdrantVectorCandidateStore::new("http://127.0.0.1:1", "not_contacted", 2).unwrap();
+        let queries = [
+            VectorCandidateSearch::new(vec![1.0, 0.0], 10, Vec::new()),
+            VectorCandidateSearch::new(vec![1.0, 0.0], 0, vec![ObjectType::Episode]),
+        ];
+
+        for query in queries {
+            let recall = store.search_candidates(&query).await.unwrap();
+            assert!(recall.candidates.is_empty());
+            assert_eq!(recall.completeness, VectorRecallCompleteness::NotRequested);
+        }
+    }
+
+    #[tokio::test]
+    async fn wrong_dimension_zero_norm_query_fails_before_contacting_qdrant() {
+        let store =
+            QdrantVectorCandidateStore::new("http://127.0.0.1:1", "not_contacted", 2).unwrap();
+        let query = VectorCandidateSearch::new(vec![0.0], 10, vec![ObjectType::Episode]);
+
+        let error = store.search_candidates(&query).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::CollectionIncompatible(CollectionCompatibilityError {
+                collection,
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: 2,
+                    actual: 1,
+                },
+            }) if collection == "not_contacted"
+        ));
+    }
+
+    #[test]
+    fn qdrant_scroll_limit_checks_backend_width_without_narrowing() {
+        let backend_max = usize::try_from(u32::MAX).unwrap();
+        assert_eq!(qdrant_scroll_fetch_limit(backend_max).unwrap(), u32::MAX);
+
+        if let Some(too_large) = backend_max.checked_add(1) {
+            assert!(qdrant_scroll_fetch_limit(too_large).is_err());
+        }
     }
 
     #[test]
@@ -1127,44 +1171,6 @@ mod tests {
     }
 
     #[test]
-    fn all_tied_cohort_at_fetch_bound_degrades_to_canonical_fetched_membership() {
-        let admitted_limit = 2;
-        let fetched = (1..=6)
-            .rev()
-            .map(|value| {
-                VectorCandidateMatch::new(
-                    Uuid::from_u128(value),
-                    ObjectType::Episode,
-                    VectorSurface::Summary,
-                    1.0,
-                )
-            })
-            .collect::<Vec<_>>();
-        let candidates = CanonicalCandidates::new(fetched);
-        let fetch_bound = candidates.len();
-
-        assert_eq!(
-            tie_cohort_fetch_decision(
-                admitted_limit,
-                fetch_bound,
-                fetch_bound,
-                fetch_bound,
-                &candidates,
-            ),
-            TieCohortFetchDecision::ReturnAtBound
-        );
-
-        let candidates = candidates.truncated(admitted_limit);
-        assert_eq!(
-            candidates
-                .iter()
-                .map(|candidate| candidate.object_id)
-                .collect::<Vec<_>>(),
-            vec![Uuid::from_u128(1), Uuid::from_u128(2)]
-        );
-    }
-
-    #[test]
     fn candidate_mapping_does_not_return_lifecycle_hints_as_authority() {
         let object_id = Uuid::new_v4();
         let mut point = scored_point(object_id, ObjectType::DerivedMemory, 0.77);
@@ -1213,20 +1219,69 @@ mod tests {
             .expect("upsert succeeds");
 
         let matches = store
-            .search_candidates(
-                &VectorCandidateSearch::new(vec![1.0, 0.0], 1)
-                    .with_object_types(vec![ObjectType::DerivedMemory]),
-            )
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0, 0.0],
+                1,
+                vec![ObjectType::DerivedMemory],
+            ))
             .await
             .expect("search succeeds");
 
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].object_id, object_id);
+        assert_eq!(matches.candidates.len(), 1);
+        assert_eq!(matches.candidates[0].object_id, object_id);
+        assert_eq!(
+            matches.completeness,
+            VectorRecallCompleteness::BoundaryTieClosed { fetched: 1 }
+        );
 
         store
             .delete_candidates(&[object_id])
             .await
             .expect("delete succeeds");
+        let _ = store.client.delete_collection(&collection_name).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
+    async fn qdrant_candidate_store_live_scores_zero_norm_query_candidates_zero() {
+        let url = env::var("QDRANT_CONNECTION_STRING")
+            .expect("QDRANT_CONNECTION_STRING is required for live Qdrant regression");
+        let collection_name = format!("cm_zero_norm_{}", Uuid::new_v4().simple());
+        let store = QdrantVectorCandidateStore::new(&url, &collection_name, 2).unwrap();
+        let records = [
+            idle_gap_vector_record(ObjectType::Episode),
+            idle_gap_vector_record(ObjectType::Episode),
+        ];
+        let embeddings = [vec![1.0, 0.0], vec![0.0, 1.0]];
+        let record_embeddings = records
+            .iter()
+            .zip(&embeddings)
+            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
+            .collect::<Vec<_>>();
+
+        store.init_collection().await.expect("collection init");
+        store
+            .upsert_vector_records(&record_embeddings)
+            .await
+            .expect("upsert succeeds");
+        let recall = store
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![0.0, 0.0],
+                10,
+                vec![ObjectType::Episode],
+            ))
+            .await
+            .expect("zero-norm search succeeds");
+
+        assert_eq!(recall.candidates.len(), 2);
+        assert!(recall
+            .candidates
+            .iter()
+            .all(|candidate| candidate.score == 0.0));
+        assert_eq!(
+            recall.completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 2 }
+        );
         let _ = store.client.delete_collection(&collection_name).await;
     }
 
@@ -1271,8 +1326,7 @@ mod tests {
             .await
             .expect("upsert succeeds");
 
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 5)
-            .with_object_types(vec![ObjectType::Episode]);
+        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 5, vec![ObjectType::Episode]);
         let expected = object_ids[..5].to_vec();
         for _ in 0..8 {
             let matches = store
@@ -1281,10 +1335,15 @@ mod tests {
                 .expect("equal-score search succeeds");
             assert_eq!(
                 matches
+                    .candidates
                     .iter()
                     .map(|candidate| candidate.object_id)
                     .collect::<Vec<_>>(),
                 expected
+            );
+            assert_eq!(
+                matches.completeness,
+                VectorRecallCompleteness::BoundaryTieClosed { fetched: 12 }
             );
         }
 

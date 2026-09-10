@@ -41,7 +41,8 @@ pub use crate::api::types::{
     StaleCandidateOmissionSummary, StaleCandidateReason, StatsUpdateCandidate, StatsUpdateFailure,
     StatsUpdateStatus, SupersededByEvidence, SuppressionPolicy, VectorCandidateTrace,
     VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure,
-    VectorMaintenanceFailureItem, VectorMaintenanceOperation, VectorSurface,
+    VectorMaintenanceFailureItem, VectorMaintenanceOperation, VectorRecallCompleteness,
+    VectorSurface,
 };
 pub use crate::config::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
