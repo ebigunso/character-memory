@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "common"
-last_updated: "2026-07-24"
+last_updated: "2026-09-02"
 ---
 
 # Common Repository Rules
@@ -15,6 +15,7 @@ last_updated: "2026-07-24"
 
 - Committed artifacts in this repository must not contain machine-local absolute paths (for example user-profile paths); refer to sibling repositories by name and relative relationship instead.
 - When mentioning the `CharacterMemoryEvals` repository in committed docs, describe it as the public companion evaluation repository and state that evaluation tooling is a development aid, not core library functionality. Do not describe it as private or inaccessible (it was made public 2026-07-19); historical records (completed plans, dated ADR bodies) that reflect the earlier private status stay unchanged.
+- Records in this repository (plans, decision records, phase documents) state what the evaluation harness's measurements allow this library to decide and when those measurements are used; the harness's own work is planned and tracked in the evaluation repository and is never mixed into library plans (ruled 2026-09-02).
 - Do not hard-wrap prose in committed documents: never insert line breaks mid-sentence to fit a column width. Write each sentence/paragraph/list item as one line and let editors soft-wrap. Structural line breaks (list items, headings, YAML keys, code) are fine.
 - ADR frontmatter `consulted` entries record model names only (for example "Claude Fable 5", "GPT-5.5 Pro") — no role, platform, or product designations such as "(orchestrator)" or "Codex" (user-directed 2026-07-18).
 

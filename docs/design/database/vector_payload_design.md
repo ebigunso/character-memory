@@ -1,5 +1,7 @@
 # Vector Database Payload Design
 
+> Supersession note (2026-09-02): ADR-I-0025 replaced the payload field inventory below with a five-field read contract (object id, object type, surface, schema version, embedded text) shared by the service and embedded adapters, and ADR-I-0024 rules what any returning prefilter column must satisfy (synchronised or immutable, unknown never matches). The Record Shape, Payload Categories, Indexing Policy, and relationship, lifecycle, time, and text-surface sections remain as the dated design rationale they were (Record Shape still lists the graph URI, which the read contract dropped); the Design Goal (except its third rule, which named relationship and lifecycle hints the read contract dropped), Why Natural-Language Surfaces, and Consistency Model sections remain current.
+
 This document describes the Qdrant payload design for Character Memory. It is intentionally a design note, not a field-by-field copy of the Rust mapping code.
 
 Qdrant is the semantic candidate index. It is not the memory database of record. The authoritative memory state lives in the graph store. A Qdrant hit means "this object may be relevant"; it does not mean "this object is current, related, or safe to include." Retrieval must verify candidates through the graph authority before returning them in a continuity context pack.
