@@ -83,6 +83,7 @@ jobs:
           - 6333:6333
           - 6334:6334
     env:
+      REQUIRE_QDRANT_TESTS: 1
       QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
       OXIGRAPH_PATH: ./data/oxigraph
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

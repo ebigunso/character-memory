@@ -156,6 +156,14 @@ pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
         )
 }
 
+pub fn should_skip_qdrant_unavailable(error: &VectorDatabaseError) -> bool {
+    let unavailable = is_qdrant_unavailable_error(error);
+    if unavailable && std::env::var_os("REQUIRE_QDRANT_TESTS").is_some() {
+        panic!("Qdrant is required for this test but is unavailable: {error}");
+    }
+    unavailable
+}
+
 pub async fn cleanup_collection(collection_name: &str) {
     let settings = load_test_settings().expect("Failed to load settings from environment");
 

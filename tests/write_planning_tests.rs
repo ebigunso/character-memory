@@ -768,15 +768,9 @@ async fn setup_basic() -> Option<(CharacterMemory, String)> {
     match try_setup_in_memory_character_memory().await {
         Ok(fixture) => Some(fixture),
         Err(CustomError::VectorDatabaseError(error))
-            if base::is_qdrant_unavailable_error(&error) =>
+            if base::should_skip_qdrant_unavailable(&error) =>
         {
             println!("skipping write-planning test because Qdrant is unavailable: {error}");
-            None
-        }
-        Err(error) if is_qdrant_timeout_signature(&error) => {
-            println!(
-                "skipping write-planning test because local Qdrant gRPC mutation stalled: {error}"
-            );
             None
         }
         Err(error) => panic!("unexpected basic setup failure: {error}"),
@@ -796,15 +790,11 @@ async fn setup_persistent(
     {
         Ok(memory) => Some(memory),
         Err(CustomError::VectorDatabaseError(error))
-            if base::is_qdrant_unavailable_error(&error) =>
+            if base::should_skip_qdrant_unavailable(&error) =>
         {
             println!(
                 "skipping persistent write-planning test because Qdrant is unavailable: {error}"
             );
-            None
-        }
-        Err(error) if is_qdrant_timeout_signature(&error) => {
-            println!("skipping persistent write-planning test because local Qdrant gRPC mutation stalled: {error}");
             None
         }
         Err(error) => panic!("unexpected persistent setup failure: {error}"),
@@ -1171,11 +1161,6 @@ fn graph_only_commit_options() -> CommitOptions {
         update_vectors: false,
         update_stats: false,
     }
-}
-
-fn is_qdrant_timeout_signature(error: &CustomError) -> bool {
-    let message = error.to_string();
-    message.contains("Vector database error") && message.contains("Timeout expired")
 }
 
 fn has_candidate_kind(

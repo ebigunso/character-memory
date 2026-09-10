@@ -23,7 +23,7 @@ async fn stats_persist_across_facade_reopen() {
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_support::is_qdrant_unavailable_error(&error) =>
+            if test_support::should_skip_qdrant_unavailable(&error) =>
         {
             println!("skipping stats persistence test because Qdrant is unavailable: {error}");
             return;
@@ -126,7 +126,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_support::is_qdrant_unavailable_error(&error) =>
+            if test_support::should_skip_qdrant_unavailable(&error) =>
         {
             println!("skipping restart-safe retrieval test because Qdrant is unavailable: {error}");
             return;
@@ -259,7 +259,7 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
     let memory = match setup(&collection_name, &fixture, None).await {
         Ok(memory) => memory,
         Err(CustomError::VectorDatabaseError(error))
-            if test_support::is_qdrant_unavailable_error(&error) =>
+            if test_support::should_skip_qdrant_unavailable(&error) =>
         {
             println!("skipping selectivity fanout test because Qdrant is unavailable: {error}");
             return;
