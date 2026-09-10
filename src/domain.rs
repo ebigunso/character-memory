@@ -18,6 +18,7 @@ pub use write_validation::{
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 use thiserror::Error;
 
 pub type MemoryId = uuid::Uuid;
@@ -35,6 +36,72 @@ pub enum ObjectType {
     MemoryThread,
     DerivedMemory,
     MemoryLink,
+}
+
+impl fmt::Display for ObjectType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Episode => "episode",
+            Self::Observation => "observation",
+            Self::Entity => "entity",
+            Self::MemoryThread => "memory_thread",
+            Self::DerivedMemory => "derived_memory",
+            Self::MemoryLink => "memory_link",
+        })
+    }
+}
+
+impl FromStr for ObjectType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "episode" => Ok(Self::Episode),
+            "observation" => Ok(Self::Observation),
+            "entity" => Ok(Self::Entity),
+            "memory_thread" => Ok(Self::MemoryThread),
+            "derived_memory" => Ok(Self::DerivedMemory),
+            "memory_link" => Ok(Self::MemoryLink),
+            _ => Err(format!("unknown object type token: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorSurface {
+    Summary,
+    Text,
+    Name,
+    DerivedText,
+    Query,
+}
+
+impl fmt::Display for VectorSurface {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Summary => "summary",
+            Self::Text => "text",
+            Self::Name => "name",
+            Self::DerivedText => "derived_text",
+            Self::Query => "query",
+        })
+    }
+}
+
+impl FromStr for VectorSurface {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "summary" => Ok(Self::Summary),
+            "text" => Ok(Self::Text),
+            "name" => Ok(Self::Name),
+            "derived_text" => Ok(Self::DerivedText),
+            "query" => Ok(Self::Query),
+            _ => Err(format!("unknown vector surface token: {value}")),
+        }
+    }
 }
 
 impl ObjectType {
@@ -478,3 +545,31 @@ impl MemoryObject {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod token_tests {
+    use super::{ObjectType, VectorSurface};
+
+    #[test]
+    fn persisted_object_and_surface_tokens_round_trip() {
+        for object_type in [
+            ObjectType::Episode,
+            ObjectType::Observation,
+            ObjectType::Entity,
+            ObjectType::MemoryThread,
+            ObjectType::DerivedMemory,
+            ObjectType::MemoryLink,
+        ] {
+            assert_eq!(object_type.to_string().parse(), Ok(object_type));
+        }
+        for surface in [
+            VectorSurface::Summary,
+            VectorSurface::Text,
+            VectorSurface::Name,
+            VectorSurface::DerivedText,
+            VectorSurface::Query,
+        ] {
+            assert_eq!(surface.to_string().parse(), Ok(surface));
+        }
+    }
+}

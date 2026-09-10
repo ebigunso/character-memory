@@ -10,17 +10,13 @@ use crate::api::types::{
     SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
     SectionVectorScoreSource, SelectivityTelemetry, StaleCandidateOmission,
     StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
-    VectorSurface as PublicVectorSurface,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
-    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus,
+    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
-use crate::models::vector::{
-    EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
-    VectorSurface as InternalVectorSurface,
-};
+use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
 use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
     selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
@@ -236,7 +232,7 @@ where
                 .enumerate()
                 .map(|(index, candidate)| VectorCandidateTrace {
                     object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-                    surface: public_vector_surface(candidate.surface),
+                    surface: candidate.surface,
                     score: candidate.score,
                     rank: index + 1,
                 })
@@ -264,7 +260,7 @@ where
             }
             _ => context.query_text.trim().to_owned(),
         };
-        let input = EmbeddingInput::new(None, None, InternalVectorSurface::Query, text);
+        let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
         self.embedder.embed(&input).await
     }
 }
@@ -1267,16 +1263,6 @@ fn section_omission_reason(object: &MemoryObject) -> SectionAssignmentReason {
     }
 }
 
-fn public_vector_surface(surface: InternalVectorSurface) -> PublicVectorSurface {
-    match surface {
-        InternalVectorSurface::Summary => PublicVectorSurface::Summary,
-        InternalVectorSurface::Text => PublicVectorSurface::Text,
-        InternalVectorSurface::Name => PublicVectorSurface::Name,
-        InternalVectorSurface::DerivedText => PublicVectorSurface::DerivedText,
-        InternalVectorSurface::Query => PublicVectorSurface::Query,
-    }
-}
-
 fn section_limit(
     section: ContextPackSection,
     limits: crate::api::types::ContinuitySectionLimits,
@@ -1396,7 +1382,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(embedder.inputs()[0].surface, InternalVectorSurface::Query);
+        assert_eq!(embedder.inputs()[0].surface, VectorSurface::Query);
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
         assert_eq!(
             outcome.pack.salient_observations[0].id,
@@ -1472,7 +1458,7 @@ mod tests {
         assert!(trace
             .vector_candidates
             .iter()
-            .all(|candidate| candidate.surface == PublicVectorSurface::Summary));
+            .all(|candidate| candidate.surface == VectorSurface::Summary));
         assert!(!trace.graph_relations.is_empty());
         assert!(trace.graph_relations.iter().all(|relation| fixtures
             .links()
@@ -2593,7 +2579,7 @@ mod tests {
             .upsert_candidates(&[VectorCandidateRecord::new(
                 fixtures.user_preference.id,
                 ObjectType::DerivedMemory,
-                InternalVectorSurface::DerivedText,
+                VectorSurface::DerivedText,
                 vec![1.0, 0.0],
             )])
             .await
@@ -2920,12 +2906,7 @@ mod tests {
     }
 
     fn candidate(object_id: MemoryId, object_type: ObjectType, score: f32) -> VectorCandidateMatch {
-        VectorCandidateMatch::new(
-            object_id,
-            object_type,
-            InternalVectorSurface::Summary,
-            score,
-        )
+        VectorCandidateMatch::new(object_id, object_type, VectorSurface::Summary, score)
     }
 
     #[derive(Debug)]

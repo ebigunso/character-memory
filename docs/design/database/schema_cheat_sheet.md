@@ -9,7 +9,7 @@ This is the compact schema reference. The companion design notes explain why the
 
 | Store | Role | Authoritative For | Not Authoritative For |
 |---|---|---|---|
-| Qdrant | Vector candidate recall and coarse payload filtering | Vector points, embedding surfaces, payload hints | Memory existence, relationships, provenance, lifecycle, currentness, entity selectivity |
+| Qdrant | Vector candidate recall and object-type prefiltering | Vector points and embedding-surface provenance | Memory content, existence, relationships, provenance, lifecycle, currentness, entity selectivity |
 | Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking, derived selectivity counters |
 | RetrievalStatsStore | Derived retrieval-policy statistics | Entity/relation counters, global counters, selectivity inputs, fanout diagnostics | Memory existence, relationships, provenance, lifecycle, currentness, semantic ranking |
 | Raw store / caller storage | Source material | Raw transcript or source content behind `raw_ref` | Canonical memory state |
@@ -27,7 +27,7 @@ Oxigraph decides.
 | Field | Stored In | Purpose |
 |---|---|---|
 | `object_id` / `objectId` | Qdrant payload and graph literal | Stable object UUID |
-| `graph_uri` / `graphUri` | Qdrant payload and graph literal | Stable graph resource pointer |
+| `graphUri` | Graph literal | Stable graph resource pointer |
 | `schema_version` / `schemaVersion` | Qdrant payload and graph literal | Persistence and migration marker |
 
 Graph URI pattern:
@@ -45,63 +45,15 @@ Retrieval stats store keys refer to the same `object_id` / entity ID values, but
 
 ## Qdrant Payload Fields
 
-### Identity And Surface
-
 | Field | Type / Shape | Notes |
 |---|---|---|
-| `object_id` | keyword UUID string | Stable vector-to-graph join id |
-| `graph_uri` | keyword URI string | Stable graph resource pointer |
-| `object_type` | keyword enum | Canonical memory object type |
-| `record_type` | keyword enum | Indexed vector record kind |
-| `schema_version` | keyword string | Payload migration marker |
+| `object_id` | indexed keyword UUID string | Stable vector-to-graph join id |
+| `object_type` | indexed keyword enum | Canonical memory object type |
 | `surface` | keyword enum | Embedded semantic surface |
-| `embedding_text` | string | Text used to generate the vector |
-| `content_text` | string | Compact readable/debug text |
+| `schema_version` | keyword string | Record compatibility marker |
+| `embedding_text` | text | Exact text used to generate the vector; not read-out content |
 
-### Object-Specific Hints
-
-| Field | Type / Shape | Notes |
-|---|---|---|
-| `derived_type` | keyword enum | Derived memory subtype |
-| `entity_type` | keyword enum | Entity subtype |
-| `thread_status` | keyword enum | Thread lifecycle/status hint |
-| `modality` | keyword enum | Source modality |
-| `source_conversation_id` | keyword string | Source conversation filter |
-| `canonical_key` | keyword string | Stable caller/domain key |
-
-### Relationship Hints
-
-Relationship fields in Qdrant are filter hints only. Oxigraph remains authoritative.
-
-| Field | Type / Shape | Notes |
-|---|---|---|
-| `episode_ids` | keyword array | Related episode ids |
-| `observation_ids` | keyword array | Related observation ids |
-| `thread_ids` | keyword array | Related thread ids |
-| `entity_ids` | keyword array | Related entity ids |
-| `participant_entity_ids` | keyword array | Episode participant ids |
-| `speaker_entity_id` | keyword UUID string | Observation speaker id |
-| `supersedes` | keyword array | Supersession hint |
-
-Do not compute entity selectivity from Qdrant relationship hints. Qdrant may identify candidate entities from vector hits, but selectivity counts must come from graph-authoritative writes or graph-derived stats.
-
-### Lifecycle, Ranking, And Time Hints
-
-| Field | Type / Shape | Notes |
-|---|---|---|
-| `retention_state` | keyword enum | Lifecycle filter hint |
-| `is_current` | bool | Currentness hint |
-| `is_superseded` | bool | Supersession/currentness hint |
-| `salience_score` | float | Ranking/filter hint |
-| `confidence` | float | Ranking/filter hint |
-| `stability` | keyword enum | Derived memory stability |
-| `created_at` | datetime | Creation time |
-| `updated_at` | datetime | Update time |
-| `started_at` | datetime | Episode start time |
-| `ended_at` | datetime | Episode end time |
-| `observed_at` | datetime | Observation time |
-| `last_touched_at` | datetime | Thread recency |
-| `raw_ref` | keyword string | Source pointer, not raw transcript content |
+These are the only Qdrant payload fields. Readable content, graph URI, object-specific state, relationships, lifecycle/currentness, ranking, timestamps, provenance, and raw references are hydrated from Oxigraph by `object_id`. Existing obsolete extra fields may remain on old points but readers ignore them.
 
 ## Qdrant Indexed Object Types
 
@@ -264,4 +216,4 @@ The final context pack follows Oxigraph state.
 
 ## Reconciliation Diagnostics
 
-Internal diagnostics can report vector-only records, graph-only records, graph URI mismatch, stale lifecycle/currentness hints, unsupported vector schema versions, graph records with missing required provenance, stats records missing graph authority, stats health failures, and low-selectivity expansions rejected by policy. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API by default.
+Internal diagnostics can report vector-only records, graph-only records, unsupported vector schema versions, malformed vector identity or surface tokens, graph records with missing required provenance, stats records missing graph authority, stats health failures, and low-selectivity expansions rejected by policy. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API by default.

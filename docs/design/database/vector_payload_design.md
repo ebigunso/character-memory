@@ -1,226 +1,89 @@
 # Vector Database Payload Design
 
-> Supersession note (2026-09-02): ADR-I-0025 replaced the payload field inventory below with a five-field read contract (object id, object type, surface, schema version, embedded text) shared by the service and embedded adapters, and ADR-I-0024 rules what any returning prefilter column must satisfy (synchronised or immutable, unknown never matches). The Record Shape, Payload Categories, Indexing Policy, and relationship, lifecycle, time, and text-surface sections remain as the dated design rationale they were (Record Shape still lists the graph URI, which the read contract dropped); the Design Goal (except its third rule, which named relationship and lifecycle hints the read contract dropped), Why Natural-Language Surfaces, and Consistency Model sections remain current.
+> Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0024](../../decisions/implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md) governs any future prefilter re-entry.
 
-This document describes the Qdrant payload design for Character Memory. It is intentionally a design note, not a field-by-field copy of the Rust mapping code.
+This document describes the Qdrant record contract for Character Memory. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
 
-Qdrant is the semantic candidate index. It is not the memory database of record. The authoritative memory state lives in the graph store. A Qdrant hit means "this object may be relevant"; it does not mean "this object is current, related, or safe to include." Retrieval must verify candidates through the graph authority before returning them in a continuity context pack.
+A Qdrant hit means that an object may be relevant. Retrieval must hydrate and verify that object through graph authority before it can enter a continuity context pack.
 
-## Design Goal
+## Record Contract
 
-The vector payload exists to make candidate recall cheap without duplicating the graph model.
+Each Qdrant point carries exactly five payload fields:
 
-That leads to three rules:
+| Field | Shape | Purpose |
+|---|---|---|
+| object_id | UUID keyword | Stable vector-to-graph join identity |
+| object_type | closed keyword enum | Canonical memory object kind |
+| surface | closed keyword enum | Semantic surface represented by the vector |
+| schema_version | keyword string | Record compatibility marker |
+| embedding_text | text | Exact natural-language input used to create the vector |
 
-1. Store natural-language embedding surfaces in vectors.
-2. Store only enough metadata to prefilter and join candidates.
-3. Treat relationship and lifecycle payload fields as hints until Oxigraph verifies them.
+The service indexes only object_id and object_type. The other three fields are stored provenance, not prefilter columns.
 
-This split is deliberate. A vector database is excellent at finding nearby text and applying coarse filters. It is not the right place to decide graph truth, supersession, provenance, lifecycle policy, entity selectivity, or fanout policy.
+The record intentionally excludes readable result text, graph URIs, relationships, provenance links, lifecycle/currentness values, ranking values, timestamps, and raw references. Retrieval obtains those values from the graph-authoritative object identified by object_id.
 
-## Record Shape
+## Indexed Object Types And Surfaces
 
-Each indexed Qdrant point represents one vector surface for one canonical memory object. The point id may be adapter-specific, so the stable identity is carried in payload:
+The vector-indexed object kinds are:
 
-```text
-object_id  stable UUID for the memory object
-graph_uri  deterministic graph URI for joining to Oxigraph
-surface    semantic surface that was embedded
-```
-
-The same object can have more than one surface over time, but the mapping keeps the join key stable and explicit. This lets retrieval collect vector candidates, deduplicate by object identity, and ask the graph store for the authoritative object.
-
-Indexed object types are:
-
-```text
+~~~text
 episode
 observation
 entity
 memory_thread
 derived_memory
-```
+~~~
 
-`memory_link` is graph-authoritative relationship data and is not indexed as a semantic memory object by default.
+memory_link remains graph-authoritative relationship data and has no embedding surface.
 
-## Why Natural-Language Surfaces
+The public maximum-surfaces policy is colocated with the builders. This release emits at most one surface for each vector-indexed object and zero for memory_link. Publishing that limit lets callers bound recall expansion without guessing from implementation details.
 
-Embedding text should describe the memory in language a model or user might use later. It should not be a serialized metadata template.
+## Natural-Language Embedding Text
 
-Good embedding surface:
+Embedding text should describe the memory in language a model or user might use later. It must not serialize record metadata.
 
-```text
+Good:
+
+~~~text
 The user prefers deterministic public facade tests.
-```
+~~~
 
-Poor embedding surface:
+Bad:
 
-```text
+~~~text
 object_type=derived_memory; retention_state=active; confidence=0.82
-```
+~~~
 
-The first supports semantic recall. The second teaches the embedding model about field names rather than memory meaning. Metadata belongs in payload filters, not in the embedded text.
+The first supports semantic recall. The second trains similarity on storage vocabulary rather than memory meaning.
 
-## Payload Categories
+embedding_text is retained so an operator can audit what produced a vector. It is not read-out content. Prompt-ready content is hydrated from graph authority.
 
-The implemented payload fields fall into a few design categories.
+## Typed Tokens
 
-### Identity And Versioning
+object_type and surface are closed vocabularies. Their persisted spellings are owned by the domain enums through one Display and one FromStr implementation per enum. Adapters must not maintain independent token tables.
 
-```text
-object_id
-graph_uri
-object_type
-record_type
-schema_version
-surface
-```
+Unknown tokens fail candidate decoding. This prevents a new producer variant from being silently accepted or mapped to the wrong meaning.
 
-These fields make vector-to-graph joins deterministic and make migration auditable. `object_type` names the canonical memory object, while `record_type` is retained so future vector records can diverge from domain object classes without changing the join contract.
+## Consistency And Migration
 
-### Text Surfaces
+Graph writes may succeed while vector maintenance fails. Public outcomes therefore report typed vector-indexing failures, and retrieval always verifies vector candidates against current graph state.
 
-```text
-embedding_text
-content_text
-```
+The five-field change does not bump schema_version. Existing points may still contain obsolete extra fields; readers ignore those fields, and new writes emit only the five-field contract. No in-place payload migration is required. A rebuild from graph authority removes old extras naturally.
 
-`embedding_text` is the exact text used to generate the vector. `content_text` is a compact readable payload for debugging, inspection, and possible re-indexing workflows. Neither field is a raw transcript store.
+A future change that alters the meaning or required interpretation of the five fields must use the repository's schema-version policy. Adding graph-derived prefilter columns also requires an explicit consistency design: every write path must synchronize them, or the values must be immutable, and unknown values must never match.
 
-Raw interaction material should be addressed through `raw_ref` pointers owned by a caller-managed transcript system. Production raw storage is deferred in v0.1 and is not part of the Qdrant payload contract.
+## Indexing Admission
 
-### Object-Specific Filter Hints
+The write-side indexing service rejects a zero-norm record embedding before calling the Qdrant adapter. The failure identifies the affected memory object through the public typed indexing-cause contract. This mirrors the query-side rule that cosine search must not receive a zero-norm query.
 
-```text
-derived_type
-entity_type
-thread_status
-modality
-source_conversation_id
-canonical_key
-```
+## Operational Checks
 
-These fields let Qdrant avoid returning obviously irrelevant records. They are not a substitute for domain validation. For example, `thread_status` may help avoid archived threads during candidate recall, but the graph store still decides whether a thread belongs in the final context pack.
+Useful checks are:
 
-### Relationship Hints
+- graph objects with no vector point
+- vector points whose graph object no longer exists
+- unsupported record schema versions
+- malformed or unknown object_type and surface tokens
+- zero-norm embeddings rejected before adapter dispatch
 
-```text
-episode_ids
-observation_ids
-thread_ids
-entity_ids
-participant_entity_ids
-speaker_entity_id
-supersedes
-```
-
-These are denormalized hints. They exist because filters like "memories about this entity" or "memories in this thread" are common and should not require a large vector search before graph expansion.
-
-They are intentionally called hints because relationships are graph facts. If a payload says a memory is connected to an entity but the graph no longer agrees, retrieval must follow the graph.
-
-Qdrant payload relationship fields should not be used as the source of entity selectivity truth. They may identify candidate entities from vector hits, but selectivity counts must come from graph-authoritative writes or graph-derived stats.
-
-### Lifecycle And Ranking Hints
-
-```text
-retention_state
-is_current
-is_superseded
-salience_score
-confidence
-stability
-```
-
-These fields reduce work before graph verification. They also make lifecycle cleanup more visible during operational inspection.
-
-They are not sufficient for final inclusion. The design explicitly supports the case where vector cleanup fails after graph mutation: retrieval should still exclude stale graph records even if Qdrant still returns them.
-
-### Time Hints
-
-```text
-created_at
-updated_at
-started_at
-ended_at
-observed_at
-last_touched_at
-```
-
-Time filters support recency and episode/thread constraints without embedding time into the semantic vector. This keeps time an explicit retrieval dimension instead of hoping the embedding captures it.
-
-### Source Pointer
-
-```text
-raw_ref
-```
-
-`raw_ref` preserves a pointer to source material without storing the full raw chat or voice transcript in Qdrant. The pointer is provenance metadata, not raw transcript content, and it does not promise that the vector layer can resolve the source publicly.
-
-## Indexing Policy
-
-High-value Qdrant payload indexes are the fields that either reduce candidate set size or protect lifecycle correctness:
-
-```text
-object_id
-graph_uri
-object_type
-record_type
-derived_type
-entity_type
-thread_status
-schema_version
-retention_state
-episode_ids
-observation_ids
-thread_ids
-entity_ids
-participant_entity_ids
-speaker_entity_id
-supersedes
-modality
-source_conversation_id
-canonical_key
-created_at
-updated_at
-started_at
-ended_at
-observed_at
-last_touched_at
-is_current
-is_superseded
-salience_score
-confidence
-stability
-raw_ref
-```
-
-The intent is not to index every interesting fact. The intent is to index facts that are useful before graph expansion. Rich relationship traversal belongs in the graph store. Selectivity and fanout policy belong in the derived retrieval stats store.
-
-## Consistency Model
-
-Writes that affect indexed memory normally update stores in this direction:
-
-```text
-remember     graph upsert, then vector upsert, then stats delta
-correct      graph supersession, then vector delete/upsert maintenance, then stats delta
-forget       graph lifecycle mutation, then vector delete maintenance, then stats delta
-retrieve     vector candidates, then stats-guided fanout, then graph verification
-```
-
-This is not a distributed transaction. The design assumes partial vector maintenance failure can happen. The correctness rule is therefore:
-
-```text
-Graph state wins over Qdrant payload state.
-```
-
-If Qdrant is stale, retrieval may do extra work, but it should not return stale or suppressed memories as current context after graph verification.
-
-If stats are missing or unhealthy, retrieval should degrade conservatively rather than expand broadly.
-
-## Future Revisit Points
-
-Revisit this design when:
-
-- multiple vector surfaces per object become common enough to require public surface policy
-- spatial/location retrieval becomes a real product requirement
-- a belief/claim subsystem introduces new indexable object types
-- Qdrant becomes transactionally synchronized with graph authority, which is not the current design
+Obsolete extra payload fields are not read and are not treated as authority.

@@ -12,14 +12,12 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
-use crate::domain::{MemoryId, ObjectType};
+use crate::domain::MemoryId;
 use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, CustomError, IoErrorKind, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
-use crate::models::vector::{
-    VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-};
+use crate::models::vector::{VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding};
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
 use super::payload::{
@@ -495,7 +493,7 @@ fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
 fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Filter {
     Filter::must([any_field_matches(
         OBJECT_TYPE_FIELD,
-        query.object_types.iter().copied().map(object_type_name),
+        query.object_types.iter().map(ToString::to_string),
     )])
 }
 
@@ -544,8 +542,14 @@ fn qdrant_payload_to_match(
         CustomError::DatabaseError(format!("Invalid Qdrant object_id payload UUID: {error}"))
     })?;
 
-    let object_type = parse_object_type(payload_string(payload, OBJECT_TYPE_FIELD)?)?;
-    let surface = parse_vector_surface(payload_string(payload, SURFACE_FIELD)?)?;
+    let object_type = payload_string(payload, OBJECT_TYPE_FIELD)?
+        .parse()
+        .map_err(|error| {
+            CustomError::DatabaseError(format!("Invalid Qdrant object_type: {error}"))
+        })?;
+    let surface = payload_string(payload, SURFACE_FIELD)?
+        .parse()
+        .map_err(|error| CustomError::DatabaseError(format!("Invalid Qdrant surface: {error}")))?;
 
     Ok(VectorCandidateMatch::new(
         object_id,
@@ -558,13 +562,14 @@ fn qdrant_payload_to_match(
 fn qdrant_point_id(record: &crate::models::vector::VectorRecord) -> uuid::Uuid {
     let mut first = 0xcbf29ce484222325_u64;
     let mut second = 0x9e3779b97f4a7c15_u64;
+    let surface = record.surface.to_string();
 
     for byte in record
         .object_id
         .as_bytes()
         .iter()
         .copied()
-        .chain(surface_name(record.surface).as_bytes().iter().copied())
+        .chain(surface.as_bytes().iter().copied())
     {
         first ^= u64::from(byte);
         first = first.wrapping_mul(0x100000001b3);
@@ -592,66 +597,12 @@ fn payload_string(
     }
 }
 
-fn object_type_name(object_type: ObjectType) -> &'static str {
-    match object_type {
-        ObjectType::Episode => "episode",
-        ObjectType::Observation => "observation",
-        ObjectType::Entity => "entity",
-        ObjectType::MemoryThread => "memory_thread",
-        ObjectType::DerivedMemory => "derived_memory",
-        ObjectType::MemoryLink => "memory_link",
-    }
-}
-
-fn surface_name(surface: VectorSurface) -> &'static str {
-    match surface {
-        VectorSurface::Summary => "summary",
-        VectorSurface::Text => "text",
-        VectorSurface::Name => "name",
-        VectorSurface::DerivedText => "derived_text",
-        VectorSurface::Query => "query",
-    }
-}
-
-fn parse_object_type(value: String) -> Result<ObjectType, CustomError> {
-    match value.as_str() {
-        "episode" => Ok(ObjectType::Episode),
-        "observation" => Ok(ObjectType::Observation),
-        "entity" => Ok(ObjectType::Entity),
-        "memory_thread" => Ok(ObjectType::MemoryThread),
-        "derived_memory" => Ok(ObjectType::DerivedMemory),
-        "memory_link" => Ok(ObjectType::MemoryLink),
-        _ => Err(CustomError::DatabaseError(format!(
-            "Unknown Qdrant object_type payload value: {value}"
-        ))),
-    }
-}
-
-fn parse_vector_surface(value: String) -> Result<VectorSurface, CustomError> {
-    match value.as_str() {
-        "summary" => Ok(VectorSurface::Summary),
-        "text" => Ok(VectorSurface::Text),
-        "name" => Ok(VectorSurface::Name),
-        "derived_text" => Ok(VectorSurface::DerivedText),
-        "query" => Ok(VectorSurface::Query),
-        _ => Err(CustomError::DatabaseError(format!(
-            "Unknown Qdrant surface payload value: {value}"
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::payload::{
-        CONTENT_TEXT_FIELD, GRAPH_URI_FIELD, IS_CURRENT_FIELD, RETENTION_STATE_FIELD,
-    };
     use super::*;
     use crate::api::types::retrieval::VectorRecallCompleteness;
-    use crate::domain::{graph_uri, RetentionState, DEFAULT_SCHEMA_VERSION};
-    use crate::models::vector::{
-        CanonicalCandidates, VectorRecord, VectorRecordEmbedding, VectorRelationshipHints,
-        VectorSurface,
-    };
+    use crate::domain::{ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
+    use crate::models::vector::{CanonicalCandidates, VectorRecord, VectorRecordEmbedding};
     use qdrant_client::qdrant::condition::ConditionOneOf;
     use qdrant_client::qdrant::{
         point_id::PointIdOptions, value::Kind, vector, vectors, DeleteCollectionBuilder, PointId,
@@ -923,15 +874,9 @@ mod tests {
         VectorRecord::new(
             object_id,
             object_type,
-            graph_uri(object_type, object_id),
             VectorSurface::Summary,
-            "Idle-gap regression record",
-            "Idle-gap regression record",
             DEFAULT_SCHEMA_VERSION,
-            Some(RetentionState::Active),
-            Some(true),
-            VectorRelationshipHints::default(),
-            None,
+            "Idle-gap regression record",
         )
     }
 
@@ -1045,28 +990,16 @@ mod tests {
         let summary = VectorRecord::new(
             object_id,
             ObjectType::Episode,
-            graph_uri(ObjectType::Episode, object_id),
             VectorSurface::Summary,
-            "Episode summary.",
-            "Episode summary.",
             DEFAULT_SCHEMA_VERSION,
-            None,
-            None,
-            VectorRelationshipHints::default(),
-            None,
+            "Episode summary.",
         );
         let text = VectorRecord::new(
             object_id,
             ObjectType::Episode,
-            graph_uri(ObjectType::Episode, object_id),
             VectorSurface::Text,
-            "Episode text.",
-            "Episode text.",
             DEFAULT_SCHEMA_VERSION,
-            None,
-            None,
-            VectorRelationshipHints::default(),
-            None,
+            "Episode text.",
         );
 
         let points = qdrant_point_structs(&[
@@ -1087,24 +1020,14 @@ mod tests {
     }
 
     #[test]
-    fn upsert_points_use_full_vector_record_payloads() {
+    fn upsert_points_use_exact_five_field_record_payloads() {
         let object_id = Uuid::new_v4();
-        let related_episode_id = Uuid::new_v4();
         let record = VectorRecord::new(
             object_id,
             ObjectType::DerivedMemory,
-            graph_uri(ObjectType::DerivedMemory, object_id),
             VectorSurface::DerivedText,
-            "Reflection: Qdrant keeps payload details.",
-            "Qdrant keeps payload details.",
             DEFAULT_SCHEMA_VERSION,
-            None,
-            Some(true),
-            VectorRelationshipHints {
-                episode_ids: vec![related_episode_id],
-                ..VectorRelationshipHints::default()
-            },
-            Some("raw://conversation/chat_123#turn_42".to_owned()),
+            "Reflection: Qdrant keeps embedding provenance.",
         );
 
         let points = qdrant_point_structs(&[VectorRecordEmbedding::new(&record, &[0.25, 0.75])])
@@ -1119,16 +1042,8 @@ mod tests {
             payload_string(&points[0].payload, SURFACE_FIELD).unwrap(),
             "derived_text"
         );
-        assert_eq!(
-            payload_string(&points[0].payload, GRAPH_URI_FIELD).unwrap(),
-            record.graph_uri
-        );
-        assert_eq!(
-            payload_string(&points[0].payload, CONTENT_TEXT_FIELD).unwrap(),
-            "Qdrant keeps payload details."
-        );
-        assert!(points[0].payload.contains_key("episode_ids"));
-        assert!(points[0].payload.contains_key("raw_ref"));
+        assert_eq!(points[0].payload.len(), 5);
+        assert!(!points[0].payload.contains_key("graph_uri"));
 
         let vector = points[0]
             .vectors
@@ -1171,15 +1086,15 @@ mod tests {
     }
 
     #[test]
-    fn candidate_mapping_does_not_return_lifecycle_hints_as_authority() {
+    fn candidate_mapping_ignores_legacy_extra_payload_fields() {
         let object_id = Uuid::new_v4();
         let mut point = scored_point(object_id, ObjectType::DerivedMemory, 0.77);
         point
             .payload
-            .insert(RETENTION_STATE_FIELD.to_owned(), string_value("active"));
+            .insert("retention_state".to_owned(), string_value("active"));
         point
             .payload
-            .insert(IS_CURRENT_FIELD.to_owned(), bool_value(true));
+            .insert("is_current".to_owned(), bool_value(true));
 
         let matched = scored_point_to_match(point).expect("point maps");
 
@@ -1201,15 +1116,9 @@ mod tests {
         let record = VectorRecord::new(
             object_id,
             ObjectType::DerivedMemory,
-            graph_uri(ObjectType::DerivedMemory, object_id),
             VectorSurface::DerivedText,
-            "Reflection: Qdrant keeps filter hints.",
-            "Qdrant keeps filter hints.",
             DEFAULT_SCHEMA_VERSION,
-            Some(RetentionState::Active),
-            Some(true),
-            VectorRelationshipHints::default(),
-            None,
+            "Reflection: Qdrant keeps embedding provenance.",
         );
 
         store.init_collection().await.expect("collection init");
@@ -1301,15 +1210,9 @@ mod tests {
                 VectorRecord::new(
                     *object_id,
                     ObjectType::Episode,
-                    graph_uri(ObjectType::Episode, *object_id),
                     VectorSurface::Summary,
-                    format!("Equal-score episode {object_id}"),
-                    format!("Equal-score episode {object_id}"),
                     DEFAULT_SCHEMA_VERSION,
-                    Some(RetentionState::Active),
-                    Some(true),
-                    VectorRelationshipHints::default(),
-                    None,
+                    format!("Equal-score episode {object_id}"),
                 )
             })
             .collect::<Vec<_>>();
@@ -1362,7 +1265,7 @@ mod tests {
                 ),
                 (
                     OBJECT_TYPE_FIELD.to_owned(),
-                    string_value(object_type_name(object_type)),
+                    string_value(&object_type.to_string()),
                 ),
                 (SURFACE_FIELD.to_owned(), string_value("derived_text")),
             ]),

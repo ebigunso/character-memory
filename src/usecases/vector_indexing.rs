@@ -68,6 +68,17 @@ where
             ));
         }
 
+        if let Some(index) = embeddings
+            .iter()
+            .position(|embedding| embedding.iter().all(|value| *value == 0.0))
+        {
+            let object = objects[index];
+            return Ok(failed(
+                objects,
+                VectorIndexingCause::ZeroNormEmbedding { object },
+            ));
+        }
+
         let record_embeddings = records
             .iter()
             .zip(embeddings.iter())
@@ -97,5 +108,81 @@ fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIn
             unindexed_objects: objects,
             cause,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    use crate::domain::MemoryId;
+    use crate::models::vector::{zero_norm_record_fixture, EmbeddingInput, VectorCandidateSearch};
+    use crate::ports::vector_candidate::VectorCandidateRecall;
+
+    struct FixedEmbedder(Vec<f32>);
+
+    #[async_trait]
+    impl MemoryEmbedder for FixedEmbedder {
+        async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(self.0.clone())
+        }
+
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            Ok(vec![self.0.clone(); inputs.len()])
+        }
+    }
+
+    struct AdapterMustNotRun;
+
+    #[async_trait]
+    impl VectorCandidateStore for AdapterMustNotRun {
+        async fn upsert_vector_records(
+            &self,
+            _records: &[VectorRecordEmbedding<'_>],
+        ) -> Result<(), CustomError> {
+            panic!("zero-norm embeddings must be rejected before the adapter")
+        }
+
+        async fn search_candidates(
+            &self,
+            _query: &VectorCandidateSearch,
+        ) -> Result<VectorCandidateRecall, CustomError> {
+            unreachable!("search is not part of this test")
+        }
+
+        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+            unreachable!("deletion is not part of this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn zero_norm_record_embedding_is_typed_failure_before_adapter() {
+        let (object, surface, schema_version, embedding_text, embedding) =
+            zero_norm_record_fixture();
+        let record = VectorRecord::new(
+            object.id,
+            object.object_type,
+            surface,
+            schema_version,
+            embedding_text,
+        );
+        let store = AdapterMustNotRun;
+        let embedder = FixedEmbedder(embedding);
+        let service = VectorIndexingService::new(&store, &embedder);
+
+        let outcome = service.index(vec![record]).await.expect("typed outcome");
+
+        assert!(outcome.indexed_objects.is_empty());
+        assert_eq!(
+            outcome.failure,
+            Some(VectorIndexingFailure {
+                unindexed_objects: vec![object],
+                cause: VectorIndexingCause::ZeroNormEmbedding { object },
+            })
+        );
     }
 }

@@ -2,16 +2,7 @@
 // adapters while deterministic tests use narrower subsets.
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::domain::{MemoryId, ObjectType};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VectorSurface {
-    Summary,
-    Text,
-    Name,
-    DerivedText,
-    Query,
-}
+use crate::domain::{MemoryId, ObjectType, VectorSurface};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EmbeddingInput {
