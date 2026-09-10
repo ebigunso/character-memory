@@ -48,6 +48,8 @@ fn load_in_memory_settings() -> Result<Settings, CustomError> {
         .map_err(base::config_error)?
         .set_override("embedding_model", embedding_model)
         .map_err(base::config_error)?
+        .set_override("vector_store_mode", "service")
+        .map_err(base::config_error)?
         .set_override("graph_store_mode", "in_memory")
         .map_err(base::config_error)?
         .build()

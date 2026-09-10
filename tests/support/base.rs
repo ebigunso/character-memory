@@ -28,6 +28,8 @@ pub fn load_test_settings() -> Result<Settings, CustomError> {
     }
 
     for (environment_key, config_key) in [
+        ("VECTOR_STORE_MODE", "vector_store_mode"),
+        ("VECTOR_STORE_PATH", "vector_store_path"),
         ("GRAPH_STORE_MODE", "graph_store_mode"),
         ("RETRIEVAL_STATS_STORE_MODE", "retrieval_stats_store_mode"),
         ("RETRIEVAL_STATS_PATH", "retrieval_stats_path"),

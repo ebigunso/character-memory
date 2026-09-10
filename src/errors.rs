@@ -9,6 +9,7 @@ use crate::domain::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VectorDatabaseErrorKind {
+    Engine,
     Response,
     ResourceExhausted,
     Conversion,
@@ -338,6 +339,8 @@ pub struct CollectionCompatibilityError {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum CollectionMismatch {
+    #[error("collection name mismatch: expected {expected}, got {actual}")]
+    CollectionName { expected: String, actual: String },
     #[error("missing vector configuration")]
     MissingVectorConfiguration,
     #[error("vector size mismatch: expected {expected}, got {actual}")]

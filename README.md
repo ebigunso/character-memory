@@ -42,7 +42,7 @@ An episode is a remembered event or interaction. Each episode can be connected t
 
 Retrieval is graph-authoritative and hybrid:
 
-- **Vector candidate recall:** uses Qdrant to find semantically similar memory objects
+- **Vector candidate recall:** uses embedded Qdrant Edge by default, or an explicit Qdrant service, to find semantically similar memory objects
 - **Graph expansion:** uses Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
 - **Temporal retrieval:** includes memories based on when they happened
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
@@ -102,7 +102,7 @@ future interactions become more continuous
 By default, this uses:
 
 - OpenAI for embeddings
-- Qdrant for vector candidate recall and payload filtering
+- Embedded Qdrant Edge for local vector candidate recall and payload filtering
 - Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
@@ -159,13 +159,29 @@ Supplying deterministic ids gives you stable identity across retries: a replayed
 
 ## Backends
 
-The default implementation is backed by Qdrant and embedded persistent Oxigraph.
+The default implementation is backed by embedded Qdrant Edge and embedded persistent Oxigraph. Configure one local vector root; each `collection_name` passed to the constructor owns one shard directory beneath it:
 
-Qdrant is used for vector candidate recall. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=persistent` with `OXIGRAPH_PATH` set to a local filesystem path such as `./data/oxigraph`; deterministic tests and fixtures can use `GRAPH_STORE_MODE=in_memory`.
+```text
+VECTOR_STORE_MODE=embedded
+VECTOR_STORE_PATH=./data/vectors
+```
+
+Embedded vector storage is single-process. It ships with Qdrant Edge's indexing threshold at zero, so candidate recall is an exhaustive scan and reports `VectorRecallCompleteness::Exhaustive`; index tuning is deliberately deferred. The vector shard is a rebuildable candidate index over graph authority, so moving between embedded and service modes means rebuilding vectors from the graph-authoritative objects rather than copying shard files.
+
+On the 2026-09-04 Windows x86-64 development run at 1,536 dimensions, the reproducible ignored benchmark measured exhaustive query latency of 3 ms for 100 records, 11 ms for 1,000 records, and 48 ms for 5,000 records. Treat these as local guidance, not a performance guarantee; run `cargo test benchmark_configured_dimension_and_owner_responsiveness -- --ignored --nocapture --test-threads=1` on the deployment target before setting corpus expectations.
+
+To use a Qdrant service instead, select it explicitly and supply its gRPC endpoint:
+
+```text
+VECTOR_STORE_MODE=service
+QDRANT_CONNECTION_STRING=http://127.0.0.1:6334
+```
+
+Both vector modes are candidate recall only. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=persistent` with `OXIGRAPH_PATH` set to a local filesystem path such as `./data/oxigraph`; deterministic tests and fixtures can use `GRAPH_STORE_MODE=in_memory`.
 
 Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
 
-Integration tests that exercise external vector storage require a local Qdrant instance reachable over gRPC.
+Service-gated integration tests require a local Qdrant instance reachable over gRPC and `REQUIRE_QDRANT_TESTS=1`. The embedded adapter and its contract suite require no service.
 
 The default gRPC port is `6334`.
 
