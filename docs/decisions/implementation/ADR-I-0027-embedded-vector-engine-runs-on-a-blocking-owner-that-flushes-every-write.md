@@ -6,7 +6,7 @@ deciders: ["ebigunso"]
 consulted: ["Claude Fable 5.1"]
 informed: []
 warrant:
-  warranted_by: "without this record, future work would likely call the embedded engine directly from the async retrieval path (it is a plain synchronous API and the first implementation compiles), and would rely on the shard's final drop for persistence because the engine's write call returns success before anything is durable; both were the natural first draft of this phase"
+  warranted_by: "without this record, future work would likely call the embedded engine directly from the async retrieval path (it is a plain synchronous API and the first implementation compiles), and would rely on the shard's final drop for persistence because the engine's write call returns success before anything is durable; both appeared in the implementation draft reviewed on 2026-09-03"
   detected_signals: "cross-boundary contract shape (an engine with synchronous, non-durable writes inside an async host); premises likely to expire (the engine is beta and its persistence model may change); costly to detect (lost writes surface as a character forgetting after a crash, long after the cause)"
   cost_of_violation: "an engine call on an executor thread stalls every other retrieval in the process for the duration of a scan, build, or flush; a write acknowledged before its flush is lost on any exit that skips the shard's drop, and the loss is silent — the store reopens cleanly and simply lacks the memories"
   cost_of_wrong_preservation: "if the engine starts replaying its log on load or persisting on write and this record is preserved, every write keeps paying a synchronous disk sync it no longer needs"
@@ -31,7 +31,7 @@ An adapter that relies on the final drop for persistence therefore loses every u
 
 - No engine call may occupy an async executor thread; the library's other embedded stores hold this line.
 - A write the library has acknowledged must survive a process exit that skips orderly shutdown; a character that forgets after a crash violates continuity silently.
-- No port or facade method is added for shutdown; the existing facade drop remains the only close path.
+- Durability never depends on shutdown; the facade drop remains signal-only, with an explicit awaited close for deterministic resource release.
 - The rule must be pinned to measured engine behaviour so a change in the engine reopens it rather than silently voiding it.
 
 ## Decision
@@ -40,6 +40,7 @@ The adapter creates a dedicated blocking owner at construction: one blocking wor
 The async composition entry point never touches the engine; it only hands work to the owner and awaits the result.
 The owner acknowledges an upsert or delete only after the engine's flush has completed, so every acknowledged write is durable independently of the shard's final drop.
 Dropping the adapter through the existing facade drop only signals the owner; the shard's final drop happens on the owner's thread, and a process exit that pre-empts it loses nothing acknowledged.
+An explicit awaitable close is provided for consumers that must release the store directory deterministically (deleting or reopening it); durability never depends on it and the facade's drop remains signal-only.
 A shard directory stays locked while an owner holds it; a constructor that meets a locked directory waits with a bounded backoff for the previous owner to release it rather than failing or opening a second handle.
 The contract canary (ADR-I-0023) additionally pins the three engine facts this record rests on: the engine does not persist a write until its flush runs, a load does not replay the log, and a shard directory held by one owner refuses a second open until it is released.
 
@@ -59,17 +60,17 @@ The contract canary (ADR-I-0023) additionally pins the three engine facts this r
 ## Decision Outcome
 
 Chosen option: **Option 1**.
-It is the only option that keeps executor threads free, makes every acknowledged write durable, and adds no API surface.
+It keeps executor threads free and makes every acknowledged write durable independently of orderly shutdown.
 
 ### Rejected Alternatives
 
 Option 2 stalls the process on every scan, build, and flush, and was measured to lose every unflushed write on exit; rejected outright.
 Option 3 makes the library's write acknowledgement a lie under crash or exit, and a character's lost memories are the cost; rejected outright.
-Option 4 adds a close method every consumer must remember to call and still loses writes on any exit that skips it; the per-write flush makes it unnecessary; it is reopened only if the write-burst measurement shows the per-write flush dominating ingestion cost, in which case batched flushes behind an explicit acknowledgement are the shape, not a weaker guarantee.
+Option 4 is rejected as the durability mechanism because it loses writes on any exit that skips close; per-write flush supplies the durability guarantee. An explicit awaited close is provided for release ordering instead: it returns after the owner has dropped the shard and released its directory lock, allowing consumers to delete or reopen the store deterministically.
 
 ## Consequences
 
-- Positive: executor responsiveness is independent of corpus size and engine activity; acknowledged writes survive crashes and hard exits; no new API.
+- Positive: executor responsiveness is independent of corpus size and engine activity; acknowledged writes survive crashes and hard exits; explicit close supports deterministic directory release.
 - Negative / tradeoffs: a synchronous disk sync per write; a serialised engine (one call at a time per adapter), which the candidate-recall role tolerates.
 
 ## Decision Boundary
@@ -81,7 +82,8 @@ Not covered: the channel and thread mechanics, the backoff bound, and the batchi
 ## Validation
 
 - The hard-exit test writes, exits the process without dropping the shard, reopens the directory from a second process, and finds every acknowledged write.
-- The close-then-reopen test drops the facade inside an async runtime, reopens the same directory immediately, and finds every write.
+- The drop-then-reopen test drops the facade inside an async runtime, reopens the same directory immediately, and finds every write.
+- The explicit-close test awaits facade close, immediately removes the local store directories, and reopens fresh stores; repeated embedded-adapter closes succeed.
 - The benchmark shows no engine call occupying an async executor thread and observes the shard's final drop on the owner's thread.
 - The contract canary fails if the pinned engine starts replaying its log on load, persisting on write, or admitting a second open of a held shard directory.
 
@@ -89,7 +91,7 @@ Not covered: the channel and thread mechanics, the backoff bound, and the batchi
 
 - The engine persists on write or replays its log on load (the canary fails in that direction) — the per-write flush becomes optional and this record is revised.
 - The write-burst measurement shows the per-write flush dominating ingestion cost — batch flushes behind an explicit acknowledgement rather than weakening the durability rule.
-- The engine's directory lock changes semantics (the canary fails in that direction) — the constructor's wait-for-release rule is re-derived before the pin moves.
+- The engine's directory lock changes semantics (the canary fails in that direction) — the constructor's wait-for-release rule is re-derived before adopting a different engine pin.
 - A multi-process deployment shape is designed — the single-owner lock discipline is reconsidered with the graph and statistics stores, never alone.
 
 ## Consultation impact

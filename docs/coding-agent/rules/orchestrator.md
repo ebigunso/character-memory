@@ -2,14 +2,14 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "orchestrator"
-last_updated: "2026-07-23"
+last_updated: "2026-09-04"
 ---
 
 # Orchestrator Repository Rules
 ## Repo-Specific Orchestrator Policies
 
 - When creating or updating a PR, follow the format specified in `.github/pull_request_template.md`.
-- PR titles state what the change achieves, not a list of its contents; the contents go in the body. Never use bare version numbers or milestone labels as titles.
+- PR titles state the point of the change in one short clause, not a list of its contents and not an explanation of the evidence; the contents and qualifications go in the body. Never use bare version numbers or milestone labels as titles.
 - When a phase merges as one change, wave PRs target the planning branch and are registered as a GitHub stack on the planning PR with `gh stack link <plan-pr> <wave-pr>...` (bottom to top); later waves are appended with `gh stack link <stack-number> <pr>...`. The stack decides merge order.
 - Layer-boundary reorganizations must include a `use crate::` dependency-direction audit as required Reviewer evidence per ADR-I-0018 (ports/policy/models never import usecases, and import api only for the ADR's one named exception: the `api::types::retrieval` trace/telemetry vocabulary; errors/domain import no upper layer); file-placement conformance alone does not catch inverted edges hidden behind re-export shims.
 - Scope the ADR-I-0018 dependency-direction audit to the diff under review (e.g. `git diff | grep '^+.*use crate::'`) when reviewing incremental changes: pre-existing ports/policy/models imports of domain types via `crate::api::types` are grandfathered debt awaiting a one-time sweep to `crate::domain`, and a blanket grep forces per-line disambiguation between old and newly introduced edges.

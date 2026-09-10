@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs, path::Path};
 
 use async_trait::async_trait;
 use character_memory::{
@@ -52,6 +52,49 @@ async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() 
     drop(memory);
     let reopened = open_embedded(temp.path(), collection).await.unwrap();
     assert_eq!(ids(&episode_snapshot(&reopened).await), vec![id(2), id(3)]);
+    close_embedded_and_remove_root(reopened, temp).await;
+}
+
+#[tokio::test]
+async fn close_releases_local_stores_for_immediate_removal_and_fresh_reopen() {
+    let temp = TempDir::new().unwrap();
+    let collection = "close_release";
+    let config = common_settings()
+        .set_override(
+            "vector_store_path",
+            temp.path().join("vectors").to_str().unwrap(),
+        )
+        .unwrap()
+        .set_override("graph_store_mode", "persistent")
+        .unwrap()
+        .set_override("oxigraph_path", temp.path().join("graph").to_str().unwrap())
+        .unwrap()
+        .set_override("retrieval_stats_store_mode", "sqlite")
+        .unwrap()
+        .set_override(
+            "retrieval_stats_path",
+            temp.path().join("stats.sqlite").to_str().unwrap(),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+    let memory = open(Config::builder().add_source(config.clone()), collection)
+        .await
+        .unwrap();
+    remember_fixture(&memory).await;
+    assert!(temp.path().join("stats.sqlite").is_file());
+    assert!(temp.path().join("graph").is_dir());
+    memory.close().await.unwrap();
+    fs::remove_dir_all(temp.path()).unwrap();
+    assert!(!temp.path().exists());
+
+    let reopened = open(Config::builder().add_source(config), collection)
+        .await
+        .unwrap();
+    assert!(episode_snapshot(&reopened).await.is_empty());
+    remember_fixture(&reopened).await;
+    assert_eq!(ids(&episode_snapshot(&reopened).await), vec![id(1), id(2)]);
+    close_embedded_and_remove_root(reopened, temp).await;
 }
 
 #[tokio::test]
@@ -87,6 +130,7 @@ async fn embedded_zero_norm_contract_rejects_records_and_exhaustively_scores_que
         .unwrap();
 
     assert_zero_norm_contract(&memory).await;
+    close_embedded_and_remove_root(memory, temp).await;
 }
 
 #[tokio::test]
@@ -109,6 +153,8 @@ async fn service_and_embedded_share_the_zero_norm_contract() {
     }
     .await;
 
+    close_embedded_and_remove_root(embedded, temp).await;
+    service.close().await.unwrap();
     test_support::cleanup_collection(&collection).await;
     result
 }
@@ -142,8 +188,17 @@ async fn service_and_embedded_admit_identical_candidates_in_identical_order() {
     }
     .await;
 
+    close_embedded_and_remove_root(embedded, temp).await;
+    service.close().await.unwrap();
     test_support::cleanup_collection(&collection).await;
     result
+}
+
+async fn close_embedded_and_remove_root(memory: CharacterMemory, temp: TempDir) {
+    let path = temp.path().to_path_buf();
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    assert!(!path.exists());
 }
 
 async fn open_embedded(path: &Path, collection: &str) -> Result<CharacterMemory, CustomError> {

@@ -3,8 +3,6 @@
 use crate::domain::{MemoryId, ObjectType, VectorSurface};
 
 use super::EmbeddingInput;
-#[cfg(test)]
-use super::VectorCandidateRecord;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VectorRecordEmbedding<'a> {
@@ -15,11 +13,6 @@ pub(crate) struct VectorRecordEmbedding<'a> {
 impl<'a> VectorRecordEmbedding<'a> {
     pub(crate) fn new(record: &'a VectorRecord, embedding: &'a [f32]) -> Self {
         Self { record, embedding }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn to_candidate_record(self) -> VectorCandidateRecord {
-        self.record.to_candidate_record(self.embedding.to_vec())
     }
 }
 
@@ -57,11 +50,6 @@ impl VectorRecord {
             self.embedding_text.clone(),
         )
     }
-
-    #[cfg(test)]
-    pub(crate) fn to_candidate_record(&self, embedding: Vec<f32>) -> VectorCandidateRecord {
-        VectorCandidateRecord::new(self.object_id, self.object_type, self.surface, embedding)
-    }
 }
 
 impl From<&VectorRecord> for EmbeddingInput {
@@ -94,24 +82,5 @@ mod tests {
         assert_eq!(input.text, "Episode summary: Discussed contract tests.");
         assert!(!input.text.contains(&object_id.to_string()));
         assert!(!input.text.contains(DEFAULT_SCHEMA_VERSION));
-    }
-
-    #[test]
-    fn vector_record_converts_to_existing_candidate_contract_with_embedding() {
-        let object_id = MemoryId::new_v4();
-        let record = VectorRecord::new(
-            object_id,
-            ObjectType::Observation,
-            VectorSurface::Text,
-            DEFAULT_SCHEMA_VERSION,
-            "Observation excerpt: Use deterministic fakes.",
-        );
-
-        let candidate = record.to_candidate_record(vec![0.1, 0.2]);
-
-        assert_eq!(candidate.object_id, object_id);
-        assert_eq!(candidate.object_type, ObjectType::Observation);
-        assert_eq!(candidate.surface, VectorSurface::Text);
-        assert_eq!(candidate.embedding, vec![0.1, 0.2]);
     }
 }

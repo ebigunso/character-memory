@@ -1,5 +1,4 @@
-// Vector candidate query surface. Some filters are exercised by live
-// adapters while deterministic tests use narrower subsets.
+// Provider-neutral vector candidate query and match types shared by both adapters.
 use std::collections::{hash_map::Entry, HashMap};
 
 use crate::domain::{MemoryId, ObjectType, VectorSurface};
@@ -24,32 +23,6 @@ impl EmbeddingInput {
             object_type,
             surface,
             text: text.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg(test)]
-pub(crate) struct VectorCandidateRecord {
-    pub(crate) object_id: MemoryId,
-    pub(crate) object_type: ObjectType,
-    pub(crate) surface: VectorSurface,
-    pub(crate) embedding: Vec<f32>,
-}
-
-#[cfg(test)]
-impl VectorCandidateRecord {
-    pub(crate) fn new(
-        object_id: MemoryId,
-        object_type: ObjectType,
-        surface: VectorSurface,
-        embedding: Vec<f32>,
-    ) -> Self {
-        Self {
-            object_id,
-            object_type,
-            surface,
-            embedding,
         }
     }
 }
@@ -180,22 +153,6 @@ fn vector_surface_rank(surface: VectorSurface) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn vector_candidate_record_keeps_domain_identity_and_embedding_surface() {
-        let object_id = MemoryId::new_v4();
-        let record = VectorCandidateRecord::new(
-            object_id,
-            ObjectType::Observation,
-            VectorSurface::Text,
-            vec![0.1, 0.2, 0.3],
-        );
-
-        assert_eq!(record.object_id, object_id);
-        assert_eq!(record.object_type, ObjectType::Observation);
-        assert_eq!(record.surface, VectorSurface::Text);
-        assert_eq!(record.embedding, vec![0.1, 0.2, 0.3]);
-    }
 
     #[test]
     fn vector_candidate_search_can_scope_by_canonical_object_types() {

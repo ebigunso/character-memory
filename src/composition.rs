@@ -100,14 +100,16 @@ impl CharacterMemory {
     /// # Description
     ///
     /// This constructor allows callers to inject custom embedding generation while using the
-    /// default graph-authoritative storage composition.
+    /// default graph-authoritative storage composition. Vector candidate recall uses the embedded
+    /// store by default and requires `VECTOR_STORE_PATH`; callers can explicitly select service
+    /// mode, which instead requires `QDRANT_CONNECTION_STRING`.
     ///
     /// # Parameters
     ///
-    /// - `settings`: Global configuration used to derive the Qdrant connection and embedding
-    ///   model settings required to initialize the Qdrant candidate collection.
-    /// - `collection_name`: The name of the Qdrant collection where memory vectors will be
-    ///   stored and queried.
+    /// - `settings`: Global configuration used to select and initialize the vector candidate
+    ///   backend and embedding model.
+    /// - `collection_name`: The name of the vector collection where memory vectors will be stored
+    ///   and queried.
     /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
     ///   for generating embeddings from input data.
     ///
@@ -115,10 +117,10 @@ impl CharacterMemory {
     ///
     /// A `Result` which is:
     ///
-    /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by Oxigraph graph authority and
-    ///   Qdrant vector candidate recall.
+    /// - `Ok(Self)`: A new [`CharacterMemory`] instance backed by Oxigraph graph authority and the
+    ///   configured vector candidate store.
     /// - `Err(CustomError)`: Returned if any error occurs while resolving configuration from
-    ///   `settings` or initializing the Oxigraph graph authority and Qdrant vector candidate
+    ///   `settings` or initializing the Oxigraph graph authority and configured vector candidate
     ///   store.
     pub async fn new_with_embedding_provider(
         settings: Settings,
@@ -184,6 +186,10 @@ impl CharacterMemory {
     }
 
     /// Constructs a new CharacterMemory instance.
+    ///
+    /// Vector candidate recall uses the embedded store by default and requires
+    /// `VECTOR_STORE_PATH`. Explicit service mode instead requires
+    /// `QDRANT_CONNECTION_STRING`.
     ///
     /// # Parameters
     ///

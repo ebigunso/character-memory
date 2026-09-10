@@ -8,7 +8,7 @@ informed: []
 warrant:
   warranted_by: "without this record, future work would likely add a public raw vector search to the facade for the evaluation baseline, or let evaluation tooling read a store's physical schema directly again, because each is the shortest path to a number"
   detected_signals: "externally observable contract shape with a tempting alternative; rejected alternative likely to be re-proposed; cross-repository obligation; deliberately bounded scope (no product use case for raw recall exists)"
-  cost_of_violation: "a raw-recall facade makes the library a vector-database abstraction and exposes unverified candidates as if they were memory; a schema-reading baseline breaks silently the moment a second vector adapter ships a different physical schema, and it reimplements canonical ordering the library already owns"
+  cost_of_violation: "a raw-recall facade makes the library a vector-database abstraction and exposes unverified candidates as if they were memory; a schema-reading baseline breaks silently the moment a second vector adapter ships a different physical schema, and it reimplements canonical ordering owned by the library"
   cost_of_wrong_preservation: "if a product use case for candidate-level recall arrives and this record is preserved as a blanket prohibition, the diagnostic surface the observability phase plans would be blocked instead of designed"
   cost_of_over_extension: "reading this record as forbidding evaluation tooling from using the trace at all would leave the baseline with no honest data source"
 depends_on: [implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md]
@@ -56,7 +56,7 @@ Keeping the baseline inside the traced retrieval path means the measurement of "
 
 ## Implementation Impact
 
-- Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade, so the acceptance criterion "no public facade change beyond the telemetry field and this policy value" holds.
+- Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade; the consuming awaitable close that releases the local stores (ADR-I-0027) is the only other public facade addition, so the acceptance criterion "no public facade change beyond the telemetry field, this policy value, and that close" holds.
 - Evaluation repository: its baseline reads the trace under its own plan; nothing in this repository depends on how.
 
 ## Considered Options

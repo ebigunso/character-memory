@@ -1,6 +1,6 @@
 # Vector Database Payload Design
 
-> Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0024](../../decisions/implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md) governs any future prefilter re-entry.
+> Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0028](../../decisions/implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md) governs any future prefilter re-entry.
 
 This document describes the Qdrant record contract for Character Memory. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
 
@@ -70,7 +70,7 @@ Graph writes may succeed while vector maintenance fails. Public outcomes therefo
 
 The five-field change does not bump schema_version. Existing points may still contain obsolete extra fields; readers ignore those fields, and new writes emit only the five-field contract. No in-place payload migration is required. A rebuild from graph authority removes old extras naturally.
 
-A future change that alters the meaning or required interpretation of the five fields must use the repository's schema-version policy. Adding graph-derived prefilter columns also requires an explicit consistency design: every write path must synchronize them, or the values must be immutable, and unknown values must never match.
+A future change that alters the meaning or required interpretation of the five fields must use the repository's schema-version policy. A graph-derived prefilter column must be fully populated for every searchable record, including any required backfill before enablement, and must either be immutable or be synchronised by every write path; unknown values never match.
 
 ## Indexing Admission
 

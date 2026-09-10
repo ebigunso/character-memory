@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::adapters::qdrant::payload::{
-    qdrant_payload_map, QdrantPayloadKind, QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
-    SURFACE_FIELD,
+    qdrant_payload_map, qdrant_point_id, read_candidate_match, QdrantPayloadKind,
+    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
 };
 use crate::adapters::qdrant::tie_closure::close_tie_cohort;
 use crate::domain::{MemoryId, DEFAULT_SCHEMA_VERSION};
@@ -49,7 +49,8 @@ pub(crate) struct QdrantEdgeVectorCandidateStore {
     vector_size: usize,
     exact_scan: bool,
     commands: Sender<Command>,
-    operation: Mutex<()>,
+    // Serializes operations and records successful shutdown.
+    operation: Mutex<bool>,
 }
 
 enum Command {
@@ -129,7 +130,7 @@ impl QdrantEdgeVectorCandidateStore {
             vector_size,
             exact_scan: indexing_threshold_kb == 0,
             commands,
-            operation: Mutex::new(()),
+            operation: Mutex::new(false),
         })
     }
 
@@ -141,12 +142,16 @@ impl QdrantEdgeVectorCandidateStore {
         receive(receiver).await
     }
 
-    #[cfg(test)]
-    async fn close(&self) -> Result<(), CustomError> {
-        let _operation = self.operation.lock().await;
+    pub(crate) async fn close(&self) -> Result<(), CustomError> {
+        let mut closed = self.operation.lock().await;
+        if *closed {
+            return Ok(());
+        }
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Shutdown { reply: Some(reply) })?;
-        receive(receiver).await
+        receive(receiver).await?;
+        *closed = true;
+        Ok(())
     }
 
     fn send(&self, command: Command) -> Result<(), CustomError> {
@@ -170,6 +175,24 @@ impl QdrantEdgeVectorCandidateStore {
         receive(receiver).await
     }
 
+    #[cfg(test)]
+    async fn search_batch_exact(
+        &self,
+        query: &VectorCandidateSearch,
+        fetch_limit: usize,
+    ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(Command::Search {
+            query_embedding: query.query_embedding.clone(),
+            object_types: object_type_tokens(query),
+            limit: fetch_limit,
+            exact: true,
+            zero_norm: query.is_zero_norm(),
+            reply,
+        })?;
+        receive(receiver).await
+    }
+
     async fn scoped_count(&self, query: &VectorCandidateSearch) -> Result<usize, CustomError> {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Count {
@@ -182,6 +205,10 @@ impl QdrantEdgeVectorCandidateStore {
 
 #[async_trait]
 impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
+    async fn close(&self) -> Result<(), CustomError> {
+        Self::close(self).await
+    }
+
     async fn upsert_vector_records(
         &self,
         records: &[VectorRecordEmbedding<'_>],
@@ -265,13 +292,10 @@ impl QdrantEdgeVectorCandidateStore {
             }
             .into());
         }
-        let point_id = MemoryId::new_v5(
-            &record.record.object_id,
-            record.record.surface.to_string().as_bytes(),
-        )
-        .to_string()
-        .parse::<qdrant_edge::PointId>()
-        .expect("UUID text is a valid Qdrant Edge point ID");
+        let point_id = qdrant_point_id(record.record)
+            .to_string()
+            .parse::<qdrant_edge::PointId>()
+            .expect("UUID text is a valid Qdrant Edge point ID");
         let payload = serde_json::Value::Object(qdrant_payload_map(record.record)?);
         Ok(PointStruct::new(point_id, record.embedding.to_vec(), payload).into())
     }
@@ -342,6 +366,7 @@ fn owner_loop(shard: EdgeShard, commands: mpsc::Receiver<Command>) {
             }
             Command::Shutdown { reply } => {
                 let result = shard.flush().map_err(edge_error);
+                drop(shard);
                 if let Some(reply) = reply {
                     let _ = reply.send(result);
                 }
@@ -358,11 +383,15 @@ fn open_shard(
     indexing_threshold_kb: usize,
 ) -> Result<EdgeShard, CustomError> {
     fs::create_dir_all(root).map_err(io_error)?;
+    let root = fs::canonicalize(root).map_err(io_error)?;
     let path = root.join(collection_name);
     fs::create_dir_all(&path).map_err(io_error)?;
     let existing = path.join(EDGE_CONFIG_FILE).is_file();
     if existing {
         validate_marker(&path, collection_name)?;
+        // Validate before the retry loop so an incompatible shard fails once
+        // with the typed compatibility error instead of retrying a load that
+        // cannot succeed. The post-load check also protects newly created shards.
         let config = EdgeConfig::load(&path)
             .expect("existing config path must produce a load result")
             .map_err(edge_error)?;
@@ -537,33 +566,21 @@ fn payload_to_match(
     payload: Option<&qdrant_edge::Payload>,
     score: f32,
 ) -> Result<VectorCandidateMatch, CustomError> {
-    let payload = payload.ok_or_else(|| payload_error("payload is missing"))?;
-    let object_id = payload_string(payload, OBJECT_ID_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid object_id UUID: {error}")))?;
-    let object_type = payload_string(payload, OBJECT_TYPE_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid object_type: {error}")))?;
-    let surface = payload_string(payload, SURFACE_FIELD)?
-        .parse()
-        .map_err(|error| payload_error(format!("invalid surface: {error}")))?;
-    Ok(VectorCandidateMatch::new(
-        object_id,
-        object_type,
-        surface,
-        score,
-    ))
-}
-
-fn payload_string<'a>(
-    payload: &'a qdrant_edge::Payload,
-    field: &str,
-) -> Result<&'a str, CustomError> {
-    payload
-        .0
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| payload_error(format!("missing or invalid string field {field}")))
+    let payload = payload.ok_or_else(|| {
+        CustomError::VectorDatabaseError(
+            crate::adapters::qdrant::payload::payload_deserialization_error(
+                "qdrant_edge",
+                "payload is missing",
+            ),
+        )
+    })?;
+    read_candidate_match("qdrant_edge", score, |field| {
+        payload
+            .0
+            .get(field.name())
+            .and_then(serde_json::Value::as_str)
+    })
+    .map_err(CustomError::VectorDatabaseError)
 }
 
 fn string_filter(field: &str, values: Vec<String>) -> Filter {
@@ -690,15 +707,6 @@ fn owner_unavailable() -> CustomError {
     ))
 }
 
-fn payload_error(message: impl Into<String>) -> CustomError {
-    CustomError::VectorDatabaseError(VectorDatabaseError::new(
-        "qdrant_edge",
-        VectorDatabaseErrorKind::PayloadDeserialization,
-        None,
-        message,
-    ))
-}
-
 fn edge_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::VectorDatabaseError(VectorDatabaseError::new(
         "qdrant_edge",
@@ -757,6 +765,28 @@ mod tests {
             .collect::<Vec<_>>();
         let embeddings = (0..count).map(|_| embedding.to_vec()).collect();
         (records, embeddings)
+    }
+
+    #[tokio::test]
+    async fn point_identity_matches_the_shared_service_derivation() {
+        let temp = TempDir::new().unwrap();
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "point_identity", 2)
+            .await
+            .unwrap();
+        let record = VectorRecord::new(
+            MemoryId::from_u128(7),
+            ObjectType::Episode,
+            VectorSurface::Summary,
+            DEFAULT_SCHEMA_VERSION,
+            "Episode summary",
+        );
+
+        let point = store
+            .point(&VectorRecordEmbedding::new(&record, &[1.0, 0.0]))
+            .unwrap();
+
+        assert_eq!(point.id.to_string(), qdrant_point_id(&record).to_string());
+        store.close().await.unwrap();
     }
 
     async fn upsert(
@@ -878,6 +908,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relative_parent_path_survives_restart() {
+        let temp = TempDir::new_in(env::current_dir().unwrap()).unwrap();
+        let relative = Path::new(temp.path().file_name().unwrap()).join("nested/../vectors");
+        assert!(relative.is_relative());
+        assert_path_survives_restart(&relative).await;
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn long_windows_path_survives_restart() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("nested-directory/".repeat(20));
+        assert!(root.as_os_str().len() > 260);
+        assert_path_survives_restart(&root).await;
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
+    }
+
+    async fn assert_path_survives_restart(root: &Path) {
+        let (records, embeddings) = records(3, &[1.0, 0.0]);
+        let store = QdrantEdgeVectorCandidateStore::open(root, "path_restart", 2)
+            .await
+            .unwrap();
+        upsert(&store, &records, &embeddings).await;
+        store.close().await.unwrap();
+
+        let reopened = QdrantEdgeVectorCandidateStore::open(root, "path_restart", 2)
+            .await
+            .unwrap();
+        let result = reopened.search_candidates(&query(10)).await.unwrap();
+        assert_eq!(result.candidates.len(), records.len());
+        for record in &records {
+            assert!(result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.object_id == record.object_id));
+        }
+        assert_eq!(
+            result.completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: 3 }
+        );
+        reopened.close().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn zero_norm_query_returns_canonical_zero_scores_exhaustively() {
         let temp = TempDir::new().unwrap();
         let (records, embeddings) = records(4, &[1.0, 0.0]);
@@ -902,6 +981,7 @@ mod tests {
             result.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 4 }
         );
+        store.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -967,6 +1047,21 @@ mod tests {
                 actual,
             } if actual == "future"
         ));
+    }
+
+    #[tokio::test]
+    async fn close_is_idempotent_and_releases_the_directory() {
+        let temp = TempDir::new().unwrap();
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "close", 2)
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(store.close(), store.close());
+        first.unwrap();
+        second.unwrap();
+        store.close().await.unwrap();
+        let path = temp.path().to_path_buf();
+        temp.close().unwrap();
+        assert!(!path.exists());
     }
 
     #[tokio::test]
@@ -1095,6 +1190,7 @@ mod tests {
     #[tokio::test]
     async fn indexed_test_configuration_reports_boundary_and_matches_exact_recall() {
         let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
         let (records, embeddings) = records(200, &[1.0, 0.0]);
         let exact = QdrantEdgeVectorCandidateStore::open(temp.path(), "exact", 2)
             .await
@@ -1109,7 +1205,12 @@ mod tests {
 
         let exact_result = exact.search_candidates(&query(20)).await.unwrap();
         let indexed_result = indexed.search_candidates(&query(20)).await.unwrap();
+        let indexed_exact_result = indexed.search_batch_exact(&query(20), 200).await.unwrap();
         assert_eq!(exact_result.candidates, indexed_result.candidates);
+        assert_eq!(
+            exact_result.candidates,
+            CanonicalCandidates::new(indexed_exact_result).truncated(20)
+        );
         assert_eq!(
             exact_result.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 200 }
@@ -1118,6 +1219,10 @@ mod tests {
             indexed_result.completeness,
             VectorRecallCompleteness::BoundaryTieClosed { .. }
         ));
+        exact.close().await.unwrap();
+        indexed.close().await.unwrap();
+        temp.close().unwrap();
+        assert!(!path.exists());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

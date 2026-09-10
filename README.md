@@ -102,7 +102,7 @@ future interactions become more continuous
 By default, this uses:
 
 - OpenAI for embeddings
-- Embedded Qdrant Edge for local vector candidate recall and payload filtering
+- Embedded Qdrant Edge for local vector candidate recall with object-type scope filtering
 - Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
@@ -169,6 +169,10 @@ VECTOR_STORE_PATH=./data/vectors
 Embedded vector storage is single-process. It ships with Qdrant Edge's indexing threshold at zero, so candidate recall is an exhaustive scan and reports `VectorRecallCompleteness::Exhaustive`; index tuning is deliberately deferred. The vector shard is a rebuildable candidate index over graph authority, so moving between embedded and service modes means rebuilding vectors from the graph-authoritative objects rather than copying shard files.
 
 On the 2026-09-04 Windows x86-64 development run at 1,536 dimensions, the reproducible ignored benchmark measured exhaustive query latency of 3 ms for 100 records, 11 ms for 1,000 records, and 48 ms for 5,000 records. Treat these as local guidance, not a performance guarantee; run `cargo test benchmark_configured_dimension_and_owner_responsiveness -- --ignored --nocapture --test-threads=1` on the deployment target before setting corpus expectations.
+
+Call `memory.close().await?` before deleting the store directory to await resource release; acknowledged writes are already durable, and ordinary drop remains valid without waiting for the embedded owner.
+
+The embedded engine (`qdrant-edge`) enables `serde_json::preserve_order` through Cargo feature unification, so consumers sharing that dependency get insertion-ordered `serde_json::Value` maps and must explicitly sort keys when producing canonical bytes.
 
 To use a Qdrant service instead, select it explicitly and supply its gRPC endpoint:
 
