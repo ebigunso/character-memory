@@ -56,7 +56,7 @@ Keeping the baseline inside the traced retrieval path means the measurement of "
 
 ## Implementation Impact
 
-- Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade, so the acceptance criterion "no public facade change beyond the telemetry field and this policy value" holds.
+- Library: ADR-I-0024's telemetry field plus one published policy value, the maximum number of embedding surfaces per object kind, exported beside the surface policy that defines it; no candidate-search facade; the consuming awaitable close that releases the local stores (ADR-I-0027) is the only other public facade addition, so the acceptance criterion "no public facade change beyond the telemetry field, this policy value, and that close" holds.
 - Evaluation repository: its baseline reads the trace under its own plan; nothing in this repository depends on how.
 
 ## Considered Options

@@ -123,7 +123,7 @@ migration tooling between modes or between record shapes (rebuild-from-graph-aut
 multi-process access to the embedded store (same single-process expectation as embedded graph storage)
 synchronisation between an embedded shard and a service collection (an engine capability; not exercised this phase)
 any vector-layer predicate beyond the object-type scope (the candidate predicates noted in ADR-I-0028 belong to subsequent phases)
-any new public facade method (the evaluation baseline consumes the retrieval trace)
+any new public facade method other than the consuming awaitable close that releases the local stores (ADR-I-0027); the evaluation baseline consumes the retrieval trace
 reconciliation diagnostics (the reconciliation slice was deleted in the structured-verdict phase; graph verification is the guard)
 ```
 
