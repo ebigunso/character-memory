@@ -168,12 +168,9 @@ impl RememberInput {
 
         if include_vector_index_candidates {
             for object_ref in refs.candidate_refs.iter().copied() {
-                plan =
-                    plan.with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
-                        object_ref,
-                        self.embedding_text(),
-                        self.helper_provenance(),
-                    )));
+                plan = plan.with_candidate(MemoryCandidate::VectorIndex(
+                    VectorIndexCandidate::new(object_ref, self.helper_provenance()),
+                ));
             }
         }
 
@@ -281,10 +278,6 @@ impl RememberInput {
 
     pub fn source_span(source_ref: impl Into<String>) -> SourceSpan {
         SourceSpan::source(source_ref)
-    }
-
-    pub fn embedding_text(&self) -> String {
-        self.content.clone()
     }
 
     fn episode_candidate_draft(&self, defaults: &RememberPlanDefaults) -> EpisodeDraft {
@@ -557,12 +550,11 @@ mod construction_tests {
     }
 
     #[test]
-    fn source_refs_and_embedding_text_remain_opaque_and_verbatim() {
-        let input = RememberInput::new("  keep caller spacing exactly  ")
+    fn source_refs_remain_opaque_and_verbatim() {
+        let input = RememberInput::new("Caller content")
             .with_raw_ref("opaque://system/raw/123")
             .with_source_span(SourceSpan::source("conversation-123"));
 
-        assert_eq!(input.embedding_text(), "  keep caller spacing exactly  ");
         assert_eq!(
             input.source_reference(),
             Some(ExternalSourceReference::raw("opaque://system/raw/123"))
@@ -993,9 +985,6 @@ impl PlanValidationContext {
             }
             MemoryCandidate::VectorIndex(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
-                if candidate.embedding_text.trim().is_empty() {
-                    errors.push(CandidateValidationIssue::EmptyVectorEmbeddingText);
-                }
                 errors.extend(self.validate_graph_authoritative_ref(
                     candidate.target,
                     CandidateReferenceRole::VectorIndexTarget,
@@ -2070,7 +2059,6 @@ mod tests {
                     ObjectType::Episode,
                     id("550e8400-e29b-41d4-a716-446655445050"),
                 ),
-                "embedding text",
                 CandidateProvenance::caller("caller supplied vector candidate"),
             )));
 
@@ -2098,7 +2086,6 @@ mod tests {
         let plan =
             valid_plan().with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
                 MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
-                "embedding text",
                 CandidateProvenance::caller("caller supplied vector candidate"),
             )));
 
