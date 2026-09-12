@@ -175,7 +175,6 @@ mod tests {
     use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
     use crate::*;
     use async_trait::async_trait;
-    use secrecy::SecretString;
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
@@ -756,31 +755,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn constructor_rejects_embedding_provider_vector_size_mismatch_before_storage_init() {
-        let settings = Settings::new_for_tests(
-            SecretString::new("not-a-qdrant-url".into()),
-            SecretString::new("memory://local".into()),
-            SecretString::new("dummy-key".into()),
-            SecretString::new("text-embedding-3-small".into()),
-        );
+    async fn constructor_rejects_zero_provider_vector_size_before_storage_init() {
+        let settings = Settings::new(::config::Config::default()).unwrap();
 
         let error = match CharacterMemory::new_with_embedding_provider(
             settings,
-            "mismatched_provider_vectors".to_owned(),
-            Box::new(FixedEmbeddingProvider::new(8)),
+            "zero_provider_vectors".to_owned(),
+            Box::new(FixedEmbeddingProvider::new(0)),
         )
         .await
         {
-            Ok(_) => panic!("constructor should reject mismatched provider vector size"),
+            Ok(_) => panic!("constructor should reject a zero provider vector size"),
             Err(error) => error,
         };
 
         assert!(matches!(
             error,
-            CustomError::Embedding(EmbeddingError::ProviderVectorSizeMismatch {
-                expected: 1536,
-                actual: 8,
-            })
+            CustomError::Embedding(EmbeddingError::InvalidVectorSize { actual: 0 })
         ));
     }
 
@@ -864,6 +855,37 @@ mod tests {
             health.last_error_cause,
             Some(crate::errors::RetrievalStatsHealthCause::StoreInitialization { .. })
         ));
+    }
+
+    #[test]
+    fn sqlite_stats_requires_a_nonempty_path_but_in_memory_ignores_it() {
+        for mode in ["sqlite", "in_memory"] {
+            let settings = Settings::new(
+                ::config::Config::builder()
+                    .set_override("retrieval_stats_store_mode", mode)
+                    .unwrap()
+                    .set_override("retrieval_stats_path", "")
+                    .unwrap()
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+            let result = retrieval_stats_store(&settings);
+            if mode == "in_memory" {
+                assert!(result.is_ok());
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(CustomError::ConfigValidation(ConfigValidationError {
+                        keys,
+                        reason: ConfigValidationReason::MissingForMode {
+                            mode_key: "RETRIEVAL_STATS_STORE_MODE",
+                            mode: "sqlite",
+                        },
+                    })) if keys == vec!["RETRIEVAL_STATS_PATH"]
+                ));
+            }
+        }
     }
 
     async fn injected_memory() -> CharacterMemory {

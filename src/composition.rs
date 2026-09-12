@@ -11,7 +11,10 @@ use crate::config::{
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
     Settings, VectorStoreMode,
 };
-use crate::errors::{CustomError, EmbeddingError, RetrievalStatsHealthCause};
+use crate::errors::{
+    ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
+    RetrievalStatsHealthCause,
+};
 use crate::memory::CharacterMemory;
 use crate::models::vector::EmbeddingInput;
 use crate::policy::RetrievalSelectivityPolicy;
@@ -103,11 +106,13 @@ impl CharacterMemory {
     /// default graph-authoritative storage composition. Vector candidate recall uses the embedded
     /// store by default and requires `VECTOR_STORE_PATH`; callers can explicitly select service
     /// mode, which instead requires `QDRANT_CONNECTION_STRING`.
+    /// OpenAI settings are ignored; the injected provider supplies the vector dimension.
+    /// Existing vector storage must have that same dimension.
     ///
     /// # Parameters
     ///
     /// - `settings`: Global configuration used to select and initialize the vector candidate
-    ///   backend and embedding model.
+    ///   backend.
     /// - `collection_name`: The name of the vector collection where memory vectors will be stored
     ///   and queried.
     /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
@@ -127,12 +132,10 @@ impl CharacterMemory {
         collection_name: String,
         embed_provider: Box<dyn EmbeddingProvider>,
     ) -> Result<Self, CustomError> {
-        let expected_vector_size = settings.get_embedding_vector_size()?;
-        let provider_vector_size = embed_provider.vector_size();
-        if provider_vector_size != expected_vector_size {
-            return Err(EmbeddingError::ProviderVectorSizeMismatch {
-                expected: expected_vector_size,
-                actual: provider_vector_size,
+        let vector_size = embed_provider.vector_size();
+        if vector_size == 0 {
+            return Err(EmbeddingError::InvalidVectorSize {
+                actual: vector_size,
             }
             .into());
         }
@@ -147,7 +150,7 @@ impl CharacterMemory {
                 QdrantEdgeVectorCandidateStore::open(
                     settings.get_vector_store_path()?,
                     collection_name,
-                    expected_vector_size,
+                    vector_size,
                 )
                 .await?,
             ),
@@ -155,7 +158,7 @@ impl CharacterMemory {
                 let store = QdrantVectorCandidateStore::new(
                     settings.get_service_qdrant_connection()?,
                     collection_name,
-                    expected_vector_size as u64,
+                    vector_size as u64,
                 )?;
                 store.init_collection().await?;
                 Box::new(store)
@@ -190,6 +193,7 @@ impl CharacterMemory {
     /// Vector candidate recall uses the embedded store by default and requires
     /// `VECTOR_STORE_PATH`. Explicit service mode instead requires
     /// `QDRANT_CONNECTION_STRING`.
+    /// OpenAI requires both `OPENAI_API_KEY` and `EMBEDDING_MODEL`.
     ///
     /// # Parameters
     ///
@@ -205,7 +209,7 @@ impl CharacterMemory {
     pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
         // Configure and create the embedding provider
         let embedding_settings = EmbeddingProviderSettings::new(
-            settings.get_openai_api_key().to_string(),
+            settings.require_openai_api_key()?.to_string(),
             settings.get_embedding_model()?,
         );
         let embed_provider = Box::new(OpenAIEmbeddingProvider::new(embedding_settings)?);
@@ -219,6 +223,16 @@ pub(crate) fn retrieval_stats_store(
 ) -> Result<Box<dyn RetrievalStatsStore>, CustomError> {
     match settings.get_retrieval_stats_store_mode() {
         ConfigRetrievalStatsStoreMode::Sqlite => {
+            if settings.get_retrieval_stats_path().as_os_str().is_empty() {
+                return Err(ConfigValidationError {
+                    keys: vec!["RETRIEVAL_STATS_PATH"],
+                    reason: ConfigValidationReason::MissingForMode {
+                        mode_key: "RETRIEVAL_STATS_STORE_MODE",
+                        mode: "sqlite",
+                    },
+                }
+                .into());
+            }
             match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
                 Ok(store) => Ok(Box::new(store)),
                 Err(error) => match settings.get_retrieval_stats_health_fail_mode() {

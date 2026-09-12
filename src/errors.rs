@@ -157,8 +157,8 @@ pub struct VectorDatabaseError {
 pub enum EmbeddingError {
     #[error("embedding API key is missing")]
     MissingApiKey,
-    #[error("embedding provider vector size mismatch: expected {expected}, got {actual}")]
-    ProviderVectorSizeMismatch { expected: usize, actual: usize },
+    #[error("embedding provider vector size must be positive, got {actual}")]
+    InvalidVectorSize { actual: usize },
     #[error("embedding input is blank at index {index:?}")]
     BlankInput { index: Option<usize> },
     #[error("embedding transport failed ({transport_kind:?}): {detail}")]
@@ -368,6 +368,11 @@ pub struct ConfigValidationError {
 pub enum ConfigValidationReason {
     #[error("required value is missing")]
     MissingValue,
+    #[error("required value is missing for {mode_key}={mode}")]
+    MissingForMode {
+        mode_key: &'static str,
+        mode: &'static str,
+    },
     #[error("expected {expected}, got {actual:?}")]
     OutOfDomain {
         expected: &'static str,
@@ -511,9 +516,8 @@ mod tests {
     fn every_embedding_error_variant_round_trips_through_serde() {
         let errors = exhaustive_embedding_error_fixtures![
             EmbeddingError::MissingApiKey => EmbeddingError::MissingApiKey,
-            EmbeddingError::ProviderVectorSizeMismatch { .. } => EmbeddingError::ProviderVectorSizeMismatch {
-                expected: 3,
-                actual: 2,
+            EmbeddingError::InvalidVectorSize { .. } => EmbeddingError::InvalidVectorSize {
+                actual: 0,
             },
             EmbeddingError::BlankInput { .. } => EmbeddingError::BlankInput { index: Some(1) },
             EmbeddingError::Transport { .. } => EmbeddingError::Transport {
