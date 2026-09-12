@@ -857,37 +857,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn sqlite_stats_requires_a_nonempty_path_but_in_memory_ignores_it() {
-        for mode in ["sqlite", "in_memory"] {
-            let settings = Settings::new(
-                ::config::Config::builder()
-                    .set_override("retrieval_stats_store_mode", mode)
-                    .unwrap()
-                    .set_override("retrieval_stats_path", "")
-                    .unwrap()
-                    .build()
-                    .unwrap(),
-            )
-            .unwrap();
-            let result = retrieval_stats_store(&settings);
-            if mode == "in_memory" {
-                assert!(result.is_ok());
-            } else {
-                assert!(matches!(
-                    result,
-                    Err(CustomError::ConfigValidation(ConfigValidationError {
-                        keys,
-                        reason: ConfigValidationReason::MissingForMode {
-                            mode_key: "RETRIEVAL_STATS_STORE_MODE",
-                            mode: "sqlite",
-                        },
-                    })) if keys == vec!["RETRIEVAL_STATS_PATH"]
-                ));
-            }
-        }
-    }
-
     async fn injected_memory() -> CharacterMemory {
         CharacterMemory::from_parts(
             Box::new(FakeGraphAuthorityStore::new()),

@@ -167,6 +167,54 @@ fn local_mode_settings(path: &Path) -> ConfigBuilder<DefaultState> {
 }
 
 #[tokio::test]
+async fn empty_sqlite_path_fails_before_either_constructor_creates_stores() {
+    for injected in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let vector_path = temp.path().join("vectors");
+        let graph_path = temp.path().join("graph");
+        let config = local_mode_settings(temp.path())
+            .set_override("graph_store_mode", "persistent")
+            .unwrap()
+            .set_override("oxigraph_path", graph_path.to_str().unwrap())
+            .unwrap()
+            .set_override("retrieval_stats_store_mode", "sqlite")
+            .unwrap()
+            .set_override("retrieval_stats_path", "")
+            .unwrap()
+            .set_override("openai_api_key", "test-key")
+            .unwrap()
+            .set_override("embedding_model", "text-embedding-3-small")
+            .unwrap()
+            .build()
+            .unwrap();
+        let settings = Settings::new(config).unwrap();
+        let result = if injected {
+            CharacterMemory::new_with_embedding_provider(
+                settings,
+                "preflight".to_owned(),
+                Box::new(ConstantEmbeddingProvider(2)),
+            )
+            .await
+        } else {
+            CharacterMemory::new(settings, "preflight".to_owned()).await
+        };
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "RETRIEVAL_STATS_STORE_MODE",
+                    mode: "sqlite",
+                },
+            })) if keys == vec!["RETRIEVAL_STATS_PATH"]
+        ));
+        assert!(!vector_path.exists());
+        assert!(!graph_path.exists());
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
 async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() {
     let temp = TempDir::new().unwrap();
     let collection = "embedded_contract";
