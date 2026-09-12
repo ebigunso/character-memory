@@ -45,3 +45,4 @@ last_updated: "2026-09-04"
 ## Global Migration Candidates (Placeholder)
 
 - None yet.
+- Every ruling or brief that authorizes a change, of any size and in any layer, is decided on what is best for the overall product and architectural design: state the design intent it serves (decision records, philosophy, README consumer path, phase documents), what it would make worse, and the alternative rejected; audit text, plan text and worker findings are inputs, not decisions, and a worker's "blocked, need X" is a symptom to diagnose, not a specification to forward (decider feedback 2026-09-13; lessons.md same date).
