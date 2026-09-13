@@ -99,8 +99,6 @@ pub enum CandidateValidationIssue {
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]
     InvalidSourceSpan { reason: CandidateSourceSpanIssue },
-    #[error("vector index candidate embedding_text must not be empty")]
-    EmptyVectorEmbeddingText,
     #[error("stats update candidate relation and object must be supplied together")]
     IncompleteStatsRelationObjectPair,
     #[error("candidate reference {role:?} does not exist: {referenced:?}")]

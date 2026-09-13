@@ -230,21 +230,12 @@ impl MemoryLinkCandidate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorIndexCandidate {
     pub target: MemoryObjectRef,
-    pub embedding_text: String,
     pub provenance: CandidateProvenance,
 }
 
 impl VectorIndexCandidate {
-    pub fn new(
-        target: MemoryObjectRef,
-        embedding_text: impl Into<String>,
-        provenance: CandidateProvenance,
-    ) -> Self {
-        Self {
-            target,
-            embedding_text: embedding_text.into(),
-            provenance,
-        }
+    pub fn new(target: MemoryObjectRef, provenance: CandidateProvenance) -> Self {
+        Self { target, provenance }
     }
 }
 
@@ -849,6 +840,7 @@ pub struct RememberOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ObjectType;
 
     use uuid::Uuid;
 
@@ -956,29 +948,49 @@ mod tests {
     #[test]
     fn write_plan_round_trips_through_serde() {
         let operation_id = memory_id("550e8400-e29b-41d4-a716-446655442001");
-        let episode = EpisodeCandidate::new(
+        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442002");
+        let mut episode = EpisodeCandidate::new(
             EpisodeDraft::new("Discussed inspectable write planning."),
             CandidateProvenance::caller("caller supplied the episode summary")
                 .with_source_span(SourceSpan::raw("raw://conversation/42").with_turn_range(0, 1)),
         );
+        episode.draft.id = Some(episode_id);
+        let target = MemoryObjectRef::new(ObjectType::Episode, episode_id);
+        let provenance = episode.provenance.clone();
         let plan = RememberWritePlan::new(operation_id, "remember:42")
             .with_source_input_ref(ExternalSourceReference::raw("raw://conversation/42"))
             .with_candidate(MemoryCandidate::Episode(episode))
+            .with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+                target,
+                provenance.clone(),
+            )))
             .with_validation(CandidateValidation::valid(0, MemoryCandidateKind::Episode))
+            .with_validation(CandidateValidation::valid(
+                1,
+                MemoryCandidateKind::VectorIndex,
+            ))
             .with_diagnostics(
                 RememberDiagnostics::default()
                     .with_candidate_count(MemoryCandidateKind::Episode, 1)
+                    .with_candidate_count(MemoryCandidateKind::VectorIndex, 1)
                     .with_message(RememberDiagnostic::new(
                         DiagnosticSeverity::Info,
                         RememberDiagnosticCode::Prepared,
-                        "prepared one candidate",
+                        "prepared two candidates",
                     )),
             );
 
-        let serialized = serde_json::to_string(&plan).unwrap();
-        let deserialized: RememberWritePlan = serde_json::from_str(&serialized).unwrap();
+        let serialized = serde_json::to_value(&plan).unwrap();
+        let deserialized: RememberWritePlan = serde_json::from_value(serialized.clone()).unwrap();
 
         assert_eq!(deserialized, plan);
+        assert_eq!(
+            serialized["candidates"][1],
+            serde_json::json!({
+                "candidate_type": "vector_index",
+                "candidate": { "target": target, "provenance": provenance }
+            })
+        );
     }
 
     #[test]
