@@ -11,7 +11,10 @@ use crate::config::{
     RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
     Settings, VectorStoreMode,
 };
-use crate::errors::{CustomError, EmbeddingError, RetrievalStatsHealthCause};
+use crate::errors::{
+    ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
+    RetrievalStatsHealthCause,
+};
 use crate::memory::CharacterMemory;
 use crate::models::vector::EmbeddingInput;
 use crate::policy::RetrievalSelectivityPolicy;
@@ -103,11 +106,13 @@ impl CharacterMemory {
     /// default graph-authoritative storage composition. Vector candidate recall uses the embedded
     /// store by default and requires `VECTOR_STORE_PATH`; callers can explicitly select service
     /// mode, which instead requires `QDRANT_CONNECTION_STRING`.
+    /// OpenAI settings are ignored; the injected provider supplies the vector dimension.
+    /// Existing vector storage must have that same dimension.
     ///
     /// # Parameters
     ///
     /// - `settings`: Global configuration used to select and initialize the vector candidate
-    ///   backend and embedding model.
+    ///   backend.
     /// - `collection_name`: The name of the vector collection where memory vectors will be stored
     ///   and queried.
     /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
@@ -127,16 +132,15 @@ impl CharacterMemory {
         collection_name: String,
         embed_provider: Box<dyn EmbeddingProvider>,
     ) -> Result<Self, CustomError> {
-        let expected_vector_size = settings.get_embedding_vector_size()?;
-        let provider_vector_size = embed_provider.vector_size();
-        if provider_vector_size != expected_vector_size {
-            return Err(EmbeddingError::ProviderVectorSizeMismatch {
-                expected: expected_vector_size,
-                actual: provider_vector_size,
-            }
-            .into());
-        }
+        Self::construct(settings, collection_name, Some(embed_provider)).await
+    }
 
+    async fn construct(
+        settings: Settings,
+        collection_name: String,
+        embed_provider: Option<Box<dyn EmbeddingProvider>>,
+    ) -> Result<Self, CustomError> {
+        let (embed_provider, vector_size) = preflight(&settings, embed_provider)?;
         let persistent_graph_path = match settings.get_graph_store_mode() {
             ConfigGraphStoreMode::Persistent => Some(settings.get_oxigraph_path()?),
             ConfigGraphStoreMode::InMemory => None,
@@ -147,7 +151,7 @@ impl CharacterMemory {
                 QdrantEdgeVectorCandidateStore::open(
                     settings.get_vector_store_path()?,
                     collection_name,
-                    expected_vector_size,
+                    vector_size,
                 )
                 .await?,
             ),
@@ -155,7 +159,7 @@ impl CharacterMemory {
                 let store = QdrantVectorCandidateStore::new(
                     settings.get_service_qdrant_connection()?,
                     collection_name,
-                    expected_vector_size as u64,
+                    vector_size as u64,
                 )?;
                 store.init_collection().await?;
                 Box::new(store)
@@ -190,6 +194,7 @@ impl CharacterMemory {
     /// Vector candidate recall uses the embedded store by default and requires
     /// `VECTOR_STORE_PATH`. Explicit service mode instead requires
     /// `QDRANT_CONNECTION_STRING`.
+    /// OpenAI requires both `OPENAI_API_KEY` and `EMBEDDING_MODEL`.
     ///
     /// # Parameters
     ///
@@ -203,15 +208,62 @@ impl CharacterMemory {
     /// - `Ok`: A new `CharacterMemory` instance
     /// - `Err`: A `CustomError` if initialization fails
     pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
-        // Configure and create the embedding provider
-        let embedding_settings = EmbeddingProviderSettings::new(
-            settings.get_openai_api_key().to_string(),
-            settings.get_embedding_model()?,
-        );
-        let embed_provider = Box::new(OpenAIEmbeddingProvider::new(embedding_settings)?);
-
-        Self::new_with_embedding_provider(settings, collection_name, embed_provider).await
+        Self::construct(settings, collection_name, None).await
     }
+}
+
+fn preflight(
+    settings: &Settings,
+    embed_provider: Option<Box<dyn EmbeddingProvider>>,
+) -> Result<(Box<dyn EmbeddingProvider>, usize), CustomError> {
+    let vector_size = match &embed_provider {
+        Some(provider) => provider.vector_size(),
+        None => {
+            settings.require_openai_api_key()?;
+            settings.get_embedding_vector_size()?
+        }
+    };
+    if vector_size == 0 {
+        return Err(EmbeddingError::InvalidVectorSize {
+            actual: vector_size,
+        }
+        .into());
+    }
+    if settings.get_graph_store_mode() == ConfigGraphStoreMode::Persistent {
+        settings.get_oxigraph_path()?;
+    }
+    match settings.get_vector_store_mode() {
+        VectorStoreMode::Embedded => {
+            settings.get_vector_store_path()?;
+        }
+        VectorStoreMode::Service => {
+            settings.get_service_qdrant_connection()?;
+        }
+    }
+    if settings.get_retrieval_stats_store_mode() == ConfigRetrievalStatsStoreMode::Sqlite
+        && settings.get_retrieval_stats_path().as_os_str().is_empty()
+    {
+        return Err(ConfigValidationError {
+            keys: vec!["RETRIEVAL_STATS_PATH"],
+            reason: ConfigValidationReason::MissingForMode {
+                mode_key: "RETRIEVAL_STATS_STORE_MODE",
+                mode: "sqlite",
+            },
+        }
+        .into());
+    }
+
+    // Build the default provider only after all required settings have been admitted.
+    let embed_provider = match embed_provider {
+        Some(provider) => provider,
+        None => Box::new(OpenAIEmbeddingProvider::new(
+            EmbeddingProviderSettings::new(
+                settings.get_openai_api_key().to_owned(),
+                settings.get_embedding_model()?,
+            ),
+        )?),
+    };
+    Ok((embed_provider, vector_size))
 }
 
 pub(crate) fn retrieval_stats_store(

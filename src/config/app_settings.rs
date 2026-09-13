@@ -12,9 +12,9 @@ pub struct Settings {
     qdrant_connection_string: SecretString,
     vector_store_mode: VectorStoreMode,
     vector_store_path: Option<PathBuf>,
-    oxigraph_path: SecretString,
-    openai_api_key: SecretString,
-    embedding_model: SecretString,
+    oxigraph_path: Option<PathBuf>,
+    openai_api_key: Option<SecretString>,
+    embedding_model: Option<SecretString>,
     graph_store_mode: GraphStoreMode,
     retrieval_stats_store_mode: RetrievalStatsStoreMode,
     retrieval_stats_path: PathBuf,
@@ -32,9 +32,12 @@ struct RawSettings {
     vector_store_mode: String,
     #[serde(default)]
     vector_store_path: Option<PathBuf>,
-    oxigraph_path: SecretString,
-    openai_api_key: SecretString,
-    embedding_model: SecretString,
+    #[serde(default)]
+    oxigraph_path: Option<PathBuf>,
+    #[serde(default)]
+    openai_api_key: Option<SecretString>,
+    #[serde(default)]
+    embedding_model: Option<SecretString>,
     #[serde(default = "default_graph_store_mode")]
     graph_store_mode: String,
     #[serde(default = "default_retrieval_stats_store_mode")]
@@ -233,8 +236,8 @@ impl Settings {
     ///     - `vector_store_mode`: Optional vector mode selector; defaults to embedded
     ///     - `vector_store_path`: Local directory required by the default embedded vector mode
     ///     - `qdrant_connection_string`: Connection string required only in explicit service mode
-    ///     - `oxigraph_path`: Local filesystem path for the Oxigraph database
-    ///     - `openai_api_key`: API key for OpenAI services
+    ///     - `oxigraph_path`: Local filesystem path required only for persistent graphs
+    ///     - `openai_api_key`, `embedding_model`: Required only by `CharacterMemory::new`
     ///
     /// The selected vector mode's location is retained here, then consumed and validated when the
     /// `CharacterMemory` facade is constructed; this constructor does not validate that location.
@@ -324,39 +327,68 @@ impl Settings {
     }
 
     pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
-        let configured_path = self.oxigraph_path.expose_secret();
-        if configured_path.contains("://") {
+        let path = self
+            .oxigraph_path
+            .as_deref()
+            .ok_or_else(|| ConfigValidationError {
+                keys: vec!["OXIGRAPH_PATH"],
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "GRAPH_STORE_MODE",
+                    mode: "persistent",
+                },
+            })?;
+        if path.to_string_lossy().contains("://") {
             return Err(ConfigValidationError {
                 keys: vec!["OXIGRAPH_PATH"],
                 reason: ConfigValidationReason::OutOfDomain {
                     expected: "a local filesystem path",
-                    actual: configured_path.to_owned(),
+                    actual: path.display().to_string(),
                 },
             }
             .into());
         }
 
-        let path = Path::new(configured_path);
         if path.as_os_str().is_empty() {
             return Err(ConfigValidationError {
                 keys: vec!["OXIGRAPH_PATH"],
-                reason: ConfigValidationReason::MissingValue,
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "GRAPH_STORE_MODE",
+                    mode: "persistent",
+                },
             }
             .into());
         }
         Ok(path.to_path_buf())
     }
 
+    /// Returns the configured OpenAI key, or an empty string when absent.
     pub fn get_openai_api_key(&self) -> &str {
-        self.openai_api_key.expose_secret()
+        self.openai_api_key
+            .as_ref()
+            .map_or("", |key| key.expose_secret())
     }
 
+    /// Returns the configured OpenAI model's dimension.
+    /// Injected providers supply their own dimension through `EmbeddingProvider::vector_size`.
     pub fn get_embedding_vector_size(&self) -> Result<usize, CustomError> {
         Ok(self.get_embedding_model()?.vector_size() as usize)
     }
 
+    pub(crate) fn require_openai_api_key(&self) -> Result<&str, CustomError> {
+        let key = self.get_openai_api_key();
+        if key.trim().is_empty() {
+            return Err(missing_openai_setting("OPENAI_API_KEY"));
+        }
+        Ok(key)
+    }
+
     pub(crate) fn get_embedding_model(&self) -> Result<EmbeddingModel, CustomError> {
-        self.embedding_model.expose_secret().parse()
+        self.embedding_model
+            .as_ref()
+            .map(|model| model.expose_secret())
+            .filter(|model| !model.trim().is_empty())
+            .ok_or_else(|| missing_openai_setting("EMBEDDING_MODEL"))?
+            .parse()
     }
 
     fn validate_selectivity_settings(&self) -> Result<(), CustomError> {
@@ -440,30 +472,15 @@ fn reject_unsupported_fanout_target(
     Ok(())
 }
 
-#[cfg(test)]
-impl Settings {
-    pub fn new_for_tests(
-        qdrant_connection_string: SecretString,
-        oxigraph_path: SecretString,
-        openai_api_key: SecretString,
-        embedding_model: SecretString,
-    ) -> Self {
-        Settings {
-            qdrant_connection_string,
-            vector_store_mode: VectorStoreMode::Service,
-            vector_store_path: None,
-            oxigraph_path,
-            openai_api_key,
-            embedding_model,
-            graph_store_mode: GraphStoreMode::InMemory,
-            retrieval_stats_store_mode: RetrievalStatsStoreMode::InMemory,
-            retrieval_stats_path: default_retrieval_stats_path(),
-            retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode::Conservative,
-            selectivity_smoothing_alpha: default_selectivity_smoothing_alpha(),
-            selectivity_gamma: default_selectivity_gamma(),
-            retrieval: RetrievalSettings::default(),
-        }
+fn missing_openai_setting(key: &'static str) -> CustomError {
+    ConfigValidationError {
+        keys: vec![key],
+        reason: ConfigValidationReason::MissingForMode {
+            mode_key: "embedding provider",
+            mode: "openai",
+        },
     }
+    .into()
 }
 
 fn default_graph_store_mode() -> String {
@@ -1068,7 +1085,7 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_new_error() {
+    fn settings_defer_required_mode_fields_until_construction() {
         let incomplete_config = Config::builder()
             .set_override("qdrant_connection_string", "external_qdrant")
             .unwrap()
@@ -1076,6 +1093,6 @@ mod tests {
             .unwrap();
 
         let result = Settings::new(incomplete_config);
-        assert!(matches!(result, Err(CustomError::ConfigParseError(_))));
+        assert!(result.is_ok());
     }
 }

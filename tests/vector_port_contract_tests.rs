@@ -2,11 +2,11 @@ use std::{fs, path::Path};
 
 use async_trait::async_trait;
 use character_memory::{
-    zero_norm_record_fixture, CharacterMemory, ConfigValidationError, ConfigValidationReason,
-    CustomError, EmbeddingError, EmbeddingProvider, EpisodeDraft, ForgetMemoryDraft,
-    LifecycleTargetRef, MemoryId, ObjectType, ObservationDraft, RememberInput, RememberOptions,
-    RetrievalCandidateLimits, RetrievalContext, Settings, VectorCandidateTrace,
-    VectorIndexingCause, VectorRecallCompleteness,
+    zero_norm_record_fixture, CharacterMemory, CollectionCompatibilityError, CollectionMismatch,
+    ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError, EmbeddingProvider,
+    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObjectType, ObservationDraft,
+    RememberInput, RememberOptions, RetrievalCandidateLimits, RetrievalContext, Settings,
+    VectorCandidateTrace, VectorIndexingCause, VectorRecallCompleteness,
 };
 use config::{builder::DefaultState, Config, ConfigBuilder};
 use tempfile::TempDir;
@@ -14,6 +14,205 @@ use uuid::Uuid;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
+
+#[tokio::test]
+async fn injected_provider_opens_without_unused_settings_and_ignores_them_when_present() {
+    for ignored_setting in [
+        None,
+        Some(("openai_api_key", "")),
+        Some(("embedding_model", "not-an-openai-model")),
+        Some(("oxigraph_path", "http://unused.invalid")),
+        Some(("retrieval_stats_path", "")),
+    ] {
+        let temp = TempDir::new().unwrap();
+        let mut builder = local_mode_settings(temp.path());
+        if let Some((key, value)) = ignored_setting {
+            builder = builder.set_override(key, value).unwrap();
+        }
+        let settings = Settings::new(builder.build().unwrap()).unwrap();
+        let memory = CharacterMemory::new_with_embedding_provider(
+            settings,
+            "injected_without_placeholders".to_owned(),
+            Box::new(ConstantEmbeddingProvider(2)),
+        )
+        .await
+        .unwrap();
+        remember_fixture(&memory).await;
+        assert_eq!(ids(&episode_snapshot(&memory).await), vec![id(1), id(2)]);
+        close_embedded_and_remove_root(memory, temp).await;
+    }
+}
+
+#[tokio::test]
+async fn injected_provider_dimension_must_match_existing_vector_storage() {
+    let temp = TempDir::new().unwrap();
+    let config = local_mode_settings(temp.path()).build().unwrap();
+    let memory = CharacterMemory::new_with_embedding_provider(
+        Settings::new(config.clone()).unwrap(),
+        "injected_dimensions".to_owned(),
+        Box::new(ConstantEmbeddingProvider(2)),
+    )
+    .await
+    .unwrap();
+    memory.close().await.unwrap();
+
+    let result = CharacterMemory::new_with_embedding_provider(
+        Settings::new(config).unwrap(),
+        "injected_dimensions".to_owned(),
+        Box::new(ConstantEmbeddingProvider(3)),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(CustomError::CollectionIncompatible(
+            CollectionCompatibilityError {
+                mismatch: CollectionMismatch::VectorSize {
+                    expected: 3,
+                    actual: 2
+                },
+                ..
+            }
+        ))
+    ));
+    temp.close().unwrap();
+}
+
+#[tokio::test]
+async fn persistent_graph_requires_a_path_at_facade_construction() {
+    for path in [None, Some("")] {
+        let temp = TempDir::new().unwrap();
+        let mut builder = local_mode_settings(temp.path())
+            .set_override("graph_store_mode", "persistent")
+            .unwrap();
+        if let Some(path) = path {
+            builder = builder.set_override("oxigraph_path", path).unwrap();
+        }
+        let settings = Settings::new(builder.build().unwrap()).unwrap();
+        let result = CharacterMemory::new_with_embedding_provider(
+            settings,
+            "missing_graph_path".to_owned(),
+            Box::new(ConstantEmbeddingProvider(2)),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "GRAPH_STORE_MODE",
+                    mode: "persistent",
+                },
+            })) if keys == vec!["OXIGRAPH_PATH"]
+        ));
+        assert!(!temp.path().join("vectors").exists());
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn openai_requires_its_key_and_model_at_facade_construction() {
+    for (key, model, missing_field) in [
+        (None, Some("text-embedding-3-small"), "OPENAI_API_KEY"),
+        (Some(""), Some("text-embedding-3-small"), "OPENAI_API_KEY"),
+        (Some("test-key"), None, "EMBEDDING_MODEL"),
+        (Some("test-key"), Some(""), "EMBEDDING_MODEL"),
+    ] {
+        let mut builder = Config::builder();
+        for (name, value) in [("openai_api_key", key), ("embedding_model", model)] {
+            if let Some(value) = value {
+                builder = builder.set_override(name, value).unwrap();
+            }
+        }
+        let settings = Settings::new(builder.build().unwrap()).unwrap();
+        let result = CharacterMemory::new(settings, "missing_openai_settings".to_owned()).await;
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "embedding provider",
+                    mode: "openai",
+                },
+            })) if keys == vec![missing_field]
+        ));
+    }
+}
+
+#[tokio::test]
+async fn flat_openai_settings_still_open_the_default_facade() {
+    let temp = TempDir::new().unwrap();
+    let config = local_mode_settings(temp.path())
+        .set_override("openai_api_key", "test-key")
+        .unwrap()
+        .set_override("embedding_model", "text-embedding-3-small")
+        .unwrap()
+        .build()
+        .unwrap();
+    let settings = Settings::new(config).unwrap();
+    assert_eq!(settings.get_embedding_vector_size().unwrap(), 1536);
+    let memory = CharacterMemory::new(settings, "flat_openai_settings".to_owned())
+        .await
+        .unwrap();
+    close_embedded_and_remove_root(memory, temp).await;
+}
+
+fn local_mode_settings(path: &Path) -> ConfigBuilder<DefaultState> {
+    Config::builder()
+        .set_override("vector_store_path", path.join("vectors").to_str().unwrap())
+        .unwrap()
+        .set_override("graph_store_mode", "in_memory")
+        .unwrap()
+        .set_override("retrieval_stats_store_mode", "in_memory")
+        .unwrap()
+}
+
+#[tokio::test]
+async fn empty_sqlite_path_fails_before_either_constructor_creates_stores() {
+    for injected in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let vector_path = temp.path().join("vectors");
+        let graph_path = temp.path().join("graph");
+        let config = local_mode_settings(temp.path())
+            .set_override("graph_store_mode", "persistent")
+            .unwrap()
+            .set_override("oxigraph_path", graph_path.to_str().unwrap())
+            .unwrap()
+            .set_override("retrieval_stats_store_mode", "sqlite")
+            .unwrap()
+            .set_override("retrieval_stats_path", "")
+            .unwrap()
+            .set_override("openai_api_key", "test-key")
+            .unwrap()
+            .set_override("embedding_model", "text-embedding-3-small")
+            .unwrap()
+            .build()
+            .unwrap();
+        let settings = Settings::new(config).unwrap();
+        let result = if injected {
+            CharacterMemory::new_with_embedding_provider(
+                settings,
+                "preflight".to_owned(),
+                Box::new(ConstantEmbeddingProvider(2)),
+            )
+            .await
+        } else {
+            CharacterMemory::new(settings, "preflight".to_owned()).await
+        };
+        assert!(matches!(
+            result,
+            Err(CustomError::ConfigValidation(ConfigValidationError {
+                keys,
+                reason: ConfigValidationReason::MissingForMode {
+                    mode_key: "RETRIEVAL_STATS_STORE_MODE",
+                    mode: "sqlite",
+                },
+            })) if keys == vec!["RETRIEVAL_STATS_PATH"]
+        ));
+        assert!(!vector_path.exists());
+        assert!(!graph_path.exists());
+        temp.close().unwrap();
+    }
+}
 
 #[tokio::test]
 async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() {

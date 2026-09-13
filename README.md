@@ -183,6 +183,8 @@ QDRANT_CONNECTION_STRING=http://127.0.0.1:6334
 
 Both vector modes are candidate recall only. Oxigraph is the graph authority for memory objects, links, provenance, currentness, and lifecycle filtering. Local application construction defaults to `GRAPH_STORE_MODE=persistent` with `OXIGRAPH_PATH` set to a local filesystem path such as `./data/oxigraph`; deterministic tests and fixtures can use `GRAPH_STORE_MODE=in_memory`.
 
+Build `Settings` from a caller-supplied `config::Config`; required values follow the selected backend. In-memory graphs need no `OXIGRAPH_PATH`. `CharacterMemory::new` requires `OPENAI_API_KEY` and `EMBEDDING_MODEL`, while `new_with_embedding_provider` ignores both and uses `EmbeddingProvider::vector_size()`; existing vector storage must match that dimension. Set `RETRIEVAL_STATS_STORE_MODE=in_memory` to keep statistics in memory without a path or file; SQLite uses `RETRIEVAL_STATS_PATH`, defaulting to `./data/retrieval-stats.sqlite3`. No placeholder values are needed for unused settings.
+
 Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
 
 Service-gated integration tests require a local Qdrant instance reachable over gRPC and `REQUIRE_QDRANT_TESTS=1`. The embedded adapter and its contract suite require no service.

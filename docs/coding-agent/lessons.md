@@ -812,3 +812,19 @@ Prevention:
 
 Evidence:
 - Decider feedback 2026-09-13 in the orchestration session; the withdrawn brief `.agent-work/cm-worker/typed-settings-dispatch.txt` and its replacement `settings-follow-mode-dispatch.txt` (transient); the change itself lands as the settings-follow-selected-mode pull request.
+## 2026-09-13 — Validate Construction Settings Before Opening Stores [tags: review, configuration, admission, side-effects]
+
+Symptom:
+- The empty SQLite statistics path check returned the intended configuration error only after the facade had opened vector and graph stores, creating directories and starting the embedded owner for a rejected configuration.
+
+Root cause:
+- Validation was placed inside the statistics store factory, and its regression called that helper directly instead of observing the public constructors' side effects.
+
+Fix applied:
+- Both constructors now use a shared preflight for mode-required settings before opening stores; the regression checks that invalid SQLite configuration leaves both persistent roots absent.
+
+Prevention:
+- When adding construction validation, trace every public entrypoint to its first side effect and assert rejected settings leave store paths absent through those entrypoints.
+
+Evidence:
+- Accepted Copilot finding on PR #81 and `empty_sqlite_path_fails_before_either_constructor_creates_stores`.
