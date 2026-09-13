@@ -33,7 +33,7 @@ The forward-looking case for each family was analysed against the planned phases
 - A column earns its place when a reader exists; carrying it unread costs two adapter mappings, index creation per collection, a parity fixture, and the sync discipline ADR-I-0005 named in its own tradeoffs.
 - Prefilter hints are only safe on immutable or synchronised data; the relationship, lifecycle, ranking, and mutable time hints were none of those.
 - Re-adding an immutable column is a backfill from graph authority, not a re-index.
-- When embedding surfaces are generated or caller-supplied (the assisted-remember phase; the write plan carries a caller-supplied surface), the text a vector embeds is not re-derivable from graph authority, so it is provenance in the philosophy's sense.
+- The text a vector embeds is derived from the canonical object by the embedding-surface policy at commit; a write plan carries no caller-supplied surface. Where a surface is generated or supplied outside that derivation (the assisted-remember phase, if it lands), the embedded text is not re-derivable from graph authority, so persisting it is provenance in the philosophy's sense.
 - Read-out text is graph authority's job; the vector layer suggests, it does not describe.
 
 ## Decision
