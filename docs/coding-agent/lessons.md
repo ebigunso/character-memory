@@ -790,3 +790,25 @@ Prevention:
 
 Evidence:
 - The repeated-close adapter test and the public close/removal/fresh-reopen test passed on Windows with persistent vector, graph, and SQLite statistics stores.
+
+## 2026-09-13 — The Orchestrator Decides Every Change On Product And Architectural Design  [tags: orchestrator, design, delegation, rulings]
+
+Context:
+- Plan: the evaluation repository's harness right-sizing plan (Task_8 step 4) and this library's settings construction
+- Task/Wave: library change requested by the evaluation repository (no plan of its own; bounded execution slice)
+- Roles involved: Orchestrator, Worker (evaluation and library)
+
+Symptom:
+- The evaluation worker reported its typed-construction item as blocked on a library API, and the right-sizing audit's wording assumed a "typed construction surface" should exist, so the Orchestrator dispatched a new public options constructor to the library. The decider had to ask for a design scrutiny; the scrutiny showed the library's intent is externalized configuration through the config crate, the real defect was three settings required in modes that never use them, and the library already held the right rule (the service connection string is optional and validated only in service mode). A second constructor for one consumer would have been sub-par design, and a design decision had been delegated to audit text and a worker's blocker.
+
+Root cause:
+- The Orchestrator treated inputs (audit wording, plan text, a worker's "blocked, need X") as decisions instead of deciding itself from the product and architectural design; the design check was skipped because the request looked like execution.
+
+Fix applied:
+- The typed-constructor dispatch was withdrawn before any edit; the library change was narrowed to "settings are required only by the selected mode" (graph path only in persistent mode; OpenAI key and model only for the OpenAI constructor; an injected provider supplies its own dimension), with no new construction path; the evaluation adapter drops its placeholders and keeps the config-crate path.
+
+Prevention:
+- Every ruling or brief that authorizes a change, of any size and in any layer, is decided on what is best for the overall product and architectural design: the Orchestrator states the design intent it serves (decision records, philosophy, README consumer path, phase documents), what the change would make worse, and the alternative it rejected. Audit text, plan text and worker findings are inputs, not decisions; a worker's "blocked, need X" is a symptom to diagnose, not a specification to forward. A change whose only justification is "the plan or audit says so" is not authorized until that check is written.
+
+Evidence:
+- Decider feedback 2026-09-13 in the orchestration session; the withdrawn brief `.agent-work/cm-worker/typed-settings-dispatch.txt` and its replacement `settings-follow-mode-dispatch.txt` (transient); the change itself lands as the settings-follow-selected-mode pull request.
