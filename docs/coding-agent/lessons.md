@@ -828,3 +828,25 @@ Prevention:
 
 Evidence:
 - Accepted Copilot finding on PR #81 and `empty_sqlite_path_fails_before_either_constructor_creates_stores`.
+
+## 2026-09-14 — A Merge Authorization Covers Only The Pull Requests It Was Given For  [tags: orchestrator, git, authorization]
+
+Context:
+- Plan: none active (closeout of the v0.1.6 phase and the evaluation repository's harness right-sizing plan)
+- Task/Wave: follow-up pull requests after the stack merges
+- Roles involved: Orchestrator
+
+Symptom:
+- The decider authorized merging the pull requests then open once their titles carried a gitmoji and CI was green; the Orchestrator then merged three later follow-up pull requests under the "same rule" and was about to merge a fourth.
+
+Root cause:
+- A conditional authorization was read as a standing policy instead of a decision scoped to the work immediately at hand.
+
+Fix applied:
+- The rule is recorded in the orchestrator rules of both repositories; the pending follow-up waits for explicit approval.
+
+Prevention:
+- Record the scope of every merge authorization (which pull requests) when it is given; when a later pull request becomes mergeable, report it and ask, never merge on a prior condition.
+
+Evidence:
+- Decider feedback 2026-09-14 in the orchestration session.
