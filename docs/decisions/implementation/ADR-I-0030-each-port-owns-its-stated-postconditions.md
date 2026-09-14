@@ -34,7 +34,7 @@ The state that the structured-verdict observability plan (`docs/coding-agent/pla
 
 Each port owns the postconditions it states, and no layer above a port repairs, re-filters, re-sorts, or de-duplicates that port's output.
 
-- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter must pass, where the test fake either runs the same test or delegates to the shared policy the adapters use so it cannot diverge from them.
+- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter passes. Test code holds no second implementation of a port: a test double that records calls or injects failures wraps a real adapter and makes no postcondition claim of its own.
 - Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself, a postcondition each adapter establishes independently.
 - When an adapter violates a postcondition, the fix is in the adapter and its contract test, never a compensating pass above the port.
 - Query semantics are total: an empty targeted selection selects nothing in every adapter, and no query silently widens to everything.
@@ -45,7 +45,7 @@ Recall must be explainable from the trace. A candidate list altered by a repair 
 
 ## Implementation Impact
 
-- Port contract tests run against every adapter and the fake; adding an adapter means passing them, not adding a pass above the port.
+- Port contract tests run against every adapter; adding an adapter means passing them, not adding a pass above the port.
 - A use case that needs a property the port does not promise asks for the property to become a stated postcondition rather than repairing locally.
 - The candidate result type keeps its sole constructor; its shape may be absorbed into a result envelope without loosening the property.
 
