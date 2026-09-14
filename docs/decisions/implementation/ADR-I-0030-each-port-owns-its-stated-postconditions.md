@@ -21,7 +21,7 @@ supersession_scope: null
 
 ## Context and Problem Statement
 
-Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`) the retrieval pipeline re-canonicalised candidates the vector store returned as canonical, the retrieval assembly re-evaluated lifecycle filtering that graph expansion declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query owned those predicates. Each pass existed because an adapter failed to satisfy a postcondition the port stated, and the caller compensated instead of the adapter being fixed. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
+The state that the structured-verdict observability plan (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`, July 2026) found was this: the retrieval pipeline re-canonicalised candidates the vector store returned as canonical, the retrieval assembly re-evaluated lifecycle filtering that graph expansion declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query owned those predicates. Each pass existed because an adapter failed to satisfy a postcondition the port stated, and the caller compensated instead of the adapter being fixed. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
 
 ## Decision Drivers
 

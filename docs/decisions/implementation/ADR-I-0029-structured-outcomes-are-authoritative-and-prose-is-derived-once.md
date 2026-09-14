@@ -21,7 +21,7 @@ supersession_scope: null
 
 ## Context and Problem Statement
 
-Every public path of the library reports what it did through outcomes, diagnostics, retrieval traces, and errors. Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), several of those reports carried evidence only in prose: a validation warning interpolated object identifiers into a sentence, a failed graph expansion carried a reason string and a location string, an error kind was a bare string, and a context-pack section assignment explained itself in a free-text reason. A consumer that needed the evidence had to parse the sentence, and tests asserted substrings, so a wording change could break consumers or hide a regression. The retrieval philosophy requires that results carry score components and rationale, and treats unexplained recall as a failure mode; a trace row that cannot name its evidence in structure is unexplained recall with a sentence attached.
+Every public path of the library reports what it did through outcomes, diagnostics, retrieval traces, and errors. The state that the structured-verdict observability plan (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`, July 2026) found was this: several of those reports carried evidence only in prose: a validation warning interpolated object identifiers into a sentence, a failed graph expansion carried a reason string and a location string, an error kind was a bare string, and a context-pack section assignment explained itself in a free-text reason. A consumer that needed the evidence had to parse the sentence, and tests asserted substrings, so a wording change could break consumers or hide a regression. The retrieval philosophy requires that results carry score components and rationale, and treats unexplained recall as a failure mode; a trace row that cannot name its evidence in structure is unexplained recall with a sentence attached.
 
 ## Decision Drivers
 
@@ -65,7 +65,7 @@ Chosen option: **Option 1**. It is the only option under which a consumer can be
 
 Option 2 makes every consumer a parser of an informal grammar and turns every wording change into a compatibility event; rejected outright.
 
-Option 3 keeps the structure but lets the same fact render differently at different sites, which is how the two write paths diverged before the structured-verdict observability phase; rejected outright.
+Option 3 keeps the structure but lets the same fact render differently at different sites, which is how the two write paths had diverged in the state that the structured-verdict observability plan found; rejected outright.
 
 ## Consequences
 
