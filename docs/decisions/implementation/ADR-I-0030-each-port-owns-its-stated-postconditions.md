@@ -79,7 +79,7 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). For the graph port, the bounded-expansion postconditions are validated by adapter tests plus a fake that delegates that expansion to the shared policy, which is what keeps the fake from diverging there; object selection is implemented separately by the adapter and the fake and is validated by adapter tests alone, so a postcondition stated on that path, or any graph postcondition the shared policy does not express, brings a shared contract test with it.
+- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). For the graph port, the bounded-expansion postconditions are validated by adapter tests plus the shared test fake that delegates that expansion to the shared policy, which is what keeps that fake from diverging there; object selection is validated by adapter tests alone. Test doubles that only record calls inside use-case tests are not enforcement of any postcondition and make no claim to be. A postcondition stated on the selection path, or any graph postcondition the shared policy does not express, brings a shared contract test that the adapters and the shared test fake run.
 - Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When
