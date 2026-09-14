@@ -2,7 +2,7 @@
 
 > Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0028](../../decisions/implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md) governs any future prefilter re-entry.
 
-This document describes the Qdrant record contract for Character Memory. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
+This document describes the Qdrant record contract for Character Memory. The record contract is shared by the service adapter and the embedded Qdrant Edge adapter (the default vector store); what differs between them, engine placement, the blocking-owner discipline of the embedded engine, and the adapter-specific behaviour those records name, is documented in ADR-I-0023 and ADR-I-0027, not here. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
 
 A Qdrant hit means that an object may be relevant. Retrieval must hydrate and verify that object through graph authority before it can enter a continuity context pack.
 
@@ -76,14 +76,8 @@ A future change that alters the meaning or required interpretation of the five f
 
 The write-side indexing service rejects a zero-norm record embedding before calling the Qdrant adapter. The failure identifies the affected memory object through the public typed indexing-cause contract. This mirrors the query-side rule that cosine search must not receive a zero-norm query.
 
-## Operational Checks
+## Failure Handling
 
-Useful checks are:
-
-- graph objects with no vector point
-- vector points whose graph object no longer exists
-- unsupported record schema versions
-- malformed or unknown object_type and surface tokens
-- zero-norm embeddings rejected before adapter dispatch
-
-Obsolete extra payload fields are not read and are not treated as authority.
+- Write side: the indexing service rejects a zero-norm embedding before the adapter is called, and a vector write that fails after the graph commit is reported as a typed vector-indexing failure in the public outcome, naming the affected objects and the cause.
+- Read side: a point whose object_id is not a well-formed identifier or whose object_type or surface token is unknown fails candidate decoding; the schema version is enforced when a record is written, not when a point is read. Every decoded candidate is verified through graph authority before it can enter a context pack, which omits points whose object is absent and, under the default lifecycle policy, points whose object is no longer current; the public retrieval policy can opt into non-current objects for historical retrieval.
+- No reconciliation pass exists in the library; obsolete extra payload fields on old points are not read and are not treated as authority.
