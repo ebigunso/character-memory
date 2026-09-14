@@ -21,7 +21,7 @@ supersession_scope: null
 
 ## Context and Problem Statement
 
-Every public path of the library reports what it did through outcomes, diagnostics, retrieval traces, and errors. Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), several of those reported evidence only as prose: a validation warning interpolated object identifiers into a sentence, a failed graph expansion carried a reason string and a location string, an error kind was a bare string, and a context-pack section assignment explained itself in a free-text reason. A consumer that needed the evidence had to parse the sentence, and tests asserted substrings, so a wording change could break consumers or hide a regression. The retrieval philosophy requires that results carry score components and rationale, and treats unexplained recall as a failure mode; a trace row that cannot name its evidence in structure is unexplained recall with a sentence attached.
+Every public path of the library reports what it did through outcomes, diagnostics, retrieval traces, and errors. Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), several of those reports carried evidence only in prose: a validation warning interpolated object identifiers into a sentence, a failed graph expansion carried a reason string and a location string, an error kind was a bare string, and a context-pack section assignment explained itself in a free-text reason. A consumer that needed the evidence had to parse the sentence, and tests asserted substrings, so a wording change could break consumers or hide a regression. The retrieval philosophy requires that results carry score components and rationale, and treats unexplained recall as a failure mode; a trace row that cannot name its evidence in structure is unexplained recall with a sentence attached.
 
 ## Decision Drivers
 
@@ -35,10 +35,10 @@ Every public path of the library reports what it did through outcomes, diagnosti
 Structure is authoritative and prose is a projection derived exactly once, at the type that owns the structure.
 
 - Every public outcome, diagnostic, trace element, and error payload carries its evidence as typed fields: identifiers as identifier types, object references as the shared object reference, vocabularies as enums, causes as the typed cause. Evidence means a fact a consumer acts on or asserts: which object, which surface, which vocabulary value, which cause, how many. An opaque detail that no consumer branches on (a backend driver message, a parser's own text, a file path from the environment) may be carried as a string field beside the typed fields. No producer interpolates evidence into a message, and no message is the only carrier of a structured fact.
-- Each such payload renders its message in one place, its own display implementation; the top-level error type wraps payloads transparently or by source. A composite message, such as a diagnostic that names a cause, is assembled only from those displays and never from a payload's fields, and the typed cause travels on the outcome beside the diagnostic so the message is never the only carrier.
+- Each such payload renders its message in one place, its own display implementation; the top-level error type carries every payload as a typed field a consumer can match on, whether wrapped transparently, attached as a source, or formatted into the variant's own message. A composite message, such as a diagnostic that names a cause, is assembled only from those displays and never from a payload's fields, and the typed cause travels on the outcome beside the diagnostic so the message is never the only carrier.
 - Vocabularies that consumers must match exhaustively (validation issues, diagnostic codes, section-assignment reasons, graph failure modes, indexing causes) are closed enums that consumers can match completely; new meaning enters as a new variant with its fields, not as a new sentence.
 - Payload types referenced by the error type live in the domain or error modules; outcome records that embed them live in the API layer and may reference domain and error types, following the dependency direction of ADR-I-0018.
-- Tests assert variants and structured fields. String assertions are permitted on serialization tokens (the public wire contract of an enum or code) and on a projection's code or severity, never on message text.
+- Tests assert variants and structured fields. String assertions are permitted on serialization tokens (the public wire contract of an enum or code) and on a projection's code or severity; a new or changed test never asserts message text.
 
 ## Character Memory Relevance
 
@@ -77,13 +77,13 @@ Option 3 keeps the structure but lets the same fact render differently at differ
 
 Invariant: no public outcome, diagnostic, trace element, or error carries a fact only in prose, and no message is rendered in more than one place for the same payload. Changing this requires a superseding record.
 
-Not covered: which enums beyond the exhaustively matched vocabularies stay open for extension (the top-level error type, backend mismatch and configuration reason enums, and telemetry structs may remain non-exhaustive); the exact field sets of any payload, which follow the producers and are recorded in code and tests; error variants whose whole content is opaque detail from a backend, parser, or the environment (for example a database driver failure or a graph selection detail), which carry that detail as a string because no consumer branches on it, and which become typed the moment a consumer needs a fact from them.
+Not covered: which enums beyond the exhaustively matched vocabularies stay open for extension (the top-level error type, backend mismatch and configuration reason enums, and telemetry structs may remain non-exhaustive); the exact field sets of any payload, which follow the producers and are recorded in code and tests; error variants whose whole content is opaque detail from a backend, parser, or the environment (for example a database driver failure or a graph selection detail), which carry that detail as a string because no consumer branches on it, and which become typed the moment a consumer needs a fact from them; the remember diagnostic (a severity, a code, and a rendered message) as a deliberately bounded projection whose typed facts travel elsewhere on the same outcome (the validation rows and the repair markers' typed causes), so the diagnostic is a rendering and never a fact's only carrier; the message-text assertions that predate this record, which are migrated as their sites are touched rather than in one sweep.
 
 ## Validation
 
 - Compile-time: consumers match the closed vocabularies exhaustively; a new variant fails their build until handled.
 - Review: a change that adds a message without a typed field, or renders a payload's message outside its display implementation, is rejected at review.
-- Tests: assertions on variants and fields; string assertions only on serialization tokens, codes and severities, never on message text.
+- Tests: a new or changed test asserts variants and fields, with string assertions only on serialization tokens, codes and severities; a message-text assertion is migrated whenever its site is touched.
 
 ## Revisit When
 

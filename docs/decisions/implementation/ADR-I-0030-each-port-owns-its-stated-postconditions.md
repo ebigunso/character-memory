@@ -34,7 +34,7 @@ Until the structured-verdict observability phase (`docs/coding-agent/plans/compl
 
 Each port owns the postconditions it states, and no layer above a port repairs, re-filters, re-sorts, or de-duplicates that port's output.
 
-- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a port contract test that every adapter, including the test fake, must pass.
+- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter must pass, where the test fake either runs the same test or delegates to the shared policy the adapters use so it cannot diverge from them.
 - Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself.
 - When an adapter violates a postcondition, the fix is in the adapter and its contract test, never a compensating pass above the port.
 - Query semantics are total: an empty targeted selection selects nothing in every adapter, and no query silently widens to everything.
@@ -79,7 +79,7 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Every stated postcondition is validated either by a constructor that establishes it or by a port contract test run against each adapter and the fake. The vector port has that shared suite (`tests/vector_port_contract_tests.rs`); graph postconditions are validated by adapter and use-case tests with the fake delegating to the shared policy, and a new graph postcondition brings its shared contract test with it.
+- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). The graph port's intended mechanism is its adapter tests plus a fake that delegates to the shared policy, which is what keeps the fake from diverging; a graph postcondition that the shared policy does not express brings a shared contract test with it.
 - Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When
