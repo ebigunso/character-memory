@@ -21,14 +21,14 @@ supersession_scope: null
 
 ## Context and Problem Statement
 
-Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`) the retrieval pipeline re-canonicalised the candidates a vector store had already returned, the retrieval assembly re-evaluated lifecycle filtering that graph expansion had already declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query already owned those predicates. Each pass existed because an adapter had at some point failed to satisfy a postcondition the port stated, and the caller compensated instead of the adapter being fixed. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
+Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`) the retrieval pipeline re-canonicalised candidates the vector store returned as canonical, the retrieval assembly re-evaluated lifecycle filtering that graph expansion declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query owned those predicates. Each pass existed because an adapter failed to satisfy a postcondition the port stated, and the caller compensated instead of the adapter being fixed. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
 
 ## Decision Drivers
 
 - A port contract that nothing relies on cannot be verified and will decay.
 - Silent repair converts an adapter bug into an invisible performance and correctness tax paid by every caller.
 - Policy that lives in two layers drifts; the layer that declares a guarantee must be the one that enforces it.
-- The module dependency direction (ADR-I-0018) already places adapters below use cases; the postcondition ownership follows that direction.
+- The module dependency direction (ADR-I-0018) places adapters below use cases; the postcondition ownership follows that direction.
 
 ## Decision
 
@@ -79,8 +79,8 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Port contract tests exist for every stated postcondition and run against each adapter and the fake.
-- Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract already states the property.
+- Every stated postcondition is validated either by a constructor that establishes it or by a port contract test run against each adapter and the fake. The vector port has that shared suite (`tests/vector_port_contract_tests.rs`); graph postconditions are validated by adapter and use-case tests with the fake delegating to the shared policy, and a new graph postcondition brings its shared contract test with it.
+- Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When
 

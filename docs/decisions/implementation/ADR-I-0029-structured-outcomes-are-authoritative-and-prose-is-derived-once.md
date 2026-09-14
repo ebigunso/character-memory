@@ -35,10 +35,10 @@ Every public path of the library reports what it did through outcomes, diagnosti
 Structure is authoritative and prose is a projection derived exactly once, at the type that owns the structure.
 
 - Every public outcome, diagnostic, trace element, and error payload carries its evidence as typed fields: identifiers as identifier types, object references as the shared object reference, vocabularies as enums, causes as the typed cause. Evidence means a fact a consumer acts on or asserts: which object, which surface, which vocabulary value, which cause, how many. An opaque detail that no consumer branches on (a backend driver message, a parser's own text, a file path from the environment) may be carried as a string field beside the typed fields. No producer interpolates evidence into a message, and no message is the only carrier of a structured fact.
-- Each such payload renders its message in one place, its own display implementation; the top-level error type wraps payloads transparently or by source, and warning or diagnostic messages are regenerated centrally from the structured rows.
+- Each such payload renders its message in one place, its own display implementation; the top-level error type wraps payloads transparently or by source. A composite message, such as a diagnostic that names a cause, is assembled only from those displays and never from a payload's fields, and the typed cause travels on the outcome beside the diagnostic so the message is never the only carrier.
 - Vocabularies that consumers must match exhaustively (validation issues, diagnostic codes, section-assignment reasons, graph failure modes, indexing causes) are closed enums that consumers can match completely; new meaning enters as a new variant with its fields, not as a new sentence.
 - Payload types referenced by the error type live in the domain or error modules; outcome records that embed them live in the API layer and may reference domain and error types, following the dependency direction of ADR-I-0018.
-- Tests assert variants and structured fields; the only permitted string assertions are on the derived projection's code or severity.
+- Tests assert variants and structured fields. String assertions are permitted on serialization tokens (the public wire contract of an enum or code) and on a projection's code or severity, never on message text.
 
 ## Character Memory Relevance
 
@@ -49,7 +49,7 @@ Provenance and inspectable recall are product goals: a character must be able to
 - A new outcome, diagnostic, or error is designed as a typed payload first; its message is written once on that type.
 - Adding evidence to an existing outcome adds a field or a variant, never a phrase.
 - Consumers exhaustively match the closed vocabularies, so a new variant is a compile-time event for every consumer rather than a silent change in wording.
-- The evaluation harness reads these types directly and needs no parsing layer.
+- Consumers, including the evaluation harness through its own conversion layer, take the structured fields and never parse prose.
 
 ## Considered Options
 
@@ -83,7 +83,7 @@ Not covered: which enums beyond the exhaustively matched vocabularies stay open 
 
 - Compile-time: consumers match the closed vocabularies exhaustively; a new variant fails their build until handled.
 - Review: a change that adds a message without a typed field, or renders a payload's message outside its display implementation, is rejected at review.
-- Tests: assertions on variants and fields; string assertions only on derived codes and severities.
+- Tests: assertions on variants and fields; string assertions only on serialization tokens, codes and severities, never on message text.
 
 ## Revisit When
 
