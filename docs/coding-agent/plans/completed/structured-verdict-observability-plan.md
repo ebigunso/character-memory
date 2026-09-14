@@ -2,7 +2,7 @@
 
 - status: done
 - generated: 2026-07-21
-- last_updated: 2026-07-23
+- last_updated: 2026-09-14
 - work_type: code
 
 ## Goal
@@ -157,3 +157,83 @@
 ## Notes
 - Risks: report-schema evolution touching sealed readers (mitigated by Task_1 design-first + Q1); CM/CME wave coupling (mitigated by Task_4 depending on Task_2).
 - Edge cases: sealed-artifact tolerances are kept and documented, never "cleaned up".
+
+## Appendix: finding-disposition table and in-flight amendments (moved from the retired design note `docs/design/structured_verdict_contract.md`, 2026-09-14)
+
+The design note that carried the contract of the plan recorded in this file was retired when its two durable rulings became ADR-I-0029 and ADR-I-0030; the per-finding dispositions and the amendments recorded during implementation are preserved here unchanged, as historical records of what was decided in July 2026. v0.1.6 (ADR-I-0023 to ADR-I-0028) changed some of the shapes they name (for example the shared vector-indexing cause enum gained a zero-norm-embedding variant); the code and the governing ADRs are authoritative for the current shape.
+
+The section numbers cited in the table and the amendments refer to the retired note's own sections, which covered: section 1, the typed validation-issue vocabulary (now the closed-vocabulary rule of ADR-I-0029); section 2, the typed error story (the payload and display rules of ADR-I-0029); section 3, the trace identity additions (vector surface, link id, section-assignment reason, telemetry echo); section 4, postcondition ownership (ADR-I-0030); section 5, the library consolidations (indexing service, stats projection service, shared object reference, payload schema manifest, query enum); section 6, the contract the July 2026 structured-verdict observability phase (this plan) set for CharacterMemoryEvals, the public companion evaluation repository whose tooling is a development aid and not core library functionality (typed DTO vocabularies and report schema 2.0.0 with the bounded 1.0.0 dispatch, since retired by CharacterMemoryEvals ADR-I-0005, a record distinct from this repository ADR-I-0005); section 7, this table.
+
+### Finding-disposition table
+
+Legend (as written in the retired note; its sections are described in the preface of this appendix): resolved-here = designed in the retired note's sections and implemented in Task_2/3/4; pull-forward = landing in the pre-phase PRs already dispatched; deferred = owner-assigned, not designed here; dies-with-deletion = removed by the ruled R2-11 deletion.
+
+| ID | Disposition | Section / owner |
+| --- | --- | --- |
+| CM F1 | pull-forward (rejection half: `WritePlanValidationRejected` + domain relocation) + as-built (success half, 13bc56f) | section 1 retypes the carried rows |
+| CM F2 | resolved-here | section 1 |
+| CM F3 | resolved-here | section 3 |
+| CM F4 | resolved-here | section 3 |
+| CM F5 | resolved-here | section 3 |
+| CM F6 | resolved-here | section 3 |
+| CM F7 | resolved-here | section 2 |
+| CM F8 | resolved-here | section 2 |
+| CM F9 | resolved-here | section 2 |
+| CM F10 | resolved-here | section 2 |
+| CM F11 | resolved-here | section 2 |
+| CM F12 | resolved-here | section 2 |
+| CM F13 | dies-with-deletion | R2-11 ruling |
+| CM R2-01 | narrow slice resolved-here; ledger deferred | section 5; owner v0.2+ |
+| CM R2-02 | deferred | v0.2 scoped-continuity coordination; only the typed `LifecyclePolicyUnsupported` rejection (section 2) lands now |
+| CM R2-03 | deferred | v0.1.6 embedded vector-recall port design |
+| CM R2-04 | deferred | v0.2 (strict variant with R2-02); the lossy projection is unchanged this phase |
+| CM R2-05 | deferred | v0.1.6 vector-port design pass (query-side hint semantics belong to the same port contract) |
+| CM R2-06 | resolved-here (incl. typed repair/indexing causes per MAJOR ruling) | section 5; Task_2 |
+| CM R2-07 | resolved-here | section 5; Task_2 |
+| CM R2-08 | resolved-here (ObjectRef unification in Task_2 first chunk; mechanical helper replacement in Task_3) | section 5 |
+| CM R2-09 | resolved-here | section 4 |
+| CM R2-10 | resolved-here (typed failure mode with F7; internal trace/root mode enums in Task_2/3) | section 3 |
+| CM R2-11 | dies-with-deletion (ruled: delete, not gate) | Task_3 |
+| CM R2-12 | resolved-here | section 5 shape; Task_3 |
+| CM R2-13 | resolved-here (manifest + record_type drop); text-column decision deferred | section 5; v0.1.6 for text columns |
+| CM R2-14 | resolved-here (hygiene, no contract design needed) | Task_3 |
+| CM R2-15 | resolved-here | section 5 |
+| CM R2-16 | resolved-here (test-support facade, no contract design needed) | Task_3 |
+| CME r1#1 (typed-ingest verdict drop) | resolved-here | section 6, report schema 2.0.0 |
+| CME r1#2 (explicit-commit Debug-flattening + asymmetry) | resolved-here | section 6 |
+| CME r1#3 (lifecycle maintenance-failure drop) | resolved-here | section 6 |
+| CME r1#4 (telemetry DTO gaps) | resolved-here | section 6 |
+| CME r1#5 (untyped metrics Value) | resolved-here | section 6 |
+| CME r2#1 (stringly core DTOs) | resolved-here | section 6 |
+| CME r2#2 (vector_only hidden capability port) | deferred | v0.1.6 embedded vector-recall port design |
+| CME r2#3 (embedding runtime binding) | resolved-here | section 6 |
+| CME r2#4 (dataset registry) | resolved-here | section 6 |
+| CME r2#5 (dead namespace-reset knobs) | pull-forward | independent PR already dispatched |
+| CME r2#6 (boolean retrieval flags + magic budgets) | resolved-here | section 6 |
+| CME r2#7 (context-pack renderers) | resolved-here | section 6 |
+| CME r2#8 (duplicate OpenAI embedding client) | resolved-here | section 6 |
+| CME r2#9 (copied atomic-replace helper) | resolved-here | section 6 |
+| Copilot ADR-I-0018 edge: default_retrieval_object_types consumed from models | dies-with-deletion | the models-side consumers are the src/models/vector/candidate_record.rs default-type helpers (~120-137, 136, 400) deleted in Task_3's R2-12 scope, with Tier D verifying no live consumer; the canonical default set stays api-owned |
+| Copilot ADR-I-0018 edge: RetrievalLifecyclePolicy in policy | deferred | v0.2 (rides the R2-02/R2-04 lifecycle coordination) |
+
+Not in scope of this table by ruling: the CME `history_text` prose-encoded structure remains deferred-unless-a-parser-appears, as recorded in the backcompat plan addendum.
+
+### Amendments (in-flight rulings during Task_2/3/4 implementation)
+
+These rulings, recorded in the plan Decision Log at the time they were made, amend the retired note's sections described in the preface of this appendix; the implementation is the authoritative expression.
+
+1. Cause typing (amends section 5 R2-06 / section 2 F9): the vector-side cause is the shared serializable `VectorIndexingCause` enum — `Embedding(EmbeddingError)`, `CardinalityMismatch { expected, actual }`, `VectorDatabase(VectorDatabaseError)` — used by both maintenance items and indexing/repair causes; `EmbeddingError` is a closed serializable payload enumerated from the provider producer sites; the stats side uses its own `StatsUpdateCause`; `Box<CustomError>` was rejected because outcome DTOs are serialized evidence requiring Clone/serde/Eq.
+2. Vocabulary closure (amends the section 1 sketch and section 6 exhaustiveness): `#[non_exhaustive]` is REMOVED from the closed verdict vocabulary enums (CandidateValidationIssue, RememberDiagnosticCode, VectorDatabaseErrorKind, TransportStatus, EmbeddingError and its transport kind, VectorIndexingCause, StatsUpdateCause) so CME's exhaustive conversions break loudly on drift; the read-only structs (RetrievalTelemetry, RetrievalTrace, VectorDatabaseError) keep the attribute. The section-1 sketch's `#[non_exhaustive]` contradicted section 6's compile-error promise; closure wins under the Compatibility Policy.
+3. GraphFailureMode location (amends section 3 R2-10): the enum lives in domain (mode vocabulary; request-side DTOs are outside ADR-I-0018's api exception for ports/policy), flat crate-root export, api::types imports it for RetrievalGraphLimits.
+4. SectionAssignmentReason vocabulary (amends section 3 F5): a fourth variant `OmittedNoPromptSection { object_type }` covers the graph-only/no-prompt-section producer branch; reason vocabularies must be enumerated from the producer's full branch set, not a finding's citations.
+5. GraphObjectQuery empty semantics (amends section 5 R2-12): empty targeted input deterministically selects zero objects in every adapter; wildcard-on-empty is prohibited; any future query-all need gets an explicit variant.
+6. CME row/summary identity (amends section 6): outcome records carry a deterministic operation identity; every dependent row carries the full record, summaries deduplicate degradation counts by operation ID; the untruthful config-derived `embedding_provider` summary field is deleted in 2.0.0 in favor of per-scenario typed `EmbeddingBindingRecord` aggregation.
+7. Legacy-dispatch bound (sharpens section 6 / sealed-reader constraints): the 1.0.0 legacy read dispatch covers result rows and continuity traces only — the artifacts the register cites for machine reading; summary and continuity-report readers are strict 2.0.0-only, with the bound documented at the dispatch site.
+8. DatasetId shape (amends section 6 r2#4): a serde-transparent validated newtype in core with the descriptor registry runner-owned; a closed core enum would violate the dataset-independence rule.
+9. RetrievedContextPack (sharpens section 6 r2#7): sole constructor with private fields and accessors; no renderer-strategy ID and no read-time rerender — persisted `context_text` is the authoritative evaluated text.
+10. HttpConnect classification exception (rules a verified external constraint, thesis-audit F-02): qdrant-client 1.17.0 irretrievably erases the tonic transport source (`channel_pool.rs` wraps it into `Status::internal(format!("Failed to connect to {}: {:?}", ...))`), so no structural downcast can exist at our boundary.
+The adapter-contained prefix normalization is a ruled, documented exception — cited at the classification site, pinned by a canary test whose failure means the upstream message contract drifted, and retired automatically when a qdrant-client upgrade preserves the source (checked on every dependency bump).
+Forking the client for one error path was rejected on cost; the tripwire's requirement is that unavoidable workarounds be ruled and visible, never silent.
+11. Score-breakdown reconstruction invariant (rules the lossy-breakdown review finding): SectionScoreComponents publishes the EFFECTIVE vector input used by scoring plus typed provenance (`vector_score_source`: DirectMatch | DerivedFromRoot { root_score }), and max-merge keeps provenance tied to the winning component; published components must reconstruct the published final_score for both direct and derived rows, enforced by a production-path regression.
+12. Write-outcome stats conservation (rules the consumer-boundary Copilot findings, 2026-07-22): every consumer of the stats projection service propagates the returned typed `StatsUpdateStatus` to its public outcome — `remember` via `RememberOutcome`, `correct`/`forget` via `LifecycleMutationOutcome.stats_update_status`, and `link` via the new `LinkOutcome { link, stats_update_status }` (a bare `Vec<StatsUpdateCause>` was rejected as duplicating the owned status contract while dropping attempted IDs).
+CME mirrors the field on `LifecycleOutcomeRecord` and the link write records, and counts lifecycle stats failures in the degradation summary; the historical v0.1 phase doc's `link -> MemoryLink` signature stays unchanged as an append-only record.
