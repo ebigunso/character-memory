@@ -391,7 +391,7 @@ fn push_optional_literal<T: Into<String>>(
 }
 
 fn timestamp(value: DateTime<Utc>) -> String {
-    value.to_rfc3339_opts(SecondsFormat::Secs, true)
+    value.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 }
 
 fn score(value: f32) -> String {

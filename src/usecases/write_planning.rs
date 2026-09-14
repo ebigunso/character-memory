@@ -1557,7 +1557,7 @@ mod tests {
         MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate, VectorIndexCandidate,
     };
     use crate::domain::{DerivedType, RelationType, Stability, DEFAULT_SCHEMA_VERSION};
-    use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
+    use crate::test_support::{in_memory_graph_store, representative_fixtures};
 
     #[tokio::test]
     async fn accepts_valid_plan_without_writes() {
@@ -1600,7 +1600,7 @@ mod tests {
 
     #[tokio::test]
     async fn warns_when_observation_content_echoes_source_episode_candidate() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = valid_plan();
         let source_episode_id = plan
             .candidates
@@ -1634,7 +1634,7 @@ mod tests {
 
     #[tokio::test]
     async fn warns_when_derived_memory_content_echoes_source_episode_candidate() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = RememberInput::new("source episode content")
             .with_observation(ObservationDraft::new(
                 MemoryId::nil(),
@@ -1679,7 +1679,7 @@ mod tests {
 
     #[tokio::test]
     async fn does_not_warn_for_distinct_surfaces_with_vector_candidates_enabled() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = RememberInput::new("source episode content")
             .with_observation(ObservationDraft::new(
                 MemoryId::nil(),
@@ -1711,7 +1711,7 @@ mod tests {
 
     #[tokio::test]
     async fn does_not_warn_for_distinct_observation_and_derived_surfaces() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = RememberInput::new("source episode content")
             .with_observation(ObservationDraft::new(
                 MemoryId::nil(),
@@ -1743,7 +1743,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_idempotency_key() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut plan = valid_plan();
         plan.idempotency_key.clear();
 
@@ -1762,7 +1762,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_empty_plan_with_plan_identity_errors() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut plan = RememberWritePlan::new(id("00000000-0000-0000-0000-000000000000"), "");
         plan.idempotency_key.clear();
 
@@ -1796,7 +1796,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_schema_version() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut draft = EpisodeDraft::new("episode without schema");
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445001"));
         draft.schema_version = Some(String::new());
@@ -1820,7 +1820,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_candidate_id() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut draft = EpisodeDraft::new("episode without id");
         draft.created_at = Some(timestamp());
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
@@ -1841,7 +1841,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_ungrounded_derived_memory_provenance() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let derived = DerivedMemoryDraft::new(DerivedType::Reflection, "ungrounded reflection")
             .with_source_episode(id("550e8400-e29b-41d4-a716-446655445010"));
         let plan = valid_plan().with_candidate(MemoryCandidate::DerivedMemory(
@@ -1892,7 +1892,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_link_targets() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = valid_plan().with_candidate(MemoryCandidate::MemoryLink(
             crate::api::types::MemoryLinkCandidate::new(
                 link_draft(
@@ -1966,7 +1966,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_memory_link_endpoint_types() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut draft = MemoryLinkDraft::new(
             ObjectType::MemoryLink,
             id("550e8400-e29b-41d4-a716-446655445040"),
@@ -2052,7 +2052,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_vector_index_for_missing_graph_object() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan =
             valid_plan().with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
                 MemoryObjectRef::new(
@@ -2129,7 +2129,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_candidate_timestamps() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut draft = EntityDraft::new(crate::domain::EntityType::Project, "no timestamps");
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445055"));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
@@ -2187,7 +2187,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_stats_update_for_missing_graph_object() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan =
             valid_plan().with_candidate(MemoryCandidate::StatsUpdate(StatsUpdateCandidate::new(
                 MemoryObjectRef::new(
@@ -2216,7 +2216,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_invalid_source_span() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = valid_plan().with_candidate(MemoryCandidate::Episode(
             crate::api::types::EpisodeCandidate::new(
                 complete_episode(EpisodeDraft::new("bad span")),
@@ -2240,7 +2240,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_producer_rationale_origin_conflation() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = valid_plan().with_candidate(MemoryCandidate::Episode(
             crate::api::types::EpisodeCandidate::new(
                 complete_episode(EpisodeDraft::new("bad provenance")),
@@ -2264,7 +2264,7 @@ mod tests {
 
     #[tokio::test]
     async fn raw_ref_is_validated_only_as_opaque_structure() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let plan = RememberInput::new("opaque raw ref")
             .with_raw_ref("raw://does/not/need/to/exist")
             .prepare_write_plan_with_options(&defaults(), false, false);
@@ -2327,8 +2327,8 @@ mod tests {
         draft
     }
 
-    async fn graph_with_fixtures() -> FakeGraphAuthorityStore {
-        let graph = FakeGraphAuthorityStore::new();
+    async fn graph_with_fixtures() -> crate::adapters::oxigraph::OxigraphGraphAuthorityStore {
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();

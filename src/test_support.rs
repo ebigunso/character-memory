@@ -1,28 +1,23 @@
 // Deterministic test harness shared by pipeline, adapter, and facade tests.
 
-use std::sync::{Mutex, MutexGuard};
-
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
     Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::{CustomError, GraphQueryError};
+use crate::errors::CustomError;
 use crate::models::vector::{
     EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
 };
-use crate::policy::graph_expansion::{
-    bounded_expansion, derived_memories_by_provenance, derived_memories_by_thread,
-};
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphExpansionQuery, GraphObjectQuery,
 };
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
@@ -111,142 +106,8 @@ impl VectorCandidateStore for TemporaryVectorCandidateStore {
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct FakeGraphAuthorityStore {
-    objects: Mutex<Vec<MemoryObject>>,
-    links: Mutex<Vec<MemoryLink>>,
-}
-
-impl FakeGraphAuthorityStore {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-}
-
-#[async_trait]
-impl GraphAuthorityStore for FakeGraphAuthorityStore {
-    async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
-        let mut stored = lock(&self.objects)?;
-
-        for object in objects {
-            stored.retain(|existing| existing.object_ref() != object.object_ref());
-            stored.push(object.clone());
-        }
-
-        Ok(())
-    }
-
-    async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-        let mut stored = lock(&self.links)?;
-
-        for link in links {
-            stored.retain(|existing| existing.id != link.id);
-            stored.push(link.clone());
-        }
-
-        Ok(())
-    }
-
-    async fn upsert_objects_and_links(
-        &self,
-        objects: &[MemoryObject],
-        links: &[MemoryLink],
-    ) -> Result<(), CustomError> {
-        let mut stored_objects = lock(&self.objects)?;
-        let mut stored_links = lock(&self.links)?;
-
-        for object in objects {
-            stored_objects.retain(|existing| existing.object_ref() != object.object_ref());
-            stored_objects.push(object.clone());
-        }
-        for link in links {
-            stored_links.retain(|existing| existing.id != link.id);
-            stored_links.push(link.clone());
-        }
-
-        Ok(())
-    }
-
-    async fn query_objects(
-        &self,
-        query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
-        if query.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut objects: Vec<_> = lock(&self.objects)
-            .map_err(|error| GraphQueryError::Selection {
-                detail: error.to_string(),
-            })?
-            .iter()
-            .filter(|object| {
-                let object_id = object.id();
-                let object_type = object.object_type();
-                match query {
-                    GraphObjectQuery::ByRefs(object_refs) => object_refs.iter().any(|object_ref| {
-                        object_ref.id == object_id && object_ref.object_type == object_type
-                    }),
-                    GraphObjectQuery::ByIds(object_ids) => object_ids.contains(&object_id),
-                    GraphObjectQuery::ByTypes { object_types, .. } => {
-                        object_types.contains(&object_type)
-                    }
-                }
-            })
-            .cloned()
-            .collect();
-
-        sort_objects(&mut objects);
-        if let GraphObjectQuery::ByTypes {
-            limit: Some(limit), ..
-        } = query
-        {
-            objects.truncate(*limit);
-        }
-
-        Ok(objects)
-    }
-
-    async fn query_links_by_ids(
-        &self,
-        link_ids: &[MemoryId],
-    ) -> Result<Vec<MemoryLink>, CustomError> {
-        let mut links = lock(&self.links)?
-            .iter()
-            .filter(|link| link_ids.contains(&link.id))
-            .cloned()
-            .collect::<Vec<_>>();
-        links.sort_by_key(|link| link.id);
-        links.dedup_by_key(|link| link.id);
-        Ok(links)
-    }
-
-    async fn query_derived_memories_by_provenance(
-        &self,
-        query: &GraphDerivedMemoryProvenanceQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
-        Ok(derived_memories_by_provenance(query, objects, links))
-    }
-
-    async fn query_derived_memories_by_thread(
-        &self,
-        query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
-        Ok(derived_memories_by_thread(query, objects, links))
-    }
-
-    async fn expand_bounded(
-        &self,
-        query: &GraphExpansionQuery,
-    ) -> Result<GraphExpansion, CustomError> {
-        let objects = lock(&self.objects)?.clone();
-        let links = lock(&self.links)?.clone();
-        bounded_expansion(query, objects, links)
-    }
+pub(crate) fn in_memory_graph_store() -> OxigraphGraphAuthorityStore {
+    OxigraphGraphAuthorityStore::new_in_memory().expect("in-memory graph store")
 }
 
 #[derive(Debug, Clone)]
@@ -709,12 +570,6 @@ fn link(
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError> {
-    mutex
-        .lock()
-        .map_err(|error| CustomError::DatabaseError(format!("test support lock poisoned: {error}")))
-}
-
 fn fixture_id(suffix: u128) -> MemoryId {
     Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0000 + suffix)
 }
@@ -725,10 +580,6 @@ fn timestamp(value: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(MemoryObject::stable_order_key);
-}
-
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
@@ -737,8 +588,8 @@ mod lifecycle_tests {
     };
 
     #[tokio::test]
-    async fn fake_graph_lifecycle_upserts_keep_historical_objects_inspectable() {
-        let graph = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_lifecycle_upserts_keep_historical_objects_inspectable() {
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         let mut episode = fixtures.episode.clone();
         let mut observation = fixtures.salient_observation.clone();
@@ -857,12 +708,12 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn fake_graph_discovers_source_provenanced_derived_memories_with_history_policy() {
-        let graph = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_discovers_source_provenanced_derived_memories_with_history_policy() {
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         let mut non_current = fixtures.user_preference.clone();
         non_current.is_current = false;
-        let mut link_only = derived_memory(
+        let link_only = derived_memory(
             fixture_id(260),
             DerivedType::ProjectNote,
             "Typed provenance link discovers this derived memory.",
@@ -874,8 +725,7 @@ mod lifecycle_tests {
             Vec::new(),
             RetentionState::Active,
         );
-        link_only.derived_from_episode_ids.clear();
-        link_only.derived_from_observation_ids.clear();
+        // Required source IDs differ from the query, so its match must come from this link.
         let provenance_link = link(
             fixture_id(261),
             link_only.id,
@@ -983,8 +833,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_preserves_objects_links_lifecycle_and_raw_refs() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_preserves_objects_links_lifecycle_and_raw_refs() {
+        let store = in_memory_graph_store();
         let fixtures = representative_fixtures();
 
         store.upsert_objects(&fixtures.objects()).await.unwrap();
@@ -1032,8 +882,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_queries_exact_typed_object_refs() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_queries_exact_typed_object_refs() {
+        let store = in_memory_graph_store();
         let mut fixtures = representative_fixtures();
         fixtures.user_entity.id = fixtures.episode.id;
 
@@ -1056,8 +906,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_queries_only_requested_link_ids_in_canonical_order() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_queries_only_requested_link_ids_in_canonical_order() {
+        let store = in_memory_graph_store();
         let fixtures = representative_fixtures();
         let links = fixtures.links();
         store.upsert_links(&links).await.unwrap();
@@ -1078,8 +928,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_honors_relation_allowlist_and_fanout_bounds() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_honors_relation_allowlist_and_fanout_bounds() {
+        let store = in_memory_graph_store();
         let fixture = high_fanout_graph_fixture();
 
         store.upsert_objects(&fixture.objects()).await.unwrap();
@@ -1111,8 +961,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_returns_only_traversed_links_after_fanout_pruning() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_returns_only_traversed_links_after_fanout_pruning() {
+        let store = in_memory_graph_store();
         let fixture = high_fanout_graph_fixture();
         let traversed_link = fixture.links[0].clone();
         let mut pruned_duplicate = traversed_link.clone();
@@ -1145,8 +995,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_reports_or_fails_closed_on_bounded_hub_policy() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_reports_or_fails_closed_on_bounded_hub_policy() {
+        let store = in_memory_graph_store();
         let fixture = high_fanout_graph_fixture();
 
         store.upsert_objects(&fixture.objects()).await.unwrap();
@@ -1185,8 +1035,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_filters_lifecycle_currentness_and_superseded_nodes_by_default() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_filters_lifecycle_currentness_and_superseded_nodes_by_default() {
+        let store = in_memory_graph_store();
         let fixtures = representative_fixtures();
 
         store.upsert_objects(&fixtures.objects()).await.unwrap();
@@ -1243,8 +1093,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_fake_uses_deterministic_timeout_substitute() {
-        let store = FakeGraphAuthorityStore::new();
+    async fn in_memory_graph_uses_deterministic_timeout_substitute() {
+        let store = in_memory_graph_store();
         let fixtures = representative_fixtures();
 
         store.upsert_objects(&fixtures.objects()).await.unwrap();

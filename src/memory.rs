@@ -185,7 +185,7 @@ mod tests {
     };
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
-        representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
+        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
         TemporaryVectorCandidateStore,
     };
 
@@ -370,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
         let memory = CharacterMemory::from_parts(
-            Box::new(FakeGraphAuthorityStore::new()),
+            Box::new(in_memory_graph_store()),
             Box::new(FailingVectorCandidateStore),
             Box::new(DeterministicMemoryEmbedder::new(8)),
         );
@@ -859,7 +859,7 @@ mod tests {
 
     async fn injected_memory() -> CharacterMemory {
         CharacterMemory::from_parts(
-            Box::new(FakeGraphAuthorityStore::new()),
+            Box::new(in_memory_graph_store()),
             Box::new(TemporaryVectorCandidateStore::open(8).await),
             Box::new(DeterministicMemoryEmbedder::new(8)),
         )
@@ -867,7 +867,7 @@ mod tests {
 
     async fn retrieval_memory() -> (CharacterMemory, crate::test_support::RepresentativeFixtures) {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = FixedVectorCandidateStore::new(vec![VectorCandidateMatch::new(
@@ -901,7 +901,7 @@ mod tests {
         MemoryId,
     ) {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
