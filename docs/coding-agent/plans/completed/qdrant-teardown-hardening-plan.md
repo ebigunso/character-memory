@@ -174,6 +174,8 @@
   - Notes: promoted as CME PR ebigunso/character-memory-evals#21 (push-after-internal-approval); sibling CM review clone re-pinned to merged CM main 512427e afterwards. Copilot on #21: "Approval recommended", zero inline comments; its only remark (future-dated heading) carries the same local-calendar-date disposition recorded for CM PR #70.
 - 2026-09-02 CME PR ebigunso/character-memory-evals#21 MERGED (user-authorized squash) as CME main 45d96c7: six checks green incl. "Resolve Character Memory revision" against merged CM main. Phase DONE. Closeout: review worktrees removed in both repos, transient `.agent-work` reports deleted after intake, sibling CM review clone left pinned at CM main 512427e (shim intact), plan moved to completed via a CM docs PR together with the two lessons entries. Definition of Done met (the operator-run prune was removed from it by the decision below and is tracked in FOLLOWUP-SEED.md). Open follow-up outside this plan: Codex sandbox delivery-layer failure (tracked in FOLLOWUP-SEED.md).
 
+- 2026-09-14 Follow-up disposition (the seed file that tracked these is removed): the operator prune of the July orphan collections is done, the dry run `qdrant_prune_collections.sh cmem_eval_continuity_continuity_v1_` against the local service reports zero matched collections on 2026-09-14; the Codex sandbox delivery-layer failure was closed environment-side on 2026-09-02 (sandbox re-setup, PowerShell 7.4 installed at Program Files, Codex restarted; lessons.md, machine-rebuild entry) and has not recurred since.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-02 Decision: reshape the FOLLOWUP-SEED four-step spec.
