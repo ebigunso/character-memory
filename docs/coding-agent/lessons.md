@@ -447,6 +447,7 @@ Root cause:
 
 Fix applied:
 - LLVM installed by the user; pre-commit installed into Python312's own site-packages (`python -m pip install pre-commit`, not `--user`) and the hook regenerated; agmsg reports switched to files under `.agent-work/<role>/` with single-token notifications until the delivery layer is repaired (open investigation).
+- Resolution recorded 2026-09-14: the delivery layer was repaired on 2026-09-02 (Codex sandbox re-set up, PowerShell 7.4 installed under Program Files, Codex restarted); agmsg bodies with spaces round-trip since then and the investigation is closed. Reports still live as files under `.agent-work/<role>/` because full YAML reports do not fit a message, and the notification may now be a plain sentence; a one-word inbound body still means that thread runs on PowerShell 5.1 and needs the same fix.
 
 Prevention:
 - After any machine rebuild, before dispatching: run the ignored Qdrant canary, `cargo test --no-run` in both repos, `python -m pre_commit --version` with `PYTHONNOUSERSITE=1`, and an end-to-end agmsg round-trip that contains spaces. Treat one-word inbound bodies as a delivery fault, not an agent-formatting fault.
