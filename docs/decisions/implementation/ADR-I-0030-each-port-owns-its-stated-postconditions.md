@@ -34,8 +34,8 @@ The state that the structured-verdict observability plan (`docs/coding-agent/pla
 
 Each port owns the postconditions it states, and no layer above a port repairs, re-filters, re-sorts, or de-duplicates that port's output.
 
-- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter must pass, where the test fake either runs the same test or delegates to the shared policy the adapters use so it cannot diverge from them.
-- Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself, a postcondition each adapter establishes independently and whose shared contract test is pending (see Validation).
+- A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter passes. Test code holds no second implementation of a port: a test double that records calls or injects failures either wraps a real adapter or returns only its injected failure, and makes no postcondition claim of its own.
+- Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself, a postcondition each adapter establishes independently.
 - When an adapter violates a postcondition, the fix is in the adapter and its contract test, never a compensating pass above the port.
 - Query semantics are total: an empty targeted selection selects nothing in every adapter, and no query silently widens to everything.
 
@@ -45,7 +45,7 @@ Recall must be explainable from the trace. A candidate list altered by a repair 
 
 ## Implementation Impact
 
-- Port contract tests run against every adapter and the fake; adding an adapter means passing them, not adding a pass above the port.
+- Port contract tests run against every adapter; adding an adapter means passing them, not adding a pass above the port.
 - A use case that needs a property the port does not promise asks for the property to become a stated postcondition rather than repairing locally.
 - The candidate result type keeps its sole constructor; its shape may be absorbed into a result envelope without loosening the property.
 
@@ -79,7 +79,7 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). For the graph port, the bounded-expansion postconditions are validated by adapter tests plus the shared test fake that delegates that expansion to the shared policy, which is what keeps that fake from diverging there; object selection is validated by the Oxigraph adapter tests only, and the shared test fake implements selection independently without a contract test over it, so that postcondition is stated but not yet contract-enforced on the fake; the shared selection contract test is the outstanding validation item for this record. Test doubles that only record calls inside use-case tests are not enforcement of any postcondition and make no claim to be. Any further graph postcondition the shared policy does not express brings a shared contract test that the adapters and the shared test fake run.
+- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). Graph postconditions are validated by the Oxigraph adapter tests over the in-memory store (`src/adapters/oxigraph/tests.rs`), which is also a production configuration. The library keeps no second implementation of the graph port's postconditions in test code, so no parity suite is needed. Test doubles that only record calls make no postcondition claim.
 - Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When
@@ -88,5 +88,6 @@ A port must serve adapters that cannot establish a property at all (for example 
 
 ## More Information
 
+- The graph test fake was deleted under this record because a second implementation of a port's postconditions in test code is the drift this record forbids.
 - Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 in the Task_2 description and in the finding-disposition table of the appendix, which record the deletion of the three repair passes.
 - ADR-I-0029 (structured outcomes are authoritative) records the other durable ruling of the structured-verdict observability plan named above.

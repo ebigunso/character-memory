@@ -1356,7 +1356,7 @@ mod tests {
     use crate::policy::RetrievalSelectivityPolicy;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
-        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
+        high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
 
@@ -1652,7 +1652,7 @@ mod tests {
         ];
 
         for completeness in cases {
-            let graph = FakeGraphAuthorityStore::new();
+            let graph = in_memory_graph_store();
             let vector = RecordingVectorStore::with_completeness(Vec::new(), completeness);
             let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
             let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
@@ -2852,8 +2852,8 @@ mod tests {
     async fn graph_with(
         objects: &[MemoryObject],
         links: &[crate::domain::MemoryLink],
-    ) -> FakeGraphAuthorityStore {
-        let graph = FakeGraphAuthorityStore::new();
+    ) -> crate::adapters::oxigraph::OxigraphGraphAuthorityStore {
+        let graph = in_memory_graph_store();
         graph.upsert_objects(objects).await.unwrap();
         graph.upsert_links(links).await.unwrap();
         graph

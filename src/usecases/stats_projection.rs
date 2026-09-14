@@ -241,7 +241,7 @@ mod tests {
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState,
     };
-    use crate::test_support::{simple_episode, FakeGraphAuthorityStore};
+    use crate::test_support::{in_memory_graph_store, simple_episode};
 
     #[derive(Debug)]
     struct RecordingStatsStore {
@@ -332,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn successful_writes_then_health_failure_marks_store_with_retained_cause() {
-        let graph_store = FakeGraphAuthorityStore::new();
+        let graph_store = in_memory_graph_store();
         let stats_store = RecordingStatsStore {
             health_result: Err(health_check_error()),
             ..RecordingStatsStore::default()
@@ -358,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn edge_and_object_state_failures_are_both_retained() {
-        let graph_store = FakeGraphAuthorityStore::new();
+        let graph_store = in_memory_graph_store();
         let stats_store = RecordingStatsStore {
             edge_error: Some(edge_write_error()),
             object_state_error: Some(object_state_write_error()),
@@ -384,7 +384,7 @@ mod tests {
 
     #[tokio::test]
     async fn preexisting_unhealthy_state_is_retained_with_write_failure() {
-        let graph_store = FakeGraphAuthorityStore::new();
+        let graph_store = in_memory_graph_store();
         let stored_health_cause = RetrievalStatsHealthCause::CounterRead {
             error: health_check_error(),
         };
@@ -416,7 +416,7 @@ mod tests {
 
     #[tokio::test]
     async fn partial_endpoint_hydration_is_reported_in_stats_status() {
-        let graph_store = FakeGraphAuthorityStore::new();
+        let graph_store = in_memory_graph_store();
         let present_episode = simple_episode();
         graph_store
             .upsert_objects(&[MemoryObject::Episode(present_episode.clone())])

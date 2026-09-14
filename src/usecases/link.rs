@@ -134,11 +134,11 @@ mod tests {
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState, RetrievalStatsStore,
     };
-    use crate::test_support::{representative_fixtures, FakeGraphAuthorityStore};
+    use crate::test_support::{in_memory_graph_store, representative_fixtures};
 
     #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         let pipeline = LinkPipeline::new(&graph);
@@ -190,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_invalid_confidence_before_graph_write() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let pipeline = LinkPipeline::new(&graph);
         let mut draft = valid_link_draft();
         draft.confidence = 1.1;
@@ -204,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_self_links_before_graph_write() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let pipeline = LinkPipeline::new(&graph);
         let object_id = id("550e8400-e29b-41d4-a716-446655444010");
         let draft = MemoryLinkDraft::new(
@@ -224,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_memory_link_endpoints_before_graph_write() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let pipeline = LinkPipeline::new(&graph);
         let draft = MemoryLinkDraft::new(
             ObjectType::MemoryLink,
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_pipeline_uses_graph_store_only() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let pipeline = LinkPipeline::new(&graph);
 
         let persisted = pipeline.link(valid_link_draft()).await.unwrap().link;
@@ -253,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_pipeline_records_entity_relation_stats_after_graph_success() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
         let draft = valid_link_draft();
@@ -277,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_pipeline_records_endpoint_lifecycle_state_in_stats() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         let mut suppressed_episode = fixtures.episode.clone();
         suppressed_episode.retention_state = RetentionState::Suppressed;
@@ -316,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn low_information_guard_rejects_weak_associated_with_candidate_without_graph_write() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
         let mut defaults = DraftDefaults::at(timestamp());
@@ -343,7 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn explicit_intent_allows_associated_with_links_by_default() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
 
@@ -358,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn entity_neutral_low_information_guard_does_not_check_roles() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
 
@@ -413,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn link_outcome_preserves_all_stats_failures() {
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
         graph
             .upsert_objects(&[

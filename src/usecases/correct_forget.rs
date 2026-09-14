@@ -1302,7 +1302,7 @@ mod tests {
     };
     use crate::ports::vector_candidate::VectorCandidateRecall;
     use crate::test_support::{
-        representative_fixtures, DeterministicMemoryEmbedder, FakeGraphAuthorityStore,
+        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
         TemporaryVectorCandidateStore,
     };
     use crate::usecases::RetrievePipeline;
@@ -1310,7 +1310,8 @@ mod tests {
     #[tokio::test]
     async fn correction_writes_graph_before_vector_maintenance_in_stable_order() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -1408,7 +1409,7 @@ mod tests {
     #[tokio::test]
     async fn distinct_replacement_payloads_do_not_collide_in_same_store() {
         let ids = fixed_ids();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph
             .upsert_objects(&[
                 MemoryObject::Episode(source_episode(&ids)),
@@ -1453,7 +1454,7 @@ mod tests {
     #[tokio::test]
     async fn identical_same_store_retry_repairs_without_graph_mutation() {
         let ids = fixed_ids();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph
             .upsert_objects(&[
                 MemoryObject::Episode(source_episode(&ids)),
@@ -1483,7 +1484,7 @@ mod tests {
     #[tokio::test]
     async fn identical_direct_target_retry_replays_repairs_without_graph_mutation() {
         let ids = fixed_ids();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph
             .upsert_objects(&[MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
@@ -1563,7 +1564,7 @@ mod tests {
     async fn identical_retry_repairs_one_shot_vector_failure_without_graph_writes() {
         let ids = fixed_ids();
         let old = old_memory(&ids);
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old.clone())]);
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old.clone())]).await;
         let vector = OneShotDeleteFailingVectorStore::new().await;
         let old_record = memory_object_vector_record(&MemoryObject::DerivedMemory(old)).unwrap();
         vector
@@ -1639,7 +1640,7 @@ mod tests {
         let entity_id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8301);
         let mut old = old_memory(&ids);
         old.entity_ids = vec![entity_id];
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old)]);
+        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old)]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let stats = OneShotEdgeFailingStatsStore::new();
@@ -1692,7 +1693,7 @@ mod tests {
     #[tokio::test]
     async fn multi_replacement_retry_preserves_each_replacements_lineage() {
         let ids = fixed_ids();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph
             .upsert_objects(&[
                 MemoryObject::Episode(source_episode(&ids)),
@@ -1764,15 +1765,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_replacement_ids_reject_before_fake_and_oxigraph_side_effects() {
+    async fn duplicate_replacement_ids_reject_before_oxigraph_side_effects() {
         let ids = fixed_ids();
-        let fake = FakeGraphAuthorityStore::new();
-        let fake_original = old_memory(&ids);
-        fake.upsert_objects(&[MemoryObject::DerivedMemory(fake_original.clone())])
-            .await
-            .unwrap();
-        assert_duplicate_replacement_rejection(&fake, &ids).await;
-
         let oxigraph = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let oxigraph_original = old_memory(&ids);
         oxigraph
@@ -1796,7 +1790,8 @@ mod tests {
         let graph = RecordingGraphStore::new(vec![
             MemoryObject::DerivedMemory(old_memory(&ids)),
             MemoryObject::DerivedMemory(divergent),
-        ]);
+        ])
+        .await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
 
@@ -1920,7 +1915,8 @@ mod tests {
     }
 
     async fn correction_link_ids(ids: &FixedIds) -> Vec<MemoryId> {
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         CorrectionForgetPipeline::new(&graph, &vector, &embedder)
@@ -1931,7 +1927,8 @@ mod tests {
     }
 
     async fn generated_correction_ids(ids: &FixedIds) -> (Vec<MemoryId>, Vec<MemoryId>) {
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let mut draft = correction_draft(ids);
@@ -1954,9 +1951,8 @@ mod tests {
         let ids = fixed_ids();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let graph = RecordingGraphStore {
-            objects: Mutex::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]),
             calls: calls.clone(),
-            ..RecordingGraphStore::default()
+            ..RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await
         };
         let vector = RecordingVectorStore {
             calls: calls.clone(),
@@ -2001,9 +1997,8 @@ mod tests {
         let ids = fixed_ids();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let graph = RecordingGraphStore {
-            objects: Mutex::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]),
             calls: calls.clone(),
-            ..RecordingGraphStore::default()
+            ..RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await
         };
         let vector = RecordingVectorStore {
             calls: calls.clone(),
@@ -2048,7 +2043,8 @@ mod tests {
     #[tokio::test]
     async fn forget_outcome_preserves_all_stats_failures() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let stats = RecordingStatsStore {
@@ -2091,7 +2087,8 @@ mod tests {
     #[tokio::test]
     async fn validation_failure_prevents_graph_and_vector_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2141,7 +2138,7 @@ mod tests {
         ] {
             draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
             let graph =
-                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
             let vector = RecordingVectorStore::default();
             let embedder = RecordingEmbedder::default();
             let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2189,7 +2186,7 @@ mod tests {
         ] {
             draft.rationale = format!("{} {}", draft.rationale, Uuid::new_v4());
             let graph =
-                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+                RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
             let vector = RecordingVectorStore::default();
             let embedder = RecordingEmbedder::default();
             let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2209,6 +2206,7 @@ mod tests {
     async fn graph_failure_prevents_vector_maintenance() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
+            .await
             .fail_objects();
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
@@ -2224,6 +2222,7 @@ mod tests {
     async fn graph_link_failure_prevents_partial_object_mutation_and_vector_maintenance() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
+            .await
             .fail_links();
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
@@ -2242,7 +2241,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            graph.object_refs(),
+            graph
+                .store
+                .query_objects(&GraphObjectQuery::by_ids(vec![ids.old, ids.replacement]))
+                .await
+                .unwrap()
+                .iter()
+                .map(MemoryObject::object_ref)
+                .collect::<Vec<_>>(),
             vec![MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old)]
         );
         assert!(vector.calls().is_empty());
@@ -2251,7 +2257,8 @@ mod tests {
     #[tokio::test]
     async fn vector_failure_after_graph_success_returns_partial_outcome() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore::default().fail_delete();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2301,7 +2308,8 @@ mod tests {
     #[tokio::test]
     async fn correction_policy_can_mark_non_current_without_supersession_evidence() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2327,7 +2335,7 @@ mod tests {
     #[tokio::test]
     async fn source_object_correction_supersedes_provenanced_memories_without_rewriting_source() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
@@ -2421,7 +2429,7 @@ mod tests {
         observation_only.id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9101);
         observation_only.derived_from_episode_ids.clear();
         observation_only.derived_from_observation_ids = vec![fixtures.salient_observation.id];
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut objects = fixtures.objects();
         objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
         graph.upsert_objects(&objects).await.unwrap();
@@ -2490,7 +2498,8 @@ mod tests {
     #[tokio::test]
     async fn source_object_correction_requires_original_refs_before_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2516,7 +2525,8 @@ mod tests {
     #[tokio::test]
     async fn source_object_correction_rejects_mismatched_episode_refs_before_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]);
+        let graph =
+            RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]).await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2546,7 +2556,8 @@ mod tests {
         let graph = RecordingGraphStore::new(vec![
             MemoryObject::Episode(source_episode(&ids)),
             MemoryObject::Observation(source_observation(&ids)),
-        ]);
+        ])
+        .await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -2582,7 +2593,7 @@ mod tests {
         let next_replacement_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9202);
         let current_replacement =
             current_replacement_from(&fixtures.user_preference, current_replacement_id);
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut objects = fixtures.objects();
         objects.push(MemoryObject::DerivedMemory(current_replacement.clone()));
         graph.upsert_objects(&objects).await.unwrap();
@@ -2647,7 +2658,7 @@ mod tests {
         let current_replacement_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9203);
         let current_replacement =
             current_replacement_from(&fixtures.user_preference, current_replacement_id);
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut objects = fixtures.objects();
         objects.push(MemoryObject::DerivedMemory(current_replacement.clone()));
         graph.upsert_objects(&objects).await.unwrap();
@@ -2700,7 +2711,7 @@ mod tests {
     #[tokio::test]
     async fn forget_cascade_does_not_warn_when_draft_retention_archives_replacements() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
@@ -2726,7 +2737,7 @@ mod tests {
     #[tokio::test]
     async fn forget_suppresses_source_and_dependent_derived_memories_and_deletes_vectors() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut objects = fixtures.objects();
         for object in &mut objects {
             if let MemoryObject::DerivedMemory(memory) = object {
@@ -2795,7 +2806,7 @@ mod tests {
         observation_only.id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_9103);
         observation_only.derived_from_episode_ids.clear();
         observation_only.derived_from_observation_ids = vec![fixtures.salient_observation.id];
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         let mut objects = fixtures.objects();
         objects.push(MemoryObject::DerivedMemory(observation_only.clone()));
         graph.upsert_objects(&objects).await.unwrap();
@@ -2834,7 +2845,7 @@ mod tests {
     #[tokio::test]
     async fn forget_policy_can_suppress_source_without_derived_cascade() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
@@ -2886,7 +2897,7 @@ mod tests {
     #[tokio::test]
     async fn forget_policy_can_skip_source_suppression_without_vector_deleting_source() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
@@ -2922,7 +2933,7 @@ mod tests {
     #[tokio::test]
     async fn forget_archives_memory_thread() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
@@ -2958,7 +2969,7 @@ mod tests {
     #[tokio::test]
     async fn forget_policy_can_skip_thread_archive_without_vector_deleting_thread() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
@@ -2993,7 +3004,8 @@ mod tests {
         let graph = RecordingGraphStore::new(vec![
             MemoryObject::MemoryThread(thread),
             MemoryObject::DerivedMemory(current_replacement),
-        ]);
+        ])
+        .await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -3033,7 +3045,7 @@ mod tests {
     #[tokio::test]
     async fn retrieval_excludes_stale_superseded_candidate_when_vector_cleanup_fails() {
         let ids = fixed_ids();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph
             .upsert_objects(&[MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
@@ -3084,7 +3096,7 @@ mod tests {
     #[tokio::test]
     async fn retrieval_excludes_stale_source_and_dependent_candidates_when_forget_cleanup_fails() {
         let fixtures = representative_fixtures();
-        let graph = FakeGraphAuthorityStore::new();
+        let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
         let vector = DeleteFailingVectorStore::new().await;
@@ -3306,20 +3318,22 @@ mod tests {
         StatsUnhealthy,
     }
 
-    #[derive(Debug, Default)]
     struct RecordingGraphStore {
-        objects: Mutex<Vec<MemoryObject>>,
-        links: Mutex<Vec<MemoryLink>>,
+        store: OxigraphGraphAuthorityStore,
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_objects: bool,
         fail_links: bool,
     }
 
     impl RecordingGraphStore {
-        fn new(objects: Vec<MemoryObject>) -> Self {
+        async fn new(objects: Vec<MemoryObject>) -> Self {
+            let store = in_memory_graph_store();
+            store.upsert_objects(&objects).await.unwrap();
             Self {
-                objects: Mutex::new(objects),
-                ..Self::default()
+                store,
+                calls: Arc::default(),
+                fail_objects: false,
+                fail_links: false,
             }
         }
 
@@ -3336,15 +3350,6 @@ mod tests {
         fn calls(&self) -> Vec<StoreCall> {
             lock(&self.calls).clone()
         }
-
-        fn object_refs(&self) -> Vec<MemoryObjectRef> {
-            let mut refs = lock(&self.objects)
-                .iter()
-                .map(MemoryObject::object_ref)
-                .collect::<Vec<_>>();
-            sort_refs(&mut refs);
-            refs
-        }
     }
 
     #[async_trait]
@@ -3356,13 +3361,7 @@ mod tests {
             if self.fail_objects {
                 return Err(CustomError::DatabaseError("object write failed".to_owned()));
             }
-            let mut stored = lock(&self.objects);
-            for object in objects {
-                let object_ref = object.object_ref();
-                stored.retain(|existing| existing.object_ref() != object_ref);
-                stored.push(object.clone());
-            }
-            Ok(())
+            self.store.upsert_objects(objects).await
         }
 
         async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
@@ -3375,8 +3374,7 @@ mod tests {
             if self.fail_links {
                 return Err(CustomError::DatabaseError("link write failed".to_owned()));
             }
-            lock(&self.links).extend_from_slice(links);
-            Ok(())
+            self.store.upsert_links(links).await
         }
 
         async fn upsert_objects_and_links(
@@ -3399,14 +3397,7 @@ mod tests {
             if self.fail_links {
                 return Err(CustomError::DatabaseError("link write failed".to_owned()));
             }
-            let mut stored = lock(&self.objects);
-            for object in objects {
-                let object_ref = object.object_ref();
-                stored.retain(|existing| existing.object_ref() != object_ref);
-                stored.push(object.clone());
-            }
-            lock(&self.links).extend_from_slice(links);
-            Ok(())
+            self.store.upsert_objects_and_links(objects, links).await
         }
 
         async fn query_objects(
@@ -3421,43 +3412,21 @@ mod tests {
                 GraphObjectQuery::ByTypes { .. } => Vec::new(),
             };
             lock(&self.calls).push(StoreCall::GraphQuery(queried_ids));
-            Ok(lock(&self.objects)
-                .iter()
-                .filter(|object| {
-                    let object_ref = object.object_ref();
-                    match query {
-                        GraphObjectQuery::ByRefs(object_refs) => {
-                            object_refs.iter().any(|query_ref| {
-                                query_ref.id == object_ref.id
-                                    && query_ref.object_type == object_ref.object_type
-                            })
-                        }
-                        GraphObjectQuery::ByIds(object_ids) => object_ids.contains(&object_ref.id),
-                        GraphObjectQuery::ByTypes { object_types, .. } => {
-                            object_types.contains(&object_ref.object_type)
-                        }
-                    }
-                })
-                .cloned()
-                .collect())
+            self.store.query_objects(query).await
         }
 
         async fn query_links_by_ids(
             &self,
             link_ids: &[MemoryId],
         ) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(lock(&self.links)
-                .iter()
-                .filter(|link| link_ids.contains(&link.id))
-                .cloned()
-                .collect())
+            self.store.query_links_by_ids(link_ids).await
         }
 
         async fn query_derived_memories_by_provenance(
             &self,
-            _query: &GraphDerivedMemoryProvenanceQuery,
+            query: &GraphDerivedMemoryProvenanceQuery,
         ) -> Result<Vec<DerivedMemory>, CustomError> {
-            Ok(Vec::new())
+            self.store.query_derived_memories_by_provenance(query).await
         }
 
         async fn query_derived_memories_by_thread(
@@ -3465,26 +3434,14 @@ mod tests {
             query: &GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<DerivedMemory>, CustomError> {
             lock(&self.calls).push(StoreCall::GraphThreadQuery(query.thread_ids.clone()));
-            Ok(lock(&self.objects)
-                .iter()
-                .filter_map(|object| match object {
-                    MemoryObject::DerivedMemory(memory) => Some(memory.clone()),
-                    _ => None,
-                })
-                .filter(|memory| {
-                    memory
-                        .thread_ids
-                        .iter()
-                        .any(|thread_id| query.thread_ids.contains(thread_id))
-                })
-                .collect())
+            self.store.query_derived_memories_by_thread(query).await
         }
 
         async fn expand_bounded(
             &self,
-            _query: &GraphExpansionQuery,
+            query: &GraphExpansionQuery,
         ) -> Result<GraphExpansion, CustomError> {
-            Ok(GraphExpansion::new(Vec::new(), Vec::new()))
+            self.store.expand_bounded(query).await
         }
     }
 

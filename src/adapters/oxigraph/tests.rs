@@ -27,9 +27,7 @@ mod tests {
         GraphExpansionQuery, GraphObjectQuery,
     };
     use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
-    use crate::test_support::{
-        high_fanout_graph_fixture, representative_fixtures, FakeGraphAuthorityStore,
-    };
+    use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
     use crate::usecases::RetrievePipeline;
     use crate::CustomError;
     use async_trait::async_trait;
@@ -79,17 +77,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_object_query_variants_have_fake_oxigraph_empty_and_non_empty_parity() {
+    async fn oxigraph_round_trips_subsecond_object_and_link_timestamps() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let mut fixtures = representative_fixtures();
+        let timestamp = chrono::DateTime::parse_from_rfc3339("2026-09-14T07:00:00.123456789Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        fixtures.episode.created_at = timestamp;
+        fixtures.episode.started_at = Some(timestamp);
+        fixtures.episode.ended_at = Some(timestamp);
+        fixtures.salient_observation.created_at = timestamp;
+        fixtures.salient_observation.observed_at = Some(timestamp);
+        let mut link = fixtures.soft_thread_link.clone();
+        link.created_at = timestamp;
+        store
+            .upsert_objects_and_links(&fixtures.objects(), std::slice::from_ref(&link))
+            .await
+            .unwrap();
+
+        let objects = store
+            .query_objects(&GraphObjectQuery::by_ids(vec![
+                fixtures.episode.id,
+                fixtures.salient_observation.id,
+            ]))
+            .await
+            .unwrap();
+        let links = store.query_links_by_ids(&[link.id]).await.unwrap();
+        assert_eq!(
+            (objects, links),
+            (
+                vec![
+                    MemoryObject::Episode(fixtures.episode),
+                    MemoryObject::Observation(fixtures.salient_observation),
+                ],
+                vec![link],
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn oxigraph_object_selection_obeys_predicates_ordering_and_limits() {
         let oxigraph = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let fake = FakeGraphAuthorityStore::new();
         let fixtures = representative_fixtures();
         let episode = MemoryObject::Episode(fixtures.episode.clone());
         let observation = MemoryObject::Observation(fixtures.salient_observation.clone());
         let entity = MemoryObject::Entity(fixtures.user_entity.clone());
-        let objects = vec![episode.clone(), observation, entity];
+        let mut colliding_entity = fixtures.project_entity.clone();
+        colliding_entity.id = episode.id();
+        let colliding_entity = MemoryObject::Entity(colliding_entity);
+        // Input order differs from the contract's ID-then-type order, including an ID tie.
+        let objects = vec![
+            observation.clone(),
+            colliding_entity.clone(),
+            episode.clone(),
+            entity.clone(),
+        ];
+        let ordered_objects = vec![
+            entity.clone(),
+            episode.clone(),
+            colliding_entity.clone(),
+            observation.clone(),
+        ];
+        let unknown_id = MemoryId::from_u128(u128::MAX);
 
         oxigraph.upsert_objects(&objects).await.unwrap();
-        fake.upsert_objects(&objects).await.unwrap();
 
         let cases = vec![
             (
@@ -98,9 +149,35 @@ mod tests {
                 Vec::new(),
             ),
             (
-                "non-empty refs",
+                "refs match both identifier and type",
                 GraphObjectQuery::by_refs(vec![episode.object_ref()]),
                 vec![episode.clone()],
+            ),
+            (
+                "mixed-type refs preserve identifier/type pairs",
+                GraphObjectQuery::by_refs(vec![episode.object_ref(), entity.object_ref()]),
+                vec![entity.clone(), episode.clone()],
+            ),
+            (
+                "refs order by identifier then type rank",
+                GraphObjectQuery::by_refs(objects.iter().map(MemoryObject::object_ref).collect()),
+                ordered_objects.clone(),
+            ),
+            (
+                "unknown refs",
+                GraphObjectQuery::by_refs(vec![MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    unknown_id,
+                )]),
+                Vec::new(),
+            ),
+            (
+                "known identifier with wrong reference type",
+                GraphObjectQuery::by_refs(vec![MemoryObjectRef::new(
+                    ObjectType::Entity,
+                    observation.id(),
+                )]),
+                Vec::new(),
             ),
             (
                 "empty ids",
@@ -108,9 +185,19 @@ mod tests {
                 Vec::new(),
             ),
             (
-                "non-empty ids",
+                "ids select every matching type",
                 GraphObjectQuery::by_ids(vec![episode.id()]),
-                vec![episode.clone()],
+                vec![episode.clone(), colliding_entity.clone()],
+            ),
+            (
+                "ids order by identifier then type rank",
+                GraphObjectQuery::by_ids(vec![observation.id(), episode.id(), entity.id()]),
+                ordered_objects,
+            ),
+            (
+                "unknown ids",
+                GraphObjectQuery::by_ids(vec![unknown_id]),
+                Vec::new(),
             ),
             (
                 "empty types",
@@ -118,18 +205,34 @@ mod tests {
                 Vec::new(),
             ),
             (
-                "non-empty types",
-                GraphObjectQuery::by_types(vec![ObjectType::Episode], Some(1)),
-                vec![episode],
+                "types filter and order by identifier then type rank",
+                GraphObjectQuery::by_types(vec![ObjectType::Episode, ObjectType::Entity], None),
+                vec![entity.clone(), episode.clone(), colliding_entity],
+            ),
+            (
+                "limit follows identifier and type-rank ordering",
+                GraphObjectQuery::by_types(vec![ObjectType::Episode, ObjectType::Entity], Some(2)),
+                vec![entity, episode.clone()],
+            ),
+            (
+                "type filtering precedes limit",
+                GraphObjectQuery::by_types(
+                    vec![ObjectType::Episode, ObjectType::Observation],
+                    Some(2),
+                ),
+                vec![episode, observation],
+            ),
+            (
+                "zero limit",
+                GraphObjectQuery::by_types(vec![ObjectType::Episode, ObjectType::Entity], Some(0)),
+                Vec::new(),
             ),
         ];
 
         for (label, query, expected) in cases {
             let oxigraph_objects = oxigraph.query_objects(&query).await.unwrap();
-            let fake_objects = fake.query_objects(&query).await.unwrap();
 
             assert_eq!(oxigraph_objects, expected, "Oxigraph {label}");
-            assert_eq!(fake_objects, expected, "fake {label}");
         }
     }
 
@@ -500,9 +603,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oxigraph_utilization_excludes_suppressed_intermediate_and_matches_in_memory() {
+    async fn oxigraph_utilization_excludes_suppressed_intermediate() {
         let embedded = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let in_memory = FakeGraphAuthorityStore::new();
         let fixtures = representative_fixtures();
         let objects = vec![
             MemoryObject::Entity(fixtures.hub_entity.clone()),
@@ -548,15 +650,12 @@ mod tests {
         ];
         embedded.upsert_objects(&objects).await.unwrap();
         embedded.upsert_links(&links).await.unwrap();
-        in_memory.upsert_objects(&objects).await.unwrap();
-        in_memory.upsert_links(&links).await.unwrap();
 
         let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 2, 10)
             .with_allowed_object_types(vec![ObjectType::DerivedMemory])
             .with_max_fanout_per_node(1)
             .with_fanout_utilization_recording(crate::ports::graph_authority::TraceMode::Enabled);
         let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
-        let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
 
         assert!(embedded_expansion.filtered_nodes.iter().any(|filtered| {
             filtered.object_ref.id == fixtures.suppressed_seed.id
@@ -571,16 +670,11 @@ mod tests {
             .iter()
             .all(|entry| entry.root.id == fixtures.hub_entity.id));
         assert!(!embedded_expansion.fanout_utilization.is_empty());
-        assert_eq!(
-            embedded_expansion.fanout_utilization,
-            in_memory_expansion.fanout_utilization
-        );
     }
 
     #[tokio::test]
     async fn oxigraph_utilization_excludes_nodes_returned_only_at_max_depth() {
         let embedded = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let in_memory = FakeGraphAuthorityStore::new();
         let fixtures = representative_fixtures();
         let objects = vec![
             MemoryObject::Entity(fixtures.hub_entity.clone()),
@@ -652,13 +746,10 @@ mod tests {
         ];
         embedded.upsert_objects(&objects).await.unwrap();
         embedded.upsert_links(&links).await.unwrap();
-        in_memory.upsert_objects(&objects).await.unwrap();
-        in_memory.upsert_links(&links).await.unwrap();
 
         let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 3, 20)
             .with_fanout_utilization_recording(crate::ports::graph_authority::TraceMode::Enabled);
         let embedded_expansion = embedded.expand_bounded(&query).await.unwrap();
-        let in_memory_expansion = in_memory.expand_bounded(&query).await.unwrap();
 
         assert!(embedded_expansion.objects.iter().any(|object| {
             matches!(object, MemoryObject::DerivedMemory(memory) if memory.id == fixtures.user_preference.id)
@@ -671,10 +762,6 @@ mod tests {
             .fanout_utilization
             .iter()
             .any(|entry| entry.root.id == fixtures.salient_observation.id));
-        assert_eq!(
-            embedded_expansion.fanout_utilization,
-            in_memory_expansion.fanout_utilization
-        );
     }
 
     #[tokio::test]
