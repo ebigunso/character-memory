@@ -17,7 +17,7 @@ superseded_by: null
 supersession_scope: null
 ---
 
-# ADR-I-0029: Structured outcomes are authoritative and prose is derived once at the owning type
+# ADR-I-0029: Structured outcomes are authoritative and prose is derived by the owning type
 
 ## Context and Problem Statement
 
@@ -32,7 +32,7 @@ Every public path of the library reports what it did through outcomes, diagnosti
 
 ## Decision
 
-Structure is authoritative and prose is a projection derived exactly once, at the type that owns the structure.
+Structure is authoritative and prose is a projection derived by the single type that owns the structure.
 
 - Every public outcome, trace element, and error payload carries its evidence as typed fields: identifiers as identifier types, object references as the shared object reference, vocabularies as enums, causes as the typed cause. Evidence means a fact a consumer acts on or asserts: which object, which surface, which vocabulary value, which cause, how many. An opaque detail that no consumer branches on (a backend driver message, a parser's own text, a file path from the environment) may be carried as a string field beside the typed fields. No producer interpolates evidence into a message, and no message is the only carrier of a structured fact. A diagnostic is the one bounded exception: it is a rendering (a severity, a code, and a message) of typed facts that travel on the same outcome, so it may carry prose, but only prose derived from those typed facts, and never a fact that exists nowhere else.
 - Each such payload renders its message in one place, its own display implementation; the top-level error type carries every payload as a typed field a consumer can match on, whether wrapped transparently, attached as a source, or formatted into the variant's own message. A composite message, such as a diagnostic that names a cause, is assembled only from those displays and never from a payload's fields, and the typed cause travels on the outcome beside the diagnostic so the message is never the only carrier.
@@ -46,7 +46,7 @@ Provenance and inspectable recall are product goals: a character must be able to
 
 ## Implementation Impact
 
-- A new outcome, diagnostic, or error is designed as a typed payload first; its message is written once on that type.
+- A new outcome, diagnostic, or error is designed as a typed payload first; that type is the sole author of its message.
 - Adding evidence to an existing outcome adds a field or a variant, never a phrase.
 - Consumers exhaustively match the closed vocabularies, so a new variant is a compile-time event for every consumer rather than a silent change in wording.
 - Consumers, including the evaluation harness through its own conversion layer, take the structured fields and never parse prose.
