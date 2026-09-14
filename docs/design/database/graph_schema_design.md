@@ -377,23 +377,13 @@ Oxigraph verifies existence, relationships, provenance, lifecycle, and context
 
 The vector payload does not duplicate graph-derived hints. Retrieval joins candidates to Oxigraph by stable object ID, then applies relationships, provenance, lifecycle, currentness, and context from graph authority.
 
-Internal reconciliation diagnostics can report cross-store drift:
-
-- vector point exists but graph object is missing
-- graph object exists but vector point is missing
-- vector payload schema version is unsupported
-- vector payload identity or surface token is malformed
-- graph object is missing required provenance
-- stats counter refers to graph edge/object state that no longer exists
-- stats health indicates conservative fallback should be used
-
-The initial boundary is report-only. Diagnostics do not change normal retrieval behavior and are not exposed through the public facade by default.
+No reconciliation pass runs between the stores. A vector write that fails after the graph commit surfaces as a typed vector-indexing failure in the write outcome while the graph commit stands; a candidate with an unsupported schema version or an unknown identity or surface token fails decoding; every remaining candidate is verified through graph authority before it can enter a context pack; and the retrieval stats store reports its own health so retrieval falls back to conservative selectivity after an internal failure until the counters are rebuilt from graph authority. Cross-store census operations are an operator concern outside the library.
 
 ## Future Revisit Points
 
 Revisit this design when:
 
-- public/admin reconciliation operations need a stable facade
+- cross-store reconciliation or census operations need a library facade
 - stats diagnostics reveal that the selectivity model needs more dimensions
 - belief/claim tracking adds richer factual rigor semantics
 - some relation types become important enough to deserve specialized objects

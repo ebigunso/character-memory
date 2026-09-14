@@ -9,7 +9,7 @@ This is the compact schema reference. The companion design notes explain why the
 
 | Store | Role | Authoritative For | Not Authoritative For |
 |---|---|---|---|
-| Qdrant | Vector candidate recall and object-type prefiltering | Vector points and embedding-surface provenance | Memory content, existence, relationships, provenance, lifecycle, currentness, entity selectivity |
+| Qdrant (service or embedded Qdrant Edge, one record contract) | Vector candidate recall and object-type prefiltering | Vector points and embedding-surface provenance | Memory content, existence, relationships, provenance, lifecycle, currentness, entity selectivity |
 | Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking, derived selectivity counters |
 | RetrievalStatsStore | Derived retrieval-policy statistics | Entity/relation counters, global counters, selectivity inputs, fanout diagnostics | Memory existence, relationships, provenance, lifecycle, currentness, semantic ranking |
 | Raw store / caller storage | Source material | Raw transcript or source content behind `raw_ref` | Canonical memory state |
@@ -182,7 +182,7 @@ Core stats tables:
 entity_edge_index
 entity_relation_counts
 global_relation_counts
-stats_meta, optional
+stats_meta
 ```
 
 The stats store answers retrieval-policy questions such as:
@@ -214,6 +214,13 @@ Oxigraph verifies graph truth.
 The final context pack follows Oxigraph state.
 ```
 
-## Reconciliation Diagnostics
+## Drift Handling
 
-Internal diagnostics can report vector-only records, graph-only records, unsupported vector schema versions, malformed vector identity or surface tokens, graph records with missing required provenance, stats records missing graph authority, stats health failures, and low-selectivity expansions rejected by policy. The initial boundary is report-only; diagnostics do not repair stores or expose a public facade API by default.
+There is no reconciliation pass between the stores. Drift is prevented at write time and neutralised at read time:
+
+- A vector write that fails after the graph commit is reported as a typed vector-indexing failure in the public write outcome, naming the affected objects and the cause; the graph commit stands.
+- A candidate whose payload carries an unsupported schema version or an unknown object-type or surface token fails decoding and never becomes a candidate.
+- Every surviving candidate is hydrated and verified through graph authority before it can enter a context pack, so a stale or orphaned vector point cannot surface a memory the graph does not hold or no longer holds current.
+- The retrieval stats store records its own health; after an internal failure it reports unhealthy and retrieval falls back to conservative selectivity until the counters are rebuilt from graph authority.
+
+Cross-store census operations (vector points without a graph object, graph objects without a vector point) are not part of the library; an operator performs them against the stores directly if needed.
