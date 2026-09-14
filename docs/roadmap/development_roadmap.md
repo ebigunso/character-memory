@@ -258,7 +258,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.1.2 | Continuous entity selectivity and retrieval guardrails | New. Use-case-agnostic guardrails for high-degree or low-selectivity entities, persistent retrieval statistics, continuous selectivity scoring, relation-specific fanout control, low-information co-occurrence prevention, and diagnostics. |
 | v0.1.3 | Remember intake interfaces and deterministic write planning | Finished. Generation-ready write path with `RememberWritePlan`, memory candidates, validation, deterministic helpers, prepare/validate/commit flow, and shared manual/future-generated commit machinery. |
 | v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
-| v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](../design/roadmap-phases/v0_1_5_closeout_report.md). |
+| v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md). |
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
 | v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
 | v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
@@ -402,7 +402,7 @@ Concrete LLM providers should be adapters or examples, not hard dependencies.
 
 # 5. v0.1: starter episodic memory
 
-Detailed draft: [`v0_1_starter_episodic_memory.md`](../design/roadmap-phases/v0_1_starter_episodic_memory.md)
+Detailed draft: [`v0_1_starter_episodic_memory.md`](roadmap-phases/v0_1_starter_episodic_memory.md)
 
 ## Core concepts
 
@@ -442,7 +442,7 @@ Corrections can supersede older derived memories.
 
 # 6. v0.1 backend contracts
 
-Detailed draft: [`v0_1_storage_and_backend_contracts.md`](../design/roadmap-phases/v0_1_storage_and_backend_contracts.md)
+Detailed draft: [`v0_1_storage_and_backend_contracts.md`](roadmap-phases/v0_1_storage_and_backend_contracts.md)
 
 ## Goals
 
@@ -471,7 +471,7 @@ retrieval behavior is deterministic under fixed fixtures
 
 # 7. v0.1.1: persistent graph authority
 
-Detailed draft: [`v0_1_1_persistent_graph_authority.md`](../design/roadmap-phases/v0_1_1_persistent_graph_authority.md)
+Detailed draft: [`v0_1_1_persistent_graph_authority.md`](roadmap-phases/v0_1_1_persistent_graph_authority.md)
 
 ## Intent
 
@@ -538,7 +538,7 @@ Existing v0.1 public APIs continue to work.
 
 # 8. v0.1.2: continuous entity selectivity and retrieval guardrails
 
-Detailed draft: [`v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md`](../design/roadmap-phases/v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md)
+Detailed draft: [`v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md`](roadmap-phases/v0_1_2_continuous_entity_selectivity_retrieval_guardrails.md)
 
 ## Intent
 
@@ -713,7 +713,7 @@ Synthetic high-degree fixtures cover people, places, projects, topics, objects, 
 
 # 9. v0.1.3: remember intake interfaces and deterministic write planning
 
-Detailed draft: [`v0_1_3_remember_intake_interfaces_deterministic_write_planning.md`](../design/roadmap-phases/v0_1_3_remember_intake_interfaces_deterministic_write_planning.md)
+Detailed draft: [`v0_1_3_remember_intake_interfaces_deterministic_write_planning.md`](roadmap-phases/v0_1_3_remember_intake_interfaces_deterministic_write_planning.md)
 
 ## Intent
 
@@ -1088,7 +1088,7 @@ v0.1.3 keeps candidate state simpler unless implementation clearly requires more
 
 # 10. v0.1.4: continuity evaluation harness
 
-Detailed draft: [`v0_1_4_continuity_evaluation_harness.md`](../design/roadmap-phases/v0_1_4_continuity_evaluation_harness.md)
+Detailed draft: [`v0_1_4_continuity_evaluation_harness.md`](roadmap-phases/v0_1_4_continuity_evaluation_harness.md)
 
 ## Intent
 
@@ -1156,9 +1156,9 @@ Selectivity and fanout measurements are recorded in a form usable for tuning def
 
 # 11. v0.1.5: eval-driven v0.1 family closeout
 
-Detailed draft: [`v0_1_5_eval_driven_v0_1_family_closeout.md`](../design/roadmap-phases/v0_1_5_eval_driven_v0_1_family_closeout.md)
+Detailed draft: [`v0_1_5_eval_driven_v0_1_family_closeout.md`](roadmap-phases/v0_1_5_eval_driven_v0_1_family_closeout.md)
 
-Closeout report: [`v0_1_5_closeout_report.md`](../design/roadmap-phases/v0_1_5_closeout_report.md) (findings and dispositions, shipped changes, confirmation evidence, deferred findings, v0.2 entry confirmation).
+Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md) (findings and dispositions, shipped changes, confirmation evidence, deferred findings, v0.2 entry confirmation).
 
 ## Intent
 
@@ -1200,7 +1200,7 @@ v0.2 entry is explicitly confirmed against the closed v0.1 family.
 
 # 12. v0.1.6: embedded vector candidate recall
 
-Detailed draft: [`v0_1_6_embedded_vector_candidate_recall.md`](../design/roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md)
+Detailed draft: [`v0_1_6_embedded_vector_candidate_recall.md`](roadmap-phases/v0_1_6_embedded_vector_candidate_recall.md)
 
 Decisions: ADR-I-0023 (embedded Qdrant Edge is the default vector candidate store), ADR-I-0024 (vector candidate recall reports completeness), ADR-I-0025 (the vector record is a read contract), ADR-I-0026 (raw vector baselines read the retrieval trace), ADR-I-0027 (the embedded engine runs on a blocking owner that flushes every write), ADR-I-0028 (vector prefilters require fully populated current columns and never match unknown values).
 
@@ -1249,7 +1249,7 @@ No public facade change beyond the telemetry field, the published maximum-surfac
 
 # 13. v0.2: scoped continuity and reflection
 
-Detailed draft: [`v0_2_scoped_continuity_reflection.md`](../design/roadmap-phases/v0_2_scoped_continuity_reflection.md)
+Detailed draft: [`v0_2_scoped_continuity_reflection.md`](roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
 ## New concepts
 
@@ -1297,7 +1297,7 @@ Open loops and commitments can be retrieved by scope without assuming who the ma
 
 # 14. v0.3: factual rigor, temporal validity, and entity evolution
 
-Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](../design/roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
+Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
 
 ## New concepts
 
@@ -1328,7 +1328,7 @@ This is important, but it should not block the starter because Character Memory'
 
 # 15. v0.4: retrieval observability and governance
 
-Detailed draft: [`v0_4_retrieval_observability_governance.md`](../design/roadmap-phases/v0_4_retrieval_observability_governance.md)
+Detailed draft: [`v0_4_retrieval_observability_governance.md`](roadmap-phases/v0_4_retrieval_observability_governance.md)
 
 ## New concepts
 
@@ -1410,7 +1410,7 @@ The default intent is `Continuity`.
 
 # 16. v0.5: controlled associative recall and clustering
 
-Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](../design/roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
+Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
 
 ## New concepts
 
@@ -1472,7 +1472,7 @@ Durable graph truth is the associative unit, membership lifecycle, and support e
 
 # 17. v0.6: assisted remember workflow and memory candidate generation
 
-Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](../design/roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
+Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
 
 ## Intent
 
@@ -1566,7 +1566,7 @@ Generated candidates use the same validation and commit path as manual candidate
 
 # 18. v1.0+: multimodal and embodied expansion
 
-Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](../design/roadmap-phases/v1_0_multimodal_embodied_expansion.md)
+Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](roadmap-phases/v1_0_multimodal_embodied_expansion.md)
 
 ## New concepts
 

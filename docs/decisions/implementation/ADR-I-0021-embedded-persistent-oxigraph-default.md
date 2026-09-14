@@ -104,5 +104,5 @@ The authority split is unaffected: Qdrant suggests vector candidates, stats guid
 
 - ADR-I-0003 (backend defaults; embedded graph-authoritative storage — unchanged by this decision).
 - ADR-I-0020 (restart identity via caller-supplied ids; one of the process-local components that bounds deployment shape).
-- Roadmap phase document `docs/design/roadmap-phases/v0_1_1_persistent_graph_authority.md` (historical record of the superseded service-default guidance).
+- Roadmap phase document `docs/roadmap/roadmap-phases/v0_1_1_persistent_graph_authority.md` (historical record of the superseded service-default guidance).
 - The completed service-remote-SPARQL graph-authority plan (targeted SPARQL query design reference).

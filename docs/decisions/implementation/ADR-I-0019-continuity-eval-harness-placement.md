@@ -100,5 +100,5 @@ Option 4 is the wrong boundary. A feature-gated module would place evaluation co
 
 ## More Information
 
-- Roadmap phase: `docs/design/roadmap-phases/v0_1_4_continuity_evaluation_harness.md`.
+- Roadmap phase: `docs/roadmap/roadmap-phases/v0_1_4_continuity_evaluation_harness.md`.
 - Related ADR: ADR-I-0018, whose revisit trigger covers concepts with no unambiguous home in the responsibility-boundary module layout.

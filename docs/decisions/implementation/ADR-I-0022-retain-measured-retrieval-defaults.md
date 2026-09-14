@@ -97,4 +97,4 @@ Option 3 is contradicted by the measurements: larger root limits bought context-
 
 - ADR-I-0010 (continuous selectivity and smooth fanout; the mechanism whose defaults this ADR confirms).
 - ADR-I-0016 and the v0.2 roadmap phase (the deferred admission/ranking and selectivity-widening work).
-- The [v0.1.5 closeout report](../../design/roadmap-phases/v0_1_5_closeout_report.md) (findings dispositions and deferred-findings table).
+- The [v0.1.5 closeout report](../../roadmap/roadmap-phases/v0_1_5_closeout_report.md) (findings dispositions and deferred-findings table).
