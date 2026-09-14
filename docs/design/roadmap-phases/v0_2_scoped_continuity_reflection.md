@@ -13,6 +13,12 @@ The v0.1.5 closeout (see the [closeout report](v0_1_5_closeout_report.md)) hands
 - Build scoped and person-keyed evaluation scenarios (continuity situation catalog items B1-B3: person-keyed separation, group versus one-on-one frames, differential relationship states) BEFORE implementing ContinuityScope, so scope-leakage is measurable from the first implementation — preserving the eval-first pattern v0.1.5 established.
 - Answer the intra-process concurrency question ReflectionJob introduces: background derivation inside one process creates write/read interleaving the v0.1 family never had to answer; the single-writer assumptions in the current stores must be examined against reflection scheduling.
 
+Carried into v0.2 planning from earlier audits (each enters the planning-time value audit and is scheduled or declined there):
+
+- The `MutationPlan.stats_projection_objects` and `stats_projection_links` parallel clones in `src/usecases/correct_forget.rs` (2026-07-22 value audit verdict OVERSIZED): replace with an omitted-id filter at projection time inside the next task that touches the correction path.
+- The idempotency-ledger question (blind-upsert lifecycle paths; attempt-versus-operation identity), which pairs with reflection scheduling.
+- The lifecycle DTO modes finding (modes the implementation rejects), which intersects the scoped-continuity lifecycle work and must be designed once with it.
+
 Caveat on inherited baselines: the benchmark gap-bucket recall baselines rest on small per-bucket sample counts (medium n=3, long n=4); treat them as directional planning input, not stable regression thresholds, until the benchmark roster widens.
 
 The key refinement in this version is scope:
