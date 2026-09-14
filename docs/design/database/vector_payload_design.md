@@ -79,5 +79,5 @@ The write-side indexing service rejects a zero-norm record embedding before call
 ## Failure Handling
 
 - Write side: the indexing service rejects a zero-norm embedding before the adapter is called, and a vector write that fails after the graph commit is reported as a typed vector-indexing failure in the public outcome, naming the affected objects and the cause.
-- Read side: a point whose schema version is unsupported or whose object_type or surface token is unknown fails candidate decoding; every decoded candidate is verified through graph authority before it can enter a context pack.
+- Read side: a point whose object_id is not a well-formed identifier or whose object_type or surface token is unknown fails candidate decoding; the schema version is enforced when a record is written, not when a point is read. Every decoded candidate is verified through graph authority before it can enter a context pack, which omits points whose object is absent or no longer current.
 - No reconciliation pass exists in the library; obsolete extra payload fields on old points are not read and are not treated as authority.
