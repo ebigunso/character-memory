@@ -89,4 +89,4 @@ A port must serve adapters that cannot establish a property at all (for example 
 ## More Information
 
 - Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 and its Decision Log entries, which record the deletion of the three repair passes.
-- ADR-I-0029 (structured outcomes are authoritative) was decided in the same phase.
+- ADR-I-0029 (structured outcomes are authoritative) records the other durable ruling of the structured-verdict observability plan named above.

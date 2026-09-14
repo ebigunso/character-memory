@@ -2,7 +2,7 @@
 
 - status: done
 - generated: 2026-07-21
-- last_updated: 2026-07-23
+- last_updated: 2026-09-14
 - work_type: code
 
 ## Goal
@@ -160,7 +160,9 @@
 
 ## Appendix: finding-disposition table and in-flight amendments (moved from the retired design note `docs/design/structured_verdict_contract.md`, 2026-09-14)
 
-The design note that carried this phase's contract was retired when its two durable rulings became ADR-I-0029 and ADR-I-0030; the per-finding dispositions and the amendments recorded during implementation are preserved here unchanged.
+The design note that carried this phase's contract was retired when its two durable rulings became ADR-I-0029 and ADR-I-0030; the per-finding dispositions and the amendments recorded during implementation are preserved here unchanged, as historical records of what was decided in July 2026. Later phases changed some of the shapes they name (for example the shared vector-indexing cause enum gained a zero-norm-embedding variant in v0.1.6); the code and the governing ADRs are authoritative for the current shape.
+
+The section numbers cited in the table and the amendments refer to the retired note's own sections, which covered: section 1, the typed validation-issue vocabulary (now the closed-vocabulary rule of ADR-I-0029); section 2, the typed error story (the payload and display rules of ADR-I-0029); section 3, the trace identity additions (vector surface, link id, section-assignment reason, telemetry echo); section 4, postcondition ownership (ADR-I-0030); section 5, the library consolidations (indexing service, stats projection service, shared object reference, payload schema manifest, query enum); section 6, the evaluation-repository contract of that phase (typed DTO vocabularies and report schema 2.0.0 with the bounded 1.0.0 dispatch, since retired by the evaluation repository's ADR-I-0005); section 7, this table.
 
 ### Finding-disposition table
 

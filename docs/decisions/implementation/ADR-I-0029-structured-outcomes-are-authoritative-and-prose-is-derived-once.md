@@ -92,4 +92,4 @@ A consumer class appears that can only receive text (for example a transport tha
 ## More Information
 
 - Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`, Decision Log and its amendments), where the typed vocabularies, the typed error story, and the trace identity fields were decided finding by finding; this record states the rule they share.
-- ADR-I-0030 (ports own their postconditions) was decided in the same phase.
+- ADR-I-0030 (ports own their postconditions) records the other durable ruling of the structured-verdict observability plan named above.
