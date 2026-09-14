@@ -21,7 +21,7 @@ supersession_scope: null
 
 ## Context and Problem Statement
 
-Before this decision the retrieval pipeline re-canonicalised the candidates a vector store had already returned, the retrieval assembly re-evaluated lifecycle filtering that graph expansion had already declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query already owned those predicates. Each pass existed because some adapter had once returned something the port did not promise. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
+Until the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`) the retrieval pipeline re-canonicalised the candidates a vector store had already returned, the retrieval assembly re-evaluated lifecycle filtering that graph expansion had already declared, removed contradictory omissions, and de-duplicated decisions a second time, and the graph selector post-filtered and re-sorted rows whose query already owned those predicates. Each pass existed because an adapter had at some point failed to satisfy a postcondition the port stated, and the caller compensated instead of the adapter being fixed. The passes hid those adapter defects, duplicated policy in two places that could drift apart, and left the port contracts untested, since the pipeline no longer depended on them.
 
 ## Decision Drivers
 
@@ -63,7 +63,7 @@ Chosen option: **Option 1**. It makes every port contract load-bearing and there
 
 Option 2 masks adapter defects, duplicates policy, and taxes every caller; rejected outright.
 
-Option 3 is how the repair passes came to exist; a stated but unenforced postcondition is violated the first time an adapter is written by someone who did not read it; rejected outright.
+Option 3 is the state that produced the repair passes; a stated but unenforced postcondition is violated the first time an adapter is written by someone who did not read it; rejected outright.
 
 ## Consequences
 
@@ -88,5 +88,5 @@ A port must serve adapters that cannot establish a property at all (for example 
 
 ## More Information
 
-- Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 and its Decision Log entries, where the three repair passes were deleted.
+- Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 and its Decision Log entries, which record the deletion of the three repair passes.
 - ADR-I-0029 (structured outcomes are authoritative) was decided in the same phase.
