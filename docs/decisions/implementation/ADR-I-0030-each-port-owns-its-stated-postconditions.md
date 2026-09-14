@@ -35,7 +35,7 @@ The state that the structured-verdict observability plan (`docs/coding-agent/pla
 Each port owns the postconditions it states, and no layer above a port repairs, re-filters, re-sorts, or de-duplicates that port's output.
 
 - A postcondition is enforced at the boundary that states it, by one of two mechanisms chosen per site by cost: a result type whose only constructor establishes the property (so an adapter cannot return a value that violates it), or a contract test that every adapter must pass, where the test fake either runs the same test or delegates to the shared policy the adapters use so it cannot diverge from them.
-- Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself.
+- Canonical vector candidates are established by the constructor of the candidate result type; lifecycle filtering of graph expansion is owned by graph expansion as declared by its query; graph object selection owns its reference, identifier, type predicates and ordering in the query itself, a postcondition each adapter establishes independently and whose shared contract test is pending (see Validation).
 - When an adapter violates a postcondition, the fix is in the adapter and its contract test, never a compensating pass above the port.
 - Query semantics are total: an empty targeted selection selects nothing in every adapter, and no query silently widens to everything.
 
@@ -79,7 +79,7 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). For the graph port, the bounded-expansion postconditions are validated by adapter tests plus the shared test fake that delegates that expansion to the shared policy, which is what keeps that fake from diverging there; object selection is validated by adapter tests alone. Test doubles that only record calls inside use-case tests are not enforcement of any postcondition and make no claim to be. A postcondition stated on the selection path, or any graph postcondition the shared policy does not express, brings a shared contract test that the adapters and the shared test fake run.
+- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). For the graph port, the bounded-expansion postconditions are validated by adapter tests plus the shared test fake that delegates that expansion to the shared policy, which is what keeps that fake from diverging there; object selection is validated by the Oxigraph adapter tests only, and the shared test fake implements selection independently without a contract test over it, so that postcondition is stated but not yet contract-enforced on the fake; the shared selection contract test is the outstanding validation item for this record. Test doubles that only record calls inside use-case tests are not enforcement of any postcondition and make no claim to be. Any further graph postcondition the shared policy does not express brings a shared contract test that the adapters and the shared test fake run.
 - Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When
@@ -88,5 +88,5 @@ A port must serve adapters that cannot establish a property at all (for example 
 
 ## More Information
 
-- Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 and its Decision Log entries, which record the deletion of the three repair passes.
+- Design history: the structured-verdict observability phase (`docs/coding-agent/plans/completed/structured-verdict-observability-plan.md`), finding R2-09 in the Task_2 description and in the finding-disposition table of the appendix, which record the deletion of the three repair passes.
 - ADR-I-0029 (structured outcomes are authoritative) records the other durable ruling of the structured-verdict observability plan named above.
