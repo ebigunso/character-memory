@@ -2,7 +2,7 @@
 
 > Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0028](../../decisions/implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md) governs any future prefilter re-entry.
 
-This document describes the Qdrant record contract for Character Memory. The contract is the same for the service adapter and for the embedded Qdrant Edge adapter (the default vector store, ADR-I-0023); the two differ only in where the engine runs. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
+This document describes the Qdrant record contract for Character Memory. The record contract is shared by the service adapter and the embedded Qdrant Edge adapter (the default vector store); what differs between them, engine placement, the blocking-owner discipline of the embedded engine, and the adapter-specific behaviour those records name, is documented in ADR-I-0023 and ADR-I-0027, not here. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
 
 A Qdrant hit means that an object may be relevant. Retrieval must hydrate and verify that object through graph authority before it can enter a continuity context pack.
 
