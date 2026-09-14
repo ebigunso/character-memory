@@ -857,7 +857,7 @@ Symptom:
 - A shared parity suite was being extended to keep FakeGraphAuthorityStore aligned with the Oxigraph adapter, while the adapter's in-memory mode was already a production configuration.
 
 Root cause:
-- The fake dated from the store-contracts phase, before the adapter matured; it carried no failure injection or call recording, only a second implementation of selection, ordering and expansion, kept alive by habit at 85 test sites.
+- The fake dated from the store-contracts phase, before the adapter matured; it carried no failure injection or call recording, only a second implementation of selection, ordering and expansion, kept alive by habit at 85 symbol references (72 construction sites).
 
 Fix applied:
 - The decider ruled deletion: every site uses the in-memory Oxigraph adapter; the two recording doubles wrap the real adapter and keep only recording and injected failures; the former parity test is an adapter contract test; ADR-I-0030 names the adapter tests as the validation (CM PR #94).
