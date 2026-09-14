@@ -1158,6 +1158,8 @@ Selectivity and fanout measurements are recorded in a form usable for tuning def
 
 Detailed draft: [`v0_1_5_eval_driven_v0_1_family_closeout.md`](../design/roadmap-phases/v0_1_5_eval_driven_v0_1_family_closeout.md)
 
+Closeout report: [`v0_1_5_closeout_report.md`](../design/roadmap-phases/v0_1_5_closeout_report.md) (findings and dispositions, shipped changes, confirmation evidence, deferred findings, v0.2 entry confirmation).
+
 ## Intent
 
 Run the v0.1.4 harness against the full v0.1 family feature surface, identify weaknesses, fix them, and close out the v0.1 family before scoped continuity work begins.
