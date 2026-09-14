@@ -6,7 +6,7 @@ v0.1 stores episodes and simple derived memories. v0.1.2 hardens retrieval so br
 
 ## Inherited from the v0.1.5 closeout
 
-The v0.1.5 closeout (see the closeout report in `docs/roadmap/`) hands this phase four explicit obligations:
+The v0.1.5 closeout (see the [closeout report](v0_1_5_closeout_report.md)) hands this phase four explicit obligations:
 
 - Own the joined admission/ranking design item deferred from v0.1.5: admission gating and ranking credit for graph-only evidence, so relevant memories reachable only through graph structure are not starved by vector-scored items at pack admission. Planning baseline: the graph-only probe scenario and the recorded benchmark baselines; pack-admission changes invalidate the pollution and context-size baselines recorded in ADR-I-0022 and must re-measure.
 - Own the selectivity-widening item deferred from v0.1.5: applying selectivity beyond entity roots requires retrieval statistics keyed by something other than entities, which is this phase's signal design to make or explicitly decline.
