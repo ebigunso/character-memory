@@ -850,3 +850,54 @@ Prevention:
 
 Evidence:
 - Decider feedback 2026-09-14 in the orchestration session.
+
+## 2026-09-14 - A test fake that re-implements a port is deleted when the real adapter has an in-memory mode [tags: orchestrator, testing, ports]
+
+Symptom:
+- A shared parity suite was being extended to keep FakeGraphAuthorityStore aligned with the Oxigraph adapter, while the adapter's in-memory mode was already a production configuration.
+
+Root cause:
+- The fake dated from the store-contracts phase, before the adapter matured; it carried no failure injection or call recording, only a second implementation of selection, ordering and expansion, kept alive by habit at 85 test sites.
+
+Fix applied:
+- The decider ruled deletion: every site uses the in-memory Oxigraph adapter; the two recording doubles wrap the real adapter and keep only recording and injected failures; the former parity test is an adapter contract test; ADR-I-0030 names the adapter tests as the validation (CM PR #94).
+
+Prevention:
+- Before extending or policing a fake, ask whether the real adapter can serve the test; delete a fake that re-implements port semantics rather than keep it in parity. Doubles that only record calls or inject failures stay, as wrappers around the real adapter.
+
+Evidence:
+- ADR-I-0030 More Information; the site census in the #94 description.
+
+## 2026-09-14 - A fake accepted a fixture state the adapter rejects [tags: worker, testing, admission]
+
+Symptom:
+- After the fake deletion, a source-provenance fixture failed: it stored a derived memory with both source lists empty, which the real adapter rejects because a derived memory must reference at least one source episode or observation.
+
+Root cause:
+- The fake implemented storage without the production admission checks, so a link-only discovery test silently depended on invalid input.
+
+Fix applied:
+- The fixture keeps admitted, non-queried source ids; the assertion that the match arrives through the explicit provenance link survives unchanged. The adapter was not weakened.
+
+Prevention:
+- Fixtures go through the production admission path; a test that only passes against a permissive double is testing the double.
+
+Evidence:
+- CM PR #94; the worker report under the graph-fake-deletion evidence at review time.
+
+## 2026-09-14 - The fake hid lossy persistence that broke retry idempotency [tags: worker, persistence, idempotency]
+
+Symptom:
+- With the real adapter, the facade retry-idempotency tests rejected an exact same-plan retry as a divergent collision.
+
+Root cause:
+- The RDF mapping formatted timestamps with whole-second precision while the write path defaults to the current time with subseconds; a hydrated object therefore differed from its draft in six timestamp fields, and the production divergence check compares whole objects. The fake returned drafts byte-identical to what was stored, so the loss was invisible.
+
+Fix applied:
+- The shared timestamp formatter is lossless (RFC 3339 with subseconds as needed; whole-second values keep their shape); a deterministic subsecond roundtrip regression over objects and links failed before and passes after; the retry tests are unchanged and now prove the production path.
+
+Prevention:
+- Persistence roundtrip tests run against the real adapter with values that exercise precision; an idempotency comparison is never loosened to hide a lossy store.
+
+Evidence:
+- CM PR #94; the before and after logs of the subsecond regression in the worker evidence at review time.
