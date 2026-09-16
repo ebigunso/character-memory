@@ -1,6 +1,6 @@
 # Plan: Graph adapter contracts are tested once, through the port, on the real adapter
 
-- status: in_progress (approved by the decider 2026-09-16)
+- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 54f63b5; pull request open, awaiting merge approval)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
@@ -137,6 +137,10 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 - 2026-09-16 Wave 1 completed: [Task_1, Task_2, Task_3] (pre-rebase task commits 0d9614c, 7114b58, 4cdb313; after the rebase onto the integration-suite tip a61241e they are 02b15d4, 7f90fc5, 1778456), plus the review follow-up 7f9873a
   - Summary: Oxigraph tests consolidated onto port-level assertions (47 to 31 adapter tests); sparql_selectors and vocabulary test modules removed; test_support keeps two tests; ports and models glue tests removed; the three retrieval pipeline tests run on the embedded Qdrant Edge adapter; Task_2's assertion gaps carried into Task_1's surviving tests. Review follow-up: FixedVectorCandidateStore in src/memory.rs tests replaced by the real temporary embedded store; the surviving link-query test writes links onto an empty object store again.
   - Validation evidence (orchestrator, post-rebase tip 1778456): fmt, clippy, test --no-run clean; cargo test lib 374 passed 5 ignored, integration 2+3+12+6, doc 1, zero skipping. Follow-up: cargo test --lib memory 40 passed; link-only test passed.
+
+- 2026-09-16 Wave 2 completed: [Task_4] (reviewed 1778456, follow-up 7f9873a, final pin 54f63b5)
+  - Summary: cm-reviewer APPROVED. Findings closed in the follow-up: the facade's FixedVectorCandidateStore double replaced by the real temporary embedded store; the surviving link-query test writes links onto an empty object store again. The retrieve module's RecordingVectorStore is carried into the unit-test re-anchoring plan (non-blocking).
+  - Validation evidence (reviewer, pinned worktree, Qdrant ports closed, no .env): fmt, check, clippy, test --no-run clean; lib 374 passed 5 ignored; integration 2+3+12+6; doc 1; retrieve module 36 with zero TEMP additions.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
