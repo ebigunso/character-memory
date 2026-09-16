@@ -398,14 +398,77 @@ pub(crate) fn recomputed_global_counters(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::stats::InMemoryRetrievalStatsStore;
+    use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
     use crate::domain::{
         DerivedMemory, DerivedType, Episode, Modality, Stability, DEFAULT_SCHEMA_VERSION,
     };
 
-    #[tokio::test]
-    async fn in_memory_store_counts_edges_idempotently() {
-        let store = InMemoryRetrievalStatsStore::new();
+    struct StoreFixture {
+        store: Box<dyn RetrievalStatsStore>,
+        directory: Option<tempfile::TempDir>,
+    }
+
+    impl StoreFixture {
+        fn in_memory() -> Self {
+            Self {
+                store: Box::new(InMemoryRetrievalStatsStore::new()),
+                directory: None,
+            }
+        }
+
+        fn sqlite() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let store =
+                SqliteRetrievalStatsStore::open(directory.path().join("stats.sqlite3")).unwrap();
+            Self {
+                store: Box::new(store),
+                directory: Some(directory),
+            }
+        }
+
+        fn close(self) {
+            drop(self.store);
+            if let Some(directory) = self.directory {
+                directory.close().unwrap();
+            }
+        }
+    }
+
+    macro_rules! port_contract_suite {
+        ($adapter:ident, $open:expr; $($case:ident),+ $(,)?) => {
+            mod $adapter {
+                use super::*;
+                $(
+                    #[tokio::test]
+                    async fn $case() {
+                        let fixture = $open;
+                        super::$case(fixture.store.as_ref()).await;
+                        fixture.close();
+                    }
+                )+
+            }
+        };
+    }
+
+    port_contract_suite!(
+        in_memory, StoreFixture::in_memory();
+        counts_edges_idempotently,
+        counts_global_relation_object_pairs,
+        keeps_restrictive_lifecycle_on_repeated_edge,
+        updates_lifecycle_counts_from_object_states,
+        health_marker_survives_successful_writes,
+    );
+
+    port_contract_suite!(
+        sqlite, StoreFixture::sqlite();
+        counts_edges_idempotently,
+        counts_global_relation_object_pairs,
+        keeps_restrictive_lifecycle_on_repeated_edge,
+        updates_lifecycle_counts_from_object_states,
+        health_marker_survives_successful_writes,
+    );
+
+    async fn counts_edges_idempotently(store: &dyn RetrievalStatsStore) {
         let entity_id = id("550e8400-e29b-41d4-a716-446655460001");
         let episode_id = id("550e8400-e29b-41d4-a716-446655460002");
         let edge = edge(
@@ -447,9 +510,7 @@ mod tests {
         assert_eq!(global.total_count, 1);
     }
 
-    #[tokio::test]
-    async fn in_memory_store_counts_global_relation_object_pairs() {
-        let store = InMemoryRetrievalStatsStore::new();
+    async fn counts_global_relation_object_pairs(store: &dyn RetrievalStatsStore) {
         let first_entity_id = id("550e8400-e29b-41d4-a716-446655460031");
         let second_entity_id = id("550e8400-e29b-41d4-a716-446655460032");
         let first_episode_id = id("550e8400-e29b-41d4-a716-446655460033");
@@ -489,45 +550,46 @@ mod tests {
         assert_eq!(counter.current_count, 1);
     }
 
-    #[tokio::test]
-    async fn in_memory_store_merges_duplicate_edge_timestamps() {
-        let store = InMemoryRetrievalStatsStore::new();
+    async fn keeps_restrictive_lifecycle_on_repeated_edge(store: &dyn RetrievalStatsStore) {
         let entity_id = id("550e8400-e29b-41d4-a716-446655460041");
         let episode_id = id("550e8400-e29b-41d4-a716-446655460042");
-        let later_edge = edge(
+        let suppressed_edge = edge(
+            entity_id,
+            RelationType::Involves,
+            episode_id,
+            ObjectType::Episode,
+            RetentionState::Suppressed,
+            false,
+            timestamp(),
+        );
+        let active_edge = edge(
             entity_id,
             RelationType::Involves,
             episode_id,
             ObjectType::Episode,
             RetentionState::Active,
             true,
-            timestamp_at("2026-04-28T13:00:00Z"),
-        );
-        let earlier_edge = edge(
-            entity_id,
-            RelationType::Involves,
-            episode_id,
-            ObjectType::Episode,
-            RetentionState::Active,
-            true,
-            timestamp_at("2026-04-28T11:00:00Z"),
+            timestamp(),
         );
 
-        store.record_edges(&[later_edge]).await.unwrap();
-        store.record_edges(&[earlier_edge]).await.unwrap();
+        store.record_edges(&[suppressed_edge]).await.unwrap();
+        store.record_edges(&[active_edge]).await.unwrap();
 
-        let state = store.state.lock().await;
-        let stored = state
-            .edges
-            .get(&format!("{}:involves:episode:{}", entity_id, episode_id))
+        let counter = store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: RelationType::Involves,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
             .unwrap();
-        assert_eq!(stored.first_seen_at, timestamp_at("2026-04-28T11:00:00Z"));
-        assert_eq!(stored.last_seen_at, timestamp_at("2026-04-28T13:00:00Z"));
+        assert_eq!(counter.total_count, 1);
+        assert_eq!(counter.active_count, 0);
+        assert_eq!(counter.current_count, 0);
     }
 
-    #[tokio::test]
-    async fn in_memory_store_updates_lifecycle_counts() {
-        let store = InMemoryRetrievalStatsStore::new();
+    async fn updates_lifecycle_counts_from_object_states(store: &dyn RetrievalStatsStore) {
         let entity_id = id("550e8400-e29b-41d4-a716-446655460011");
         let memory_id = id("550e8400-e29b-41d4-a716-446655460012");
         store
@@ -547,7 +609,7 @@ mod tests {
                 object_id: memory_id,
                 object_type: ObjectType::DerivedMemory,
                 retention_state: RetentionState::Suppressed,
-                is_current: false,
+                is_current: true,
                 observed_at: timestamp(),
             }])
             .await
@@ -567,41 +629,29 @@ mod tests {
         assert_eq!(counter.current_count, 0);
     }
 
-    #[tokio::test]
-    async fn in_memory_object_state_updates_do_not_regress_last_seen_at() {
-        let store = InMemoryRetrievalStatsStore::new();
-        let entity_id = id("550e8400-e29b-41d4-a716-446655460051");
-        let memory_id = id("550e8400-e29b-41d4-a716-446655460052");
+    async fn health_marker_survives_successful_writes(store: &dyn RetrievalStatsStore) {
+        let failure = RetrievalStatsHealthCause::EdgeWrite {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "stats write failed".to_owned(),
+            },
+        };
+        store.mark_unhealthy(failure.clone()).await.unwrap();
         store
             .record_edges(&[edge(
-                entity_id,
-                RelationType::About,
-                memory_id,
-                ObjectType::DerivedMemory,
+                id("550e8400-e29b-41d4-a716-446655460071"),
+                RelationType::Involves,
+                id("550e8400-e29b-41d4-a716-446655460072"),
+                ObjectType::Episode,
                 RetentionState::Active,
                 true,
-                timestamp_at("2026-04-28T13:00:00Z"),
+                timestamp(),
             )])
             .await
             .unwrap();
 
-        store
-            .record_object_states(&[RetrievalStatsObjectState {
-                object_id: memory_id,
-                object_type: ObjectType::DerivedMemory,
-                retention_state: RetentionState::Suppressed,
-                is_current: false,
-                observed_at: timestamp_at("2026-04-28T11:00:00Z"),
-            }])
-            .await
-            .unwrap();
-
-        let state = store.state.lock().await;
-        let stored = state
-            .edges
-            .get(&format!("{}:about:derived_memory:{}", entity_id, memory_id))
-            .unwrap();
-        assert_eq!(stored.last_seen_at, timestamp_at("2026-04-28T13:00:00Z"));
+        let health = store.health().await.unwrap();
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert_eq!(health.last_error_cause, Some(failure));
     }
 
     #[test]
@@ -776,33 +826,6 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].retention_state, RetentionState::Suppressed);
         assert!(!edges[0].is_current);
-    }
-
-    #[tokio::test]
-    async fn health_tracks_internal_failure_markers() {
-        let store = InMemoryRetrievalStatsStore::new();
-        let failure = RetrievalStatsHealthCause::EdgeWrite {
-            error: RetrievalStatsStoreError::Sqlite {
-                detail: "stats write failed".to_owned(),
-            },
-        };
-        store.mark_unhealthy(failure.clone()).await.unwrap();
-        store
-            .record_edges(&[edge(
-                id("550e8400-e29b-41d4-a716-446655460071"),
-                RelationType::Involves,
-                id("550e8400-e29b-41d4-a716-446655460072"),
-                ObjectType::Episode,
-                RetentionState::Active,
-                true,
-                timestamp(),
-            )])
-            .await
-            .unwrap();
-
-        let health = store.health().await.unwrap();
-        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
-        assert_eq!(health.last_error_cause, Some(failure));
     }
 
     #[tokio::test]

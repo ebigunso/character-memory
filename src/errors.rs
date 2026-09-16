@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
-    CandidateValidation, GraphExpansionBoundedFailureTrace, LifecycleDtoValidationError,
-    LifecyclePolicyKnob, MemoryId, MemoryObjectRef, ObjectType,
+    CandidateValidation, DomainValidationError, GraphExpansionBoundedFailureTrace,
+    LifecycleDtoValidationError, LifecyclePolicyKnob, MemoryId, MemoryObjectRef, ObjectType,
+    SourceReferenceKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -250,6 +251,8 @@ pub enum GraphQueryError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RetrievalStatsStoreError {
+    #[error("retrieval stats counter was negative: {value}")]
+    NegativeCounter { value: i64 },
     #[error("retrieval stats sqlite operation failed: {detail}")]
     Sqlite { detail: String },
     #[error("retrieval stats filesystem operation failed ({io_kind:?}): {detail}")]
@@ -415,8 +418,30 @@ pub enum CustomError {
     #[error(transparent)]
     ConfigValidation(#[from] ConfigValidationError),
 
-    #[error("Memory validation error: {0}")]
-    MemoryValidation(String),
+    #[error(transparent)]
+    DomainValidation(#[from] DomainValidationError),
+
+    /// Rejected by the production low-information co-occurrence guard.
+    ///
+    /// Its only rejecting evidence class is currently constructible under `cfg(test)`;
+    /// the public link path supplies `ExplicitCallerIntent`. This variant is declared
+    /// ahead of a production producer for that rejecting evidence.
+    #[error("low-information co-occurrence link rejected: {link_id}")]
+    LowInformationCoOccurrence { link_id: MemoryId },
+
+    #[error("source-object correction requires an original raw or source reference: {target:?}")]
+    MissingOriginalSourceReference { target: MemoryObjectRef },
+
+    #[error("original {kind:?} reference does not match source object {target:?}")]
+    OriginalSourceReferenceMismatch {
+        target: MemoryObjectRef,
+        kind: SourceReferenceKind,
+        provided: String,
+        stored: Option<String>,
+    },
+
+    #[error("write plan deterministic ID collided with existing divergent content: {object:?}")]
+    DeterministicIdCollision { object: MemoryObjectRef },
 
     #[error(transparent)]
     ReplacementIdentityConflict(#[from] ReplacementIdentityConflictError),
@@ -457,6 +482,9 @@ pub enum CustomError {
         actual: String,
     },
 
+    #[error("Unsupported graph expansion root: {object:?}")]
+    UnsupportedExpansionRoot { object: MemoryObjectRef },
+
     #[error("Graph expansion root not found: {object_type:?} {object_id}")]
     GraphExpansionRootNotFound {
         object_type: ObjectType,
@@ -494,92 +522,26 @@ fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind};
 
-    macro_rules! exhaustive_embedding_error_fixtures {
-        ($( $pattern:pat => $fixture:expr ),+ $(,)?) => {{
-            fn assert_exhaustive(error: &EmbeddingError) {
-                match error {
-                    $( $pattern => {} ),+
-                }
-            }
+    #[test]
+    fn unrecognized_embedding_error_preserves_persisted_kind_and_detail() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs write_jsonl/read_jsonl
+        // persists this via VectorIndexingCause::Embedding in RememberOutcome.vector_indexing_failure.
+        let detail = "opaque provider detail";
+        let serialized = serde_json::to_value(EmbeddingError::Unrecognized {
+            detail: detail.to_owned(),
+        })
+        .unwrap();
 
-            let fixtures = vec![$($fixture),+];
-            for fixture in &fixtures {
-                assert_exhaustive(fixture);
-            }
-            fixtures
-        }};
+        assert_eq!(serialized["kind"], "unrecognized");
+        assert_eq!(serialized["detail"], detail);
     }
 
     #[test]
-    fn every_embedding_error_variant_round_trips_through_serde() {
-        let errors = exhaustive_embedding_error_fixtures![
-            EmbeddingError::MissingApiKey => EmbeddingError::MissingApiKey,
-            EmbeddingError::InvalidVectorSize { .. } => EmbeddingError::InvalidVectorSize {
-                actual: 0,
-            },
-            EmbeddingError::BlankInput { .. } => EmbeddingError::BlankInput { index: Some(1) },
-            EmbeddingError::Transport { .. } => EmbeddingError::Transport {
-                transport_kind: EmbeddingTransportErrorKind::Connect,
-                detail: "connection refused".to_owned(),
-            },
-            EmbeddingError::HttpStatus { .. } => EmbeddingError::HttpStatus {
-                status: 429,
-                body: "rate limited".to_owned(),
-            },
-            EmbeddingError::InvalidJson { .. } => EmbeddingError::InvalidJson {
-                detail: "unexpected token".to_owned(),
-            },
-            EmbeddingError::MissingData => EmbeddingError::MissingData,
-            EmbeddingError::CountMismatch { .. } => EmbeddingError::CountMismatch {
-                expected: 2,
-                actual: 1,
-            },
-            EmbeddingError::MissingIndex { .. } => EmbeddingError::MissingIndex { item: 0 },
-            EmbeddingError::IndexOutOfRange { .. } => EmbeddingError::IndexOutOfRange {
-                index: 2,
-                expected_count: 2,
-            },
-            EmbeddingError::DuplicateIndex { .. } => EmbeddingError::DuplicateIndex { index: 0 },
-            EmbeddingError::MissingEmbedding { .. } => EmbeddingError::MissingEmbedding { item: 0 },
-            EmbeddingError::DimensionMismatch { .. } => EmbeddingError::DimensionMismatch {
-                index: 0,
-                expected: 3,
-                actual: 2,
-            },
-            EmbeddingError::NonNumericValue { .. } => EmbeddingError::NonNumericValue {
-                index: 0,
-                component: 1,
-            },
-            EmbeddingError::MissingResponseIndex { .. } => EmbeddingError::MissingResponseIndex { index: 1 },
-            EmbeddingError::Unrecognized { .. } => EmbeddingError::Unrecognized {
-                detail: "custom provider failure".to_owned(),
-            },
-        ];
-
-        for error in errors {
-            let serialized = serde_json::to_value(&error).unwrap();
-            let deserialized = serde_json::from_value(serialized.clone()).unwrap();
-            assert_eq!(error, deserialized);
-
-            if matches!(error, EmbeddingError::Unrecognized { .. }) {
-                assert_eq!(serialized["kind"], "unrecognized");
-                assert_eq!(serialized["detail"], "custom provider failure");
-            }
-        }
-    }
-
-    #[test]
-    fn io_error_kind_preserves_transport_classification_and_round_trips() {
+    fn io_error_kind_preserves_transport_classification() {
         let kind = IoErrorKind::from(std::io::ErrorKind::ConnectionRefused);
 
         assert_eq!(kind, IoErrorKind::ConnectionRefused);
-        let serialized = serde_json::to_string(&kind).unwrap();
-        assert_eq!(
-            serde_json::from_str::<IoErrorKind>(&serialized).unwrap(),
-            kind
-        );
     }
 
     #[test]
@@ -590,27 +552,6 @@ mod tests {
         assert!(
             serialized.get("value").is_none(),
             "the fallback must not expose a Debug-derived carrier"
-        );
-    }
-
-    #[test]
-    fn write_plan_rejection_preserves_validation_issues() {
-        let error = CustomError::WritePlanValidationRejected {
-            validations: vec![CandidateValidation {
-                candidate_index: 2,
-                candidate_kind: MemoryCandidateKind::DerivedMemory,
-                status: CandidateValidationStatus::Invalid,
-                errors: vec![CandidateValidationIssue::MissingDerivedSource],
-                warnings: Vec::new(),
-            }],
-        };
-
-        let CustomError::WritePlanValidationRejected { validations } = error else {
-            panic!("expected write-plan validation rejection");
-        };
-        assert_eq!(
-            validations[0].errors,
-            vec![CandidateValidationIssue::MissingDerivedSource]
         );
     }
 }

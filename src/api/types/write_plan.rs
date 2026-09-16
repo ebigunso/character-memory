@@ -369,10 +369,6 @@ impl CandidateProvenance {
         self.source.external_refs.push(external_ref);
         self
     }
-
-    pub const fn rationale_origin(&self) -> RationaleOrigin {
-        self.rationale.origin()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -413,15 +409,6 @@ impl CandidateRationale {
         Self::Unavailable
     }
 
-    pub const fn origin(&self) -> RationaleOrigin {
-        match self {
-            Self::ProvidedByCaller(_) => RationaleOrigin::ProvidedByCaller,
-            Self::ProvidedByProcessor(_) => RationaleOrigin::ProvidedByProcessor,
-            Self::InferredByProcessor(_) => RationaleOrigin::InferredByProcessor,
-            Self::Unavailable => RationaleOrigin::Unavailable,
-        }
-    }
-
     pub fn text(&self) -> Option<&str> {
         match self {
             Self::ProvidedByCaller(text)
@@ -430,15 +417,6 @@ impl CandidateRationale {
             Self::Unavailable => None,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RationaleOrigin {
-    ProvidedByCaller,
-    ProvidedByProcessor,
-    InferredByProcessor,
-    Unavailable,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -840,7 +818,6 @@ pub struct RememberOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ObjectType;
 
     use uuid::Uuid;
 
@@ -880,37 +857,23 @@ mod tests {
     }
 
     #[test]
-    fn inferred_rationale_cannot_claim_caller_origin_through_constructors() {
-        let caller = CandidateProvenance::caller("caller supplied rationale");
-        assert_eq!(caller.producer_kind, CandidateProducerKind::Caller);
-        assert_eq!(caller.rationale_origin(), RationaleOrigin::ProvidedByCaller);
-        assert_eq!(caller.rationale.text(), Some("caller supplied rationale"));
-
-        let provenance = CandidateProvenance::inferred_by_processor(
-            CandidateProducerKind::ModelProcessor,
-            "candidate was inferred from a transcript segment",
+    fn stats_update_status_preserves_persisted_failure_tokens() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs persists this status in
+        // RememberOutcome, LinkOutcome and LifecycleMutationOutcome via write_jsonl/read_jsonl.
+        let status = StatsUpdateStatus::failed(
+            [],
+            [],
+            vec![StatsUpdateCause::ObjectStateWrite {
+                error: crate::errors::RetrievalStatsStoreError::Sqlite {
+                    detail: String::new(),
+                },
+            }],
         );
+        let serialized = serde_json::to_value(status).unwrap();
+        let cause = &serialized["failure"]["causes"][0];
 
-        assert_eq!(
-            provenance.producer_kind,
-            CandidateProducerKind::ModelProcessor
-        );
-        assert_eq!(
-            provenance.rationale_origin(),
-            RationaleOrigin::InferredByProcessor
-        );
-        assert!(matches!(
-            provenance.rationale,
-            CandidateRationale::InferredByProcessor(_)
-        ));
-    }
-
-    #[test]
-    fn missing_rationale_is_explicitly_representable() {
-        let provenance = CandidateProvenance::unavailable(CandidateProducerKind::Unknown);
-
-        assert_eq!(provenance.rationale_origin(), RationaleOrigin::Unavailable);
-        assert_eq!(provenance.rationale.text(), None);
+        assert_eq!(cause["cause"], "object_state_write");
+        assert_eq!(cause["error"]["kind"], "sqlite");
     }
 
     #[test]
@@ -952,74 +915,5 @@ mod tests {
             warning["matching_episode_ids"][0],
             matching_episode_id.to_string()
         );
-    }
-
-    #[test]
-    fn write_plan_round_trips_through_serde() {
-        let operation_id = memory_id("550e8400-e29b-41d4-a716-446655442001");
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442002");
-        let mut episode = EpisodeCandidate::new(
-            EpisodeDraft::new("Discussed inspectable write planning."),
-            CandidateProvenance::caller("caller supplied the episode summary")
-                .with_source_span(SourceSpan::raw("raw://conversation/42").with_turn_range(0, 1)),
-        );
-        episode.draft.id = Some(episode_id);
-        let target = MemoryObjectRef::new(ObjectType::Episode, episode_id);
-        let provenance = episode.provenance.clone();
-        let plan = RememberWritePlan::new(operation_id, "remember:42")
-            .with_source_input_ref(ExternalSourceReference::raw("raw://conversation/42"))
-            .with_candidate(MemoryCandidate::Episode(episode))
-            .with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
-                target,
-                provenance.clone(),
-            )))
-            .with_validation(CandidateValidation::valid(0, MemoryCandidateKind::Episode))
-            .with_validation(CandidateValidation::valid(
-                1,
-                MemoryCandidateKind::VectorIndex,
-            ))
-            .with_diagnostics(
-                RememberDiagnostics::default()
-                    .with_candidate_count(MemoryCandidateKind::Episode, 1)
-                    .with_candidate_count(MemoryCandidateKind::VectorIndex, 1)
-                    .with_message(RememberDiagnostic::new(
-                        DiagnosticSeverity::Info,
-                        RememberDiagnosticCode::Prepared,
-                        "prepared two candidates",
-                    )),
-            );
-
-        let serialized = serde_json::to_value(&plan).unwrap();
-        let deserialized: RememberWritePlan = serde_json::from_value(serialized.clone()).unwrap();
-
-        assert_eq!(deserialized, plan);
-        assert_eq!(
-            serialized["candidates"][1],
-            serde_json::json!({
-                "candidate_type": "vector_index",
-                "candidate": { "target": target, "provenance": provenance }
-            })
-        );
-    }
-
-    #[test]
-    fn stats_update_failure_round_trips_with_typed_cause() {
-        let object_id = memory_id("550e8400-e29b-41d4-a716-446655442010");
-        let status = StatsUpdateStatus::failed(
-            [],
-            [object_id],
-            vec![StatsUpdateCause::ObjectStateWrite {
-                error: crate::errors::RetrievalStatsStoreError::Sqlite {
-                    detail: "state write rejected".to_owned(),
-                },
-            }],
-        );
-
-        let serialized = serde_json::to_string(&status).unwrap();
-        let deserialized: StatsUpdateStatus = serde_json::from_str(&serialized).unwrap();
-
-        assert_eq!(deserialized, status);
-        assert!(serialized.contains("\"cause\":\"object_state_write\""));
-        assert!(serialized.contains("\"kind\":\"sqlite\""));
     }
 }

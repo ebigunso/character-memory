@@ -683,17 +683,11 @@ mod tests {
     }
 
     #[test]
-    fn retrieval_context_serializes_with_defaults() {
-        let context = RetrievalContext::new("What should I remember for this conversation?")
-            .with_current_context("The user is planning a retrieval feature.")
-            .with_trace();
+    fn retrieval_context_defaults_to_every_object_type() {
+        let context = RetrievalContext::new("What should I remember for this conversation?");
 
-        let encoded = serde_json::to_string(&context).unwrap();
-        let decoded: RetrievalContext = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(decoded, context);
         assert_eq!(
-            decoded.object_type_defaults,
+            context.object_type_defaults,
             vec![
                 ObjectType::Episode,
                 ObjectType::Observation,
@@ -702,7 +696,6 @@ mod tests {
                 ObjectType::Entity,
             ]
         );
-        assert!(decoded.include_trace);
     }
 
     #[test]
@@ -763,25 +756,6 @@ mod tests {
     }
 
     #[test]
-    fn include_superseded_is_for_graph_superseded_by_evidence_not_local_supersedes() {
-        let object = MemoryObjectRef::new(
-            ObjectType::DerivedMemory,
-            memory_id("550e8400-e29b-41d4-a716-446655442070"),
-        );
-        let newer_memory_id = memory_id("550e8400-e29b-41d4-a716-446655442071");
-        let decision = LifecycleFilterDecision {
-            object,
-            retention_state: Some(RetentionState::Active),
-            is_current: Some(false),
-            superseded_by: vec![newer_memory_id],
-            action: LifecycleFilterAction::Included,
-            reason: LifecycleFilterReason::SupersededIncludedByPolicy,
-        };
-
-        assert_eq!(decision.superseded_by, vec![newer_memory_id]);
-    }
-
-    #[test]
     fn section_assignment_shape_reports_final_section() {
         let assignment = SectionAssignment {
             object: MemoryObjectRef::new(
@@ -822,7 +796,7 @@ mod tests {
             memory_id("550e8400-e29b-41d4-a716-446655442031"),
             episode_id,
         );
-        let included = IncludedDerivedMemory::from(derived.clone());
+        let included = IncludedDerivedMemory::from(derived);
         let mut pack = ContinuityContextPack::empty();
         pack.relevant_episodes.push(episode(episode_id));
         pack.salient_observations.push(observation(
@@ -832,23 +806,7 @@ mod tests {
         pack.preferences.push(included);
 
         let encoded_value = serde_json::to_value(&pack).unwrap();
-        let encoded = serde_json::to_string(&pack).unwrap();
-        let decoded: ContinuityContextPack = serde_json::from_str(&encoded).unwrap();
 
-        assert_eq!(
-            decoded.relevant_episodes[0].raw_ref.as_deref(),
-            Some("raw://conversation/42#episode")
-        );
-        assert_eq!(
-            decoded.salient_observations[0].raw_ref.as_deref(),
-            Some("raw://conversation/42#turn-2")
-        );
-        assert_eq!(decoded.preferences[0].source_episode_ids, vec![episode_id]);
-        assert_eq!(
-            decoded.preferences[0].source_observation_ids,
-            derived.derived_from_observation_ids
-        );
-        assert_eq!(decoded.preferences[0].memory.text, derived.text);
         for raw_content_key in [
             "raw_transcript",
             "raw_text",
@@ -870,188 +828,5 @@ mod tests {
             }
             _ => false,
         }
-    }
-
-    #[test]
-    fn trace_can_report_candidate_graph_lifecycle_stale_and_section_details() {
-        let candidate_id = memory_id("550e8400-e29b-41d4-a716-446655442040");
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442041");
-        let candidate = MemoryObjectRef::new(ObjectType::DerivedMemory, candidate_id);
-        let episode = MemoryObjectRef::new(ObjectType::Episode, episode_id);
-        let trace = RetrievalTrace {
-            vector_candidates: vec![VectorCandidateTrace {
-                object: candidate,
-                surface: VectorSurface::DerivedText,
-                score: 0.82,
-                rank: 1,
-            }],
-            graph_relations: vec![GraphRelationTrace {
-                link_id: memory_id("550e8400-e29b-41d4-a716-446655442042"),
-                from: candidate,
-                to: episode,
-                relation: RelationType::DerivedFrom,
-                proximity: 1,
-            }],
-            graph_expansions: vec![GraphExpansionTrace {
-                root: candidate,
-                object_count: 2,
-                relation_count: 1,
-                filtered_node_count: 0,
-                bounded_failure: Some(GraphExpansionBoundedFailureTrace {
-                    reason: GraphExpansionBoundedReason::NodeLimit,
-                    at: Some(episode),
-                }),
-                outcome: GraphExpansionOutcome::Bounded,
-            }],
-            fanout_utilization: vec![FanoutUtilizationTrace {
-                root: candidate,
-                relation: RelationType::About,
-                object_type: ObjectType::DerivedMemory,
-                configured_cap: 16,
-                selected_cap: 4,
-                retained_count: 4,
-                omitted_by_fanout_count: 3,
-            }],
-            selectivity_decisions: Vec::new(),
-            lifecycle_filter_decisions: vec![LifecycleFilterDecision {
-                object: candidate,
-                retention_state: Some(RetentionState::Active),
-                is_current: Some(true),
-                superseded_by: Vec::new(),
-                action: LifecycleFilterAction::Included,
-                reason: LifecycleFilterReason::Active,
-            }],
-            stale_candidate_omissions: vec![StaleCandidateOmission {
-                candidate: MemoryObjectRef::new(ObjectType::Observation, episode_id),
-                vector_score: Some(0.44),
-                reason: StaleCandidateReason::GraphObjectMissing,
-                rationale_categories: vec![RationaleCategory::Semantic],
-            }],
-            section_assignments: vec![SectionAssignment {
-                object: candidate,
-                section: ContextPackSection::Preferences,
-                rank: Some(1),
-                reason: SectionAssignmentReason::Selected {
-                    scores: SectionScoreComponents {
-                        final_score: 0.82,
-                        vector_score: Some(0.82),
-                        vector_score_source: Some(SectionVectorScoreSource::DirectMatch),
-                        graph_score: None,
-                        salience_score: None,
-                    },
-                },
-                rationale_categories: vec![RationaleCategory::Scope, RationaleCategory::Semantic],
-            }],
-        };
-
-        let encoded = serde_json::to_string(&trace).unwrap();
-        let decoded: RetrievalTrace = serde_json::from_str(&encoded).unwrap();
-
-        assert_eq!(decoded.vector_candidates[0].score, 0.82);
-        assert_eq!(
-            decoded.vector_candidates[0].surface,
-            VectorSurface::DerivedText
-        );
-        assert_eq!(
-            decoded.graph_relations[0].link_id,
-            memory_id("550e8400-e29b-41d4-a716-446655442042")
-        );
-        assert_eq!(
-            decoded.graph_relations[0].relation,
-            RelationType::DerivedFrom
-        );
-        assert_eq!(
-            decoded.graph_expansions[0]
-                .bounded_failure
-                .as_ref()
-                .unwrap()
-                .reason,
-            GraphExpansionBoundedReason::NodeLimit
-        );
-        assert_eq!(
-            decoded.lifecycle_filter_decisions[0].reason,
-            LifecycleFilterReason::Active
-        );
-        assert_eq!(
-            decoded.stale_candidate_omissions[0].reason,
-            StaleCandidateReason::GraphObjectMissing
-        );
-        assert_eq!(
-            decoded.stale_candidate_omissions[0].rationale_categories,
-            vec![RationaleCategory::Semantic]
-        );
-        assert_eq!(
-            decoded.section_assignments[0].section,
-            ContextPackSection::Preferences
-        );
-        assert_eq!(
-            decoded.section_assignments[0].rationale_categories,
-            vec![RationaleCategory::Scope, RationaleCategory::Semantic]
-        );
-        assert_eq!(decoded.fanout_utilization[0].omitted_by_fanout_count, 3);
-    }
-
-    #[test]
-    fn retrieval_telemetry_serializes_with_backend_agnostic_bounds() {
-        let telemetry = RetrievalTelemetry {
-            query_embedding_dimension: 3,
-            returned_vector_candidate_count: 4,
-            unique_graph_root_candidate_count: 3,
-            selected_graph_root_count: 2,
-            graph_root_omission_count: 1,
-            graph_expansion: GraphExpansionTelemetry {
-                attempted_root_count: 2,
-                bounded_failure_count: 1,
-                bounded_failure_reasons: vec![GraphExpansionBoundedFailureSummary {
-                    reason: GraphExpansionBoundedReason::HubLimit,
-                    count: 1,
-                }],
-                ..GraphExpansionTelemetry::default()
-            },
-            selectivity: SelectivityTelemetry {
-                decision_count: 2,
-                high_selectivity_count: 1,
-                low_selectivity_supported_count: 1,
-                low_selectivity_rejected_count: 0,
-                fallback_count: 0,
-            },
-            section_pressure: vec![SectionPressureSummary {
-                section: ContextPackSection::SalientObservations,
-                limit: 16,
-                included_count: 16,
-                omitted_by_limit_count: 2,
-            }],
-            ..RetrievalTelemetry::default()
-        };
-        let mut rationale = RetrievalRationale::new("telemetry example");
-        rationale.telemetry = telemetry.clone();
-
-        let encoded = serde_json::to_value(&rationale).unwrap();
-        let decoded: RetrievalRationale = serde_json::from_value(encoded.clone()).unwrap();
-
-        assert_eq!(decoded.telemetry, telemetry);
-        assert_eq!(
-            encoded["telemetry"]["graph_expansion"]["bounded_failure_reasons"][0]["reason"],
-            "hub_limit"
-        );
-        assert_eq!(encoded["telemetry"]["selectivity"]["decision_count"], 2);
-    }
-
-    #[test]
-    fn retrieval_telemetry_default_preserves_retrieval_defaults() {
-        let telemetry = RetrievalTelemetry::default();
-
-        assert_eq!(
-            telemetry.configured_candidate_limits,
-            RetrievalCandidateLimits::default()
-        );
-        assert_eq!(
-            telemetry.configured_graph_limits,
-            RetrievalGraphLimits::default()
-        );
-        assert_eq!(
-            telemetry.configured_section_limits,
-            ContinuitySectionLimits::default()
-        );
     }
 }

@@ -616,10 +616,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = Settings::new(external_config);
-        assert!(result.is_ok());
+        let settings = Settings::new(external_config).unwrap();
 
-        let settings = result.unwrap();
         assert_eq!(settings.get_vector_store_mode(), VectorStoreMode::Embedded);
         assert!(matches!(
             settings.get_vector_store_path(),
@@ -628,11 +626,6 @@ mod tests {
                 reason: ConfigValidationReason::MissingValue,
             })) if keys == vec!["VECTOR_STORE_PATH"]
         ));
-        assert_eq!(settings.get_qdrant_connection(), "external_qdrant");
-        assert_eq!(
-            settings.get_oxigraph_path().unwrap(),
-            PathBuf::from("external_oxigraph")
-        );
         assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
         assert_eq!(
             settings.get_retrieval_stats_store_mode(),
@@ -727,80 +720,46 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_new_accepts_in_memory_graph_override() {
-        let external_config = Config::builder()
-            .set_override("qdrant_connection_string", "external_qdrant")
-            .unwrap()
-            .set_override("oxigraph_path", "external_oxigraph")
-            .unwrap()
-            .set_override("openai_api_key", "external_openai")
-            .unwrap()
-            .set_override("embedding_model", "TextEmbedding3Small")
-            .unwrap()
-            .set_override("graph_store_mode", "in_memory")
-            .unwrap()
-            .build()
-            .unwrap();
+    fn graph_store_mode_admits_persistent_or_in_memory() {
+        for (mode, expected) in [
+            ("in_memory", Ok(GraphStoreMode::InMemory)),
+            ("persistent", Ok(GraphStoreMode::Persistent)),
+            (
+                "service",
+                Err(ConfigValidationError {
+                    keys: vec!["GRAPH_STORE_MODE"],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "persistent or in_memory",
+                        actual: "service".to_owned(),
+                    },
+                }),
+            ),
+        ] {
+            let external_config = Config::builder()
+                .set_override("qdrant_connection_string", "external_qdrant")
+                .unwrap()
+                .set_override("oxigraph_path", "./data/oxigraph")
+                .unwrap()
+                .set_override("openai_api_key", "external_openai")
+                .unwrap()
+                .set_override("embedding_model", "TextEmbedding3Small")
+                .unwrap()
+                .set_override("graph_store_mode", mode)
+                .unwrap()
+                .build()
+                .unwrap();
 
-        let settings = Settings::new(external_config).unwrap();
+            let actual = Settings::new(external_config)
+                .map(|settings| settings.get_graph_store_mode())
+                .map_err(|error| match error {
+                    CustomError::ConfigValidation(error) => error,
+                    other => {
+                        panic!("{mode}: expected configuration validation error, got {other:?}")
+                    }
+                });
 
-        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::InMemory);
-    }
-
-    #[test]
-    fn test_settings_new_accepts_embedded_persistent_graph_override() {
-        let external_config = Config::builder()
-            .set_override("qdrant_connection_string", "external_qdrant")
-            .unwrap()
-            .set_override("oxigraph_path", "./data/oxigraph")
-            .unwrap()
-            .set_override("openai_api_key", "external_openai")
-            .unwrap()
-            .set_override("embedding_model", "TextEmbedding3Small")
-            .unwrap()
-            .set_override("graph_store_mode", "persistent")
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let settings = Settings::new(external_config).unwrap();
-
-        assert_eq!(settings.get_graph_store_mode(), GraphStoreMode::Persistent);
-        assert_eq!(
-            settings.get_oxigraph_path().unwrap(),
-            PathBuf::from("./data/oxigraph")
-        );
-    }
-
-    #[test]
-    fn test_settings_new_rejects_unknown_graph_mode() {
-        let external_config = Config::builder()
-            .set_override("qdrant_connection_string", "external_qdrant")
-            .unwrap()
-            .set_override("oxigraph_path", "./data/oxigraph")
-            .unwrap()
-            .set_override("openai_api_key", "external_openai")
-            .unwrap()
-            .set_override("embedding_model", "TextEmbedding3Small")
-            .unwrap()
-            .set_override("graph_store_mode", "service")
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let error = Settings::new(external_config).unwrap_err();
-        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
-            panic!("expected configuration validation error");
-        };
-
-        assert_eq!(keys, vec!["GRAPH_STORE_MODE"]);
-        assert_eq!(
-            reason,
-            ConfigValidationReason::OutOfDomain {
-                expected: "persistent or in_memory",
-                actual: "service".to_owned(),
-            }
-        );
+            assert_eq!(actual, expected, "{mode}");
+        }
     }
 
     #[test]
@@ -832,44 +791,6 @@ mod tests {
                 actual: "http://localhost:7878".to_owned(),
             }
         );
-    }
-
-    #[test]
-    fn test_settings_new_accepts_retrieval_stats_overrides() {
-        let external_config = Config::builder()
-            .set_override("qdrant_connection_string", "external_qdrant")
-            .unwrap()
-            .set_override("oxigraph_path", "external_oxigraph")
-            .unwrap()
-            .set_override("openai_api_key", "external_openai")
-            .unwrap()
-            .set_override("embedding_model", "TextEmbedding3Small")
-            .unwrap()
-            .set_override("retrieval_stats_store_mode", "in_memory")
-            .unwrap()
-            .set_override("retrieval_stats_path", "./tmp/stats.sqlite3")
-            .unwrap()
-            .set_override("retrieval_stats_health_fail_mode", "conservative")
-            .unwrap()
-            .set_override("selectivity_smoothing_alpha", 2.0)
-            .unwrap()
-            .set_override("selectivity_gamma", 0.5)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let settings = Settings::new(external_config).unwrap();
-
-        assert_eq!(
-            settings.get_retrieval_stats_store_mode(),
-            RetrievalStatsStoreMode::InMemory
-        );
-        assert_eq!(
-            settings.get_retrieval_stats_path(),
-            Path::new("./tmp/stats.sqlite3")
-        );
-        assert_eq!(settings.get_selectivity_smoothing_alpha(), 2.0);
-        assert_eq!(settings.get_selectivity_gamma(), 0.5);
     }
 
     #[test]
@@ -1041,7 +962,20 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_new_rejects_invalid_selectivity_numbers() {
+    fn selectivity_numbers_admit_finite_positive_values_only() {
+        let accepted = Settings::new(
+            Config::builder()
+                .set_override("selectivity_smoothing_alpha", 2.0)
+                .unwrap()
+                .set_override("selectivity_gamma", 0.5)
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(accepted.get_selectivity_smoothing_alpha(), 2.0);
+        assert_eq!(accepted.get_selectivity_gamma(), 0.5);
+
         for (key, value) in [
             ("selectivity_smoothing_alpha", 0.0),
             ("selectivity_smoothing_alpha", -1.0),

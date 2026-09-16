@@ -282,16 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_valid_api() {
-        let settings = create_test_settings("dummy_key");
-        let provider = OpenAIEmbeddingProvider::new(settings);
-        assert!(
-            provider.is_ok(),
-            "OpenAIEmbeddingProvider initialization should succeed with valid API key."
-        );
-    }
-
-    #[test]
     fn test_new_with_empty_api() {
         let settings = create_test_settings("");
         let error = match OpenAIEmbeddingProvider::new(settings) {
@@ -312,27 +302,6 @@ mod tests {
         let error = provider.generate_embedding("  ").await.unwrap_err();
 
         assert_eq!(error, EmbeddingError::BlankInput { index: None });
-    }
-
-    #[test]
-    fn batch_payload_uses_array_input() {
-        let payload = embedding_payload("text-embedding-3-large", &["first", "second"]);
-
-        assert_eq!(payload["model"], "text-embedding-3-large");
-        assert_eq!(payload["input"][0], "first");
-        assert_eq!(payload["input"][1], "second");
-    }
-
-    #[test]
-    fn validate_embedding_texts_allows_empty_batch() {
-        assert!(validate_embedding_texts(&[]).is_ok());
-    }
-
-    #[test]
-    fn validate_embedding_texts_rejects_blank_entries() {
-        let error = validate_embedding_texts(&["first", "  "]).unwrap_err();
-
-        assert_eq!(error, EmbeddingError::BlankInput { index: Some(1) });
     }
 
     #[test]

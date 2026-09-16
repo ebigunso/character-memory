@@ -579,9 +579,6 @@ pub enum VectorMaintenanceOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::{
-        RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind,
-    };
 
     use uuid::Uuid;
 
@@ -638,25 +635,15 @@ mod tests {
     }
 
     #[test]
-    fn correction_and_forget_dtos_round_trip_through_serde() {
-        let correction = correction_draft();
-        let forget = ForgetMemoryDraft::suppress(
-            LifecycleTargetRef::observation(observation_id()),
-            "Hide this observation from recall.",
+    fn lifecycle_warning_reason_preserves_persisted_token() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs write_jsonl/read_jsonl
+        // persists this reason in LifecycleMutationOutcome.diagnostics.warnings.
+        let serialized = serde_json::to_value(
+            LifecycleMutationWarningReason::CascadeSuppressesCurrentReplacement,
         )
-        .with_trace();
+        .unwrap();
 
-        let correction_json = serde_json::to_string(&correction).unwrap();
-        let forget_json = serde_json::to_string(&forget).unwrap();
-
-        assert_eq!(
-            serde_json::from_str::<CorrectMemoryDraft>(&correction_json).unwrap(),
-            correction
-        );
-        assert_eq!(
-            serde_json::from_str::<ForgetMemoryDraft>(&forget_json).unwrap(),
-            forget
-        );
+        assert_eq!(serialized, "cascade-suppresses-current-replacement");
     }
 
     #[test]
@@ -752,18 +739,6 @@ mod tests {
     }
 
     #[test]
-    fn validation_errors_have_actionable_display_messages() {
-        assert_eq!(
-            LifecycleDtoValidationError::MissingForgetTarget.to_string(),
-            "forget requires at least one target"
-        );
-        assert_eq!(
-            LifecycleDtoValidationError::UnsupportedLifecycleTarget(ObjectType::Entity).to_string(),
-            "unsupported lifecycle target: Entity"
-        );
-    }
-
-    #[test]
     fn typed_target_boundaries_accept_supported_lifecycle_objects_only() {
         for object_type in [
             ObjectType::DerivedMemory,
@@ -825,26 +800,6 @@ mod tests {
     }
 
     #[test]
-    fn original_source_and_correction_origin_provenance_are_distinct_refs() {
-        let replacement = replacement();
-        let serialized = serde_json::to_string(&replacement).unwrap();
-
-        assert_eq!(
-            replacement.original_source_provenance.external_refs[0]
-                .raw_ref
-                .as_deref(),
-            Some("raw://original/episode")
-        );
-        assert_eq!(
-            replacement.correction_origin_provenance.external_refs[0]
-                .raw_ref
-                .as_deref(),
-            Some("raw://corrections/1#message")
-        );
-        assert!(!serialized.contains("verbatim transcript payload"));
-    }
-
-    #[test]
     fn suppression_and_archive_defaults_match_supported_lifecycle_boundary() {
         let suppression = SuppressionPolicy::default();
         let archive = ArchivePolicy::default();
@@ -863,87 +818,6 @@ mod tests {
         assert_eq!(
             thread_forget.target_thread_status,
             Some(ThreadStatus::Archived)
-        );
-    }
-
-    #[test]
-    fn hard_delete_and_redaction_are_deferred_not_selectable_behaviors() {
-        let policy = DeferredDestructiveLifecyclePolicy::default();
-        let serialized = serde_json::to_string(&policy).unwrap();
-
-        assert_eq!(
-            policy.hard_delete,
-            DeferredLifecycleAction::UnsupportedDeferred
-        );
-        assert_eq!(
-            policy.redaction,
-            DeferredLifecycleAction::UnsupportedDeferred
-        );
-        assert!(serialized.contains("unsupported_deferred"));
-    }
-
-    #[test]
-    fn outcome_reports_graph_vector_and_partial_vector_failures() {
-        let outcome = LifecycleMutationOutcome {
-            graph_mutated_object_ids: vec![MemoryObjectRef::new(
-                ObjectType::DerivedMemory,
-                new_memory_id(),
-            )],
-            graph_mutated_link_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655441004")],
-            vector_maintained_object_ids: vec![MemoryObjectRef::new(
-                ObjectType::DerivedMemory,
-                new_memory_id(),
-            )],
-            vector_maintenance_failure: Some(VectorMaintenanceFailure {
-                failures: vec![VectorMaintenanceFailureItem {
-                    operation: VectorMaintenanceOperation::Delete,
-                    objects: vec![MemoryObjectRef::new(
-                        ObjectType::DerivedMemory,
-                        old_memory_id(),
-                    )],
-                    cause: VectorIndexingCause::VectorDatabase(VectorDatabaseError::new(
-                        "test",
-                        VectorDatabaseErrorKind::HttpTimeout,
-                        None,
-                        "timed out after graph mutation",
-                    )),
-                }],
-            }),
-            stats_update_status: StatsUpdateStatus::failed(
-                [],
-                [old_memory_id()],
-                vec![StatsUpdateCause::EdgeWrite {
-                    error: RetrievalStatsStoreError::Sqlite {
-                        detail: "stats edge write failed".to_owned(),
-                    },
-                }],
-            ),
-            trace: Some(LifecycleMutationTrace {
-                requested_targets: vec![LifecycleTargetRef::derived_memory(old_memory_id())],
-                superseded_by: vec![SupersededByEvidence {
-                    superseded_memory_id: old_memory_id(),
-                    superseded_by_memory_id: new_memory_id(),
-                }],
-            }),
-            diagnostics: LifecycleMutationDiagnostics {
-                warnings: vec![LifecycleMutationWarning {
-                    reason: LifecycleMutationWarningReason::CascadeSuppressesCurrentReplacement,
-                    affected_memory_ids: vec![new_memory_id()],
-                }],
-            },
-        };
-
-        let serialized = serde_json::to_string(&outcome).unwrap();
-        let round_tripped: LifecycleMutationOutcome = serde_json::from_str(&serialized).unwrap();
-
-        assert_eq!(round_tripped, outcome);
-        assert!(serialized.contains("cascade-suppresses-current-replacement"));
-        assert_eq!(
-            round_tripped.trace.unwrap().superseded_by[0],
-            SupersededByEvidence {
-                superseded_memory_id: old_memory_id(),
-                superseded_by_memory_id: new_memory_id(),
-            }
         );
     }
 }

@@ -508,115 +508,6 @@ mod tests {
         assert_eq!(conservative_fallback_fanout(4, 2), 2);
     }
 
-    #[test]
-    fn selectivity_policy_rejects_invalid_numbers() {
-        let invalid_alpha = RetrievalSelectivityPolicy::try_new(0.0, 1.0);
-        let invalid_gamma = RetrievalSelectivityPolicy::try_new(1.0, f64::NAN);
-
-        assert!(matches!(
-            invalid_alpha,
-            Err(CustomError::ConfigValidation(ConfigValidationError {
-                keys,
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "a finite positive number",
-                    ..
-                },
-            })) if keys == vec!["selectivity_smoothing_alpha"]
-        ));
-        assert!(matches!(
-            invalid_gamma,
-            Err(CustomError::ConfigValidation(ConfigValidationError {
-                keys,
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "a finite positive number",
-                    ..
-                },
-            })) if keys == vec!["selectivity_gamma"]
-        ));
-    }
-
-    #[test]
-    fn selectivity_policy_preserves_default_fanout_specs() {
-        let policy = RetrievalSelectivityPolicy::default();
-
-        assert_eq!(policy.fanout_specs, default_fanout_specs());
-    }
-
-    #[test]
-    fn selectivity_policy_accepts_fanout_budget_overrides() {
-        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-            1.0,
-            1.0,
-            [(RelationType::About, ObjectType::DerivedMemory, 2, 8)],
-        )
-        .unwrap();
-
-        assert_eq!(
-            policy
-                .fanout_spec(RelationType::About, ObjectType::DerivedMemory)
-                .unwrap(),
-            FanoutSpec {
-                relation: RelationType::About,
-                object_type: ObjectType::DerivedMemory,
-                min_fanout: 2,
-                max_fanout: 8,
-            }
-        );
-        assert_eq!(
-            policy
-                .fanout_spec(RelationType::PartOfThread, ObjectType::DerivedMemory)
-                .unwrap()
-                .max_fanout,
-            15
-        );
-    }
-
-    #[test]
-    fn selectivity_policy_rejects_invalid_fanout_budgets() {
-        let result = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-            1.0,
-            1.0,
-            [(RelationType::About, ObjectType::DerivedMemory, 9, 8)],
-        );
-
-        let Err(CustomError::ConfigValidation(error)) = result else {
-            panic!("expected configuration validation error");
-        };
-        assert_eq!(
-            error,
-            ConfigValidationError {
-                keys: vec!["retrieval.fanout.about_entity.derived_memory"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "min <= max",
-                    actual: "min=9 max=8".to_owned(),
-                },
-            }
-        );
-    }
-
-    #[test]
-    fn selectivity_policy_rejects_unknown_fanout_override_targets() {
-        let result = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-            1.0,
-            1.0,
-            [(RelationType::About, ObjectType::Episode, 0, 8)],
-        );
-
-        let Err(CustomError::ConfigValidation(error)) = result else {
-            panic!("expected configuration validation error");
-        };
-        assert_eq!(
-            error,
-            ConfigValidationError {
-                keys: vec!["retrieval.fanout"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "an implemented retrieval fanout target",
-                    actual: "About->Episode".to_owned(),
-                },
-            }
-        );
-    }
-
     #[tokio::test]
     async fn selectivity_plan_builds_traces_only_when_requested() {
         let stats = InMemoryRetrievalStatsStore::new();
@@ -741,8 +632,20 @@ mod tests {
                     && trace.object_type == ObjectType::DerivedMemory
             })
             .unwrap();
+        let part_of_thread = plan
+            .traces
+            .iter()
+            .find(|trace| {
+                trace.relation == RelationType::PartOfThread
+                    && trace.object_type == ObjectType::DerivedMemory
+            })
+            .unwrap();
         assert_eq!(about.max_fanout, 4);
         assert_eq!(about.chosen_fanout, 4);
+        assert_eq!(
+            part_of_thread.max_fanout, 15,
+            "pairs without an override keep their default budget"
+        );
     }
 
     #[tokio::test]

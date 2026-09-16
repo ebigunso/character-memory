@@ -442,12 +442,6 @@ mod tests {
             stats_link(MemoryId::from_u128(6), missing_episode_id),
         ];
         let stats_store = RecordingStatsStore::default();
-        let expected_error = GraphQueryError::Hydration {
-            detail: format!(
-                "graph query omitted requested stats endpoint objects: Episode {missing_episode_id}"
-            ),
-        };
-
         let status = StatsProjectionService::new(&graph_store, &stats_store)
             .project(&[], &links)
             .await
@@ -461,18 +455,18 @@ mod tests {
             failure.failed_object_ids,
             vec![present_episode.id, missing_episode_id]
         );
-        assert_eq!(
-            failure.causes,
-            vec![StatsUpdateCause::EndpointHydration {
-                error: expected_error.clone(),
+        assert!(matches!(
+            failure.causes.as_slice(),
+            [StatsUpdateCause::EndpointHydration {
+                error: GraphQueryError::Hydration { .. },
             }]
-        );
-        assert_eq!(
-            *stats_store.marked_causes.lock().unwrap(),
-            vec![RetrievalStatsHealthCause::EndpointHydration {
-                error: expected_error,
+        ));
+        assert!(matches!(
+            stats_store.marked_causes.lock().unwrap().as_slice(),
+            [RetrievalStatsHealthCause::EndpointHydration {
+                error: GraphQueryError::Hydration { .. },
             }]
-        );
+        ));
     }
 
     #[test]

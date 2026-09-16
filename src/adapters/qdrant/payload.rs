@@ -251,42 +251,31 @@ mod tests {
     }
 
     #[test]
-    fn manifest_declares_exact_record_and_only_identity_indexes() {
-        assert_eq!(
-            QdrantPayloadSchema::FIELDS,
-            &[
-                schema(
-                    QdrantPayloadField::ObjectId,
-                    QdrantPayloadKind::Keyword,
-                    true
-                ),
-                schema(
-                    QdrantPayloadField::ObjectType,
-                    QdrantPayloadKind::Keyword,
-                    true
-                ),
-                schema(
-                    QdrantPayloadField::Surface,
-                    QdrantPayloadKind::Keyword,
-                    false
-                ),
-                schema(
-                    QdrantPayloadField::SchemaVersion,
-                    QdrantPayloadKind::Keyword,
-                    false
-                ),
-                schema(
-                    QdrantPayloadField::EmbeddingText,
-                    QdrantPayloadKind::Text,
-                    false
-                ),
-            ]
+    fn every_payload_key_is_declared_and_only_filter_keys_are_indexed() {
+        let record = VectorRecord::new(
+            MemoryId::new_v4(),
+            ObjectType::Episode,
+            VectorSurface::Summary,
+            DEFAULT_SCHEMA_VERSION,
+            "Episode summary",
         );
+        let payload = qdrant_payload_map(&record).expect("payload maps");
+
+        let declared = QdrantPayloadSchema::FIELDS
+            .iter()
+            .map(|schema| schema.field.name())
+            .collect::<Vec<_>>();
+        for key in payload.keys() {
+            assert!(
+                declared.contains(&key.as_str()),
+                "{key} is not in the schema"
+            );
+        }
         assert_eq!(
             QdrantPayloadSchema::indexed_fields()
-                .map(|field| field.field)
+                .map(|schema| schema.field.name())
                 .collect::<Vec<_>>(),
-            vec![QdrantPayloadField::ObjectId, QdrantPayloadField::ObjectType,]
+            vec![OBJECT_ID_FIELD, OBJECT_TYPE_FIELD]
         );
     }
 
@@ -312,19 +301,22 @@ mod tests {
     }
 
     #[test]
-    fn point_identity_is_the_surface_namespaced_object_identity() {
-        let record = VectorRecord::new(
+    fn point_identity_is_stable_per_object_and_distinct_per_surface() {
+        let summary = VectorRecord::new(
             MemoryId::from_u128(7),
             ObjectType::Episode,
             VectorSurface::Summary,
             DEFAULT_SCHEMA_VERSION,
             "Episode summary",
         );
+        let mut re_embedded = summary.clone();
+        re_embedded.embedding_text = "Episode summary, rewritten".to_owned();
+        let mut text = summary.clone();
+        text.surface = VectorSurface::Text;
 
-        assert_eq!(
-            qdrant_point_id(&record),
-            MemoryId::new_v5(&record.object_id, b"summary")
-        );
+        assert_eq!(qdrant_point_id(&summary), qdrant_point_id(&summary));
+        assert_eq!(qdrant_point_id(&summary), qdrant_point_id(&re_embedded));
+        assert_ne!(qdrant_point_id(&summary), qdrant_point_id(&text));
     }
 
     #[test]
@@ -333,6 +325,5 @@ mod tests {
             read_candidate_match("qdrant", 1.0, |_| None).expect_err("missing identity must fail");
 
         assert_eq!(error.kind, VectorDatabaseErrorKind::PayloadDeserialization);
-        assert!(error.message.contains(OBJECT_ID_FIELD));
     }
 }

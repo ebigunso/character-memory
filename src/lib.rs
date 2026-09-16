@@ -33,7 +33,7 @@ pub use crate::api::types::{
     LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleOmissionSummary,
     LifecycleTargetRef, LinkOutcome, MemoryCandidate, MemoryLinkCandidate, MemoryLinkDraft,
     MemoryObjectDraft, MemoryThreadCandidate, MemoryThreadDraft, ObservationCandidate,
-    ObservationDraft, PrepareOptions, RationaleCategory, RationaleOrigin, RememberDiagnostic,
+    ObservationDraft, PrepareOptions, RationaleCategory, RememberDiagnostic,
     RememberDiagnosticCode, RememberDiagnostics, RememberInput, RememberOptions, RememberOutcome,
     RememberWritePlan, RepairMarker, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits,
     RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale,
@@ -58,8 +58,8 @@ pub use crate::domain::{
     GraphExpansionBoundedReason, GraphFailureMode, LifecycleDtoValidationError,
     LifecyclePolicyKnob, MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint,
     MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
-    PlanIdentityField, RelationType, RetentionState, Stability, ThreadStatus, VectorSurface,
-    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    PlanIdentityField, RelationType, RetentionState, SourceReferenceKind, Stability, ThreadStatus,
+    VectorSurface, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
