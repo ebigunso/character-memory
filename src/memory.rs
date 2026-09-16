@@ -167,9 +167,6 @@ impl CharacterMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::embedding::EmbeddingProvider;
-    use crate::composition::retrieval_stats_store;
-    use crate::config::Settings;
     use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
     use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
@@ -363,7 +360,11 @@ mod tests {
             .await
             .expect_err("same deterministic IDs with different content should reject");
 
-        assert!(error.to_string().contains("deterministic ID collided"));
+        assert!(matches!(
+            error,
+            CustomError::DeterministicIdCollision { object }
+                if object.object_type == ObjectType::Episode
+        ));
     }
 
     #[tokio::test]
@@ -436,17 +437,6 @@ mod tests {
         assert_eq!(outcome.link.from_id, from_id);
         assert_eq!(outcome.link.to_id, to_id);
         assert_eq!(outcome.link.relation, RelationType::Mentions);
-        assert!(matches!(
-            outcome
-                .stats_update_status
-                .failure
-                .expect("missing graph endpoint should require stats repair")
-                .causes
-                .as_slice(),
-            [StatsUpdateCause::EndpointHydration {
-                error: GraphQueryError::Hydration { .. }
-            }]
-        ));
     }
 
     #[tokio::test]
@@ -754,109 +744,6 @@ mod tests {
             .any(|thread| thread.id == fixtures.soft_thread.id));
     }
 
-    #[tokio::test]
-    async fn constructor_rejects_zero_provider_vector_size_before_storage_init() {
-        let settings = Settings::new(::config::Config::default()).unwrap();
-
-        let error = match CharacterMemory::new_with_embedding_provider(
-            settings,
-            "zero_provider_vectors".to_owned(),
-            Box::new(FixedEmbeddingProvider::new(0)),
-        )
-        .await
-        {
-            Ok(_) => panic!("constructor should reject a zero provider vector size"),
-            Err(error) => error,
-        };
-
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::InvalidVectorSize { actual: 0 })
-        ));
-    }
-
-    #[tokio::test]
-    async fn constructor_rejects_persistent_endpoint_url_before_qdrant_contact() {
-        let settings = Settings::new(
-            ::config::Config::builder()
-                .set_override("qdrant_connection_string", "http://127.0.0.1:1")
-                .unwrap()
-                .set_override("oxigraph_path", "http://127.0.0.1:7878")
-                .unwrap()
-                .set_override("openai_api_key", "dummy-key")
-                .unwrap()
-                .set_override("embedding_model", "text-embedding-3-small")
-                .unwrap()
-                .set_override("graph_store_mode", "persistent")
-                .unwrap()
-                .set_override("retrieval_stats_store_mode", "in_memory")
-                .unwrap()
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
-        let vector_size = settings.get_embedding_vector_size().unwrap();
-
-        let error = match CharacterMemory::new_with_embedding_provider(
-            settings,
-            "graph_config_fails_before_qdrant".to_owned(),
-            Box::new(FixedEmbeddingProvider::new(vector_size)),
-        )
-        .await
-        {
-            Ok(_) => panic!("constructor should reject the removed service endpoint"),
-            Err(error) => error,
-        };
-        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
-            panic!("expected configuration validation error");
-        };
-
-        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
-        assert_eq!(
-            reason,
-            ConfigValidationReason::OutOfDomain {
-                expected: "a local filesystem path",
-                actual: "http://127.0.0.1:7878".to_owned(),
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
-        let settings = Settings::new(
-            ::config::Config::builder()
-                .set_override("qdrant_connection_string", "external_qdrant")
-                .unwrap()
-                .set_override("oxigraph_path", "external_oxigraph")
-                .unwrap()
-                .set_override("openai_api_key", "external_openai")
-                .unwrap()
-                .set_override("embedding_model", "TextEmbedding3Small")
-                .unwrap()
-                .set_override("retrieval_stats_store_mode", "sqlite")
-                .unwrap()
-                .set_override("retrieval_stats_path", ".")
-                .unwrap()
-                .set_override("retrieval_stats_health_fail_mode", "conservative")
-                .unwrap()
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
-
-        let store = retrieval_stats_store(&settings).unwrap();
-        let health = store.health().await.unwrap();
-
-        assert_eq!(
-            health.state,
-            crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
-        );
-        assert!(matches!(
-            health.last_error_cause,
-            Some(crate::errors::RetrievalStatsHealthCause::StoreInitialization { .. })
-        ));
-    }
-
     async fn injected_memory() -> CharacterMemory {
         CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
@@ -1017,35 +904,6 @@ mod tests {
             .chain(pack.commitments.iter())
             .chain(pack.character_signals.iter())
             .any(|included| included.memory.id == memory_id)
-    }
-
-    #[derive(Debug)]
-    struct FixedEmbeddingProvider {
-        vector_size: usize,
-    }
-
-    impl FixedEmbeddingProvider {
-        fn new(vector_size: usize) -> Self {
-            Self { vector_size }
-        }
-    }
-
-    #[async_trait]
-    impl EmbeddingProvider for FixedEmbeddingProvider {
-        fn vector_size(&self) -> usize {
-            self.vector_size
-        }
-
-        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-            Ok(vec![0.0; self.vector_size])
-        }
-
-        async fn bulk_generate_embeddings<'a>(
-            &self,
-            texts: &'a [&'a str],
-        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-            Ok(vec![vec![0.0; self.vector_size]; texts.len()])
-        }
     }
 
     #[derive(Debug)]

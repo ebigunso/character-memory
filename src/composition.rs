@@ -285,3 +285,106 @@ pub(crate) fn retrieval_stats_store(
         ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::retrieval_stats::RetrievalStatsHealthState;
+
+    #[test]
+    fn preflight_rejects_zero_provider_vector_size_before_storage_init() {
+        let settings = Settings::new(::config::Config::default()).unwrap();
+
+        let error = preflight_error(&settings, FixedEmbeddingProvider(0));
+
+        assert!(matches!(
+            error,
+            CustomError::Embedding(EmbeddingError::InvalidVectorSize { actual: 0 })
+        ));
+    }
+
+    #[test]
+    fn preflight_rejects_persistent_endpoint_url_before_vector_store_admission() {
+        let settings = Settings::new(
+            ::config::Config::builder()
+                .set_override("qdrant_connection_string", "http://127.0.0.1:1")
+                .unwrap()
+                .set_override("oxigraph_path", "http://127.0.0.1:7878")
+                .unwrap()
+                .set_override("graph_store_mode", "persistent")
+                .unwrap()
+                .set_override("retrieval_stats_store_mode", "in_memory")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let error = preflight_error(&settings, FixedEmbeddingProvider(3));
+
+        let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
+            panic!("expected configuration validation error");
+        };
+        assert_eq!(keys, vec!["OXIGRAPH_PATH"]);
+        assert_eq!(
+            reason,
+            ConfigValidationReason::OutOfDomain {
+                expected: "a local filesystem path",
+                actual: "http://127.0.0.1:7878".to_owned(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
+        let settings = Settings::new(
+            ::config::Config::builder()
+                .set_override("retrieval_stats_store_mode", "sqlite")
+                .unwrap()
+                .set_override("retrieval_stats_path", ".")
+                .unwrap()
+                .set_override("retrieval_stats_health_fail_mode", "conservative")
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let store = retrieval_stats_store(&settings).unwrap();
+        let health = store.health().await.unwrap();
+
+        assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
+        assert!(matches!(
+            health.last_error_cause,
+            Some(RetrievalStatsHealthCause::StoreInitialization { .. })
+        ));
+    }
+
+    fn preflight_error(settings: &Settings, provider: FixedEmbeddingProvider) -> CustomError {
+        match preflight(settings, Some(Box::new(provider))) {
+            Ok(_) => panic!("preflight should reject the settings"),
+            Err(error) => error,
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixedEmbeddingProvider(usize);
+
+    #[async_trait]
+    impl EmbeddingProvider for FixedEmbeddingProvider {
+        fn vector_size(&self) -> usize {
+            self.0
+        }
+
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
+            Ok(vec![0.0; self.0])
+        }
+
+        async fn bulk_generate_embeddings<'a>(
+            &self,
+            texts: &'a [&'a str],
+        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+            Ok(vec![vec![0.0; self.0]; texts.len()])
+        }
+    }
+}

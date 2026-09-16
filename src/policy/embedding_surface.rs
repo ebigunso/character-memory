@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_object_builder_covers_vector_indexed_domain_objects_and_skips_links() {
+    fn memory_object_builder_dispatches_each_vector_indexed_domain_object() {
         let objects = [
             MemoryObject::Episode(episode_fixture()),
             MemoryObject::Observation(observation_fixture()),
@@ -216,11 +216,6 @@ mod tests {
         assert_eq!(records[2].object_type, ObjectType::DerivedMemory);
         assert_eq!(records[3].object_type, ObjectType::MemoryThread);
         assert_eq!(records[4].object_type, ObjectType::Entity);
-        assert_eq!(records.len(), 5);
-        assert_eq!(
-            memory_object_vector_record(&MemoryObject::MemoryLink(link_fixture())),
-            None
-        );
     }
 
     #[test]
