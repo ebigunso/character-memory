@@ -635,6 +635,18 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_warning_reason_preserves_persisted_token() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs write_jsonl/read_jsonl
+        // persists this reason in LifecycleMutationOutcome.diagnostics.warnings.
+        let serialized = serde_json::to_value(
+            LifecycleMutationWarningReason::CascadeSuppressesCurrentReplacement,
+        )
+        .unwrap();
+
+        assert_eq!(serialized, "cascade-suppresses-current-replacement");
+    }
+
+    #[test]
     fn lifecycle_defaults_are_non_destructive_and_trace_is_opt_in() {
         let correction = CorrectMemoryDraft::new(
             CorrectionTarget::derived_memory(old_memory_id()),

@@ -520,6 +520,21 @@ fn write_plan_validation_errors(validations: &[CandidateValidation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unrecognized_embedding_error_preserves_persisted_kind_and_detail() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs write_jsonl/read_jsonl
+        // persists this via VectorIndexingCause::Embedding in RememberOutcome.vector_indexing_failure.
+        let detail = "opaque provider detail";
+        let serialized = serde_json::to_value(EmbeddingError::Unrecognized {
+            detail: detail.to_owned(),
+        })
+        .unwrap();
+
+        assert_eq!(serialized["kind"], "unrecognized");
+        assert_eq!(serialized["detail"], detail);
+    }
+
     #[test]
     fn io_error_kind_preserves_transport_classification() {
         let kind = IoErrorKind::from(std::io::ErrorKind::ConnectionRefused);

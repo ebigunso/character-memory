@@ -857,6 +857,26 @@ mod tests {
     }
 
     #[test]
+    fn stats_update_status_preserves_persisted_failure_tokens() {
+        // CharacterMemoryEvals/crates/cmem-eval/src/results.rs persists this status in
+        // RememberOutcome, LinkOutcome and LifecycleMutationOutcome via write_jsonl/read_jsonl.
+        let status = StatsUpdateStatus::failed(
+            [],
+            [],
+            vec![StatsUpdateCause::ObjectStateWrite {
+                error: crate::errors::RetrievalStatsStoreError::Sqlite {
+                    detail: String::new(),
+                },
+            }],
+        );
+        let serialized = serde_json::to_value(status).unwrap();
+        let cause = &serialized["failure"]["causes"][0];
+
+        assert_eq!(cause["cause"], "object_state_write");
+        assert_eq!(cause["error"]["kind"], "sqlite");
+    }
+
+    #[test]
     fn remember_diagnostics_preserves_structured_validation_and_projects_warnings() {
         let matching_episode_id = memory_id("550e8400-e29b-41d4-a716-446655442009");
         let validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation)
