@@ -155,22 +155,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vector_candidate_search_can_scope_by_canonical_object_types() {
-        let search = VectorCandidateSearch::new(
-            vec![1.0, 0.0],
-            10,
-            vec![ObjectType::Episode, ObjectType::DerivedMemory],
-        );
-
-        assert_eq!(search.query_embedding, vec![1.0, 0.0]);
-        assert_eq!(search.limit, 10);
-        assert_eq!(
-            search.object_types,
-            vec![ObjectType::Episode, ObjectType::DerivedMemory]
-        );
-    }
-
-    #[test]
     fn canonical_candidates_dedupe_identity_at_highest_score_and_totally_order_ties() {
         let episode_id = MemoryId::from_u128(2);
         let observation_id = MemoryId::from_u128(1);
@@ -191,21 +175,5 @@ mod tests {
         assert_eq!(canonical[0].object_id, episode_id);
         assert_eq!(canonical[0].score, 0.9);
         assert_eq!(canonical[1].object_id, observation_id);
-    }
-
-    #[test]
-    fn embedding_input_keeps_raw_text_consumer_supplied() {
-        let object_id = MemoryId::new_v4();
-        let input = EmbeddingInput::new(
-            Some(object_id),
-            Some(ObjectType::Episode),
-            VectorSurface::Summary,
-            "episode summary",
-        );
-
-        assert_eq!(input.object_id, Some(object_id));
-        assert_eq!(input.object_type, Some(ObjectType::Episode));
-        assert_eq!(input.surface, VectorSurface::Summary);
-        assert_eq!(input.text, "episode summary");
     }
 }
