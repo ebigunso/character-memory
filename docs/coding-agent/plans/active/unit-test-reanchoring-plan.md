@@ -1,6 +1,6 @@
 # Plan: Unit tests assert typed contracts and outcomes, not prose, transcripts or serde plumbing
 
-- status: in_progress (approved by the decider 2026-09-16)
+- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-17 at 3c2f154; pull request open, awaiting merge approval)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
@@ -224,6 +224,10 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 - 2026-09-17 Wave 2 completed: [Task_2 3d5b356, Task_3 e3d5ac5, Task_4 b8831f1, Task_5 a57c58f, Task_6 b5d3584, Task_7 5df6e7b] (integrated tip 5df6e7b)
   - Summary: write-path and read-path usecase tests re-anchored on typed variants, ordering plus persisted state; the retrieve module's semantic vector double rebuilt over the real embedded store at 18 sites; facade module keeps facade contracts; one retrieval-stats port-contract suite runs over both stores; API type tests keep wire-contract and validation assertions; vector and embedding adapter tests re-anchored; the four Oxigraph erasure maps use the transparent DomainValidation variant; the orphaned triple_count helper removed.
   - Validation evidence: per-task module counts in the worker reports; orchestrator full-suite run on the integrated tip recorded in the Wave 3 entry.
+
+- 2026-09-17 Wave 3 completed: [Task_8] (reviewed 8818bc8, final pin 3c2f154 after the three restored wire-token tests)
+  - Summary: cm-reviewer APPROVED. Findings: three deleted serde tests had a persisted consumer (the evaluation workspace's JSONL records) and were restored as focused token observers; two qualifications recorded (LowInformationCoOccurrence reachable through test evidence only; companion Windows symlink exception).
+  - Validation evidence (reviewer, pinned worktree, Qdrant unused, no .env): fmt, check, clippy, test --no-run clean; lib 322 passed 3 ignored at 8818bc8 and 325 at 3c2f154; integration 2+3+12+6; doc 1; zero skipping; TEMP 2700 to 2699, zero additions; ADR-I-0018 diff-scoped dependency audit clean. Companion: cargo check --workspace --all-targets clean and cargo test --workspace green except the known symlink exception against 8818bc8.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
