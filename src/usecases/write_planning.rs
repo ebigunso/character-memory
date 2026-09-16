@@ -551,9 +551,12 @@ mod construction_tests {
 
     #[test]
     fn source_refs_remain_opaque_and_verbatim() {
+        let span = SourceSpan::raw("opaque://system/raw/123")
+            .with_message_id("message-7")
+            .with_char_range(3, 31);
         let input = RememberInput::new("Caller content")
             .with_raw_ref("opaque://system/raw/123")
-            .with_source_span(SourceSpan::source("conversation-123"));
+            .with_source_span(span.clone());
 
         assert_eq!(
             input.source_reference(),
@@ -565,6 +568,19 @@ mod construction_tests {
                 .as_deref(),
             Some("opaque://system/raw/123")
         );
+
+        let defaults =
+            RememberPlanDefaults::fixed("source-refs", timestamp("2026-07-03T10:05:00Z"));
+        let plan = input.prepare_write_plan(&defaults);
+        assert_eq!(
+            plan.source_input_ref,
+            Some(ExternalSourceReference::raw("opaque://system/raw/123"))
+        );
+        assert!(plan.candidates.iter().any(|candidate| matches!(
+            candidate,
+            MemoryCandidate::Episode(candidate)
+                if candidate.provenance.source.source_spans.contains(&span)
+        )));
     }
 
     #[test]
