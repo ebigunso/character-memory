@@ -1,77 +1,47 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use async_trait::async_trait;
-use character_memory::{
-    CustomError, EmbeddingError, EmbeddingProvider, IoErrorKind, Settings, TransportStatus,
-    VectorDatabaseError, VectorDatabaseErrorKind,
-};
-use config::Config;
+use character_memory::{CharacterMemory, CustomError, EmbeddingError, EmbeddingProvider, Settings};
+use config::{builder::DefaultState, Config, ConfigBuilder};
 use qdrant_client::{config::QdrantConfig, Qdrant};
+use tempfile::TempDir;
 use uuid::Uuid;
 
-pub fn load_test_settings() -> Result<Settings, CustomError> {
-    dotenvy::dotenv().ok();
+/// Settings for the embedded vector store under `root/vectors` with in-memory graph and
+/// stats stores. Built from explicit overrides only: no environment variable is read.
+pub fn embedded_settings(root: &Path) -> ConfigBuilder<DefaultState> {
+    Config::builder()
+        .set_override("vector_store_path", path_string(&root.join("vectors")))
+        .unwrap()
+        .set_override("embedding_model", "text-embedding-3-small")
+        .unwrap()
+        .set_override("graph_store_mode", "in_memory")
+        .unwrap()
+        .set_override("retrieval_stats_store_mode", "in_memory")
+        .unwrap()
+}
 
-    let mut builder = Config::builder();
-    for (environment_key, config_key) in [
-        ("QDRANT_CONNECTION_STRING", "qdrant_connection_string"),
-        ("OXIGRAPH_PATH", "oxigraph_path"),
-        ("OPENAI_API_KEY", "openai_api_key"),
-        ("EMBEDDING_MODEL", "embedding_model"),
-    ] {
-        let value = std::env::var(environment_key).map_err(|error| {
-            CustomError::ConfigParseError(format!("{environment_key}: {error}"))
-        })?;
-        builder = builder
-            .set_override(config_key, value)
-            .map_err(config_error)?;
-    }
+pub async fn open(
+    builder: ConfigBuilder<DefaultState>,
+    collection_name: String,
+) -> Result<CharacterMemory, CustomError> {
+    let settings = Settings::new(builder.build().unwrap())?;
+    let embed_provider = Box::new(DeterministicEmbeddingProvider::new(
+        settings.get_embedding_vector_size()?,
+    ));
+    CharacterMemory::new_with_embedding_provider(settings, collection_name, embed_provider).await
+}
 
-    for (environment_key, config_key) in [
-        ("VECTOR_STORE_MODE", "vector_store_mode"),
-        ("VECTOR_STORE_PATH", "vector_store_path"),
-        ("GRAPH_STORE_MODE", "graph_store_mode"),
-        ("RETRIEVAL_STATS_STORE_MODE", "retrieval_stats_store_mode"),
-        ("RETRIEVAL_STATS_PATH", "retrieval_stats_path"),
-        (
-            "RETRIEVAL_STATS_HEALTH_FAIL_MODE",
-            "retrieval_stats_health_fail_mode",
-        ),
-        ("SELECTIVITY_SMOOTHING_ALPHA", "selectivity_smoothing_alpha"),
-        ("SELECTIVITY_GAMMA", "selectivity_gamma"),
-        (
-            "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MIN",
-            "retrieval.fanout.about_entity.derived_memory.min",
-        ),
-        (
-            "RETRIEVAL_FANOUT_ABOUT_ENTITY_DERIVED_MEMORY_MAX",
-            "retrieval.fanout.about_entity.derived_memory.max",
-        ),
-        (
-            "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MIN",
-            "retrieval.fanout.participant_entity.episode.min",
-        ),
-        (
-            "RETRIEVAL_FANOUT_PARTICIPANT_ENTITY_EPISODE_MAX",
-            "retrieval.fanout.participant_entity.episode.max",
-        ),
-        (
-            "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MIN",
-            "retrieval.fanout.part_of_thread.derived_memory.min",
-        ),
-        (
-            "RETRIEVAL_FANOUT_PART_OF_THREAD_DERIVED_MEMORY_MAX",
-            "retrieval.fanout.part_of_thread.derived_memory.max",
-        ),
-    ] {
-        if let Ok(value) = std::env::var(environment_key) {
-            builder = builder
-                .set_override(config_key, value)
-                .map_err(config_error)?;
-        }
-    }
+/// Closes the facade so its local stores release their files, then removes the store root.
+pub async fn close_and_remove_root(memory: CharacterMemory, root: TempDir) {
+    let path = root.path().to_path_buf();
+    memory.close().await.expect("facade should close");
+    root.close().expect("store root should be removed");
+    assert!(!path.exists(), "store root should not remain at {path:?}");
+}
 
-    Settings::new(builder.build().map_err(config_error)?)
+pub fn path_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 pub fn unique_collection_name() -> String {
@@ -134,42 +104,11 @@ fn stable_hash(text: &str) -> usize {
     })
 }
 
-pub fn is_qdrant_unavailable_error(error: &VectorDatabaseError) -> bool {
-    if error.backend != "qdrant" {
-        return false;
-    }
-
-    error.status == Some(TransportStatus::Unavailable)
-        || matches!(
-            error.kind,
-            VectorDatabaseErrorKind::HttpConnect | VectorDatabaseErrorKind::HttpTimeout
-        )
-        || matches!(
-            &error.kind,
-            VectorDatabaseErrorKind::Io { io_kind }
-                if matches!(
-                    io_kind,
-                    IoErrorKind::ConnectionRefused
-                        | IoErrorKind::ConnectionReset
-                        | IoErrorKind::ConnectionAborted
-                        | IoErrorKind::NotConnected
-                        | IoErrorKind::TimedOut
-                )
-        )
-}
-
-pub fn should_skip_qdrant_unavailable(error: &VectorDatabaseError) -> bool {
-    let unavailable = is_qdrant_unavailable_error(error);
-    if unavailable && std::env::var_os("REQUIRE_QDRANT_TESTS").is_some() {
-        panic!("Qdrant is required for this test but is unavailable: {error}");
-    }
-    unavailable
-}
-
+/// Deletes a collection on the Qdrant service named by `QDRANT_CONNECTION_STRING`.
+/// Only the opt-in service parity tests reach the service, so only they call this.
 pub async fn cleanup_collection(collection_name: &str) {
-    let settings = load_test_settings().expect("Failed to load settings from environment");
-
-    let qdrant_url = settings.get_qdrant_connection().to_string();
+    let qdrant_url = std::env::var("QDRANT_CONNECTION_STRING")
+        .expect("QDRANT_CONNECTION_STRING is set for service parity tests");
     let client = Qdrant::new(QdrantConfig::from_url(&qdrant_url).timeout(Duration::from_secs(30)))
         .expect("Failed to create Qdrant client");
 
@@ -188,8 +127,4 @@ pub async fn cleanup_collection(collection_name: &str) {
             }
         }
     }
-}
-
-pub fn config_error(error: config::ConfigError) -> CustomError {
-    CustomError::ConfigParseError(error.to_string())
 }

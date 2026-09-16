@@ -881,11 +881,20 @@ mod tests {
 
     #[test]
     fn inferred_rationale_cannot_claim_caller_origin_through_constructors() {
+        let caller = CandidateProvenance::caller("caller supplied rationale");
+        assert_eq!(caller.producer_kind, CandidateProducerKind::Caller);
+        assert_eq!(caller.rationale_origin(), RationaleOrigin::ProvidedByCaller);
+        assert_eq!(caller.rationale.text(), Some("caller supplied rationale"));
+
         let provenance = CandidateProvenance::inferred_by_processor(
             CandidateProducerKind::ModelProcessor,
             "candidate was inferred from a transcript segment",
         );
 
+        assert_eq!(
+            provenance.producer_kind,
+            CandidateProducerKind::ModelProcessor
+        );
         assert_eq!(
             provenance.rationale_origin(),
             RationaleOrigin::InferredByProcessor

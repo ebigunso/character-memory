@@ -39,7 +39,7 @@ async fn injected_provider_opens_without_unused_settings_and_ignores_them_when_p
         .unwrap();
         remember_fixture(&memory).await;
         assert_eq!(ids(&episode_snapshot(&memory).await), vec![id(1), id(2)]);
-        close_embedded_and_remove_root(memory, temp).await;
+        test_support::close_and_remove_root(memory, temp).await;
     }
 }
 
@@ -153,7 +153,7 @@ async fn flat_openai_settings_still_open_the_default_facade() {
     let memory = CharacterMemory::new(settings, "flat_openai_settings".to_owned())
         .await
         .unwrap();
-    close_embedded_and_remove_root(memory, temp).await;
+    test_support::close_and_remove_root(memory, temp).await;
 }
 
 fn local_mode_settings(path: &Path) -> ConfigBuilder<DefaultState> {
@@ -251,7 +251,7 @@ async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() 
     drop(memory);
     let reopened = open_embedded(temp.path(), collection).await.unwrap();
     assert_eq!(ids(&episode_snapshot(&reopened).await), vec![id(2), id(3)]);
-    close_embedded_and_remove_root(reopened, temp).await;
+    test_support::close_and_remove_root(reopened, temp).await;
 }
 
 #[tokio::test]
@@ -293,7 +293,7 @@ async fn close_releases_local_stores_for_immediate_removal_and_fresh_reopen() {
     assert!(episode_snapshot(&reopened).await.is_empty());
     remember_fixture(&reopened).await;
     assert_eq!(ids(&episode_snapshot(&reopened).await), vec![id(1), id(2)]);
-    close_embedded_and_remove_root(reopened, temp).await;
+    test_support::close_and_remove_root(reopened, temp).await;
 }
 
 #[tokio::test]
@@ -329,7 +329,7 @@ async fn embedded_zero_norm_contract_rejects_records_and_exhaustively_scores_que
         .unwrap();
 
     assert_zero_norm_contract(&memory).await;
-    close_embedded_and_remove_root(memory, temp).await;
+    test_support::close_and_remove_root(memory, temp).await;
 }
 
 #[tokio::test]
@@ -352,7 +352,7 @@ async fn service_and_embedded_share_the_zero_norm_contract() {
     }
     .await;
 
-    close_embedded_and_remove_root(embedded, temp).await;
+    test_support::close_and_remove_root(embedded, temp).await;
     service.close().await.unwrap();
     test_support::cleanup_collection(&collection).await;
     result
@@ -387,17 +387,10 @@ async fn service_and_embedded_admit_identical_candidates_in_identical_order() {
     }
     .await;
 
-    close_embedded_and_remove_root(embedded, temp).await;
+    test_support::close_and_remove_root(embedded, temp).await;
     service.close().await.unwrap();
     test_support::cleanup_collection(&collection).await;
     result
-}
-
-async fn close_embedded_and_remove_root(memory: CharacterMemory, temp: TempDir) {
-    let path = temp.path().to_path_buf();
-    memory.close().await.unwrap();
-    temp.close().unwrap();
-    assert!(!path.exists());
 }
 
 async fn open_embedded(path: &Path, collection: &str) -> Result<CharacterMemory, CustomError> {
