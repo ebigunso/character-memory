@@ -2849,6 +2849,294 @@ mod tests {
         }));
     }
 
+    #[tokio::test]
+    async fn retrieval_after_lifecycle_mutation_excludes_stale_records_by_default() {
+        let graph = in_memory_graph_store();
+        let fixtures = representative_fixtures();
+        let mut superseded_memory = fixtures.user_preference.clone();
+        let mut suppressed_memory = fixtures.suppressed_seed.clone();
+        let mut non_current_memory = fixtures.open_loop.clone();
+        let mut replacement = fixtures.correction.clone();
+        let mut archived_thread = fixtures.soft_thread.clone();
+        superseded_memory.retention_state = RetentionState::Active;
+        superseded_memory.is_current = true;
+        suppressed_memory.retention_state = RetentionState::Suppressed;
+        non_current_memory.is_current = false;
+        replacement.supersedes = vec![superseded_memory.id];
+        archived_thread.status = ThreadStatus::Archived;
+        let supersedes_link = crate::domain::MemoryLink {
+            id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0002),
+            object_type: ObjectType::MemoryLink,
+            from_id: replacement.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: superseded_memory.id,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::Supersedes,
+            confidence: 1.0,
+            rationale: Some("Replacement supersedes stale retrieval candidate.".to_owned()),
+            created_at: replacement.created_at,
+            schema_version: replacement.schema_version.clone(),
+        };
+        graph
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Observation(fixtures.salient_observation.clone()),
+                MemoryObject::MemoryThread(archived_thread.clone()),
+                MemoryObject::DerivedMemory(superseded_memory.clone()),
+                MemoryObject::DerivedMemory(suppressed_memory.clone()),
+                MemoryObject::DerivedMemory(non_current_memory.clone()),
+                MemoryObject::DerivedMemory(replacement.clone()),
+            ])
+            .await
+            .unwrap();
+        graph
+            .upsert_links(&[fixtures.soft_thread_link.clone(), supersedes_link])
+            .await
+            .unwrap();
+
+        let vector = TemporaryVectorCandidateStore::open(2).await;
+        seed(
+            &vector,
+            MemoryObject::DerivedMemory(replacement.clone()),
+            0.0,
+        )
+        .await;
+        seed(
+            &vector,
+            MemoryObject::DerivedMemory(superseded_memory.clone()),
+            0.1,
+        )
+        .await;
+        seed(
+            &vector,
+            MemoryObject::DerivedMemory(suppressed_memory.clone()),
+            0.2,
+        )
+        .await;
+        seed(
+            &vector,
+            MemoryObject::DerivedMemory(non_current_memory.clone()),
+            0.3,
+        )
+        .await;
+        seed(
+            &vector,
+            MemoryObject::MemoryThread(archived_thread.clone()),
+            0.4,
+        )
+        .await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("lifecycle graph truth").with_trace())
+            .await
+            .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+
+        assert!(outcome
+            .pack
+            .derived_memories
+            .iter()
+            .any(|included| included.memory.id == replacement.id));
+        assert!(!outcome
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == superseded_memory.id));
+        assert!(!outcome
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == suppressed_memory.id));
+        assert!(!outcome
+            .pack
+            .open_loops
+            .iter()
+            .any(|included| included.memory.id == non_current_memory.id));
+        assert!(outcome.pack.active_threads.is_empty());
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == superseded_memory.id
+                && decision.reason == LifecycleFilterReason::SupersededOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == suppressed_memory.id
+                && decision.reason == LifecycleFilterReason::SuppressedOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == non_current_memory.id
+                && decision.reason == LifecycleFilterReason::NonCurrentOmitted
+        }));
+        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+            decision.object.id == archived_thread.id
+                && decision.reason == LifecycleFilterReason::ArchivedOmitted
+        }));
+    }
+
+    #[tokio::test]
+    async fn retrieve_pipeline_expands_embedded_vector_candidate_with_embedded_oxigraph() {
+        let fixtures = representative_fixtures();
+        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
+        let vector = TemporaryVectorCandidateStore::open(2).await;
+        seed(
+            &vector,
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            0.0,
+        )
+        .await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+
+        let outcome = pipeline
+            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
+            .await
+            .unwrap();
+        let repeated = pipeline
+            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
+            .await
+            .unwrap();
+        let trace = outcome.trace.as_ref().unwrap();
+        let repeated_trace = repeated.trace.as_ref().unwrap();
+        let included_assignments = trace
+            .section_assignments
+            .iter()
+            .filter(|assignment| assignment.section != ContextPackSection::Omitted)
+            .count();
+
+        assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
+        assert_eq!(
+            outcome.pack.derived_memories[0].memory.id,
+            fixtures.derived_reflection.id
+        );
+        assert_eq!(outcome.rationale.vector_candidate_count, 1);
+        assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
+        assert!(trace.graph_expansions.iter().any(|expansion| {
+            expansion.root.id == fixtures.hub_entity.id && expansion.object_count > 0
+        }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::RelevantEpisodes
+                && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
+        }));
+        assert_eq!(trace.vector_candidates.len(), 1);
+        assert_eq!(trace.vector_candidates[0].object.id, fixtures.hub_entity.id);
+        assert_eq!(
+            trace
+                .section_assignments
+                .iter()
+                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
+                .collect::<Vec<_>>(),
+            repeated_trace
+                .section_assignments
+                .iter()
+                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trace
+                .graph_relations
+                .iter()
+                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
+                .collect::<Vec<_>>(),
+            repeated_trace
+                .graph_relations
+                .iter()
+                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
+                .collect::<Vec<_>>()
+        );
+        assert!(trace.graph_relations.iter().any(|relation| {
+            relation.from.id == fixtures.hub_entity.id
+                && relation.to.id == fixtures.episode.id
+                && relation.relation == RelationType::Involves
+        }));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.derived_reflection.id
+                && assignment.section == ContextPackSection::DerivedMemories
+        }));
+    }
+
+    #[tokio::test]
+    async fn retrieve_pipeline_after_persistent_reopen_uses_graph_authority_filters() {
+        let graph_dir = tempfile::TempDir::new().unwrap();
+        let graph_path = graph_dir.path().join("graph");
+        let fixtures = representative_fixtures();
+        let missing_vector_only_id = MemoryId::new_v4();
+
+        {
+            let graph =
+                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
+                    .unwrap();
+            graph.upsert_objects(&fixtures.objects()).await.unwrap();
+            graph.upsert_links(&fixtures.links()).await.unwrap();
+        }
+
+        {
+            let reopened =
+                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
+                    .unwrap();
+            let vector = TemporaryVectorCandidateStore::open(2).await;
+            seed(
+                &vector,
+                MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+                0.0,
+            )
+            .await;
+            seed(
+                &vector,
+                MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+                0.1,
+            )
+            .await;
+            let vector_only = crate::models::vector::VectorRecord::new(
+                missing_vector_only_id,
+                ObjectType::DerivedMemory,
+                VectorSurface::Summary,
+                crate::domain::DEFAULT_SCHEMA_VERSION,
+                "Derived memory present in the vector index only",
+            );
+            vector
+                .upsert_vector_records(&[VectorRecordEmbedding::new(&vector_only, &[1.0, 0.2])])
+                .await
+                .unwrap();
+            let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+            let pipeline = RetrievePipeline::new(&reopened, &vector, &embedder);
+
+            let outcome = pipeline
+                .retrieve(RetrievalContext::new("restart graph authority").with_trace())
+                .await
+                .unwrap();
+            let retrieved_ids = outcome
+                .pack
+                .derived_memories
+                .iter()
+                .chain(outcome.pack.preferences.iter())
+                .map(|included| included.memory.id)
+                .collect::<HashSet<_>>();
+
+            assert!(retrieved_ids.contains(&fixtures.derived_reflection.id));
+            assert!(!retrieved_ids.contains(&fixtures.suppressed_seed.id));
+            assert!(!retrieved_ids.contains(&missing_vector_only_id));
+            let trace = outcome.trace.as_ref().unwrap();
+            assert!(trace.vector_candidates.iter().any(|candidate| {
+                candidate.object.id == missing_vector_only_id
+                    && candidate.object.object_type == ObjectType::DerivedMemory
+            }));
+            assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
+                decision.object.id == fixtures.suppressed_seed.id
+                    && decision.action == LifecycleFilterAction::Omitted
+            }));
+        }
+    }
+
+    /// Upserts the object's real vector record; `tilt` orders candidates by
+    /// cosine distance from the `[1.0, 0.0]` query (0.0 ranks first).
+    async fn seed(vector: &TemporaryVectorCandidateStore, object: MemoryObject, tilt: f32) {
+        let record = crate::policy::memory_object_vector_record(&object).unwrap();
+        vector
+            .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, tilt])])
+            .await
+            .unwrap();
+    }
+
     async fn graph_with(
         objects: &[MemoryObject],
         links: &[crate::domain::MemoryLink],

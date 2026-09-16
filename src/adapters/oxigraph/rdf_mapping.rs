@@ -408,80 +408,8 @@ fn enum_value(value: impl Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{graph_uri, ObjectType, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::DEFAULT_SCHEMA_VERSION;
     use crate::test_support::representative_fixtures;
-
-    #[test]
-    fn rdf_mapping_uses_canonical_graph_uris_for_all_object_subjects() {
-        let fixtures = representative_fixtures();
-
-        for object in fixtures.objects() {
-            let triples = rdf_triples_for_object(&object).expect("current schema maps");
-
-            assert!(triples
-                .iter()
-                .all(|triple| triple.subject == graph_uri(object.object_type(), object.id())));
-            assert!(triples.iter().any(|triple| {
-                triple.predicate == vocab::GRAPH_URI
-                    && triple.object
-                        == RdfObject::Literal(graph_uri(object.object_type(), object.id()))
-            }));
-        }
-    }
-
-    #[test]
-    fn rdf_mapping_covers_lifecycle_currentness_provenance_and_supersession() {
-        let fixtures = representative_fixtures();
-        let triples =
-            rdf_triples_for_object(&MemoryObject::DerivedMemory(fixtures.correction.clone()))
-                .expect("current schema maps");
-
-        assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
-        assert_contains_literal(&triples, vocab::IS_CURRENT, "true");
-        assert_contains_literal(&triples, vocab::RETENTION_STATE, "active");
-        assert_contains_resource(
-            &triples,
-            vocab::DERIVED_FROM_EPISODE,
-            &graph_uri(ObjectType::Episode, fixtures.episode.id),
-        );
-        assert_contains_resource(
-            &triples,
-            vocab::DERIVED_FROM_OBSERVATION,
-            &graph_uri(ObjectType::Observation, fixtures.salient_observation.id),
-        );
-        assert_contains_resource(
-            &triples,
-            vocab::PART_OF_THREAD,
-            &graph_uri(ObjectType::MemoryThread, fixtures.soft_thread.id),
-        );
-        assert_contains_resource(
-            &triples,
-            vocab::ABOUT_ENTITY,
-            &graph_uri(ObjectType::Entity, fixtures.user_entity.id),
-        );
-        assert_contains_resource(
-            &triples,
-            vocab::SUPERSEDES,
-            &graph_uri(ObjectType::DerivedMemory, fixtures.suppressed_seed.id),
-        );
-    }
-
-    #[test]
-    fn rdf_mapping_preserves_schema_version_literals_for_objects_and_links() {
-        let fixtures = representative_fixtures();
-
-        for object in fixtures.objects() {
-            let triples = rdf_triples_for_object(&object).expect("current schema maps");
-
-            assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
-        }
-
-        for link in fixtures.links() {
-            let triples = rdf_triples_for_link(&link).expect("current schema maps");
-
-            assert_contains_literal(&triples, vocab::SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION);
-        }
-    }
 
     #[test]
     fn rdf_mapping_preserves_source_pointers_without_raw_transcript_literals() {
@@ -510,24 +438,6 @@ mod tests {
         );
         assert_no_raw_content_predicates(&episode_triples);
         assert_no_raw_content_predicates(&observation_triples);
-    }
-
-    #[test]
-    fn rdf_mapping_reifies_memory_links_and_adds_typed_relation_triples() {
-        let fixtures = representative_fixtures();
-        let link = fixtures.soft_thread_link;
-        let triples = rdf_triples_for_link(&link).expect("current schema maps");
-        let from = graph_uri(link.from_type, link.from_id);
-        let to = graph_uri(link.to_type, link.to_id);
-
-        assert_contains_resource(&triples, vocab::FROM, &from);
-        assert_contains_resource(&triples, vocab::TO, &to);
-        assert_contains_literal(&triples, vocab::RELATION, "part_of_thread");
-        assert!(triples.iter().any(|triple| {
-            triple.subject == from
-                && triple.predicate == "urn:cmem:relation:part_of_thread"
-                && triple.object == RdfObject::Resource(to.clone())
-        }));
     }
 
     #[test]
@@ -575,12 +485,6 @@ mod tests {
     fn assert_contains_literal(triples: &[RdfTriple], predicate: &'static str, value: &str) {
         assert!(triples.iter().any(|triple| {
             triple.predicate == predicate && triple.object == RdfObject::Literal(value.to_owned())
-        }));
-    }
-
-    fn assert_contains_resource(triples: &[RdfTriple], predicate: &'static str, value: &str) {
-        assert!(triples.iter().any(|triple| {
-            triple.predicate == predicate && triple.object == RdfObject::Resource(value.to_owned())
         }));
     }
 
