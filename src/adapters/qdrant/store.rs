@@ -612,6 +612,15 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn service_wrong_width_upsert_fails_before_contacting_qdrant() {
+            let store =
+                QdrantVectorCandidateStore::new("http://127.0.0.1:1", "not_contacted", 2).unwrap();
+            let result = wrong_width_upsert(&store).await;
+
+            assert_wrong_width_rejected(result);
+        }
+
+        #[tokio::test]
         async fn service_wrong_width_upsert_rejects_with_collection_mismatch() {
             if env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
                 return;
