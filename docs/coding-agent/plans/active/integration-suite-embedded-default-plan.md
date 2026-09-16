@@ -1,6 +1,6 @@
 # Plan: Integration tests run against the embedded default and stop duplicating the facade suite
 
-- status: in_progress (approved by the decider 2026-09-16)
+- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 1d8c5fb; pull request open, awaiting merge approval)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
@@ -146,6 +146,11 @@ Parallel tasks run in separate worktrees (review-worktree pattern) so Cargo comm
   - Summary: write_planning integration tests 19 to 6 with every deletion mapped to its inline observer; source_input_ref and provenance span assertions moved into the inline source-ref test; persistent test closes and reopens; README testing paragraph rewritten; PR workflow gains an unconditional service-free cargo test job and the live job runs the two parity tests.
   - Validation evidence (orchestrator, integrated branch, Qdrant down, no .env): fmt, check, clippy, test --no-run clean; lib 400 passed 5 ignored; public_facade 2, retrieval_guardrails 3, vector_port_contract 12, write_planning 6; zero skipping lines.
   - Notes: Codex workers write only under the repository root; task worktrees moved to .worktrees/ (memory note codex-worktrees-inside-repo-root).
+
+- 2026-09-16 Wave 3 completed: [Task_4] (reviewed 7957e3c, final pin 1d8c5fb)
+  - Summary: cm-reviewer APPROVED. Two P2 observer gaps found in the deletion mapping (MissingDerivedSource at validate and commit; caller and ModelProcessor provenance fields) and closed by carrying the assertions into the inline tests (1d8c5fb, test-only). All 13 deletion mappings verified at the owning boundary.
+  - Validation evidence (reviewer, pinned worktree): fmt, check, clippy, test --no-run clean; Qdrant down and no .env: lib 400 (401 at the final pin) passed 5 ignored, integration 2+3+12+6, doc 1, zero skipping lines; TEMP census 2663 to 2663 and tempfile roots 2158 to 2158; live parity at http://127.0.0.1:6334 with REQUIRE_QDRANT_TESTS=1: both service_and_embedded tests executed ok; workflow parses and reads as planned.
+  - Notes: lesson recorded in lessons.md (deletion mappings compare assertion sets, not test names).
 
 ## Decision Log (append-only; re-plans and major discoveries)
 

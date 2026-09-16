@@ -902,3 +902,20 @@ Prevention:
 
 Evidence:
 - CM PR #94; the before and after logs of the subsecond regression in the worker evidence at review time.
+
+## 2026-09-16 - A deletion mapping compares assertion sets at the owning boundary, not test names [tags: review, tests, deletion, orchestrator]
+
+Symptom:
+- The test-suite audit mapped thirteen integration tests to inline observers by contract name. Two mappings were wrong at the assertion level: the deleted ungrounded-derived-memory test asserted `CandidateValidationIssue::MissingDerivedSource` at validate and commit, and the named inline validator test covered only `UnknownObjectRef`; the deleted provenance test asserted caller producer kind, caller rationale origin and text, and the ModelProcessor producer kind, and the named constructor tests asserted only inferred and unavailable rationale.
+
+Root cause:
+- Related tests were accepted as complete substitutes because their names and subjects matched; nobody compared the deleted test's asserted fields and error classifications with the surviving test's.
+
+Fix applied:
+- The unmatched assertions moved into the existing inline tests (test-only); every integration deletion stayed. Caught by the Tier D reviewer's static deletion mapping before the pull request opened.
+
+Prevention:
+- Before approving a deletion, list the deleted test's assertions (fields, variants, classifications) and find each one in the surviving observer at the cheapest existing boundary; a name-level mapping is a hypothesis, not evidence. Worker briefs for delete-shaped tasks carry this check explicitly.
+
+Evidence:
+- CM plan integration-suite-embedded-default, commit 1d8c5fb; reviewer report under the review worktree's `.agent-work/cm-reviewer/p1-review.md`.
