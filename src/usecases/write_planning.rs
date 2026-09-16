@@ -1569,11 +1569,16 @@ mod tests {
 
     use super::RememberPlanDefaults;
     use crate::api::types::{
-        CandidateProvenance, CandidateRationale, DerivedMemoryDraft, EntityDraft, EpisodeDraft,
-        MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate, VectorIndexCandidate,
+        CandidateProvenance, CandidateRationale, CommitOptions, DerivedMemoryDraft, EntityDraft,
+        EpisodeDraft, MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate,
+        VectorIndexCandidate,
     };
     use crate::domain::{DerivedType, RelationType, Stability, DEFAULT_SCHEMA_VERSION};
-    use crate::test_support::{in_memory_graph_store, representative_fixtures};
+    use crate::test_support::{
+        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
+        TemporaryVectorCandidateStore,
+    };
+    use crate::usecases::RememberPipeline;
 
     #[tokio::test]
     async fn accepts_valid_plan_without_writes() {
@@ -1882,6 +1887,45 @@ mod tests {
                 ),
             },
         );
+    }
+
+    #[tokio::test]
+    async fn missing_derived_source_is_rejected_at_validate_and_commit() {
+        let graph = in_memory_graph_store();
+        let derived = DerivedMemoryDraft::new(DerivedType::UserPreference, "ungrounded preference");
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655444102"),
+            "missing-derived-source",
+        )
+        .with_candidate(MemoryCandidate::DerivedMemory(
+            crate::api::types::DerivedMemoryCandidate::new(
+                complete_derived(derived),
+                CandidateProvenance::caller("caller omitted source provenance"),
+            ),
+        ));
+        let expected = vec![CandidateValidation::invalid(
+            0,
+            MemoryCandidateKind::DerivedMemory,
+            CandidateValidationIssue::MissingDerivedSource,
+        )];
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+        assert_eq!(verdict.decision, WritePlanValidationDecision::Rejected);
+        assert_eq!(verdict.validations, expected);
+
+        let vector = TemporaryVectorCandidateStore::open(8).await;
+        let embedder = DeterministicMemoryEmbedder::new(8);
+        let error = RememberPipeline::new(&graph, &vector, &embedder)
+            .commit(plan, CommitOptions::default())
+            .await
+            .expect_err("commit must reject an ungrounded preference");
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected structured validation rejection, got {error:?}");
+        };
+        assert_eq!(validations, expected);
     }
 
     #[tokio::test]
