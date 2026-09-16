@@ -3,6 +3,12 @@ use thiserror::Error;
 
 use super::ObjectType;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceReferenceKind {
+    Raw,
+    Source,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum LifecycleDtoValidationError {
     #[error("rationale must not be empty")]

@@ -4,7 +4,7 @@ mod retrieval;
 pub(crate) mod schema;
 mod write_validation;
 
-pub use lifecycle::{LifecycleDtoValidationError, LifecyclePolicyKnob};
+pub use lifecycle::{LifecycleDtoValidationError, LifecyclePolicyKnob, SourceReferenceKind};
 pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,

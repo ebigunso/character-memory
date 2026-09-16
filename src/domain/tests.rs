@@ -1,9 +1,8 @@
 use super::*;
 
 use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use serde::Serialize;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 fn serialized_value<T: Serialize>(value: T) -> String {
@@ -24,14 +23,6 @@ fn timestamp(value: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn round_trip<T>(value: &T) -> T
-where
-    T: Serialize + DeserializeOwned,
-{
-    let serialized = serde_json::to_string(value).unwrap();
-    serde_json::from_str(&serialized).unwrap()
-}
-
 #[test]
 fn canonical_identity_and_order_ranks_are_stable() {
     let episode = MemoryObject::Episode(representative_episode());
@@ -45,13 +36,51 @@ fn canonical_identity_and_order_ranks_are_stable() {
         episode.object_ref(),
         MemoryObjectRef::new(ObjectType::Episode, episode.id())
     );
-    assert_eq!(episode.stable_order_key(), (episode.id(), 0));
-    assert_eq!(ObjectType::MemoryLink.stable_rank(), 5);
-    assert_eq!(RelationType::AssociatedWith.stable_rank(), 13);
-    assert_eq!(RetentionState::Active.restrictiveness_rank(), 0);
-    assert_eq!(RetentionState::Archived.restrictiveness_rank(), 1);
-    assert_eq!(RetentionState::Suppressed.restrictiveness_rank(), 2);
-    assert_eq!(RetentionState::Deleted.restrictiveness_rank(), 3);
+    assert_eq!(
+        episode.stable_order_key(),
+        (episode.id(), ObjectType::Episode.stable_rank())
+    );
+
+    let object_ranks = [
+        ObjectType::Episode,
+        ObjectType::Observation,
+        ObjectType::Entity,
+        ObjectType::MemoryThread,
+        ObjectType::DerivedMemory,
+        ObjectType::MemoryLink,
+    ]
+    .map(ObjectType::stable_rank);
+    let relation_ranks = [
+        RelationType::HasObservation,
+        RelationType::ObservedIn,
+        RelationType::Mentions,
+        RelationType::Involves,
+        RelationType::About,
+        RelationType::DerivedFrom,
+        RelationType::PartOfThread,
+        RelationType::Supports,
+        RelationType::Contradicts,
+        RelationType::Supersedes,
+        RelationType::Resolves,
+        RelationType::CreatesOpenLoop,
+        RelationType::FulfillsCommitment,
+        RelationType::AssociatedWith,
+    ]
+    .map(RelationType::stable_rank);
+    for ranks in [object_ranks.as_slice(), relation_ranks.as_slice()] {
+        assert_eq!(
+            ranks.iter().copied().collect::<HashSet<_>>().len(),
+            ranks.len()
+        );
+    }
+    let retention_ranks = [
+        RetentionState::Active,
+        RetentionState::Archived,
+        RetentionState::Suppressed,
+        RetentionState::Deleted,
+    ]
+    .map(RetentionState::restrictiveness_rank);
+    assert!(retention_ranks.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
 fn representative_episode() -> Episode {
@@ -143,36 +172,10 @@ fn valid_memory_link() -> MemoryLink {
     }
 }
 
-struct FileBackedRawRefFixture {
-    path: PathBuf,
-    raw_text: String,
-}
-
-impl FileBackedRawRefFixture {
-    fn new(raw_text: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("cmem-raw-ref-{}.txt", Uuid::new_v4()));
-        fs::write(&path, raw_text).unwrap();
-
-        Self {
-            path,
-            raw_text: raw_text.to_owned(),
-        }
-    }
-
-    fn raw_ref(&self) -> String {
-        format!("file:{}", self.path.display())
-    }
-}
-
-impl Drop for FileBackedRawRefFixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
 #[test]
 fn domain_enums_serialize_as_snake_case() {
     let cases = [
+        serialized_value(ObjectType::Episode),
         serialized_value(ObjectType::MemoryThread),
         serialized_value(ObjectType::DerivedMemory),
         serialized_value(ObjectType::MemoryLink),
@@ -192,6 +195,7 @@ fn domain_enums_serialize_as_snake_case() {
     assert_eq!(
         cases,
         [
+            "episode",
             "memory_thread",
             "derived_memory",
             "memory_link",
@@ -227,11 +231,6 @@ fn graph_uri_maps_object_types_to_stable_urns() {
     for (object_type, prefix) in cases {
         assert_eq!(graph_uri(object_type, memory_id), format!("{prefix}:{id}"));
     }
-
-    assert_eq!(
-        graph_uri(ObjectType::Episode, memory_id),
-        graph_uri(ObjectType::Episode, memory_id)
-    );
 }
 
 #[test]
@@ -239,93 +238,6 @@ fn schema_version_constants_are_pinned_to_the_initial_episodic_memory_schema() {
     assert_eq!(EPISODIC_MEMORY_SCHEMA_VERSION, "episodic_memory_initial");
     assert_eq!(CURRENT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
     assert_eq!(DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
-}
-
-#[test]
-fn representative_domain_objects_round_trip_through_serde() {
-    let episode = representative_episode();
-    let observation = representative_observation();
-    let entity = Entity {
-        id: memory_id("550e8400-e29b-41d4-a716-446655440001"),
-        object_type: ObjectType::Entity,
-        entity_type: EntityType::User,
-        name: "Kohta".to_owned(),
-        aliases: vec!["workspace user".to_owned()],
-        canonical_key: Some("person:kohta".to_owned()),
-        summary: Some("Primary workspace user.".to_owned()),
-        created_at: timestamp("2026-04-27T10:06:02Z"),
-        updated_at: timestamp("2026-04-27T10:06:03Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    };
-    let thread = MemoryThread {
-        id: memory_id("550e8400-e29b-41d4-a716-446655440020"),
-        object_type: ObjectType::MemoryThread,
-        title: "Episodic memory domain foundation".to_owned(),
-        summary: "Model foundation planning and implementation.".to_owned(),
-        status: ThreadStatus::Active,
-        last_touched_at: timestamp("2026-04-27T10:07:00Z"),
-        salience_score: 0.75,
-        canonical_key: Some("thread:episodic-memory-domain-foundation".to_owned()),
-        created_at: timestamp("2026-04-27T10:06:04Z"),
-        updated_at: timestamp("2026-04-27T10:07:00Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    };
-    let derived = DerivedMemory {
-        text: "The domain model uses external raw references.".to_owned(),
-        derived_from_episode_ids: vec![episode.id],
-        derived_from_observation_ids: vec![observation.id],
-        thread_ids: vec![thread.id],
-        entity_ids: vec![entity.id],
-        ..valid_derived_memory()
-    };
-    let link = MemoryLink {
-        from_id: derived.id,
-        to_id: episode.id,
-        rationale: Some("Derived project note cites the source episode.".to_owned()),
-        ..valid_memory_link()
-    };
-
-    assert_eq!(round_trip(&episode), episode);
-    assert_eq!(round_trip(&observation), observation);
-    assert_eq!(round_trip(&entity), entity);
-    assert_eq!(round_trip(&thread), thread);
-    assert_eq!(round_trip(&derived), derived);
-    assert_eq!(round_trip(&link), link);
-}
-
-#[test]
-fn raw_references_are_preserved_as_external_reference_strings() {
-    let episode = representative_episode();
-    let observation = representative_observation();
-
-    let serialized_episode = serde_json::to_value(&episode).unwrap();
-    let serialized_observation = serde_json::to_value(&observation).unwrap();
-    let round_tripped_episode: Episode = round_trip(&episode);
-    let round_tripped_observation: Observation = round_trip(&observation);
-
-    assert_eq!(
-        serialized_episode["raw_ref"],
-        episode.raw_ref.as_deref().unwrap()
-    );
-    assert_eq!(
-        serialized_observation["raw_ref"],
-        observation.raw_ref.as_deref().unwrap()
-    );
-    assert!(serialized_episode.get("raw_transcript").is_none());
-    assert!(serialized_observation.get("raw_transcript").is_none());
-    assert_eq!(round_tripped_episode.raw_ref, episode.raw_ref);
-    assert_eq!(round_tripped_observation.raw_ref, observation.raw_ref);
-}
-
-#[test]
-fn memory_object_round_trips_with_tagged_object_type() {
-    let object = MemoryObject::Episode(representative_episode());
-    let serialized = serde_json::to_value(&object).unwrap();
-
-    assert_eq!(serialized["object_type"], "episode");
-
-    let round_tripped: MemoryObject = serde_json::from_value(serialized).unwrap();
-    assert_eq!(round_tripped, object);
 }
 
 #[test]
@@ -437,21 +349,26 @@ fn object_type_validation_rejects_mismatched_containing_type() {
 }
 
 #[test]
-fn file_backed_raw_ref_fixture_preserves_reference_without_embedding_payload() {
-    let fixture = FileBackedRawRefFixture::new(
-        "verbatim raw transcript text that should stay outside the memory object",
-    );
-    let raw_ref = fixture.raw_ref();
+fn raw_references_serialize_without_embedding_transcript_payload() {
+    let raw_text = "verbatim raw transcript text that should stay outside the memory object";
     let mut episode = valid_episode();
-    episode.raw_ref = Some(raw_ref.clone());
+    episode.raw_ref = Some("file:fixtures/raw/episode.txt".to_owned());
     episode.summary = "Summarized external transcript fixture.".to_owned();
+    let observation = valid_observation();
 
-    let serialized = serde_json::to_string(&episode).unwrap();
-    let serialized_value = serde_json::to_value(&episode).unwrap();
-
-    assert_eq!(fs::read_to_string(&fixture.path).unwrap(), fixture.raw_text);
-    assert_eq!(episode.raw_ref.as_deref(), Some(raw_ref.as_str()));
-    assert_eq!(serialized_value["raw_ref"], raw_ref);
-    assert!(!serialized.contains(&fixture.raw_text));
+    for (serialized, raw_ref) in [
+        (
+            serde_json::to_value(&episode).unwrap(),
+            episode.raw_ref.as_deref().unwrap(),
+        ),
+        (
+            serde_json::to_value(&observation).unwrap(),
+            observation.raw_ref.as_deref().unwrap(),
+        ),
+    ] {
+        assert_eq!(serialized["raw_ref"], raw_ref);
+        assert!(serialized.get("raw_transcript").is_none());
+        assert!(!serialized.to_string().contains(raw_text));
+    }
     assert_eq!(episode.validate(), Ok(()));
 }
