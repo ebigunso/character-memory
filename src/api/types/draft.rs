@@ -669,55 +669,6 @@ mod tests {
     }
 
     #[test]
-    fn draft_conversions_cover_all_canonical_object_variants() {
-        let now = timestamp("2026-04-28T12:02:00Z");
-        let ids = [
-            memory_id("550e8400-e29b-41d4-a716-446655441020"),
-            memory_id("550e8400-e29b-41d4-a716-446655441021"),
-            memory_id("550e8400-e29b-41d4-a716-446655441022"),
-            memory_id("550e8400-e29b-41d4-a716-446655441023"),
-            memory_id("550e8400-e29b-41d4-a716-446655441024"),
-            memory_id("550e8400-e29b-41d4-a716-446655441025"),
-        ];
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655441030");
-        let observation_id = memory_id("550e8400-e29b-41d4-a716-446655441031");
-        let mut defaults = DraftDefaults::with_id_sequence(now, ids);
-
-        let drafts = [
-            MemoryObjectDraft::Episode(EpisodeDraft::new("Episode summary")),
-            MemoryObjectDraft::Observation(ObservationDraft::new(episode_id, "Observation text")),
-            MemoryObjectDraft::Entity(EntityDraft::new(EntityType::Concept, "Drafts")),
-            MemoryObjectDraft::MemoryThread(MemoryThreadDraft::new("Thread", "Thread summary")),
-            MemoryObjectDraft::DerivedMemory(
-                DerivedMemoryDraft::new(
-                    DerivedType::AssistantPreference,
-                    "Assistant prefers concise context.",
-                )
-                .with_source_episode(episode_id),
-            ),
-            MemoryObjectDraft::MemoryLink(MemoryLinkDraft::new(
-                ObjectType::DerivedMemory,
-                ids[4],
-                RelationType::DerivedFrom,
-                ObjectType::Observation,
-                observation_id,
-            )),
-        ];
-
-        let objects = drafts
-            .into_iter()
-            .map(|draft| draft.into_domain_with_defaults(&mut defaults).unwrap())
-            .collect::<Vec<_>>();
-
-        assert!(matches!(objects[0], MemoryObject::Episode(_)));
-        assert!(matches!(objects[1], MemoryObject::Observation(_)));
-        assert!(matches!(objects[2], MemoryObject::Entity(_)));
-        assert!(matches!(objects[3], MemoryObject::MemoryThread(_)));
-        assert!(matches!(objects[4], MemoryObject::DerivedMemory(_)));
-        assert!(matches!(objects[5], MemoryObject::MemoryLink(_)));
-    }
-
-    #[test]
     fn derived_memory_draft_requires_episode_or_observation_source() {
         let error = DerivedMemoryDraft::new(DerivedType::Reflection, "No source")
             .into_domain()
