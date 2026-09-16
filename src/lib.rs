@@ -58,8 +58,8 @@ pub use crate::domain::{
     GraphExpansionBoundedReason, GraphFailureMode, LifecycleDtoValidationError,
     LifecyclePolicyKnob, MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint,
     MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
-    PlanIdentityField, RelationType, RetentionState, Stability, ThreadStatus, VectorSurface,
-    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    PlanIdentityField, RelationType, RetentionState, SourceReferenceKind, Stability, ThreadStatus,
+    VectorSurface, CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,

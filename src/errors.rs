@@ -424,6 +424,11 @@ pub enum CustomError {
     #[error(transparent)]
     DomainValidation(#[from] DomainValidationError),
 
+    /// Rejected by the production low-information co-occurrence guard.
+    ///
+    /// Its only rejecting evidence class is currently constructible under `cfg(test)`;
+    /// the public link path supplies `ExplicitCallerIntent`. This variant is declared
+    /// ahead of a production producer for that rejecting evidence.
     #[error("low-information co-occurrence link rejected: {link_id}")]
     LowInformationCoOccurrence { link_id: MemoryId },
 
