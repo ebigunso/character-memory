@@ -1570,10 +1570,12 @@ mod tests {
     use super::RememberPlanDefaults;
     use crate::api::types::{
         CandidateProvenance, CandidateRationale, CommitOptions, DerivedMemoryDraft, EntityDraft,
-        EpisodeDraft, MemoryLinkDraft, RememberInput, SourceSpan, StatsUpdateCandidate,
-        VectorIndexCandidate,
+        EpisodeDraft, MemoryLinkDraft, RememberInput, RememberOutcome, SourceSpan,
+        StatsUpdateCandidate, StatsUpdateStatus, VectorIndexCandidate,
     };
-    use crate::domain::{DerivedType, RelationType, Stability, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::{
+        DerivedType, EntityType, MemoryObject, RelationType, Stability, DEFAULT_SCHEMA_VERSION,
+    };
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
         TemporaryVectorCandidateStore,
@@ -2335,6 +2337,198 @@ mod tests {
             .unwrap();
 
         assert!(verdict.is_valid());
+    }
+
+    #[tokio::test]
+    async fn processor_origin_plan_validates_and_commits_through_pipeline() {
+        let graph = in_memory_graph_store();
+        let entity_id = id("550e8400-e29b-41d4-a716-446655613301");
+        let episode_id = id("550e8400-e29b-41d4-a716-446655613302");
+        let derived_id = id("550e8400-e29b-41d4-a716-446655613303");
+        let link_id = id("550e8400-e29b-41d4-a716-446655613305");
+        let mut entity = EntityDraft::new(EntityType::Project, "generated-style entity");
+        entity.id = Some(entity_id);
+        entity.created_at = Some(timestamp());
+        entity.updated_at = Some(timestamp());
+        entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let mut episode = complete_episode(EpisodeDraft::new("generated-style source episode"));
+        episode.id = Some(episode_id);
+        let mut derived = complete_derived(DerivedMemoryDraft::new(
+            DerivedType::Claim,
+            "generated-style derived memory",
+        ));
+        derived.id = Some(derived_id);
+        derived.derived_from_episode_ids.push(episode_id);
+        derived.entity_ids.push(entity_id);
+        let mut link = link_draft(entity_id, episode_id);
+        link.id = Some(link_id);
+        let processor = |rationale: &str| {
+            CandidateProvenance::inferred_by_processor(
+                CandidateProducerKind::ModelProcessor,
+                rationale,
+            )
+        };
+        let plan = RememberWritePlan::new(
+            id("550e8400-e29b-41d4-a716-446655613304"),
+            "generated-style-plan",
+        )
+        .with_candidate(MemoryCandidate::Entity(
+            crate::api::types::EntityCandidate::new(entity, processor("generated entity")),
+        ))
+        .with_candidate(MemoryCandidate::Episode(
+            crate::api::types::EpisodeCandidate::new(episode, processor("generated episode")),
+        ))
+        .with_candidate(MemoryCandidate::DerivedMemory(
+            crate::api::types::DerivedMemoryCandidate::new(
+                derived,
+                processor("generated derived memory").with_source_episode(episode_id),
+            ),
+        ))
+        .with_candidate(MemoryCandidate::MemoryLink(
+            crate::api::types::MemoryLinkCandidate::new(link, processor("generated link")),
+        ));
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+        assert_eq!(verdict.decision, WritePlanValidationDecision::Accepted);
+        assert_eq!(
+            verdict.validations,
+            vec![
+                CandidateValidation::valid(0, MemoryCandidateKind::Entity),
+                CandidateValidation::valid(1, MemoryCandidateKind::Episode),
+                CandidateValidation::valid(2, MemoryCandidateKind::DerivedMemory),
+                CandidateValidation::valid(3, MemoryCandidateKind::MemoryLink),
+            ]
+        );
+
+        let vector = TemporaryVectorCandidateStore::open(8).await;
+        let embedder = DeterministicMemoryEmbedder::new(8);
+        let outcome = RememberPipeline::new(&graph, &vector, &embedder)
+            .commit(plan, graph_only_commit_options())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.persisted_object_ids,
+            vec![entity_id, episode_id, derived_id]
+        );
+        assert_eq!(outcome.persisted_link_ids, vec![link_id]);
+        assert_graph_only_outcome(&outcome);
+
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_ids(vec![
+                entity_id, episode_id, derived_id,
+            ]))
+            .await
+            .unwrap();
+        let mut object_refs = objects
+            .iter()
+            .map(MemoryObject::object_ref)
+            .collect::<Vec<_>>();
+        object_refs.sort_by_key(|object_ref| object_ref.id);
+        let mut expected_refs = vec![
+            MemoryObjectRef::new(ObjectType::Entity, entity_id),
+            MemoryObjectRef::new(ObjectType::Episode, episode_id),
+            MemoryObjectRef::new(ObjectType::DerivedMemory, derived_id),
+        ];
+        expected_refs.sort_by_key(|object_ref| object_ref.id);
+        assert_eq!(object_refs, expected_refs);
+        let links = graph.query_links_by_ids(&[link_id]).await.unwrap();
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.id, link.from_id, link.relation, link.to_id))
+                .collect::<Vec<_>>(),
+            vec![(link_id, entity_id, RelationType::Involves, episode_id)]
+        );
+    }
+
+    #[tokio::test]
+    async fn valid_source_span_validates_and_commits_with_raw_ref_preserved() {
+        let graph = in_memory_graph_store();
+        let raw_ref = "raw://opaque/source-refs";
+        let span = SourceSpan::raw(raw_ref)
+            .with_message_id("message-7")
+            .with_char_range(3, 31);
+        let plan = RememberInput::new("source-preserved episode")
+            .with_observation(ObservationDraft::new(
+                MemoryId::nil(),
+                "distinct observation content",
+            ))
+            .with_raw_ref(raw_ref)
+            .with_source_span(span.clone())
+            .prepare_write_plan_with_options(&defaults(), false, false);
+        let episode_id = defaults().stable_id("episode:0");
+        let observation_id = defaults().stable_id("observation:0");
+        assert_eq!(
+            plan.source_input_ref,
+            Some(ExternalSourceReference::raw(raw_ref))
+        );
+        assert!(plan.candidates.iter().any(|candidate| matches!(
+            candidate,
+            MemoryCandidate::Episode(candidate)
+                if candidate.provenance.source.source_spans == vec![span.clone()]
+        )));
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+        assert_eq!(verdict.decision, WritePlanValidationDecision::Accepted);
+        assert_eq!(
+            verdict.validations,
+            vec![
+                CandidateValidation::valid(0, MemoryCandidateKind::Episode),
+                CandidateValidation::valid(1, MemoryCandidateKind::Observation),
+            ]
+        );
+
+        let vector = TemporaryVectorCandidateStore::open(8).await;
+        let embedder = DeterministicMemoryEmbedder::new(8);
+        let outcome = RememberPipeline::new(&graph, &vector, &embedder)
+            .commit(plan, graph_only_commit_options())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.persisted_object_ids,
+            vec![episode_id, observation_id]
+        );
+        assert_graph_only_outcome(&outcome);
+
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_ids(vec![episode_id, observation_id]))
+            .await
+            .unwrap();
+        let mut persisted_raw_refs = objects
+            .iter()
+            .map(|object| match object {
+                MemoryObject::Episode(episode) => (episode.id, episode.raw_ref.as_deref()),
+                MemoryObject::Observation(observation) => {
+                    (observation.id, observation.raw_ref.as_deref())
+                }
+                other => panic!("unexpected committed object {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        persisted_raw_refs.sort();
+        let mut expected_raw_refs =
+            vec![(episode_id, Some(raw_ref)), (observation_id, Some(raw_ref))];
+        expected_raw_refs.sort();
+        assert_eq!(persisted_raw_refs, expected_raw_refs);
+    }
+
+    fn graph_only_commit_options() -> CommitOptions {
+        CommitOptions {
+            update_vectors: false,
+            update_stats: false,
+        }
+    }
+
+    fn assert_graph_only_outcome(outcome: &RememberOutcome) {
+        assert!(!outcome.persisted_object_ids.is_empty());
+        assert_eq!(outcome.vector_indexed_object_ids, Vec::<MemoryId>::new());
+        assert_eq!(outcome.vector_indexing_failure, None);
+        assert_eq!(outcome.stats_update_status, StatsUpdateStatus::default());
     }
 
     fn valid_plan() -> RememberWritePlan {
