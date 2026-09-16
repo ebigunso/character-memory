@@ -1540,6 +1540,36 @@ mod tests {
     use crate::usecases::RememberPipeline;
 
     #[tokio::test]
+    async fn accepts_derived_source_references_to_candidates_declared_later() {
+        let graph = in_memory_graph_store();
+        let mut plan = RememberInput::new("later source episode")
+            .with_derived_memory(DerivedMemoryDraft::new(
+                DerivedType::Reflection,
+                "reflection on the later source",
+            ))
+            .prepare_write_plan_with_options(&defaults(), false, false);
+        plan.candidates.reverse();
+
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+
+        assert_eq!(verdict.decision, WritePlanValidationDecision::Accepted);
+        assert_eq!(
+            verdict.validations[0].candidate_kind,
+            MemoryCandidateKind::DerivedMemory
+        );
+        assert_eq!(
+            verdict.validations.last().unwrap().candidate_kind,
+            MemoryCandidateKind::Episode
+        );
+        assert!(verdict.validations.iter().all(|validation| {
+            validation.status == CandidateValidationStatus::Valid && validation.errors.is_empty()
+        }));
+    }
+
+    #[tokio::test]
     async fn accepts_valid_plan_without_writes() {
         let graph = graph_with_fixtures().await;
         let fixtures = representative_fixtures();

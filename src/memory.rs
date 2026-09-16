@@ -256,6 +256,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_honors_idempotency_key_and_generates_fresh_plan_ids() {
+        let memory = injected_memory().await;
+        let input = RememberInput::new("fresh plans with a caller key");
+        let options = PrepareOptions {
+            idempotency_key: Some("caller-operation".to_owned()),
+            ..PrepareOptions::default()
+        };
+
+        let first = memory
+            .prepare(input.clone(), options.clone())
+            .await
+            .unwrap();
+        let second = memory.prepare(input, options).await.unwrap();
+        memory.close().await.unwrap();
+
+        assert_eq!(first.idempotency_key, "caller-operation");
+        assert_eq!(second.idempotency_key, "caller-operation");
+        assert_ne!(first.operation_id, second.operation_id);
+    }
+
+    #[tokio::test]
     async fn prepare_and_validate_plan_do_not_persist() {
         let memory = injected_memory().await;
 

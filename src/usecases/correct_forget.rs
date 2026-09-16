@@ -1309,6 +1309,40 @@ mod tests {
     use crate::usecases::RetrievePipeline;
 
     #[tokio::test]
+    async fn correction_rejects_absent_target_before_any_write() {
+        let ids = fixed_ids();
+        let graph = RecordingGraphStore::new(Vec::new()).await;
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = RecordingStatsStore::default();
+        let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
+
+        let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::GraphExpansionRootNotFound {
+                object_type: ObjectType::DerivedMemory,
+                object_id,
+            } if object_id == ids.old
+        ));
+        assert!(!graph
+            .calls()
+            .iter()
+            .any(|call| matches!(call, StoreCall::GraphObjects(_) | StoreCall::GraphLinks(_))));
+        assert!(graph
+            .query_objects(&GraphObjectQuery::by_types(
+                vec![ObjectType::DerivedMemory],
+                None,
+            ))
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(vector.calls().is_empty());
+        assert!(lock(&stats.calls).is_empty());
+    }
+
+    #[tokio::test]
     async fn correction_writes_graph_before_vector_maintenance_in_stable_order() {
         let ids = fixed_ids();
         let graph =

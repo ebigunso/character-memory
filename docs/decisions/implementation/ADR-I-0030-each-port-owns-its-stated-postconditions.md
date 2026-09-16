@@ -79,7 +79,7 @@ Not covered: which properties each port states (recorded in the port's documenta
 
 ## Validation
 
-- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`). Graph postconditions are validated by the Oxigraph adapter tests over the in-memory store (`src/adapters/oxigraph/tests.rs`), which is also a production configuration. The library keeps no second implementation of the graph port's postconditions in test code, so no parity suite is needed. Test doubles that only record calls make no postcondition claim.
+- Every stated postcondition is validated either by a constructor that establishes it or by contract tests every adapter passes. The vector port has a shared suite (`tests/vector_port_contract_tests.rs`) for what the facade can drive, and an in-crate parity module (`src/adapters/qdrant/store.rs`, `port_contract`) for raw-port postconditions the facade guards before the adapter, such as wrong-width upserts; both backends run the same cases there. Graph postconditions are validated by the Oxigraph adapter tests over the in-memory store (`src/adapters/oxigraph/tests.rs`), which is also a production configuration. The library keeps no second implementation of the graph port's postconditions in test code, so no parity suite is needed. Test doubles that only record calls make no postcondition claim.
 - Review rejects a canonicalisation, filtering, ordering, or de-duplication pass above a port whose contract states the property.
 
 ## Revisit When

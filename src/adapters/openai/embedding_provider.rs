@@ -391,6 +391,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_classifies_non_success_response_as_http_status() {
+        let transport = Arc::new(RecordingTransport::default());
+        transport.enqueue_response(StatusCode::SERVICE_UNAVAILABLE, "service unavailable");
+        let provider = create_test_provider(transport);
+
+        let error = provider
+            .generate_embedding("valid input")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            EmbeddingError::HttpStatus { status: 503, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn provider_classifies_malformed_success_body_as_invalid_json() {
+        let transport = Arc::new(RecordingTransport::default());
+        transport.enqueue_response(StatusCode::OK, "not JSON");
+        let provider = create_test_provider(transport);
+
+        let error = provider
+            .generate_embedding("valid input")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, EmbeddingError::InvalidJson { .. }));
+    }
+
+    #[tokio::test]
     async fn bulk_generate_embeddings_sends_one_array_request_for_multiple_inputs() {
         let transport = Arc::new(RecordingTransport::default());
         transport.enqueue_success_response(2, 3072);
@@ -472,12 +503,16 @@ mod tests {
                     })
                 })
                 .collect::<Vec<_>>();
+            self.enqueue_response(StatusCode::OK, json!({ "data": data }).to_string());
+        }
+
+        fn enqueue_response(&self, status: StatusCode, body: impl Into<String>) {
             self.responses
                 .lock()
                 .expect("responses mutex poisoned")
                 .push(OpenAIEmbeddingHttpResponse {
-                    status: StatusCode::OK,
-                    body: json!({ "data": data }).to_string(),
+                    status,
+                    body: body.into(),
                 });
         }
 
