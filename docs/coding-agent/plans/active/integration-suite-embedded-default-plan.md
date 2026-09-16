@@ -156,7 +156,7 @@ Parallel tasks run in separate worktrees (review-worktree pattern) so Cargo comm
 
 - 2026-09-16 Decision: Task_2 owns widened to the test module of src/usecases/write_planning.rs for one move. Trigger: the inline source-ref test did not assert plan.source_input_ref or candidate provenance source_spans, so deleting the integration test would have lost those observers. Plan delta: the two assertions moved inline, then the integration test was deleted. Tradeoff: a second observer at the cheaper boundary versus keeping a service-shaped integration test. User approval: orchestrator ruling under the accepted plan.
 - 2026-09-16 Decision: the PR workflow keeps its global trigger filters (bases, paths) and adds the service-free job beneath them. Trigger: worker question whether every pull request literally required removing the filters. Rationale: the planner-added requirement targets fork and Dependabot coverage on source-touching pull requests; widening triggers would also widen the live job. User approval: orchestrator ruling under the accepted plan.
-- 2026-09-16 Decision: integration tests default to the embedded store; the service is reached only through explicit opt-in parity tests. Trigger: 24 of 38 integration tests skipped silently with Qdrant down. User approval: pending.
+- 2026-09-16 Decision: integration tests default to the embedded store; the service is reached only through explicit opt-in parity tests. Trigger: 24 of 38 integration tests skipped silently with Qdrant down. Decider approval: plan accepted 2026-09-16; merge approval pending.
 
 ## Notes
 - Risks: an integration test may depend on a service-only behaviour not visible from its name; the worker reports each such case instead of re-adding a skip.
