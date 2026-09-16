@@ -33,7 +33,7 @@ pub use crate::api::types::{
     LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleOmissionSummary,
     LifecycleTargetRef, LinkOutcome, MemoryCandidate, MemoryLinkCandidate, MemoryLinkDraft,
     MemoryObjectDraft, MemoryThreadCandidate, MemoryThreadDraft, ObservationCandidate,
-    ObservationDraft, PrepareOptions, RationaleCategory, RationaleOrigin, RememberDiagnostic,
+    ObservationDraft, PrepareOptions, RationaleCategory, RememberDiagnostic,
     RememberDiagnosticCode, RememberDiagnostics, RememberInput, RememberOptions, RememberOutcome,
     RememberWritePlan, RepairMarker, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits,
     RetrievalContext, RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale,

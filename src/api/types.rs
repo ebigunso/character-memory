@@ -35,8 +35,8 @@ pub use write_plan::{
     CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     DerivedMemoryCandidate, DiagnosticSeverity, EntityCandidate, EpisodeCandidate, MemoryCandidate,
     MemoryLinkCandidate, MemoryThreadCandidate, ObservationCandidate, PrepareOptions,
-    RationaleOrigin, RememberDiagnostic, RememberDiagnosticCode, RememberDiagnostics,
-    RememberInput, RememberOptions, RememberWritePlan, RepairMarker, SourceProvenance, SourceSpan,
+    RememberDiagnostic, RememberDiagnosticCode, RememberDiagnostics, RememberInput,
+    RememberOptions, RememberWritePlan, RepairMarker, SourceProvenance, SourceSpan,
     SourceSpanRange, SourceSpanValidationError, StatsUpdateCandidate, StatsUpdateFailure,
     StatsUpdateStatus, VectorIndexCandidate,
 };

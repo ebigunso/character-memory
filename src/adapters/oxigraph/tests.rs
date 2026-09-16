@@ -1274,7 +1274,11 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(unsupported, CustomError::MemoryValidation(_)));
+        assert!(matches!(
+            unsupported,
+            CustomError::UnsupportedExpansionRoot { object }
+                if object == MemoryObjectRef::from_id_type(fixture.links[0].id, ObjectType::MemoryLink)
+        ));
 
         let missing_root = store
             .expand_bounded(&GraphExpansionQuery::new(

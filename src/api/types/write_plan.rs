@@ -369,10 +369,6 @@ impl CandidateProvenance {
         self.source.external_refs.push(external_ref);
         self
     }
-
-    pub const fn rationale_origin(&self) -> RationaleOrigin {
-        self.rationale.origin()
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -413,15 +409,6 @@ impl CandidateRationale {
         Self::Unavailable
     }
 
-    pub const fn origin(&self) -> RationaleOrigin {
-        match self {
-            Self::ProvidedByCaller(_) => RationaleOrigin::ProvidedByCaller,
-            Self::ProvidedByProcessor(_) => RationaleOrigin::ProvidedByProcessor,
-            Self::InferredByProcessor(_) => RationaleOrigin::InferredByProcessor,
-            Self::Unavailable => RationaleOrigin::Unavailable,
-        }
-    }
-
     pub fn text(&self) -> Option<&str> {
         match self {
             Self::ProvidedByCaller(text)
@@ -430,15 +417,6 @@ impl CandidateRationale {
             Self::Unavailable => None,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RationaleOrigin {
-    ProvidedByCaller,
-    ProvidedByProcessor,
-    InferredByProcessor,
-    Unavailable,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

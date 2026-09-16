@@ -253,16 +253,11 @@ pub(crate) fn bounded_expansion_node_set(
         || query.lifecycle_policy != GraphExpansionLifecyclePolicy::default()
         || query.failure_policy != GraphExpansionFailurePolicy::default()
     {
-        return Err(CustomError::MemoryValidation(
-            "bounded_expansion_node_set only supports basic depth/node/object-type bounds"
-                .to_owned(),
-        ));
+        panic!("bounded_expansion_node_set only supports basic depth/node/object-type bounds");
     }
 
     if query.root_type == ObjectType::MemoryLink {
-        return Err(CustomError::MemoryValidation(
-            "bounded graph expansion does not support MemoryLink roots".to_owned(),
-        ));
+        panic!("bounded_expansion_node_set does not support MemoryLink roots");
     }
 
     if !root_exists {
@@ -324,10 +319,9 @@ fn bounded_expansion_plan<'a>(
     objects: impl IntoIterator<Item = &'a MemoryObject>,
     links: impl IntoIterator<Item = &'a MemoryLink>,
 ) -> Result<BoundedExpansionPlan, CustomError> {
+    let root = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
     if query.root_type == ObjectType::MemoryLink {
-        return Err(CustomError::MemoryValidation(
-            "bounded graph expansion does not support MemoryLink roots".to_owned(),
-        ));
+        return Err(CustomError::UnsupportedExpansionRoot { object: root });
     }
 
     let objects = objects.into_iter().collect::<Vec<_>>();
@@ -336,7 +330,6 @@ fn bounded_expansion_plan<'a>(
         .iter()
         .map(|object| object.object_ref())
         .collect::<HashSet<_>>();
-    let root = MemoryObjectRef::from_id_type(query.root_id, query.root_type);
 
     if !object_refs.contains(&root) {
         return Err(CustomError::GraphExpansionRootNotFound {
@@ -969,6 +962,19 @@ mod tests {
             bounded_hub_retention_limit(&query, RootFanoutMode::SelectivityOverrides),
             64
         );
+    }
+
+    #[test]
+    fn bounded_expansion_rejects_memory_link_root_with_object_reference() {
+        let root = MemoryObjectRef::from_id_type(MemoryId::new_v4(), ObjectType::MemoryLink);
+        let query = GraphExpansionQuery::new(root.id, root.object_type, 1, 2);
+
+        let error = bounded_expansion(&query, Vec::new(), Vec::new()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CustomError::UnsupportedExpansionRoot { object } if object == root
+        ));
     }
 
     #[test]

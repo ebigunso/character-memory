@@ -480,6 +480,9 @@ pub enum CustomError {
         actual: String,
     },
 
+    #[error("Unsupported graph expansion root: {object:?}")]
+    UnsupportedExpansionRoot { object: MemoryObjectRef },
+
     #[error("Graph expansion root not found: {object_type:?} {object_id}")]
     GraphExpansionRootNotFound {
         object_type: ObjectType,
