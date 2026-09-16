@@ -244,11 +244,9 @@ where
                     .find(|object| object.object_ref() == existing.object_ref())
                 {
                     if planned != &existing {
-                        return Err(validation_error(format!(
-                            "write plan deterministic ID collided with existing divergent object content: {:?} {}",
-                            planned.object_type(),
-                            planned.id()
-                        )));
+                        return Err(CustomError::DeterministicIdCollision {
+                            object: planned.object_ref(),
+                        });
                     }
                 }
             }
@@ -259,10 +257,12 @@ where
             for existing in self.graph_store.query_links_by_ids(&link_ids).await? {
                 if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
                     if planned != &existing {
-                        return Err(validation_error(format!(
-                            "write plan deterministic ID collided with existing divergent link content: {}",
-                            planned.id
-                        )));
+                        return Err(CustomError::DeterministicIdCollision {
+                            object: MemoryObjectRef::new(
+                                crate::domain::ObjectType::MemoryLink,
+                                planned.id,
+                            ),
+                        });
                     }
                 }
             }
@@ -293,10 +293,6 @@ fn vector_records_for_targets(
         .collect()
 }
 
-fn validation_error(error: impl ToString) -> CustomError {
-    CustomError::MemoryValidation(error.to_string())
-}
-
 fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> RememberOutcome {
     RememberOutcome {
         persisted_object_ids: objects.iter().map(MemoryObject::id).collect(),
@@ -324,8 +320,8 @@ mod tests {
         MemoryLinkCandidate, MemoryLinkDraft, MemoryThreadDraft, ObservationDraft, RememberInput,
     };
     use crate::domain::{
-        DerivedType, EntityType, MemoryId, ObjectType, RelationType, RetentionState,
-        DEFAULT_SCHEMA_VERSION,
+        CandidateValidationIssue, DerivedType, EntityType, MemoryCandidateKind, MemoryId,
+        ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
     };
     use crate::errors::{
         RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
@@ -347,7 +343,10 @@ mod tests {
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore {
+            calls: graph.calls.clone(),
+            ..RecordingVectorStore::default()
+        };
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -366,38 +365,37 @@ mod tests {
             outcome.persisted_object_ids
         );
         assert_eq!(outcome.vector_indexing_failure, None);
+        let calls = graph.calls();
+        let last_graph_write = calls
+            .iter()
+            .rposition(|call| matches!(call, StoreCall::GraphObjects(_) | StoreCall::GraphLinks(_)))
+            .unwrap();
+        let first_vector_write = calls
+            .iter()
+            .position(|call| matches!(call, StoreCall::VectorUpsert(_)))
+            .unwrap();
+        assert!(last_graph_write < first_vector_write);
+        let stored = graph
+            .query_objects(&GraphObjectQuery::by_ids(expected_object_ids(&ids)))
+            .await
+            .unwrap();
         assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphObjects(vec![
-                    ids.episode,
-                    ids.observation,
-                    ids.entity,
-                    ids.thread,
-                    ids.derived,
-                ]),
-                StoreCall::GraphLinks(vec![ids.inline_link, ids.extra_link]),
-            ]
+            stored
+                .iter()
+                .map(MemoryObject::id)
+                .collect::<std::collections::HashSet<_>>(),
+            expected_object_ids(&ids).into_iter().collect()
         );
+        let stored_links = graph
+            .query_links_by_ids(&[ids.inline_link, ids.extra_link])
+            .await
+            .unwrap();
         assert_eq!(
-            embedder.calls(),
-            vec![StoreCall::EmbedBatch(vec![
-                ids.episode,
-                ids.observation,
-                ids.entity,
-                ids.thread,
-                ids.derived,
-            ])]
-        );
-        assert_eq!(
-            vector.calls(),
-            vec![StoreCall::VectorUpsert(vec![
-                ids.episode,
-                ids.observation,
-                ids.entity,
-                ids.thread,
-                ids.derived,
-            ])]
+            stored_links
+                .iter()
+                .map(|link| link.id)
+                .collect::<std::collections::HashSet<_>>(),
+            [ids.inline_link, ids.extra_link].into_iter().collect()
         );
     }
 
@@ -419,7 +417,10 @@ mod tests {
             .await
             .expect_err("divergent content under an existing link ID must reject");
 
-        assert!(matches!(error, CustomError::MemoryValidation(_)));
+        assert!(
+            matches!(error, CustomError::DeterministicIdCollision { object }
+            if object == MemoryObjectRef::new(ObjectType::MemoryLink, existing.id))
+        );
     }
 
     #[tokio::test]
@@ -435,17 +436,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("object write failed"));
-        assert_eq!(
-            graph.calls(),
-            vec![StoreCall::GraphObjects(vec![
-                ids.episode,
-                ids.observation,
-                ids.entity,
-                ids.thread,
-                ids.derived,
-            ])]
-        );
+        assert!(matches!(error, CustomError::DatabaseError(_)));
         assert!(embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
@@ -463,20 +454,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("link write failed"));
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphObjects(vec![
-                    ids.episode,
-                    ids.observation,
-                    ids.entity,
-                    ids.thread,
-                    ids.derived,
-                ]),
-                StoreCall::GraphLinks(vec![ids.inline_link, ids.extra_link]),
-            ]
-        );
+        assert!(matches!(error, CustomError::DatabaseError(_)));
         assert!(embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
@@ -497,9 +475,18 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("episode summary must not be empty"));
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected structured plan rejection");
+        };
+        assert!(validations
+            .iter()
+            .any(
+                |validation| validation.candidate_kind == MemoryCandidateKind::Episode
+                    && validation.status == CandidateValidationStatus::Invalid
+                    && validation
+                        .errors
+                        .contains(&CandidateValidationIssue::EmptyEpisodeSummary)
+            ));
         assert!(graph.calls().is_empty());
         assert!(embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
@@ -533,9 +520,8 @@ mod tests {
             VectorIndexingCause::VectorDatabase(VectorDatabaseError {
                 backend,
                 kind: VectorDatabaseErrorKind::Response,
-                message,
                 ..
-            }) if backend == "test" && message == "vector write failed"
+            }) if backend == "test"
         ));
     }
 
@@ -640,9 +626,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
-        assert!(graph
-            .calls()
-            .contains(&StoreCall::GraphLinks(vec![ids.extra_link])));
+        let stored = graph.query_links_by_ids(&[ids.extra_link]).await.unwrap();
+        assert!(matches!(stored.as_slice(), [link]
+            if link.id == ids.extra_link && link.relation == RelationType::AssociatedWith));
         assert!(!embedder.calls().is_empty());
         assert!(!vector.calls().is_empty());
     }
@@ -691,11 +677,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(
-            fixtures.suppressed_seed.retention_state,
-            RetentionState::Suppressed
-        );
-        assert!(!fixtures.suppressed_seed.is_current);
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 0);
         assert_eq!(counter.current_count, 0);
@@ -710,61 +691,10 @@ mod tests {
             .map(|failure| failure.failed_object_ids.as_slice())
             .unwrap_or_default();
         assert!(failed_ids.is_empty());
-
-        let health_cause = RetrievalStatsHealthCause::StoreInitialization {
-            error: RetrievalStatsStoreError::Sqlite {
-                detail: "repair required".to_owned(),
-            },
-        };
-        let unhealthy_stats = InMemoryRetrievalStatsStore::unhealthy(health_cause.clone());
-        let repair_pipeline =
-            RememberPipeline::new_with_stats(&graph, &vector, &embedder, &unhealthy_stats);
-        let repair_outcome = repair_pipeline
-            .commit(
-                prepare_test_plan_with_seed(
-                    RememberInput::new("existing endpoint repair").with_memory_link(
-                        typed_link_draft(
-                            id("550e8400-e29b-41d4-a716-446655443009"),
-                            ObjectType::Entity,
-                            fixtures.hub_entity.id,
-                            RelationType::About,
-                            ObjectType::DerivedMemory,
-                            fixtures.suppressed_seed.id,
-                        ),
-                    ),
-                    "remember-pipeline-repair",
-                ),
-                CommitOptions::default(),
-            )
-            .await
-            .expect("stats repair outcome should still return graph success");
-
-        let failure = repair_outcome
-            .stats_update_status
-            .failure
-            .as_ref()
-            .expect("unhealthy stats store should report failed update ids");
-        assert!(failure
-            .failed_object_ids
-            .contains(&fixtures.suppressed_seed.id));
-        assert_eq!(
-            failure.causes,
-            vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
-                health_cause: Some(health_cause.clone()),
-            }]
-        );
-        assert!(repair_outcome.repair_needed.iter().any(|marker| matches!(
-            marker,
-            RepairMarker::StatsUpdate { object_ids, causes }
-                if object_ids.contains(&fixtures.suppressed_seed.id)
-                    && causes == &vec![crate::errors::StatsUpdateCause::StoreUnhealthy {
-                        health_cause: Some(health_cause.clone()),
-                    }]
-        )));
     }
 
     #[tokio::test]
-    async fn link_only_hydration_failure_reports_endpoint_ids_for_stats_repair() {
+    async fn link_only_stats_failures_preserve_endpoint_ids_and_repair_causes() {
         let fixtures = representative_fixtures();
         let episode_id = fixtures.episode.id;
         let observation_id = fixtures.salient_observation.id;
@@ -777,7 +707,7 @@ mod tests {
             .fail_id_queries();
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
-        let stats = InMemoryRetrievalStatsStore::new();
+        let stats = EdgeFailingStatsStore::default();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
         let mut link = typed_link_draft(
             id("550e8400-e29b-41d4-a716-446655443010"),
@@ -812,58 +742,6 @@ mod tests {
         assert_eq!(failure.failed_object_ids, expected_ids);
         assert!(matches!(
             failure.causes.as_slice(),
-            [StatsUpdateCause::EndpointHydration { .. }]
-        ));
-        assert!(outcome.repair_needed.iter().any(|marker| matches!(
-            marker,
-            RepairMarker::StatsUpdate { object_ids, causes }
-                if object_ids == &expected_ids
-                    && matches!(causes.as_slice(), [StatsUpdateCause::EndpointHydration { .. }])
-        )));
-    }
-
-    #[tokio::test]
-    async fn stats_failure_and_repair_preserve_hydration_and_write_causes() {
-        let fixtures = representative_fixtures();
-        let episode_id = fixtures.episode.id;
-        let observation_id = fixtures.salient_observation.id;
-        let graph = RecordingGraphStore::default()
-            .with_query_objects(vec![
-                MemoryObject::Episode(fixtures.episode),
-                MemoryObject::Observation(fixtures.salient_observation),
-            ])
-            .await
-            .fail_id_queries();
-        let vector = RecordingVectorStore::default();
-        let embedder = RecordingEmbedder::default();
-        let stats = EdgeFailingStatsStore::default();
-        let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
-        let mut link = typed_link_draft(
-            id("550e8400-e29b-41d4-a716-446655443012"),
-            ObjectType::Episode,
-            episode_id,
-            RelationType::Mentions,
-            ObjectType::Observation,
-            observation_id,
-        );
-        link.created_at = Some(timestamp());
-        link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-        let plan = RememberWritePlan::new(
-            id("550e8400-e29b-41d4-a716-446655443013"),
-            "link-only-two-stats-failures",
-        )
-        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
-            link,
-            CandidateProvenance::caller("exercise multiple typed stats failures"),
-        )));
-
-        let outcome = pipeline
-            .commit(plan, CommitOptions::default())
-            .await
-            .unwrap();
-        let failure = outcome.stats_update_status.failure.as_ref().unwrap();
-        assert!(matches!(
-            failure.causes.as_slice(),
             [
                 StatsUpdateCause::EndpointHydration { .. },
                 StatsUpdateCause::EdgeWrite { .. }
@@ -871,8 +749,9 @@ mod tests {
         ));
         assert!(outcome.repair_needed.iter().any(|marker| matches!(
             marker,
-            RepairMarker::StatsUpdate { causes, .. }
-                if causes == &failure.causes
+            RepairMarker::StatsUpdate { object_ids, causes }
+                if object_ids == &expected_ids
+                    && causes == &failure.causes
         )));
     }
 

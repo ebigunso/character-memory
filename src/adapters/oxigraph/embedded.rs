@@ -57,12 +57,6 @@ impl OxigraphGraphAuthorityStore {
         })
     }
 
-    // Embedded adapter tests assert graph mutation counts; remove when tests assert via graph queries only.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn triple_count(&self) -> Result<usize, CustomError> {
-        Ok(self.store.iter().count())
-    }
-
     fn replace_triples_batch(
         &self,
         replacements: Vec<(String, Vec<Quad>)>,

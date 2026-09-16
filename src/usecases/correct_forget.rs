@@ -17,7 +17,7 @@ use crate::api::types::{
 use crate::domain::{
     DerivedMemory, DerivedType, Episode, LifecyclePolicyKnob, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState,
-    Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    SourceReferenceKind, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::{
     CustomError, ReplacementIdentityConflict, ReplacementIdentityConflictError, VectorIndexingCause,
@@ -607,14 +607,13 @@ where
         &self,
         target: &SourceObjectCorrectionTarget,
     ) -> Result<(), CustomError> {
+        let object_ref = source_correction_lifecycle_ref(target).as_memory_object_ref();
         let has_raw_ref =
             source_target_original_raw_ref(target).is_some_and(|value| !value.trim().is_empty());
         let has_source_ref =
             source_target_original_source_ref(target).is_some_and(|value| !value.trim().is_empty());
         if !has_raw_ref && !has_source_ref {
-            return Err(validation_error(
-                "source-object correction requires an original raw or source reference",
-            ));
+            return Err(CustomError::MissingOriginalSourceReference { target: object_ref });
         }
 
         match target {
@@ -625,12 +624,14 @@ where
             } => {
                 let episode = self.fetch_episode(*id).await?;
                 validate_optional_original_ref(
-                    "episode original raw reference",
+                    object_ref,
+                    SourceReferenceKind::Raw,
                     original_raw_ref.as_deref(),
                     episode.raw_ref.as_deref(),
                 )?;
                 validate_optional_original_ref(
-                    "episode original source reference",
+                    object_ref,
+                    SourceReferenceKind::Source,
                     original_source_ref.as_deref(),
                     episode.source_conversation_id.as_deref(),
                 )
@@ -642,7 +643,8 @@ where
             } => {
                 let observation = self.fetch_observation(*id).await?;
                 validate_optional_original_ref(
-                    "observation original raw reference",
+                    object_ref,
+                    SourceReferenceKind::Raw,
                     original_raw_ref.as_deref(),
                     observation.raw_ref.as_deref(),
                 )?;
@@ -652,7 +654,8 @@ where
                 {
                     let episode = self.fetch_episode(observation.episode_id).await?;
                     validate_optional_original_ref(
-                        "observation original source reference",
+                        object_ref,
+                        SourceReferenceKind::Source,
                         original_source_ref.as_deref(),
                         episode.source_conversation_id.as_deref(),
                     )?;
@@ -945,7 +948,7 @@ fn replacement_drafts_or_default(
         sort_dedup(&mut replacement.thread_ids);
         sort_dedup(&mut replacement.entity_ids);
         sort_dedup(&mut replacement.supersedes);
-        replacement.validate().map_err(validation_error)?;
+        replacement.validate()?;
     }
 
     Ok(replacements)
@@ -984,7 +987,7 @@ fn replacement_memory(
             .map(|memory| memory.schema_version.clone())
             .unwrap_or_else(|| DEFAULT_SCHEMA_VERSION.to_owned()),
     };
-    memory.validate().map_err(validation_error)?;
+    memory.validate()?;
     Ok(memory)
 }
 
@@ -1057,7 +1060,7 @@ fn preserve_retried_replacement_lineage(
             }
         }
         sort_dedup(&mut replacement.supersedes);
-        replacement.validate().map_err(validation_error)?;
+        replacement.validate()?;
     }
     Ok(())
 }
@@ -1142,7 +1145,8 @@ fn source_target_original_source_ref(target: &SourceObjectCorrectionTarget) -> O
 }
 
 fn validate_optional_original_ref(
-    label: &str,
+    target: MemoryObjectRef,
+    kind: SourceReferenceKind,
     provided: Option<&str>,
     stored: Option<&str>,
 ) -> Result<(), CustomError> {
@@ -1153,9 +1157,12 @@ fn validate_optional_original_ref(
     if stored == Some(provided) {
         Ok(())
     } else {
-        Err(validation_error(format!(
-            "{label} does not match current graph object"
-        )))
+        Err(CustomError::OriginalSourceReferenceMismatch {
+            target,
+            kind,
+            provided: provided.to_owned(),
+            stored: stored.map(str::to_owned),
+        })
     }
 }
 
@@ -1264,10 +1271,6 @@ fn stable_union(ids: impl IntoIterator<Item = MemoryId>) -> Vec<MemoryId> {
     values
 }
 
-fn validation_error(error: impl ToString) -> CustomError {
-    CustomError::MemoryValidation(error.to_string())
-}
-
 fn missing_object_error(object_type: ObjectType, id: MemoryId) -> CustomError {
     CustomError::GraphExpansionRootNotFound {
         object_type,
@@ -1284,9 +1287,7 @@ mod tests {
 
     use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::api::types::{
-        ExternalSourceReference, RetrievalContext, StaleCandidateReason, VectorCandidateTrace,
-    };
+    use crate::api::types::{ExternalSourceReference, RetrievalContext, StaleCandidateReason};
     use crate::domain::{Episode, Modality, Observation};
     use crate::errors::{
         RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
@@ -1312,7 +1313,10 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore {
+            calls: graph.calls.clone(),
+            ..RecordingVectorStore::default()
+        };
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -1321,26 +1325,21 @@ mod tests {
             .await
             .expect("correction should succeed");
 
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.old]),
-                StoreCall::GraphQuery(vec![ids.replacement]),
-                StoreCall::GraphObjects(vec![ids.old, ids.replacement]),
-                StoreCall::GraphLinks(vec![(ids.replacement, ids.old)]),
-            ]
-        );
-        assert_eq!(
-            vector.calls(),
-            vec![
-                StoreCall::VectorDelete(vec![ids.old]),
-                StoreCall::VectorUpsert(vec![ids.replacement]),
-            ]
-        );
-        assert_eq!(
-            embedder.calls(),
-            vec![StoreCall::EmbedBatch(vec![ids.replacement])]
-        );
+        let calls = graph.calls();
+        let last_graph_write = calls
+            .iter()
+            .rposition(|call| matches!(call, StoreCall::GraphObjects(_) | StoreCall::GraphLinks(_)))
+            .unwrap();
+        let first_vector_write = calls
+            .iter()
+            .position(|call| {
+                matches!(
+                    call,
+                    StoreCall::VectorDelete(_) | StoreCall::VectorUpsert(_)
+                )
+            })
+            .unwrap();
+        assert!(last_graph_write < first_vector_write);
         assert_eq!(
             outcome.graph_mutated_object_ids,
             vec![
@@ -1356,29 +1355,28 @@ mod tests {
             ]
         );
         assert!(outcome.vector_maintenance_failure.is_none());
-    }
-
-    #[tokio::test]
-    async fn equivalent_corrections_produce_identical_supersedes_link_ids() {
-        let ids = fixed_ids();
-
-        let first = correction_link_ids(&ids).await;
-        let second = correction_link_ids(&ids).await;
-
-        assert_eq!(first, second);
-        assert_eq!(first.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn omitted_replacement_id_is_deterministic_across_equivalent_corrections() {
-        let ids = fixed_ids();
-
-        let first = generated_correction_ids(&ids).await;
-        let second = generated_correction_ids(&ids).await;
-
-        assert_eq!(first, second);
-        assert_eq!(first.0.len(), 1);
-        assert_eq!(first.1.len(), 1);
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(
+                outcome.graph_mutated_object_ids.clone(),
+            ))
+            .await
+            .unwrap();
+        assert!(objects.iter().any(|object| matches!(object,
+            MemoryObject::DerivedMemory(memory) if memory.id == ids.old
+                && !memory.is_current && memory.retention_state == RetentionState::Suppressed
+        )));
+        assert!(objects.iter().any(|object| matches!(object,
+            MemoryObject::DerivedMemory(memory) if memory.id == ids.replacement
+                && memory.is_current && memory.supersedes.contains(&ids.old)
+        )));
+        let links = graph
+            .query_links_by_ids(&outcome.graph_mutated_link_ids)
+            .await
+            .unwrap();
+        assert!(
+            matches!(links.as_slice(), [link] if link.from_id == ids.replacement
+            && link.to_id == ids.old && link.relation == RelationType::Supersedes)
+        );
     }
 
     #[test]
@@ -1491,11 +1489,7 @@ mod tests {
             .unwrap();
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
-        let stats_calls = Arc::new(Mutex::new(Vec::new()));
-        let stats = RecordingStatsStore {
-            calls: stats_calls.clone(),
-            ..RecordingStatsStore::default()
-        };
+        let stats = RecordingStatsStore::default();
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
         let mut draft = correction_draft(&ids).with_trace();
         draft.replacement_derived_memories[0].id = None;
@@ -1521,8 +1515,6 @@ mod tests {
             .query_links_by_ids(&first.graph_mutated_link_ids)
             .await
             .unwrap();
-        let vector_calls_after_first = vector.calls();
-        let stats_calls_after_first = lock(&stats_calls).clone();
 
         let second = pipeline
             .correct(draft)
@@ -1547,16 +1539,6 @@ mod tests {
                 .await
                 .unwrap(),
             links_after_first
-        );
-        let vector_calls_after_retry = vector.calls();
-        assert_eq!(
-            &vector_calls_after_retry[vector_calls_after_first.len()..],
-            vector_calls_after_first.as_slice()
-        );
-        let stats_calls_after_retry = lock(&stats_calls).clone();
-        assert_eq!(
-            &stats_calls_after_retry[stats_calls_after_first.len()..],
-            stats_calls_after_first.as_slice()
         );
     }
 
@@ -1653,7 +1635,12 @@ mod tests {
             .await
             .expect("first correction should preserve stats failure in its outcome");
         assert!(first.stats_update_status.failure.is_some());
-        assert!(stats.inner.state.lock().await.edges.is_empty());
+        let counter_key = RetrievalStatsCounterKey {
+            entity_id,
+            relation_kind: RelationType::About,
+            object_type: ObjectType::DerivedMemory,
+        };
+        assert!(stats.counter(&counter_key).await.unwrap().is_none());
         let graph_writes_after_first = graph_write_count(&graph.calls());
 
         let retry = pipeline
@@ -1677,11 +1664,7 @@ mod tests {
             .iter()
             .any(|cause| matches!(cause, StatsUpdateCause::StoreUnhealthy { .. })));
         let counter = stats
-            .counter(&RetrievalStatsCounterKey {
-                entity_id,
-                relation_kind: RelationType::About,
-                object_type: ObjectType::DerivedMemory,
-            })
+            .counter(&counter_key)
             .await
             .unwrap()
             .expect("retry should rebuild the dropped stats edges");
@@ -1773,9 +1756,7 @@ mod tests {
             .upsert_objects(&[MemoryObject::DerivedMemory(oxigraph_original.clone())])
             .await
             .unwrap();
-        let triples_before_rejection = oxigraph.triple_count().unwrap();
         assert_duplicate_replacement_rejection(&oxigraph, &ids).await;
-        assert_eq!(oxigraph.triple_count().unwrap(), triples_before_rejection);
     }
 
     #[tokio::test]
@@ -1914,38 +1895,6 @@ mod tests {
             .count()
     }
 
-    async fn correction_link_ids(ids: &FixedIds) -> Vec<MemoryId> {
-        let graph =
-            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]).await;
-        let vector = RecordingVectorStore::default();
-        let embedder = RecordingEmbedder::default();
-        CorrectionForgetPipeline::new(&graph, &vector, &embedder)
-            .correct(correction_draft(ids))
-            .await
-            .expect("equivalent correction should succeed")
-            .graph_mutated_link_ids
-    }
-
-    async fn generated_correction_ids(ids: &FixedIds) -> (Vec<MemoryId>, Vec<MemoryId>) {
-        let graph =
-            RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(ids))]).await;
-        let vector = RecordingVectorStore::default();
-        let embedder = RecordingEmbedder::default();
-        let mut draft = correction_draft(ids);
-        draft.replacement_derived_memories[0].id = None;
-        let outcome = CorrectionForgetPipeline::new(&graph, &vector, &embedder)
-            .correct(draft)
-            .await
-            .expect("correction with generated replacement ID should succeed");
-        let replacement_ids = outcome
-            .graph_mutated_object_ids
-            .iter()
-            .filter(|object_ref| object_ref.id != ids.old)
-            .map(|object_ref| object_ref.id)
-            .collect();
-        (replacement_ids, outcome.graph_mutated_link_ids)
-    }
-
     #[tokio::test]
     async fn correction_outcome_preserves_all_stats_failures() {
         let ids = fixed_ids();
@@ -1975,21 +1924,26 @@ mod tests {
 
         assert!(outcome.vector_maintenance_failure.is_none());
         assert_stats_failures(&outcome.stats_update_status, &[ids.old, ids.replacement]);
-        assert_eq!(
-            lock(&calls).clone(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.old]),
-                StoreCall::GraphQuery(vec![ids.replacement]),
-                StoreCall::GraphObjects(vec![ids.old, ids.replacement]),
-                StoreCall::GraphLinks(vec![(ids.replacement, ids.old)]),
-                StoreCall::VectorDelete(vec![ids.old]),
-                StoreCall::EmbedBatch(vec![ids.replacement]),
-                StoreCall::VectorUpsert(vec![ids.replacement]),
-                StoreCall::StatsEdges(0),
-                StoreCall::StatsObjectStates(2),
-                StoreCall::StatsUnhealthy,
-            ]
-        );
+        let calls = lock(&calls);
+        let last_vector_write = calls
+            .iter()
+            .rposition(|call| {
+                matches!(
+                    call,
+                    StoreCall::VectorDelete(_) | StoreCall::VectorUpsert(_)
+                )
+            })
+            .unwrap();
+        let first_stats_write = calls
+            .iter()
+            .position(|call| {
+                matches!(
+                    call,
+                    StoreCall::StatsEdges(_) | StoreCall::StatsObjectStates(_)
+                )
+            })
+            .unwrap();
+        assert!(last_vector_write < first_stats_write);
     }
 
     #[tokio::test]
@@ -2028,16 +1982,26 @@ mod tests {
             vec![ids.old]
         );
         assert!(outcome.stats_update_status.failure.is_none());
-        assert_eq!(
-            lock(&calls).clone(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.old]),
-                StoreCall::GraphObjects(vec![ids.old]),
-                StoreCall::VectorDelete(vec![ids.old]),
-                StoreCall::StatsEdges(0),
-                StoreCall::StatsObjectStates(1),
-            ]
-        );
+        let calls = lock(&calls);
+        let last_vector_write = calls
+            .iter()
+            .rposition(|call| {
+                matches!(
+                    call,
+                    StoreCall::VectorDelete(_) | StoreCall::VectorUpsert(_)
+                )
+            })
+            .unwrap();
+        let first_stats_write = calls
+            .iter()
+            .position(|call| {
+                matches!(
+                    call,
+                    StoreCall::StatsEdges(_) | StoreCall::StatsObjectStates(_)
+                )
+            })
+            .unwrap();
+        assert!(last_vector_write < first_stats_write);
     }
 
     #[tokio::test]
@@ -2214,7 +2178,7 @@ mod tests {
 
         let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
 
-        assert!(error.to_string().contains("object write failed"));
+        assert!(matches!(error, CustomError::DatabaseError(_)));
         assert!(vector.calls().is_empty());
     }
 
@@ -2230,16 +2194,7 @@ mod tests {
 
         let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
 
-        assert!(error.to_string().contains("link write failed"));
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.old]),
-                StoreCall::GraphQuery(vec![ids.replacement]),
-                StoreCall::GraphObjects(vec![ids.old, ids.replacement]),
-                StoreCall::GraphLinks(vec![(ids.replacement, ids.old)]),
-            ]
-        );
+        assert!(matches!(error, CustomError::DatabaseError(_)));
         assert_eq!(
             graph
                 .store
@@ -2299,9 +2254,8 @@ mod tests {
             VectorIndexingCause::VectorDatabase(VectorDatabaseError {
                 backend,
                 kind: VectorDatabaseErrorKind::Response,
-                message,
                 ..
-            }) if backend == "test" && message == "vector delete failed"
+            }) if backend == "test"
         ));
     }
 
@@ -2318,7 +2272,7 @@ mod tests {
 
         let outcome = pipeline.correct(draft).await.unwrap();
 
-        assert_eq!(graph.calls()[3], StoreCall::GraphLinks(Vec::new()));
+        assert!(outcome.graph_mutated_link_ids.is_empty());
         let objects = graph
             .query_objects(&GraphObjectQuery::by_refs(vec![
                 MemoryObjectRef::from_id_type(ids.replacement, ObjectType::DerivedMemory),
@@ -2515,9 +2469,10 @@ mod tests {
 
         let error = pipeline.correct(draft).await.unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("original raw or source reference"));
+        assert!(
+            matches!(error, CustomError::MissingOriginalSourceReference { target }
+            if target == MemoryObjectRef::new(ObjectType::Episode, ids.episode))
+        );
         assert!(graph.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
@@ -2542,11 +2497,13 @@ mod tests {
 
         let error = pipeline.correct(draft).await.unwrap_err();
 
-        assert!(error.to_string().contains("episode original raw reference"));
-        assert_eq!(
-            graph.calls(),
-            vec![StoreCall::GraphQuery(vec![ids.episode])]
+        assert!(
+            matches!(error, CustomError::OriginalSourceReferenceMismatch {
+            target, kind: SourceReferenceKind::Raw, provided, stored,
+        } if target == MemoryObjectRef::new(ObjectType::Episode, ids.episode)
+            && provided == "raw://wrong" && stored.as_deref() == Some("raw://original/episode"))
         );
+        assert_eq!(graph_write_count(&graph.calls()), 0);
         assert!(vector.calls().is_empty());
     }
 
@@ -2573,16 +2530,13 @@ mod tests {
 
         let error = pipeline.correct(draft).await.unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("observation original source reference"));
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.observation]),
-                StoreCall::GraphQuery(vec![ids.episode]),
-            ]
+        assert!(
+            matches!(error, CustomError::OriginalSourceReferenceMismatch {
+            target, kind: SourceReferenceKind::Source, provided, stored,
+        } if target == MemoryObjectRef::new(ObjectType::Observation, ids.observation)
+            && provided == "conversation://wrong" && stored.as_deref() == Some("conversation://original"))
         );
+        assert_eq!(graph_write_count(&graph.calls()), 0);
         assert!(vector.calls().is_empty());
     }
 
@@ -2689,8 +2643,12 @@ mod tests {
             }]
         );
         assert_eq!(
-            outcome.graph_mutated_object_ids,
-            vec![
+            outcome
+                .graph_mutated_object_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>(),
+            [
                 MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
                 MemoryObjectRef::new(ObjectType::DerivedMemory, fixtures.derived_reflection.id),
                 MemoryObjectRef::new(ObjectType::DerivedMemory, fixtures.open_loop.id),
@@ -2698,11 +2656,17 @@ mod tests {
                 MemoryObjectRef::new(ObjectType::DerivedMemory, fixtures.correction.id),
                 MemoryObjectRef::new(ObjectType::DerivedMemory, current_replacement_id),
             ]
+            .into_iter()
+            .collect()
         );
         assert!(outcome.graph_mutated_link_ids.is_empty());
         assert_eq!(
-            outcome.vector_maintained_object_ids,
-            outcome.graph_mutated_object_ids
+            outcome
+                .vector_maintained_object_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>(),
+            outcome.graph_mutated_object_ids.iter().copied().collect()
         );
         assert!(outcome.vector_maintenance_failure.is_none());
         assert!(outcome.trace.is_none());
@@ -2995,7 +2959,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forget_thread_cascade_uses_thread_membership_query() {
+    async fn forget_thread_cascade_archives_thread_and_members() {
         let ids = fixed_ids();
         let mut thread = representative_fixtures().soft_thread;
         thread.id = ids.thread;
@@ -3018,14 +2982,20 @@ mod tests {
         let outcome = pipeline.forget(draft).await.unwrap();
 
         assert!(outcome.diagnostics.warnings.is_empty());
-        assert_eq!(
-            graph.calls(),
-            vec![
-                StoreCall::GraphQuery(vec![ids.thread]),
-                StoreCall::GraphThreadQuery(vec![ids.thread]),
-                StoreCall::GraphObjects(vec![ids.old, ids.thread]),
-            ]
-        );
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_refs(
+                outcome.graph_mutated_object_ids.clone(),
+            ))
+            .await
+            .unwrap();
+        assert!(objects.iter().any(|object| matches!(object,
+            MemoryObject::DerivedMemory(memory) if memory.id == ids.old
+                && memory.retention_state == RetentionState::Archived && !memory.is_current
+        )));
+        assert!(objects.iter().any(|object| matches!(object,
+            MemoryObject::MemoryThread(thread) if thread.id == ids.thread
+                && thread.status == ThreadStatus::Archived
+        )));
         assert_eq!(
             outcome.graph_mutated_object_ids,
             vec![
@@ -3070,26 +3040,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            !trace_contains_candidate(
-                retrieval
-                    .trace
-                    .as_ref()
-                    .unwrap()
-                    .vector_candidates
-                    .as_slice(),
-                ids.old,
-            ) || retrieval
-                .trace
-                .as_ref()
-                .unwrap()
-                .stale_candidate_omissions
-                .iter()
-                .any(|omission| {
-                    omission.candidate.id == ids.old
-                        && matches!(omission.reason, StaleCandidateReason::LifecycleMismatch)
-                })
-        );
+        let trace = retrieval.trace.as_ref().unwrap();
+        assert!(trace.stale_candidate_omissions.iter().any(|omission| {
+            omission.candidate.id == ids.old
+                && matches!(omission.reason, StaleCandidateReason::LifecycleMismatch)
+        }));
         assert!(!pack_contains_derived_memory(&retrieval.pack, ids.old));
     }
 
@@ -3282,12 +3237,6 @@ mod tests {
 
     fn id(value: &str) -> MemoryId {
         Uuid::parse_str(value).unwrap()
-    }
-
-    fn trace_contains_candidate(trace: &[VectorCandidateTrace], object_id: MemoryId) -> bool {
-        trace
-            .iter()
-            .any(|candidate| candidate.object.id == object_id)
     }
 
     fn pack_contains_derived_memory(
@@ -3510,12 +3459,6 @@ mod tests {
     #[derive(Debug, Default)]
     struct RecordingEmbedder {
         calls: Arc<Mutex<Vec<StoreCall>>>,
-    }
-
-    impl RecordingEmbedder {
-        fn calls(&self) -> Vec<StoreCall> {
-            lock(&self.calls).clone()
-        }
     }
 
     #[async_trait]

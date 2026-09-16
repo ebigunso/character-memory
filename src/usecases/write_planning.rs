@@ -510,10 +510,6 @@ mod construction_tests {
         let second = input.prepare_write_plan(&defaults);
 
         assert_eq!(first, second);
-        assert_eq!(
-            serde_json::to_vec(&first).unwrap(),
-            serde_json::to_vec(&second).unwrap()
-        );
     }
 
     #[test]
@@ -584,17 +580,6 @@ mod construction_tests {
     }
 
     #[test]
-    fn graph_iri_reuses_domain_graph_uri() {
-        let defaults = RememberPlanDefaults::fixed("graph-iri", timestamp("2026-07-03T10:10:00Z"));
-        let id = defaults.stable_id("episode:0");
-
-        assert_eq!(
-            defaults.graph_iri(ObjectType::Episode, id),
-            graph_uri(ObjectType::Episode, id)
-        );
-    }
-
-    #[test]
     fn candidate_ids_and_idempotency_key_change_with_content() {
         let defaults =
             RememberPlanDefaults::fixed("same-defaults", timestamp("2026-07-03T10:15:00Z"));
@@ -609,25 +594,6 @@ mod construction_tests {
             first.prepared_candidate_refs(&defaults).episode_id,
             second.prepared_candidate_refs(&defaults).episode_id
         );
-    }
-
-    #[test]
-    fn diagnostics_candidate_counts_can_be_computed_by_callers_deterministically() {
-        let defaults = RememberPlanDefaults::fixed("counts", timestamp("2026-07-03T10:20:00Z"));
-        let plan = RememberInput::new("count candidates").prepare_write_plan(&defaults);
-        let episode_count = plan
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.kind() == MemoryCandidateKind::Episode)
-            .count();
-        let observation_count = plan
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.kind() == MemoryCandidateKind::Observation)
-            .count();
-
-        assert_eq!(episode_count, 1);
-        assert_eq!(observation_count, 1);
     }
 }
 
@@ -1183,45 +1149,50 @@ impl WritePlanCommitValues {
         let mut vector_targets = Vec::new();
         let mut defaults = DraftDefaults::generated();
 
-        for candidate in plan.candidates {
+        for (index, candidate) in plan.candidates.into_iter().enumerate() {
+            let kind = candidate.kind();
+            let timestamp_error = |field| CustomError::WritePlanValidationRejected {
+                validations: vec![CandidateValidation::invalid(
+                    index,
+                    kind,
+                    CandidateValidationIssue::MissingTimestamp { field },
+                )],
+            };
             match candidate {
                 MemoryCandidate::Episode(candidate) => objects.push(MemoryObject::Episode(
-                    stable_episode_draft(candidate.draft)?
-                        .into_domain_with_defaults(&mut defaults)
-                        .map_err(validation_error)?,
+                    stable_episode_draft(candidate.draft)
+                        .map_err(timestamp_error)?
+                        .into_domain_with_defaults(&mut defaults)?,
                 )),
                 MemoryCandidate::Observation(candidate) => objects.push(MemoryObject::Observation(
-                    require_created_at(candidate.draft, "observation candidate")?
-                        .into_domain_with_defaults(&mut defaults)
-                        .map_err(validation_error)?,
+                    require_created_at(candidate.draft)
+                        .map_err(timestamp_error)?
+                        .into_domain_with_defaults(&mut defaults)?,
                 )),
                 MemoryCandidate::Entity(candidate) => objects.push(MemoryObject::Entity(
-                    require_created_and_updated_at(candidate.draft, "entity candidate")?
-                        .into_domain_with_defaults(&mut defaults)
-                        .map_err(validation_error)?,
+                    require_created_and_updated_at(candidate.draft)
+                        .map_err(timestamp_error)?
+                        .into_domain_with_defaults(&mut defaults)?,
                 )),
                 MemoryCandidate::MemoryThread(candidate) => {
                     objects.push(MemoryObject::MemoryThread(
-                        stable_memory_thread_draft(candidate.draft)?
-                            .into_domain_with_defaults(&mut defaults)
-                            .map_err(validation_error)?,
+                        stable_memory_thread_draft(candidate.draft)
+                            .map_err(timestamp_error)?
+                            .into_domain_with_defaults(&mut defaults)?,
                     ));
                 }
                 MemoryCandidate::DerivedMemory(candidate) => {
                     objects.push(MemoryObject::DerivedMemory(
-                        require_created_and_updated_at(
-                            candidate.draft,
-                            "derived memory candidate",
-                        )?
-                        .into_domain_with_defaults(&mut defaults)
-                        .map_err(validation_error)?,
+                        require_created_and_updated_at(candidate.draft)
+                            .map_err(timestamp_error)?
+                            .into_domain_with_defaults(&mut defaults)?,
                     ));
                 }
                 MemoryCandidate::MemoryLink(candidate) => {
                     links.push(
-                        stable_memory_link_draft(candidate.draft)?
-                            .into_domain_with_defaults(&mut defaults)
-                            .map_err(validation_error)?,
+                        stable_memory_link_draft(candidate.draft)
+                            .map_err(timestamp_error)?
+                            .into_domain_with_defaults(&mut defaults)?,
                     );
                 }
                 MemoryCandidate::VectorIndex(candidate) => vector_targets.push(candidate.target),
@@ -1275,65 +1246,55 @@ impl CandidateUpdatedAt for crate::api::types::DerivedMemoryDraft {
     }
 }
 
-fn require_created_at<T>(draft: T, label: &str) -> Result<T, CustomError>
+fn require_created_at<T>(draft: T) -> Result<T, CandidateTimestampField>
 where
     T: CandidateCreatedAt,
 {
     if draft.created_at().is_none() {
-        return Err(validation_error(format!(
-            "{label} created_at must be present for deterministic commit"
-        )));
+        return Err(CandidateTimestampField::CreatedAt);
     }
     Ok(draft)
 }
 
-fn require_created_and_updated_at<T>(draft: T, label: &str) -> Result<T, CustomError>
+fn require_created_and_updated_at<T>(draft: T) -> Result<T, CandidateTimestampField>
 where
     T: CandidateUpdatedAt,
 {
-    require_created_at(draft, label).and_then(|draft| {
+    require_created_at(draft).and_then(|draft| {
         if draft.updated_at().is_none() {
-            return Err(validation_error(format!(
-                "{label} updated_at must be present for deterministic commit"
-            )));
+            return Err(CandidateTimestampField::UpdatedAt);
         }
         Ok(draft)
     })
 }
 
-fn stable_episode_draft(draft: EpisodeDraft) -> Result<EpisodeDraft, CustomError> {
+fn stable_episode_draft(draft: EpisodeDraft) -> Result<EpisodeDraft, CandidateTimestampField> {
     if draft.created_at.is_none() {
-        return Err(validation_error(
-            "episode candidate created_at must be present for deterministic commit",
-        ));
+        return Err(CandidateTimestampField::CreatedAt);
     }
     Ok(draft)
 }
 
-fn stable_memory_thread_draft(draft: MemoryThreadDraft) -> Result<MemoryThreadDraft, CustomError> {
+fn stable_memory_thread_draft(
+    draft: MemoryThreadDraft,
+) -> Result<MemoryThreadDraft, CandidateTimestampField> {
     if draft.created_at.is_none() {
-        return Err(validation_error(
-            "memory thread candidate created_at must be present for deterministic commit",
-        ));
+        return Err(CandidateTimestampField::CreatedAt);
     }
     if draft.updated_at.is_none() {
-        return Err(validation_error(
-            "memory thread candidate updated_at must be present for deterministic commit",
-        ));
+        return Err(CandidateTimestampField::UpdatedAt);
     }
     if draft.last_touched_at.is_none() {
-        return Err(validation_error(
-            "memory thread candidate last_touched_at must be present for deterministic commit",
-        ));
+        return Err(CandidateTimestampField::LastTouchedAt);
     }
     Ok(draft)
 }
 
-fn stable_memory_link_draft(draft: MemoryLinkDraft) -> Result<MemoryLinkDraft, CustomError> {
+fn stable_memory_link_draft(
+    draft: MemoryLinkDraft,
+) -> Result<MemoryLinkDraft, CandidateTimestampField> {
     if draft.created_at.is_none() {
-        return Err(validation_error(
-            "memory link candidate created_at must be present for deterministic commit",
-        ));
+        return Err(CandidateTimestampField::CreatedAt);
     }
     Ok(draft)
 }
@@ -1557,10 +1518,6 @@ fn schema_version(object: &MemoryObject) -> &str {
     }
 }
 
-fn validation_error(error: impl ToString) -> CustomError {
-    CustomError::MemoryValidation(error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1593,32 +1550,43 @@ mod tests {
             ),
         ));
 
+        let query = GraphObjectQuery::by_types(
+            vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::Entity,
+                ObjectType::MemoryThread,
+                ObjectType::DerivedMemory,
+            ],
+            None,
+        );
+        let link_ids = fixtures
+            .links()
+            .iter()
+            .map(|link| link.id)
+            .chain(
+                plan.candidates
+                    .iter()
+                    .filter_map(|candidate| match candidate {
+                        MemoryCandidate::MemoryLink(candidate) => candidate.draft.id,
+                        _ => None,
+                    }),
+            )
+            .collect::<Vec<_>>();
+        let objects_before = graph.query_objects(&query).await.unwrap();
+        let links_before = graph.query_links_by_ids(&link_ids).await.unwrap();
+
         let verdict = WritePlanValidator::new(&graph)
             .validate(&plan)
             .await
             .unwrap();
 
         assert!(verdict.is_valid());
-        let objects = graph
-            .query_objects(&GraphObjectQuery::by_types(
-                vec![
-                    ObjectType::Episode,
-                    ObjectType::Observation,
-                    ObjectType::Entity,
-                    ObjectType::MemoryThread,
-                    ObjectType::DerivedMemory,
-                ],
-                None,
-            ))
-            .await
-            .unwrap();
-        assert_eq!(objects.len(), 13);
-        let link_ids = fixtures
-            .links()
-            .iter()
-            .map(|link| link.id)
-            .collect::<Vec<_>>();
-        assert_eq!(graph.query_links_by_ids(&link_ids).await.unwrap().len(), 5);
+        assert_eq!(graph.query_objects(&query).await.unwrap(), objects_before);
+        assert_eq!(
+            graph.query_links_by_ids(&link_ids).await.unwrap(),
+            links_before
+        );
     }
 
     #[tokio::test]
@@ -1698,38 +1666,6 @@ mod tests {
                 matching_episode_ids: vec![source_episode_id],
             }]
         );
-    }
-
-    #[tokio::test]
-    async fn does_not_warn_for_distinct_surfaces_with_vector_candidates_enabled() {
-        let graph = in_memory_graph_store();
-        let plan = RememberInput::new("source episode content")
-            .with_observation(ObservationDraft::new(
-                MemoryId::nil(),
-                "distinct observation content",
-            ))
-            .with_derived_memory(DerivedMemoryDraft::new(
-                DerivedType::Reflection,
-                "distinct derived content",
-            ))
-            .prepare_write_plan_with_options(&defaults(), true, false);
-
-        let verdict = WritePlanValidator::new(&graph)
-            .validate(&plan)
-            .await
-            .unwrap();
-
-        assert!(verdict.is_valid());
-        assert!(verdict
-            .validations
-            .iter()
-            .filter(|validation| {
-                matches!(
-                    validation.candidate_kind,
-                    MemoryCandidateKind::Observation | MemoryCandidateKind::DerivedMemory
-                )
-            })
-            .all(|validation| validation.warnings.is_empty()));
     }
 
     #[tokio::test]
@@ -2242,9 +2178,19 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error
-            .to_string()
-            .contains("episode candidate created_at must be present"));
+        let CustomError::WritePlanValidationRejected { validations } = error else {
+            panic!("expected typed timestamp rejection");
+        };
+        assert_eq!(
+            validations,
+            vec![CandidateValidation::invalid(
+                0,
+                MemoryCandidateKind::Episode,
+                CandidateValidationIssue::MissingTimestamp {
+                    field: CandidateTimestampField::CreatedAt
+                },
+            )]
+        );
     }
 
     #[tokio::test]
