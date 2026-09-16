@@ -81,7 +81,7 @@
   - kind: command
     required: true
     owner: worker
-    detail: "cargo test --test vector_port_contract_tests (Qdrant down); REQUIRE_QDRANT_TESTS=1 cargo test --test vector_port_contract_tests (Qdrant up, endpoint stated); cargo test --lib adapters::openai (executed counts reported)"
+    detail: "cargo test --lib adapters::qdrant (Qdrant down; the in-crate port-parity module); REQUIRE_QDRANT_TESTS=1 cargo test --lib adapters::qdrant (Qdrant up, endpoint stated); cargo test --lib adapters::openai (executed counts reported)"
 
 ### Task_3: Settings-to-fanout wiring observed offline
 - type: test
@@ -166,6 +166,7 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 - 2026-09-17 Decision (Q2): no product change; correcting a target absent from the graph is already rejected with GraphExpansionRootNotFound (exact type and id) before any graph, vector or stats write, and the new test observes it.
 - 2026-09-16 Decision: a new test that fails on main is committed ignored with the pending-ruling reason and pauses its item for a ruling rather than being fixed by the worker; the PR joins the stack only with zero such ignores. Trigger: orchestrator design-altitude rule (2026-09-13) and the 2026-09-15 stack-merge incident. Decider approval: plan accepted 2026-09-16; merge approval pending.
 - 2026-09-16 Decision: the `close()` gap is withdrawn from this plan and from the audit. Trigger: plan review found the unconditional close-and-reopen test in the vector port contract suite.
+- 2026-09-17 Decision (Copilot, PR 100): the wrong-width upsert and delete parity tests stay in the crate (`src/adapters/qdrant/store.rs`, module `port_contract`) rather than in `tests/vector_port_contract_tests.rs`. The adapters and the vector port are `pub(crate)`, so an integration test can reach the port only through the facade, and the facade's own dimension check (observed by `injected_provider_dimension_must_match_existing_vector_storage`) stops a wrong-width record before any adapter sees it. The raw-port postcondition can therefore only be driven in-crate; both backends run the same helpers there, which is the ADR-I-0030 requirement (every adapter passes the same contract). ADR-I-0030's Validation section now names this in-crate parity module beside the shared suite. Task_2's validation command corrected to the in-crate target.
 
 ## Notes
 - Risks: the absent-target and wrong-width tests are the ones most likely to fail on main; Q1 and Q2 prepare the rulings.
