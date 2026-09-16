@@ -1,6 +1,6 @@
 # Plan: Public facade and port contracts with no observer get one
 
-- status: in_progress (approved by the decider 2026-09-16)
+- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-17 at 19826cf; pull request open, awaiting merge approval)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
@@ -152,6 +152,10 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
   - Summary: seven facade and usecase gap tests (prepare idempotency-key override and distinct default ids; absent correction target rejected before writes; inclusive link confidence bounds; descending final-score ordering; highest-scoring roots survive truncation; Entity and MemoryThread excluded from object-state projection; forward references inside a write plan); in-crate vector-port parity for wrong-width upsert and delete_candidates over both backends; provider non-2xx and malformed-body classification; the existing fanout wiring test verified executing offline (3 of 3 guardrails tests with Qdrant down).
   - Validation evidence: worker gates fmt and clippy clean; usecases 131 passed, memory filter 37; live port suite 4 of 4 and vector integration 12 of 12 executed against Qdrant v1.19.0 at http://127.0.0.1:6334 with zero collections left; Qdrant down afterwards. Orchestrator full-suite run on the integrated tip recorded in the Wave 3 entry.
 - 2026-09-17 Wave 2 completed: [Task_4] zero pending-ruling ignores; rulings below.
+
+- 2026-09-17 Wave 3 completed: [Task_5] (reviewed 19826cf; code identical after the rebase onto the re-anchoring log commit)
+  - Summary: cm-reviewer APPROVED, no findings. Absent-target, forward-reference and score-order mutations each failed their intended assertion and passed after SHA-256-verified restoration.
+  - Validation evidence (reviewer, pinned worktree): fmt, check, clippy, test --no-run clean; lib 338 passed 2 ignored; integration 2+3+12+6; doc 1; live port suite 4 of 4 and vector integration 12 of 12 against Qdrant v1.19.0 at http://127.0.0.1:6334 with REQUIRE_QDRANT_TESTS=1, collections empty before and after. Companion: cargo check --workspace --all-targets clean and cargo test --workspace green except the known symlink exception against 19826cf.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
