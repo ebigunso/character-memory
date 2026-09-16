@@ -139,8 +139,18 @@ Parallel tasks run in separate worktrees (review-worktree pattern) so Cargo comm
 
 - 2026-09-16 Decider accepted all eight plans; execution starts, PRs stacked.
 
+- 2026-09-16 Wave 1 completed: [Task_1] (commit fd65ec8)
+  - Summary: tests/support opens the embedded Qdrant Edge store under a TempDir from explicit overrides; skip helpers, load_test_settings, tests/initialization_tests.rs and the write_planning private harness deleted; parity opt-in kept.
+  - Validation evidence: fmt and clippy clean; Qdrant down and no .env: 2+3+12+19 integration tests executed, 0 skipping, temp census unchanged (2160 before and after); Qdrant up with REQUIRE_QDRANT_TESTS=1: same counts, both parity tests executed ok.
+- 2026-09-16 Wave 2 completed: [Task_2, Task_3] (commits 20f2de8, 7957e3c)
+  - Summary: write_planning integration tests 19 to 6 with every deletion mapped to its inline observer; source_input_ref and provenance span assertions moved into the inline source-ref test; persistent test closes and reopens; README testing paragraph rewritten; PR workflow gains an unconditional service-free cargo test job and the live job runs the two parity tests.
+  - Validation evidence (orchestrator, integrated branch, Qdrant down, no .env): fmt, check, clippy, test --no-run clean; lib 400 passed 5 ignored; public_facade 2, retrieval_guardrails 3, vector_port_contract 12, write_planning 6; zero skipping lines.
+  - Notes: Codex workers write only under the repository root; task worktrees moved to .worktrees/ (memory note codex-worktrees-inside-repo-root).
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
+- 2026-09-16 Decision: Task_2 owns widened to the test module of src/usecases/write_planning.rs for one move. Trigger: the inline source-ref test did not assert plan.source_input_ref or candidate provenance source_spans, so deleting the integration test would have lost those observers. Plan delta: the two assertions moved inline, then the integration test was deleted. Tradeoff: a second observer at the cheaper boundary versus keeping a service-shaped integration test. User approval: orchestrator ruling under the accepted plan.
+- 2026-09-16 Decision: the PR workflow keeps its global trigger filters (bases, paths) and adds the service-free job beneath them. Trigger: worker question whether every pull request literally required removing the filters. Rationale: the planner-added requirement targets fork and Dependabot coverage on source-touching pull requests; widening triggers would also widen the live job. User approval: orchestrator ruling under the accepted plan.
 - 2026-09-16 Decision: integration tests default to the embedded store; the service is reached only through explicit opt-in parity tests. Trigger: 24 of 38 integration tests skipped silently with Qdrant down. User approval: pending.
 
 ## Notes
