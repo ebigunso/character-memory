@@ -415,6 +415,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn entity_and_thread_endpoints_do_not_require_object_state_projection() {
+        let graph = in_memory_graph_store();
+        let episode = simple_episode();
+        graph
+            .upsert_objects(&[MemoryObject::Episode(episode.clone())])
+            .await
+            .unwrap();
+        let links = [ObjectType::Entity, ObjectType::MemoryThread]
+            .into_iter()
+            .enumerate()
+            .map(|(index, from_type)| MemoryLink {
+                id: MemoryId::from_u128(100 + index as u128),
+                object_type: ObjectType::MemoryLink,
+                from_id: MemoryId::from_u128(200 + index as u128),
+                from_type,
+                to_id: episode.id,
+                to_type: ObjectType::Episode,
+                relation: RelationType::Involves,
+                confidence: 1.0,
+                rationale: None,
+                created_at: episode.created_at,
+                schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let stats = RecordingStatsStore::default();
+
+        let outcome = StatsProjectionService::new(&graph, &stats)
+            .project(&[], &links)
+            .await;
+
+        assert!(outcome.causes.is_empty());
+        assert_eq!(outcome.attempted_object_ids, vec![episode.id]);
+    }
+
+    #[tokio::test]
     async fn partial_endpoint_hydration_is_reported_in_stats_status() {
         let graph_store = in_memory_graph_store();
         let present_episode = simple_episode();

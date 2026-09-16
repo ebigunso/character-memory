@@ -1359,6 +1359,75 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn section_rows_with_distinct_final_scores_are_descending() {
+        let mut low = representative_fixtures().user_preference;
+        low.id = MemoryId::from_u128(1);
+        low.salience_score = 0.0;
+        let mut middle = low.clone();
+        middle.id = MemoryId::from_u128(2);
+        let mut high = low.clone();
+        high.id = MemoryId::from_u128(3);
+        high.salience_score = 1.0;
+        let graph = graph_with(
+            &[
+                MemoryObject::DerivedMemory(low.clone()),
+                MemoryObject::DerivedMemory(middle.clone()),
+                MemoryObject::DerivedMemory(high.clone()),
+            ],
+            &[],
+        )
+        .await;
+        let vector = TemporaryVectorCandidateStore::open(2).await;
+        for (memory, tilt) in [
+            (low.clone(), 1.0),
+            (middle.clone(), 0.0),
+            (high.clone(), 0.4),
+        ] {
+            seed(&vector, MemoryObject::DerivedMemory(memory), tilt).await;
+        }
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
+            .retrieve(RetrievalContext::new("rank by final score").with_trace())
+            .await
+            .unwrap();
+
+        let ids = outcome
+            .pack
+            .preferences
+            .iter()
+            .map(|row| row.memory.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![high.id, middle.id, low.id]);
+        let trace = outcome.trace.unwrap();
+        let scores = ids
+            .iter()
+            .map(|id| {
+                let assignment = trace
+                    .section_assignments
+                    .iter()
+                    .find(|assignment| assignment.object.id == *id)
+                    .unwrap();
+                match assignment.reason {
+                    SectionAssignmentReason::Selected { scores } => scores.final_score,
+                    _ => panic!("pack row must have a selected section assignment"),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(scores.windows(2).all(|pair| pair[0] > pair[1]));
+    }
+
+    #[test]
+    fn graph_root_truncation_keeps_highest_scoring_roots() {
+        let low = candidate(MemoryId::from_u128(1), ObjectType::Episode, 0.1);
+        let middle = candidate(MemoryId::from_u128(2), ObjectType::Episode, 0.6);
+        let high = candidate(MemoryId::from_u128(3), ObjectType::Episode, 0.9);
+
+        let selected = select_candidate_roots(&[middle.clone(), low, high.clone()], 2);
+
+        assert_eq!(selected.roots, vec![high, middle]);
+    }
+
+    #[tokio::test]
     async fn vector_to_graph_flow_groups_sections_and_records_trace() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;

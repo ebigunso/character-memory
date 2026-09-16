@@ -181,6 +181,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn confidence_bounds_are_inclusive_and_outside_values_do_not_persist() {
+        for (confidence, accepted) in [
+            (0.0, true),
+            (1.0, true),
+            (-f32::EPSILON, false),
+            (1.0 + f32::EPSILON, false),
+        ] {
+            let graph = in_memory_graph_store();
+            let mut draft = valid_link_draft();
+            draft.confidence = confidence;
+            let link_id = draft.id.unwrap();
+
+            let result = LinkPipeline::new(&graph).link(draft).await;
+            let persisted = graph.query_links_by_ids(&[link_id]).await.unwrap();
+
+            if accepted {
+                let outcome = result.unwrap();
+                assert_eq!(outcome.link.confidence, confidence);
+                assert_eq!(persisted, vec![outcome.link]);
+            } else {
+                assert!(matches!(
+                    result.unwrap_err(),
+                    CustomError::DomainValidation(DomainValidationError::InvalidScore {
+                        field: "MemoryLink.confidence",
+                        value,
+                    }) if value == confidence
+                ));
+                assert!(persisted.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn rejects_invalid_confidence_before_graph_write() {
         let graph = in_memory_graph_store();
         let pipeline = LinkPipeline::new(&graph);
