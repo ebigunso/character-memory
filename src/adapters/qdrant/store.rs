@@ -128,6 +128,19 @@ impl QdrantVectorCandidateStore {
         &self,
         records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError> {
+        for record in records {
+            let actual_vector_size = u64::try_from(record.embedding.len()).unwrap_or(u64::MAX);
+            if actual_vector_size != self.vector_size {
+                return Err(CollectionCompatibilityError {
+                    collection: self.collection_name.clone(),
+                    mismatch: CollectionMismatch::VectorSize {
+                        expected: self.vector_size,
+                        actual: actual_vector_size,
+                    },
+                }
+                .into());
+            }
+        }
         let points = qdrant_point_structs(records)?;
         let request = UpsertPointsBuilder::new(&self.collection_name, points)
             .wait(true)
@@ -584,6 +597,155 @@ mod tests {
     use std::time::Instant;
     use uuid::Uuid;
 
+    mod port_contract {
+        use super::*;
+        use crate::test_support::TemporaryVectorCandidateStore;
+        use std::collections::HashSet;
+
+        #[tokio::test]
+        async fn embedded_wrong_width_upsert_rejects_with_collection_mismatch() {
+            let store = TemporaryVectorCandidateStore::open(2).await;
+            let result = wrong_width_upsert(&store).await;
+            drop(store);
+
+            assert_wrong_width_rejected(result);
+        }
+
+        #[tokio::test]
+        async fn service_wrong_width_upsert_rejects_with_collection_mismatch() {
+            if env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
+                return;
+            }
+            let store = service_store().await;
+            let result = wrong_width_upsert(&store).await;
+            store
+                .client
+                .delete_collection(&store.collection_name)
+                .await
+                .unwrap();
+
+            assert_wrong_width_rejected(result);
+        }
+
+        #[tokio::test]
+        async fn embedded_delete_removes_every_surface_of_only_the_requested_object() {
+            let store = TemporaryVectorCandidateStore::open(2).await;
+            let result = delete_surfaces(&store).await;
+            drop(store);
+
+            assert_deleted_surfaces(result.unwrap());
+        }
+
+        #[tokio::test]
+        async fn service_delete_removes_every_surface_of_only_the_requested_object() {
+            if env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
+                return;
+            }
+            let store = service_store().await;
+            let result = delete_surfaces(&store).await;
+            store
+                .client
+                .delete_collection(&store.collection_name)
+                .await
+                .unwrap();
+
+            assert_deleted_surfaces(result.unwrap());
+        }
+
+        async fn service_store() -> QdrantVectorCandidateStore {
+            let url = env::var("QDRANT_CONNECTION_STRING")
+                .expect("QDRANT_CONNECTION_STRING is required for service port contracts");
+            let collection = format!("cmem_port_contract_{}", Uuid::new_v4());
+            let store = QdrantVectorCandidateStore::new(url, collection, 2).unwrap();
+            store.init_collection().await.unwrap();
+            store
+        }
+
+        async fn wrong_width_upsert(store: &dyn VectorCandidateStore) -> Result<(), CustomError> {
+            let record = VectorRecord::new(
+                MemoryId::from_u128(1),
+                ObjectType::Episode,
+                VectorSurface::Summary,
+                DEFAULT_SCHEMA_VERSION,
+                "wrong-width record",
+            );
+            store
+                .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, 0.0, 0.0])])
+                .await
+        }
+
+        fn assert_wrong_width_rejected(result: Result<(), CustomError>) {
+            assert!(
+                matches!(
+                    &result,
+                    Err(CustomError::CollectionIncompatible(
+                        CollectionCompatibilityError {
+                            mismatch: CollectionMismatch::VectorSize {
+                                expected: 2,
+                                actual: 3
+                            },
+                            ..
+                        }
+                    ))
+                ),
+                "wrong-width upsert result: {result:?}"
+            );
+        }
+
+        async fn delete_surfaces(
+            store: &dyn VectorCandidateStore,
+        ) -> Result<(VectorCandidateRecall, VectorCandidateRecall), CustomError> {
+            let records = [
+                (MemoryId::from_u128(1), VectorSurface::Summary),
+                (MemoryId::from_u128(1), VectorSurface::Text),
+                (MemoryId::from_u128(2), VectorSurface::Summary),
+            ]
+            .map(|(id, surface)| {
+                VectorRecord::new(
+                    id,
+                    ObjectType::Episode,
+                    surface,
+                    DEFAULT_SCHEMA_VERSION,
+                    "surface",
+                )
+            });
+            let embeddings = records
+                .iter()
+                .map(|record| VectorRecordEmbedding::new(record, &[1.0, 0.0]))
+                .collect::<Vec<_>>();
+            store.upsert_vector_records(&embeddings).await?;
+            let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10, vec![ObjectType::Episode]);
+            let before = store.search_candidates(&query).await?;
+            store.delete_candidates(&[MemoryId::from_u128(1)]).await?;
+            let after = store.search_candidates(&query).await?;
+            Ok((before, after))
+        }
+
+        fn assert_deleted_surfaces(
+            (before, after): (VectorCandidateRecall, VectorCandidateRecall),
+        ) {
+            let surfaces = |recall: &VectorCandidateRecall| {
+                recall
+                    .candidates
+                    .iter()
+                    .map(|candidate| (candidate.object_id, candidate.surface))
+                    .collect::<HashSet<_>>()
+            };
+            assert_eq!(
+                surfaces(&before),
+                HashSet::from([
+                    (MemoryId::from_u128(1), VectorSurface::Summary),
+                    (MemoryId::from_u128(1), VectorSurface::Text),
+                    (MemoryId::from_u128(2), VectorSurface::Summary),
+                ])
+            );
+            assert_eq!(
+                surfaces(&after),
+                HashSet::from([(MemoryId::from_u128(2), VectorSurface::Summary)])
+            );
+        }
+    }
+
     #[tokio::test]
     async fn empty_scope_and_zero_limit_return_without_contacting_qdrant() {
         let store =
@@ -957,47 +1119,6 @@ mod tests {
             },
             _ => panic!("expected unnamed vector"),
         }
-    }
-
-    #[tokio::test]
-    #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
-    async fn qdrant_candidate_store_live_deletes_candidates() {
-        let url = env::var("QDRANT_CONNECTION_STRING")
-            .expect("QDRANT_CONNECTION_STRING is required for live Qdrant delete test");
-        let collection_name = format!("cmem_candidate_delete_{}", Uuid::new_v4());
-        let store =
-            QdrantVectorCandidateStore::new(url, &collection_name, 2).expect("store builds");
-
-        let object_id = Uuid::new_v4();
-        let record = VectorRecord::new(
-            object_id,
-            ObjectType::DerivedMemory,
-            VectorSurface::DerivedText,
-            DEFAULT_SCHEMA_VERSION,
-            "Reflection: Qdrant keeps embedding provenance.",
-        );
-
-        store.init_collection().await.expect("collection init");
-        store
-            .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, 0.0])])
-            .await
-            .expect("upsert succeeds");
-
-        store
-            .delete_candidates(&[object_id])
-            .await
-            .expect("delete succeeds");
-        let recall = store
-            .search_candidates(&VectorCandidateSearch::new(
-                vec![1.0, 0.0],
-                1,
-                vec![ObjectType::DerivedMemory],
-            ))
-            .await
-            .expect("search succeeds");
-        let _ = store.client.delete_collection(&collection_name).await;
-
-        assert!(recall.candidates.is_empty());
     }
 
     #[tokio::test]
