@@ -919,3 +919,37 @@ Prevention:
 
 Evidence:
 - CM plan integration-suite-embedded-default, commit 1d8c5fb; reviewer report under the review worktree's `.agent-work/cm-reviewer/p1-review.md`.
+
+## 2026-09-17 - A wave that splits a producer from its observer names the integration-owned check in the packet [tags: orchestrator, planning, waves]
+
+Symptom:
+- In the unit-test re-anchoring plan, Task_4 (facade collision assertion) was dispatched in parallel with Task_2 (the producer of the typed collision variant); Task_4's required memory-module check was red on its own branch and only green at integration, so the worker reported a failing gate it could not fix.
+
+Root cause:
+- The wave split a producer and its observer across two tasks without saying which check belonged to the integrated branch; the worker's brief inherited the plan's validation command verbatim.
+
+Fix applied:
+- The orchestrator ran the check on the integrated tip and recorded the dependency in the plan's Decision Log; the review confirmed the observer against the producer.
+
+Prevention:
+- When a wave puts a producer and its observer in different tasks, the observer's packet names the check that only the integrated branch can pass and marks it orchestrator-owned; the worker reports the branch-local gate as expected-red rather than blocked.
+
+Evidence:
+- `docs/coding-agent/plans/completed/unit-test-reanchoring-plan.md` Decision Log 2026-09-17 (Task_4 dispatch).
+
+## 2026-09-17 - A pre-flight error classification pairs with an unreachable-endpoint observer [tags: testing, adapters, ports]
+
+Symptom:
+- The service vector adapter gained the embedded adapter's pre-flight dimension check, and the parity test proved both backends return the same typed mismatch, but only against a live Qdrant; nothing showed the rejection happened before any network I/O.
+
+Root cause:
+- Live parity observes the outcome, not where it was decided; a server-side rejection mapped to the same variant would have passed.
+
+Fix applied:
+- One unconditional test points the service adapter at `http://127.0.0.1:1` and asserts the typed mismatch, so the guard is proven client-side without a reachable service (library PR 100).
+
+Prevention:
+- Whenever a test claims an adapter rejects input before contacting its service, add the unreachable-endpoint observer beside the live parity case; live parity alone cannot establish the absence of I/O.
+
+Evidence:
+- `src/adapters/qdrant/store.rs` `service_wrong_width_upsert_fails_before_contacting_qdrant`; `docs/coding-agent/plans/completed/facade-contract-gaps-plan.md` Progress Log 2026-09-17.

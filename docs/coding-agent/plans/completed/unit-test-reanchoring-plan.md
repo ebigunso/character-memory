@@ -1,6 +1,6 @@
 # Plan: Unit tests assert typed contracts and outcomes, not prose, transcripts or serde plumbing
 
-- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-17 at 3c2f154; pull request open, awaiting merge approval)
+- status: completed (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-17 at 3c2f154; merged 2026-09-17 by atomic stack squash merge, library main 30ebdb6)
 - generated: 2026-09-16
 - last_updated: 2026-09-17
 - work_type: code

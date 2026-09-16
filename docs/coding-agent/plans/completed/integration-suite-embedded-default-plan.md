@@ -1,6 +1,6 @@
 # Plan: Integration tests run against the embedded default and stop duplicating the facade suite
 
-- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 1d8c5fb and delta-approved at 64abbfd; pull request open, awaiting merge approval)
+- status: completed (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 1d8c5fb and delta-approved at 64abbfd; merged 2026-09-17 by atomic stack squash merge, library main 30ebdb6)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
