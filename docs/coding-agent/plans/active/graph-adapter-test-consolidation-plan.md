@@ -134,8 +134,14 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 
 - 2026-09-16 Decider accepted all eight plans; branch cut from the integration-suite branch tip 944acbf (PR open, stacked beneath).
 
+- 2026-09-16 Wave 1 completed: [Task_1, Task_2, Task_3] (0d9614c, 7114b58, 4cdb313 after rebase onto the integration-suite tip a61241e; tip 1778456), plus the review follow-up 7f9873a
+  - Summary: Oxigraph tests consolidated onto port-level assertions (47 to 31 adapter tests); sparql_selectors and vocabulary test modules removed; test_support keeps two tests; ports and models glue tests removed; the three retrieval pipeline tests run on the embedded Qdrant Edge adapter; Task_2's assertion gaps carried into Task_1's surviving tests. Review follow-up: FixedVectorCandidateStore in src/memory.rs tests replaced by the real temporary embedded store; the surviving link-query test writes links onto an empty object store again.
+  - Validation evidence (orchestrator, post-rebase tip 1778456): fmt, clippy, test --no-run clean; cargo test lib 374 passed 5 ignored, integration 2+3+12+6, doc 1, zero skipping. Follow-up: cargo test --lib memory 40 passed; link-only test passed.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
+- 2026-09-16 Decision (review): src/memory.rs FixedVectorCandidateStore, a pre-existing port double outside Wave 1 ownership, is removed in this plan (follow-up 7f9873a) because the Definition of Done states no port double under src. The retrieve module's RecordingVectorStore (src/usecases/retrieve.rs ~3233-3300, a semantic double despite its name, about 18 construction sites, some needing completeness injection) is carried into the unit-test re-anchoring plan, whose Task_3 owns that module: rebuild it as a wrapper over the real embedded adapter injecting only completeness and failures, or seed real records where that suffices. Acceptance 3 of this plan is read as the files Wave 1 touched plus src/memory.rs.
+- 2026-09-16 Decision: the typed-ref query test relocated from test_support maps onto the existing selection-table case in the Oxigraph tests (same contract) instead of a standalone duplicate; triple_count on the embedded store is kept because src/usecases/correct_forget.rs still calls it, other callerless inspection helpers were removed.
 - 2026-09-16 Decision: the vector-side port double follows the graph fake out; pipeline tests run on the real embedded adapter. Trigger: audit F4. User approval: pending.
 
 ## Notes
