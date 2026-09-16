@@ -1,6 +1,6 @@
 # Plan: Integration tests run against the embedded default and stop duplicating the facade suite
 
-- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 1d8c5fb; pull request open, awaiting merge approval)
+- status: in_progress (approved by the decider 2026-09-16; Tier D APPROVED 2026-09-16 at 1d8c5fb and delta-approved at 64abbfd; pull request open, awaiting merge approval)
 - generated: 2026-09-16
 - last_updated: 2026-09-16
 - work_type: code
@@ -151,6 +151,10 @@ Parallel tasks run in separate worktrees (review-worktree pattern) so Cargo comm
   - Summary: cm-reviewer APPROVED. Two P2 observer gaps found in the deletion mapping (MissingDerivedSource at validate and commit; caller and ModelProcessor provenance fields) and closed by carrying the assertions into the inline tests (1d8c5fb, test-only). All 13 deletion mappings verified at the owning boundary.
   - Validation evidence (reviewer, pinned worktree): fmt, check, clippy, test --no-run clean; Qdrant down and no .env: lib 400 (401 at the final pin) passed 5 ignored, integration 2+3+12+6, doc 1, zero skipping lines; TEMP census 2663 to 2663 and tempfile roots 2158 to 2158; live parity at http://127.0.0.1:6334 with REQUIRE_QDRANT_TESTS=1: both service_and_embedded tests executed ok; workflow parses and reads as planned.
   - Notes: lesson recorded in lessons.md (deletion mappings compare assertion sets, not test names).
+
+- 2026-09-16 Post-review delta: [Task_2 follow-up] (commit 64abbfd; docs-only a61241e)
+  - Summary: Copilot found two positive-path contracts the deletions removed (a valid ModelProcessor-origin plan validating and committing; a valid raw source span validating and committing with raw_ref preserved). Two inline pipeline tests added in src/usecases/write_planning.rs, each carrying the deleted integration test's assertion set. cm-reviewer delta review APPROVED at 64abbfd; final pin is 64abbfd (a61241e changes plan wording only).
+  - Validation evidence: worker fmt and clippy clean, cargo test --lib usecases::write_planning 34 passed, cargo test --lib api 37 passed; reviewer independent cargo test --lib at 64abbfd green; CI on a61241e green on every job including the new service-free job; Copilot follow-up pass: approval recommended, no new comments.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
