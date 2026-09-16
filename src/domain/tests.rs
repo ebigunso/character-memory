@@ -2,7 +2,6 @@ use super::*;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::collections::HashSet;
 use uuid::Uuid;
 
 fn serialized_value<T: Serialize>(value: T) -> String {
@@ -68,10 +67,7 @@ fn canonical_identity_and_order_ranks_are_stable() {
     ]
     .map(RelationType::stable_rank);
     for ranks in [object_ranks.as_slice(), relation_ranks.as_slice()] {
-        assert_eq!(
-            ranks.iter().copied().collect::<HashSet<_>>().len(),
-            ranks.len()
-        );
+        assert!(ranks.windows(2).all(|pair| pair[0] < pair[1]));
     }
     let retention_ranks = [
         RetentionState::Active,

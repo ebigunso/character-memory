@@ -210,7 +210,7 @@
 Parallel tasks run in separate worktrees so Cargo commands never share a target directory mid-edit; per-task validation is module-scoped and the orchestrator runs the repo validation commands on the integrated branch after each wave.
 
 ## Rollback / Safety
-- Single branch `feature/2026-09-16/unit-test-reanchoring` stacked on the graph-adapter plan's branch; the only production changes are additive error variants; revertible as one commit. If review load demands, Wave 2 is landed as two stacked PRs (write path and facade; adapters, stats, types) without changing the tasks.
+- Single branch `feature/2026-09-16/unit-test-reanchoring` stacked on the graph-adapter plan's branch; production changes are the typed error variants, the deletion of the superseded `RationaleOrigin` surface, the `MemoryValidation(String)` variant and the Oxigraph `triple_count` helper, and the usecase error paths rewired onto the typed variants; revertible as one commit. If review load demands, Wave 2 is landed as two stacked PRs (write path and facade; adapters, stats, types) without changing the tasks.
 
 ## Progress Log (append-only)
 
@@ -243,6 +243,7 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 - 2026-09-17 Decision (review): three focused wire-token tests are restored because the companion evaluation workspace persists the shapes inside its JSONL records (RememberOutcome, LinkOutcome and LifecycleMutationOutcome carry StatsUpdateStatus; RememberOutcome.vector_indexing_failure carries EmbeddingError; lifecycle diagnostics carry the cascade warning reason): StatsUpdateStatus cause and kind tokens, EmbeddingError::Unrecognized kind and opaque detail, LifecycleMutationWarningReason::CascadeSuppressesCurrentReplacement token. Rule candidate for common.md: a persisted wire consumer can live outside this crate's adapters.
 - 2026-09-17 Disposition (review): CustomError::LowInformationCoOccurrence is reachable only through cfg(test) evidence today because the public link path always supplies ExplicitCallerIntent; the variant is accepted as declared-ahead vocabulary on the existing production admission branch, asserted through the test evidence path, and its test moves to the production producer when one appears. The companion runner's OS error 1314 failure is the known Windows symlink-privilege exception (Linux CI authoritative).
 - 2026-09-16 Decision: prose-only rejections gain a typed variant rather than keeping a prose assertion, introduced in one Wave 1 task before any re-anchoring. Trigger: worker.md typed-at-introduction rule; reviewer finding that three parallel tasks would otherwise edit the same enums. Decider approval: plan accepted 2026-09-16; merge approval pending.
+- 2026-09-17 Copilot follow-up (PR 99): the stable-rank test asserts strictly increasing object and relation ranks (uniqueness alone let two ranks swap unnoticed); `CustomError::MemoryValidation(String)` had no producer or matcher left after the typed conversion and is deleted per the compatibility policy; the rollback line names every production surface this branch changes; the PR body's executed count is the final 325.
 
 ## Notes
 - Risks: Wave 2 is six parallel workers; the orchestrator integrates and validates once on the integrated branch rather than trusting six module-scoped runs.

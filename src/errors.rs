@@ -418,9 +418,6 @@ pub enum CustomError {
     #[error(transparent)]
     ConfigValidation(#[from] ConfigValidationError),
 
-    #[error("Memory validation error: {0}")]
-    MemoryValidation(String),
-
     #[error(transparent)]
     DomainValidation(#[from] DomainValidationError),
 
