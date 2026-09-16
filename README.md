@@ -187,11 +187,19 @@ Build `Settings` from a caller-supplied `config::Config`; required values follow
 
 Raw source storage is outside Character Memory core. The library may preserve opaque `raw_ref` pointers for provenance, but raw logs are not stored by core graph/vector backends and no public raw-reference resolution API is part of v0.1.
 
-Service-gated integration tests require a local Qdrant instance reachable over gRPC and `REQUIRE_QDRANT_TESTS=1`. The embedded adapter and its contract suite require no service.
+## Running tests
+
+By default, `cargo test` runs against embedded stores with deterministic embedding providers and needs neither a Qdrant service nor a `.env` file. The only integration tests that connect to a Qdrant service are the two service parity tests in `tests/vector_port_contract_tests.rs`; opt in with `REQUIRE_QDRANT_TESTS=1` and set `QDRANT_CONNECTION_STRING` to the service's gRPC endpoint.
+
+```sh
+cargo test
+```
+
+### Start Qdrant for service parity tests
 
 The default gRPC port is `6334`.
 
-### Start Qdrant with Docker
+Using Docker:
 
 ```sh
 docker run -d \
@@ -207,23 +215,11 @@ Or using Docker Compose:
 docker compose -f docker-compose.qdrant.yml up -d
 ```
 
-## Running tests
+Then run the two service parity tests:
 
-1. Copy `.env.example` to `.env`:
-
-   ```sh
-   cp .env.example .env
-   ```
-
-2. Fill in the required credentials in `.env`.
-
-3. Run the tests:
-
-   ```sh
-   cargo test
-   ```
-
-Do not commit your `.env` file.
+```sh
+REQUIRE_QDRANT_TESTS=1 QDRANT_CONNECTION_STRING=http://127.0.0.1:6334 cargo test --test vector_port_contract_tests service_and_embedded_
+```
 
 ## Status
 

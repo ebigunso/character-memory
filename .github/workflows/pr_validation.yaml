@@ -52,6 +52,22 @@ jobs:
       - name: Compile tests without running them
         run: cargo test --no-run
 
+  tests:
+    name: Service-free tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.97.0
+
+      - name: Run tests without external services
+        run: cargo test
+
   clippy:
     name: Clippy lint
     runs-on: ubuntu-latest
@@ -72,7 +88,7 @@ jobs:
   integration_tests:
     name: Live Qdrant integration tests
     runs-on: ubuntu-latest
-    # Live Qdrant-backed tests need repository-controlled configuration and secrets.
+    # Live Qdrant parity tests need repository-controlled configuration.
     # Fork and Dependabot PRs still run the external-service-free checks above, but skip this job.
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
 
@@ -85,9 +101,6 @@ jobs:
     env:
       REQUIRE_QDRANT_TESTS: 1
       QDRANT_CONNECTION_STRING: ${{ vars.QDRANT_CONNECTION_STRING }}
-      OXIGRAPH_PATH: ./data/oxigraph
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
 
     steps:
       - name: Checkout repository
@@ -101,14 +114,7 @@ jobs:
       - name: Validate live integration configuration
         shell: bash
         run: |
-          missing=0
-          for name in QDRANT_CONNECTION_STRING OXIGRAPH_PATH OPENAI_API_KEY EMBEDDING_MODEL; do
-            if [[ -z "${!name}" ]]; then
-              echo "$name is required for live Qdrant-backed integration tests" >&2
-              missing=1
-            fi
-          done
-          exit "$missing"
+          : "${QDRANT_CONNECTION_STRING:?QDRANT_CONNECTION_STRING is required for live Qdrant parity tests}"
 
       - name: Wait for Qdrant readiness
         shell: bash
@@ -125,5 +131,5 @@ jobs:
           curl -v http://127.0.0.1:6333/ -m 2 || true
           exit 1
 
-      - name: Run integration tests
-        run: cargo test --verbose
+      - name: Run service parity tests
+        run: cargo test --verbose --test vector_port_contract_tests service_and_embedded_
