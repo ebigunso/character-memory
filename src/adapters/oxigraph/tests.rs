@@ -231,7 +231,6 @@ mod tests {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let links = fixtures.links();
-        store.upsert_objects(&fixtures.objects()).await.unwrap();
         store.upsert_links(&links).await.unwrap();
 
         let mut expected = vec![links[0].clone(), links[2].clone()];

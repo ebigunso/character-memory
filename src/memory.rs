@@ -180,8 +180,7 @@ mod tests {
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{EntityType, ObjectType, RelationType};
     use crate::models::vector::{
-        CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
-        VectorRecordEmbedding, VectorSurface,
+        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
@@ -467,6 +466,7 @@ mod tests {
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert_eq!(outcome.rationale.graph_verified_count, 1);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
+        memory.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -870,12 +870,15 @@ mod tests {
         let graph = in_memory_graph_store();
         graph.upsert_objects(&fixtures.objects()).await.unwrap();
         graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = FixedVectorCandidateStore::new(vec![VectorCandidateMatch::new(
-            fixtures.user_preference.id,
-            ObjectType::DerivedMemory,
-            VectorSurface::DerivedText,
-            0.95,
-        )]);
+        let vector = TemporaryVectorCandidateStore::open(2).await;
+        let record = memory_object_vector_record(&MemoryObject::DerivedMemory(
+            fixtures.user_preference.clone(),
+        ))
+        .unwrap();
+        vector
+            .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, 0.0])])
+            .await
+            .unwrap();
         let memory = CharacterMemory::from_parts(
             Box::new(graph),
             Box::new(vector),
@@ -1067,57 +1070,6 @@ mod tests {
             inputs: &[EmbeddingInput],
         ) -> Result<Vec<Vec<f32>>, CustomError> {
             Ok(vec![self.embedding.clone(); inputs.len()])
-        }
-    }
-
-    #[derive(Debug)]
-    struct FixedVectorCandidateStore {
-        candidates: Vec<VectorCandidateMatch>,
-    }
-
-    impl FixedVectorCandidateStore {
-        fn new(candidates: Vec<VectorCandidateMatch>) -> Self {
-            Self { candidates }
-        }
-    }
-
-    #[async_trait]
-    impl VectorCandidateStore for FixedVectorCandidateStore {
-        async fn upsert_vector_records(
-            &self,
-            _records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn search_candidates(
-            &self,
-            query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            if query.limit == 0 || query.object_types.is_empty() {
-                return Ok(VectorCandidateRecall {
-                    candidates: CanonicalCandidates::new([]),
-                    completeness:
-                        crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
-                });
-            }
-            let candidates = self
-                .candidates
-                .iter()
-                .filter(|candidate| query.object_types.contains(&candidate.object_type))
-                .cloned()
-                .collect::<Vec<_>>();
-            let scanned = candidates.len();
-            Ok(VectorCandidateRecall {
-                candidates: CanonicalCandidates::new(candidates).truncated(query.limit),
-                completeness: crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
-                    scanned,
-                },
-            })
-        }
-
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
-            Ok(())
         }
     }
 
