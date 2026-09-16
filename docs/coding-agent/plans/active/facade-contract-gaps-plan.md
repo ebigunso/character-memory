@@ -156,6 +156,7 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 - 2026-09-17 Wave 3 completed: [Task_5] (reviewed 19826cf; code identical after the rebase onto the re-anchoring log commit)
   - Summary: cm-reviewer APPROVED, no findings. Absent-target, forward-reference and score-order mutations each failed their intended assertion and passed after SHA-256-verified restoration.
   - Validation evidence (reviewer, pinned worktree): fmt, check, clippy, test --no-run clean; lib 338 passed 2 ignored; integration 2+3+12+6; doc 1; live port suite 4 of 4 and vector integration 12 of 12 against Qdrant v1.19.0 at http://127.0.0.1:6334 with REQUIRE_QDRANT_TESTS=1, collections empty before and after. Companion: cargo check --workspace --all-targets clean and cargo test --workspace green except the known symlink exception against 19826cf.
+- 2026-09-17 Copilot follow-up (cm-worker, Task_2): one unconditional offline observer, `service_wrong_width_upsert_fails_before_contacting_qdrant`, points the service adapter at an unreachable endpoint and asserts the typed vector-size mismatch, so the pre-flight guard is proven without a reachable Qdrant; live parity tests unchanged. fmt, clippy clean; `cargo test --lib adapters::qdrant` 39 passed. Lesson candidate for closeout: pair a pre-flight error classification with an unreachable-endpoint observer, since live parity alone cannot show that no network I/O happened.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
