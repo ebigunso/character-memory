@@ -134,7 +134,7 @@ Parallel tasks run in separate worktrees so Cargo commands never share a target 
 
 - 2026-09-16 Decider accepted all eight plans; branch cut from the integration-suite branch tip 944acbf (PR open, stacked beneath).
 
-- 2026-09-16 Wave 1 completed: [Task_1, Task_2, Task_3] (0d9614c, 7114b58, 4cdb313 after rebase onto the integration-suite tip a61241e; tip 1778456), plus the review follow-up 7f9873a
+- 2026-09-16 Wave 1 completed: [Task_1, Task_2, Task_3] (pre-rebase task commits 0d9614c, 7114b58, 4cdb313; after the rebase onto the integration-suite tip a61241e they are 02b15d4, 7f90fc5, 1778456), plus the review follow-up 7f9873a
   - Summary: Oxigraph tests consolidated onto port-level assertions (47 to 31 adapter tests); sparql_selectors and vocabulary test modules removed; test_support keeps two tests; ports and models glue tests removed; the three retrieval pipeline tests run on the embedded Qdrant Edge adapter; Task_2's assertion gaps carried into Task_1's surviving tests. Review follow-up: FixedVectorCandidateStore in src/memory.rs tests replaced by the real temporary embedded store; the surviving link-query test writes links onto an empty object store again.
   - Validation evidence (orchestrator, post-rebase tip 1778456): fmt, clippy, test --no-run clean; cargo test lib 374 passed 5 ignored, integration 2+3+12+6, doc 1, zero skipping. Follow-up: cargo test --lib memory 40 passed; link-only test passed.
 
