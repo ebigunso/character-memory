@@ -14,22 +14,15 @@ pub mod test_support;
 
 #[tokio::test]
 async fn stats_persist_across_facade_reopen() {
-    let fixture = StoreFixture::new();
+    let root = TempDir::new().expect("store root should be created");
     let collection_name = test_support::unique_collection_name();
     let entity_id = id("550e8400-e29b-41d4-a716-446655461001");
     let episode_id = id("550e8400-e29b-41d4-a716-446655461002");
     let memory_id = id("550e8400-e29b-41d4-a716-446655461003");
 
-    let memory = match setup(&collection_name, &fixture, None).await {
-        Ok(memory) => memory,
-        Err(CustomError::VectorDatabaseError(error))
-            if test_support::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!("skipping stats persistence test because Qdrant is unavailable: {error}");
-            return;
-        }
-        Err(error) => panic!("unexpected stats persistence setup failure: {error}"),
-    };
+    let memory = setup(&collection_name, &root, None)
+        .await
+        .expect("unexpected stats persistence setup failure");
 
     let test_result = async {
         let remember_outcome = memory
@@ -73,9 +66,12 @@ async fn stats_persist_across_facade_reopen() {
             "initial stats persistence remember should index vectors",
         )?;
 
-        drop(memory);
+        memory
+            .close()
+            .await
+            .map_err(|error| format!("facade should close before reopen: {error}"))?;
 
-        let reopened = setup(&collection_name, &fixture, None)
+        let reopened = setup(&collection_name, &root, None)
             .await
             .map_err(|error| format!("reopened facade should use same persistent stores: {error}"))?;
         let retrieved = reopened
@@ -105,17 +101,17 @@ async fn stats_persist_across_facade_reopen() {
             "selectivity counters should survive SQLite stats reopen",
         )?;
 
-        Ok::<(), String>(())
+        Ok::<_, String>(reopened)
     }
     .await;
 
-    test_support::cleanup_collection(&collection_name).await;
-    test_result.expect("stats persistence test should pass");
+    let reopened = test_result.expect("stats persistence test should pass");
+    test_support::close_and_remove_root(reopened, root).await;
 }
 
 #[tokio::test]
 async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
-    let fixture = StoreFixture::new();
+    let root = TempDir::new().expect("store root should be created");
     let collection_name = test_support::unique_collection_name();
     let entity_id = id("550e8400-e29b-41d4-a716-446655462001");
     let episode_id = id("550e8400-e29b-41d4-a716-446655462002");
@@ -123,16 +119,9 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let suppressed_id = id("550e8400-e29b-41d4-a716-446655462004");
     let replacement_id = id("550e8400-e29b-41d4-a716-446655462005");
 
-    let memory = match setup(&collection_name, &fixture, None).await {
-        Ok(memory) => memory,
-        Err(CustomError::VectorDatabaseError(error))
-            if test_support::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!("skipping restart-safe retrieval test because Qdrant is unavailable: {error}");
-            return;
-        }
-        Err(error) => panic!("unexpected restart-safe setup failure: {error}"),
-    };
+    let memory = setup(&collection_name, &root, None)
+        .await
+        .expect("unexpected restart-safe setup failure");
 
     let test_result = async {
         let remember_outcome = memory
@@ -214,9 +203,12 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
             .await
             .map_err(|error| format!("suppression should persist lifecycle state: {error}"))?;
 
-        drop(memory);
+        memory
+            .close()
+            .await
+            .map_err(|error| format!("facade should close before reopen: {error}"))?;
 
-        let reopened = setup(&collection_name, &fixture, None)
+        let reopened = setup(&collection_name, &root, None)
             .await
             .map_err(|error| {
                 format!("reopened lifecycle facade should use same stores: {error}")
@@ -242,30 +234,23 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
             "retrieval should exclude suppressed memory after reopen",
         )?;
 
-        Ok::<(), String>(())
+        Ok::<_, String>(reopened)
     }
     .await;
 
-    test_support::cleanup_collection(&collection_name).await;
-    test_result.expect("restart-safe retrieval test should pass");
+    let reopened = test_result.expect("restart-safe retrieval test should pass");
+    test_support::close_and_remove_root(reopened, root).await;
 }
 
 #[tokio::test]
 async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion() {
-    let fixture = StoreFixture::new();
+    let root = TempDir::new().expect("store root should be created");
     let collection_name = test_support::unique_collection_name();
     let ids = HighDegreeIds::new();
 
-    let memory = match setup(&collection_name, &fixture, None).await {
-        Ok(memory) => memory,
-        Err(CustomError::VectorDatabaseError(error))
-            if test_support::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!("skipping selectivity fanout test because Qdrant is unavailable: {error}");
-            return;
-        }
-        Err(error) => panic!("unexpected selectivity setup failure: {error}"),
-    };
+    let memory = setup(&collection_name, &root, None)
+        .await
+        .expect("unexpected selectivity setup failure");
 
     let test_result = async {
         let remember_outcome = memory
@@ -299,9 +284,12 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
             "default fanout should include more hub derived memories than the small override",
         )?;
 
-        drop(memory);
+        memory
+            .close()
+            .await
+            .map_err(|error| format!("facade should close before reopen: {error}"))?;
 
-        let constrained = setup(&collection_name, &fixture, Some((0, 2)))
+        let constrained = setup(&collection_name, &root, Some((0, 2)))
             .await
             .map_err(|error| format!("constrained facade should reopen with fanout override: {error}"))?;
         let constrained_result = constrained
@@ -326,40 +314,22 @@ async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion()
             "configured fanout override should observably constrain returned hub expansion",
         )?;
 
-        Ok::<(), String>(())
+        Ok::<_, String>(constrained)
     }
     .await;
 
-    test_support::cleanup_collection(&collection_name).await;
-    test_result.expect("selectivity fanout test should pass");
-}
-
-struct StoreFixture {
-    _root: TempDir,
-    graph_path: std::path::PathBuf,
-    stats_path: std::path::PathBuf,
-}
-
-impl StoreFixture {
-    fn new() -> Self {
-        let root = tempfile::tempdir().expect("tempdir should be created");
-        Self {
-            graph_path: root.path().join("graph"),
-            stats_path: root.path().join("stats.sqlite3"),
-            _root: root,
-        }
-    }
+    let constrained = test_result.expect("selectivity fanout test should pass");
+    test_support::close_and_remove_root(constrained, root).await;
 }
 
 async fn setup(
     collection_name: &str,
-    fixture: &StoreFixture,
+    root: &TempDir,
     fanout: Option<(usize, usize)>,
 ) -> Result<character_memory::CharacterMemory, CustomError> {
     test_support::try_setup_persistent_character_memory(
         collection_name.to_owned(),
-        &fixture.graph_path,
-        &fixture.stats_path,
+        root.path(),
         fanout,
     )
     .await

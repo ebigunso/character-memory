@@ -1,6 +1,6 @@
 use character_memory::{
-    CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObservationDraft, RememberInput,
+    CorrectMemoryDraft, CorrectionTarget, DerivedMemoryDraft, DerivedType, EpisodeDraft,
+    ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObservationDraft, RememberInput,
     RememberOptions, ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
 };
 use uuid::Uuid;
@@ -10,16 +10,9 @@ pub mod test_support;
 
 #[tokio::test]
 async fn public_remember_and_retrieve_use_graph_authoritative_path() {
-    let (memory, collection_name) = match test_support::try_setup_character_memory().await {
-        Ok(setup) => setup,
-        Err(CustomError::VectorDatabaseError(error))
-            if test_support::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!("skipping live public facade test because Qdrant is unavailable: {error}");
-            return;
-        }
-        Err(error) => panic!("unexpected live public facade setup failure: {error}"),
-    };
+    let (memory, root) = test_support::try_setup_character_memory()
+        .await
+        .expect("unexpected live public facade setup failure");
 
     let test_result = async {
         let episode_id = id("550e8400-e29b-41d4-a716-446655440101");
@@ -97,24 +90,15 @@ async fn public_remember_and_retrieve_use_graph_authoritative_path() {
         Ok::<(), String>(())
     }
     .await;
-    test_support::cleanup_collection(&collection_name).await;
+    test_support::close_and_remove_root(memory, root).await;
     test_result.expect("live public facade test should pass");
 }
 
 #[tokio::test]
 async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
-    let (memory, collection_name) = match test_support::try_setup_character_memory().await {
-        Ok(setup) => setup,
-        Err(CustomError::VectorDatabaseError(error))
-            if test_support::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!(
-                "skipping live public lifecycle facade test because Qdrant is unavailable: {error}"
-            );
-            return;
-        }
-        Err(error) => panic!("unexpected live public lifecycle setup failure: {error}"),
-    };
+    let (memory, root) = test_support::try_setup_character_memory()
+        .await
+        .expect("unexpected live public lifecycle setup failure");
 
     let test_result = async {
         let episode_id = id("550e8400-e29b-41d4-a716-446655440201");
@@ -216,7 +200,7 @@ async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
         Ok::<(), String>(())
     }
     .await;
-    test_support::cleanup_collection(&collection_name).await;
+    test_support::close_and_remove_root(memory, root).await;
     test_result.expect("live public lifecycle facade test should pass");
 }
 

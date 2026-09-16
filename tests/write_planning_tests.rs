@@ -28,11 +28,9 @@ use character_memory::{
     EpisodeDraft, ExternalSourceReference, IncludedDerivedMemory, MemoryCandidate, MemoryId,
     MemoryLinkCandidate, MemoryLinkDraft, MemoryObjectRef, ObjectType, PrepareOptions,
     RationaleOrigin, RelationType, RememberDiagnosticCode, RememberInput, RememberOptions,
-    RememberOutcome, RememberWritePlan, RetrievalContext, Settings, SourceSpan, StatsUpdateCause,
+    RememberOutcome, RememberWritePlan, RetrievalContext, SourceSpan, StatsUpdateCause,
     StatsUpdateStatus, DEFAULT_SCHEMA_VERSION,
 };
-use config::Config;
-use std::path::Path;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -42,10 +40,7 @@ use test_support as base;
 
 #[tokio::test]
 async fn prepare_without_persist_leaves_graph_and_vectors_empty() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
 
     let input = core_input("prepare-no-persist");
     let plan = memory
@@ -58,15 +53,12 @@ async fn prepare_without_persist_leaves_graph_and_vectors_empty() {
         MemoryCandidate::Episode(_)
     )));
     assert_retrieval_empty(&memory, "prepare-no-persist").await;
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn validate_without_persist_leaves_graph_and_vectors_empty() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
 
     let plan = memory
         .prepare(core_input("validate-no-persist"), PrepareOptions::default())
@@ -81,15 +73,12 @@ async fn validate_without_persist_leaves_graph_and_vectors_empty() {
         .iter()
         .all(|validation| validation.status == CandidateValidationStatus::Valid));
     assert_retrieval_empty(&memory, "validate-no-persist").await;
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn core_commit_flow_works_in_in_memory_graph_mode() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
 
     let plan = memory
         .prepare(core_input("in-memory-core"), PrepareOptions::default())
@@ -105,17 +94,13 @@ async fn core_commit_flow_works_in_in_memory_graph_mode() {
         .expect("core plan should commit");
 
     ensure_graph_only_outcome(&outcome);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn core_commit_flow_works_in_persistent_graph_mode() {
-    let fixture = PersistentFixture::new();
-    let collection_name = base::unique_collection_name();
-    let memory = match setup_persistent(&collection_name, &fixture).await {
-        Some(memory) => memory,
-        None => return,
-    };
+    let root = TempDir::new().expect("store root should be created");
+    let memory = setup_persistent(&base::unique_collection_name(), &root).await;
 
     let plan = memory
         .prepare(core_input("persistent-core"), PrepareOptions::default())
@@ -131,15 +116,12 @@ async fn core_commit_flow_works_in_persistent_graph_mode() {
         .expect("persistent plan should commit");
 
     ensure_graph_only_outcome(&outcome);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn commit_revalidates_and_rejects_after_intervening_graph_change() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let entity_id = id("550e8400-e29b-41d4-a716-446655613001");
 
     let plan = link_to_existing_entity_plan("revalidate", entity_id).await;
@@ -170,15 +152,12 @@ async fn commit_revalidates_and_rejects_after_intervening_graph_change() {
         .expect_err("commit should revalidate/reject divergent existing graph content");
     assert_error_contains(error, "deterministic ID collided");
 
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and_commit() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let plan = ungrounded_derived_memory_plan();
 
     let validations = memory
@@ -199,15 +178,12 @@ async fn ungrounded_behavior_influencing_derived_memory_rejected_at_validate_and
         character_memory::MemoryCandidateKind::DerivedMemory,
         CandidateValidationIssue::MissingDerivedSource,
     );
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn missing_memory_link_target_is_strictly_rejected() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let plan = missing_link_target_plan();
 
     let validations = memory
@@ -232,15 +208,12 @@ async fn missing_memory_link_target_is_strictly_rejected() {
         character_memory::MemoryCandidateKind::MemoryLink,
         missing_target,
     );
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn idempotent_exact_retry_does_not_duplicate_graph_writes() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let plan = memory
         .prepare(core_input("idempotent-retry"), PrepareOptions::default())
         .await
@@ -261,15 +234,12 @@ async fn idempotent_exact_retry_does_not_duplicate_graph_writes() {
         second.persisted_object_ids.len(),
         first.persisted_object_ids.len()
     );
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn divergent_same_key_rejected() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let first_plan = memory
         .prepare(core_input("same-key-original"), PrepareOptions::default())
         .await
@@ -293,15 +263,12 @@ async fn divergent_same_key_rejected() {
         .await
         .expect_err("same IDs with divergent content should be rejected");
     assert_error_contains(error, "deterministic ID collided");
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn plan_without_vector_candidates_writes_no_vectors_with_default_commit_options() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let prepare_options = PrepareOptions {
         include_vector_index_candidates: false,
         ..PrepareOptions::default()
@@ -326,15 +293,12 @@ async fn plan_without_vector_candidates_writes_no_vectors_with_default_commit_op
     assert!(!outcome.persisted_object_ids.is_empty());
     assert!(outcome.vector_indexed_object_ids.is_empty());
     assert_eq!(outcome.vector_indexing_failure, None);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn source_refs_and_source_spans_are_preserved_and_raw_ref_is_opaque() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let raw_ref = "raw://opaque/source-refs";
     let span = SourceSpan::raw(raw_ref)
         .with_message_id("message-7")
@@ -361,15 +325,12 @@ async fn source_refs_and_source_spans_are_preserved_and_raw_ref_is_opaque() {
         .await
         .expect("source-preserving plan should commit");
     ensure_graph_only_outcome(&outcome);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn no_inference_helpers_only_plan_caller_supplied_candidates() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let input = RememberInput::new(
         "Kohta likes hidden tea ceremonies, owes a quest, and should be a wizard.",
     );
@@ -417,15 +378,12 @@ async fn no_inference_helpers_only_plan_caller_supplied_candidates() {
         .candidates
         .iter()
         .any(|candidate| matches!(candidate, MemoryCandidate::MemoryLink(_))));
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn commit_with_and_without_explicit_validation_produce_equivalent_graph_state() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
 
     let direct_commit_outcome = memory
         .commit(
@@ -463,22 +421,13 @@ async fn commit_with_and_without_explicit_validation_produce_equivalent_graph_st
         direct_commit_outcome.persisted_link_ids.len(),
         validated_commit_outcome.persisted_link_ids.len()
     );
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn remember_wrapper_commits_equivalent_graph_state() {
-    let (wrapper_memory, wrapper_collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
-    let (manual_memory, manual_collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => {
-            base::cleanup_collection(&wrapper_collection_name).await;
-            return;
-        }
-    };
+    let (wrapper_memory, wrapper_root) = setup_basic().await;
+    let (manual_memory, manual_root) = setup_basic().await;
     let input = remember_equivalence_input();
     let options = RememberOptions::default();
 
@@ -594,16 +543,13 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
                 && relation.relation == RelationType::About
         }));
 
-    base::cleanup_collection(&wrapper_collection_name).await;
-    base::cleanup_collection(&manual_collection_name).await;
+    base::close_and_remove_root(wrapper_memory, wrapper_root).await;
+    base::close_and_remove_root(manual_memory, manual_root).await;
 }
 
 #[tokio::test]
 async fn approval_flow_can_filter_candidates_before_commit() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let mut input = RememberInput::new("approval-flow base observation");
     let mut approved = DerivedMemoryDraft::new(DerivedType::Claim, "approval-flow approved memory");
     approved.id = Some(id("550e8400-e29b-41d4-a716-446655613201"));
@@ -641,15 +587,12 @@ async fn approval_flow_can_filter_candidates_before_commit() {
         .persisted_object_ids
         .iter()
         .all(|id| *id != dropped_id));
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn approval_flow_stripping_vector_candidates_writes_no_vectors() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let mut plan = memory
         .prepare(
             core_input("approval-strips-vectors"),
@@ -668,15 +611,12 @@ async fn approval_flow_stripping_vector_candidates_writes_no_vectors() {
     assert!(!outcome.persisted_object_ids.is_empty());
     assert!(outcome.vector_indexed_object_ids.is_empty());
     assert_eq!(outcome.vector_indexing_failure, None);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
 async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let plan = memory
         .prepare(core_input("authority-split"), PrepareOptions::default())
         .await
@@ -715,7 +655,7 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
     } else {
         assert!(!outcome.stats_update_status.updated_object_ids.is_empty());
     }
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
 #[test]
@@ -745,10 +685,7 @@ fn candidate_provenance_records_producer_kind_and_rationale_origin() {
 
 #[tokio::test]
 async fn generated_style_plan_commits_through_same_path_as_manual_candidates() {
-    let (memory, collection_name) = match setup_basic().await {
-        Some(fixture) => fixture,
-        None => return,
-    };
+    let (memory, root) = setup_basic().await;
     let plan = generated_style_plan();
 
     memory
@@ -761,155 +698,19 @@ async fn generated_style_plan_commits_through_same_path_as_manual_candidates() {
         .expect("generated-style plan should commit through same path");
 
     ensure_graph_only_outcome(&outcome);
-    base::cleanup_collection(&collection_name).await;
+    base::close_and_remove_root(memory, root).await;
 }
 
-async fn setup_basic() -> Option<(CharacterMemory, String)> {
-    match try_setup_in_memory_character_memory().await {
-        Ok(fixture) => Some(fixture),
-        Err(CustomError::VectorDatabaseError(error))
-            if base::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!("skipping write-planning test because Qdrant is unavailable: {error}");
-            None
-        }
-        Err(error) => panic!("unexpected basic setup failure: {error}"),
-    }
+async fn setup_basic() -> (CharacterMemory, TempDir) {
+    base::try_setup_character_memory()
+        .await
+        .expect("basic setup should succeed")
 }
 
-async fn setup_persistent(
-    collection_name: &str,
-    fixture: &PersistentFixture,
-) -> Option<CharacterMemory> {
-    match try_setup_persistent_character_memory(
-        collection_name.to_owned(),
-        &fixture.graph_path,
-        &fixture.stats_path,
-    )
-    .await
-    {
-        Ok(memory) => Some(memory),
-        Err(CustomError::VectorDatabaseError(error))
-            if base::should_skip_qdrant_unavailable(&error) =>
-        {
-            println!(
-                "skipping persistent write-planning test because Qdrant is unavailable: {error}"
-            );
-            None
-        }
-        Err(error) => panic!("unexpected persistent setup failure: {error}"),
-    }
-}
-
-async fn try_setup_in_memory_character_memory() -> Result<(CharacterMemory, String), CustomError> {
-    let collection_name = base::unique_collection_name();
-    let settings = load_in_memory_settings()?;
-    let embed_provider = Box::new(base::DeterministicEmbeddingProvider::new(
-        settings.get_embedding_vector_size()?,
-    ));
-
-    let character_memory = CharacterMemory::new_with_embedding_provider(
-        settings,
-        collection_name.clone(),
-        embed_provider,
-    )
-    .await?;
-
-    Ok((character_memory, collection_name))
-}
-
-async fn try_setup_persistent_character_memory(
-    collection_name: String,
-    graph_path: &Path,
-    stats_path: &Path,
-) -> Result<CharacterMemory, CustomError> {
-    let base_settings = base::load_test_settings()?;
-    let embedding_model = std::env::var("EMBEDDING_MODEL")
-        .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
-
-    let settings = Settings::new(
-        Config::builder()
-            .set_override(
-                "qdrant_connection_string",
-                base_settings.get_qdrant_connection(),
-            )
-            .map_err(base::config_error)?
-            .set_override("oxigraph_path", path_string(graph_path))
-            .map_err(base::config_error)?
-            .set_override("openai_api_key", base_settings.get_openai_api_key())
-            .map_err(base::config_error)?
-            .set_override("embedding_model", embedding_model)
-            .map_err(base::config_error)?
-            .set_override("vector_store_mode", "service")
-            .map_err(base::config_error)?
-            .set_override("graph_store_mode", "persistent")
-            .map_err(base::config_error)?
-            .set_override("retrieval_stats_store_mode", "sqlite")
-            .map_err(base::config_error)?
-            .set_override("retrieval_stats_path", path_string(stats_path))
-            .map_err(base::config_error)?
-            .build()
-            .map_err(base::config_error)?,
-    )?;
-    let embed_provider = Box::new(base::DeterministicEmbeddingProvider::new(
-        settings.get_embedding_vector_size()?,
-    ));
-
-    CharacterMemory::new_with_embedding_provider(settings, collection_name, embed_provider).await
-}
-
-fn load_in_memory_settings() -> Result<Settings, CustomError> {
-    let base_settings = base::load_test_settings()?;
-    let embedding_model = std::env::var("EMBEDDING_MODEL")
-        .map_err(|error| CustomError::ConfigParseError(format!("EMBEDDING_MODEL: {error}")))?;
-
-    let config = Config::builder()
-        .set_override(
-            "qdrant_connection_string",
-            base_settings.get_qdrant_connection(),
-        )
-        .map_err(base::config_error)?
-        .set_override(
-            "oxigraph_path",
-            base_settings
-                .get_oxigraph_path()?
-                .to_string_lossy()
-                .into_owned(),
-        )
-        .map_err(base::config_error)?
-        .set_override("openai_api_key", base_settings.get_openai_api_key())
-        .map_err(base::config_error)?
-        .set_override("embedding_model", embedding_model)
-        .map_err(base::config_error)?
-        .set_override("vector_store_mode", "service")
-        .map_err(base::config_error)?
-        .set_override("graph_store_mode", "in_memory")
-        .map_err(base::config_error)?
-        .build()
-        .map_err(base::config_error)?;
-
-    Settings::new(config)
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-struct PersistentFixture {
-    _temp_dir: TempDir,
-    graph_path: std::path::PathBuf,
-    stats_path: std::path::PathBuf,
-}
-
-impl PersistentFixture {
-    fn new() -> Self {
-        let temp_dir = tempfile::tempdir().expect("persistent fixture tempdir should be created");
-        Self {
-            graph_path: temp_dir.path().join("graph.oxigraph"),
-            stats_path: temp_dir.path().join("stats.sqlite3"),
-            _temp_dir: temp_dir,
-        }
-    }
+async fn setup_persistent(collection_name: &str, root: &TempDir) -> CharacterMemory {
+    base::try_setup_persistent_character_memory(collection_name.to_owned(), root.path(), None)
+        .await
+        .expect("persistent setup should succeed")
 }
 
 fn core_input(label: &str) -> RememberInput {
