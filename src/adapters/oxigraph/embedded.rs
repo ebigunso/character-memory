@@ -107,9 +107,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
         let mut replacements = Vec::new();
         for object in objects {
-            object
-                .validate()
-                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            object.validate()?;
             let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
@@ -125,8 +123,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
         let mut replacements = Vec::new();
         for link in links {
-            link.validate()
-                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            link.validate()?;
             let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
             replacements.push((
                 owner_graph_uri.clone(),
@@ -146,9 +143,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     ) -> Result<(), CustomError> {
         let mut replacements = Vec::new();
         for object in objects {
-            object
-                .validate()
-                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            object.validate()?;
             let owner_graph_uri = graph_uri(object.object_type(), object.id());
             replacements.push((
                 owner_graph_uri.clone(),
@@ -157,8 +152,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         }
 
         for link in links {
-            link.validate()
-                .map_err(|error| CustomError::MemoryValidation(error.to_string()))?;
+            link.validate()?;
             let owner_graph_uri = graph_uri(ObjectType::MemoryLink, link.id);
             replacements.push((
                 owner_graph_uri.clone(),

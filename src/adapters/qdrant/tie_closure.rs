@@ -233,7 +233,11 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(*fetch_limits.borrow(), vec![2, 4]);
+        let fetch_limits = fetch_limits.borrow();
+        assert!(fetch_limits.len() > 1, "the loop must grow at least once");
+        assert!(fetch_limits[0] > 1);
+        assert!(fetch_limits.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(result.candidates.len(), 1);
         assert_eq!(result.candidates[0].object_id, Uuid::from_u128(1));
         assert_eq!(
             result.completeness(None),

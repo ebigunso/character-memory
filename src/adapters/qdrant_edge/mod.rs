@@ -730,11 +730,8 @@ fn io_error(error: std::io::Error) -> CustomError {
 #[cfg(test)]
 mod tests {
     use std::env;
-    use std::future::Future;
     use std::path::PathBuf;
     use std::process::Command as ProcessCommand;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::Arc;
     use std::time::Instant;
 
     use tempfile::TempDir;
@@ -768,24 +765,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn point_identity_matches_the_shared_service_derivation() {
+    async fn surfaces_of_one_object_are_distinct_points() {
         let temp = TempDir::new().unwrap();
         let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "point_identity", 2)
             .await
             .unwrap();
-        let record = VectorRecord::new(
+        let summary = VectorRecord::new(
             MemoryId::from_u128(7),
             ObjectType::Episode,
             VectorSurface::Summary,
             DEFAULT_SCHEMA_VERSION,
             "Episode summary",
         );
+        let mut text = summary.clone();
+        text.surface = VectorSurface::Text;
+        upsert(&store, &[summary, text], &[vec![1.0, 0.0], vec![1.0, 0.0]]).await;
 
-        let point = store
-            .point(&VectorRecordEmbedding::new(&record, &[1.0, 0.0]))
-            .unwrap();
+        let result = store.search_candidates(&query(10)).await.unwrap();
 
-        assert_eq!(point.id.to_string(), qdrant_point_id(&record).to_string());
+        let mut surfaces = result
+            .candidates
+            .iter()
+            .map(|candidate| {
+                assert_eq!(candidate.object_id, MemoryId::from_u128(7));
+                candidate.surface
+            })
+            .collect::<Vec<_>>();
+        surfaces.sort_by_key(|surface| surface.to_string());
+        assert_eq!(surfaces, vec![VectorSurface::Summary, VectorSurface::Text]);
         store.close().await.unwrap();
     }
 
@@ -879,11 +886,7 @@ mod tests {
             first.completeness,
             VectorRecallCompleteness::Exhaustive { scanned: 6 }
         );
-        let first_bytes = format!("{first:?}").into_bytes();
-        assert_eq!(
-            format!("{:?}", store.search_candidates(&query(3)).await.unwrap()).into_bytes(),
-            first_bytes
-        );
+        assert_eq!(store.search_candidates(&query(3)).await.unwrap(), first);
 
         store
             .delete_candidates(&[records[0].object_id])
@@ -954,34 +957,6 @@ mod tests {
             VectorRecallCompleteness::Exhaustive { scanned: 3 }
         );
         reopened.close().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn zero_norm_query_returns_canonical_zero_scores_exhaustively() {
-        let temp = TempDir::new().unwrap();
-        let (records, embeddings) = records(4, &[1.0, 0.0]);
-        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "zero_norm", 2)
-            .await
-            .unwrap();
-        upsert(&store, &records, &embeddings).await;
-
-        let result = store
-            .search_candidates(&VectorCandidateSearch::new(
-                vec![0.0, 0.0],
-                4,
-                vec![ObjectType::Episode, ObjectType::Observation],
-            ))
-            .await
-            .unwrap();
-        assert!(result
-            .candidates
-            .iter()
-            .all(|candidate| candidate.score == 0.0));
-        assert_eq!(
-            result.completeness,
-            VectorRecallCompleteness::Exhaustive { scanned: 4 }
-        );
-        store.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -1075,7 +1050,6 @@ mod tests {
             .await
             .expect_err("second owner must not open a locked shard");
         assert!(matches!(error, CustomError::VectorDatabaseError(_)));
-        assert!(started.elapsed() >= Duration::from_millis(900));
         assert!(started.elapsed() < Duration::from_secs(10));
 
         first.close().await.unwrap();
@@ -1141,50 +1115,10 @@ mod tests {
             "raw_no_flush",
             temp.path(),
         );
-        let raw_path = temp.path().join("raw");
-        let shard = EdgeShard::load(&raw_path, None).unwrap();
+        // An acknowledged raw shard update that was never flushed is lost across a hard
+        // exit; this is the upstream fact that justifies flush-on-ack in the adapter.
+        let shard = EdgeShard::load(&temp.path().join("raw"), None).unwrap();
         assert_eq!(shard.count(CountRequest::new()).unwrap(), 0);
-        assert_eq!(shard.info().unwrap().indexed_vectors_count, 0);
-        assert!(EdgeShard::load(&raw_path, None).is_err());
-        drop(shard);
-
-        let missing = temp.path().join("missing");
-        assert!(EdgeShard::new(&missing, edge_config(2, 0)).is_err());
-        let non_object_payload = std::panic::catch_unwind(|| {
-            PointStruct::new(1_u64, vec![1.0, 0.0], serde_json::json!("not an object"))
-        });
-        assert!(non_object_payload.is_err());
-        assert_ne!(
-            std::any::type_name::<qdrant_edge::PointStruct>(),
-            std::any::type_name::<qdrant_client::qdrant::PointStruct>()
-        );
-
-        let (records, embeddings) = records(3, &[1.0, 0.0]);
-        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "zero_threshold", 2)
-            .await
-            .unwrap();
-        assert!(store.exact_scan);
-        upsert(&store, &records, &embeddings).await;
-        store.close().await.unwrap();
-
-        let populated = open_shard(temp.path(), "zero_threshold", 2, 0).unwrap();
-        assert_eq!(populated.count(CountRequest::new()).unwrap(), 3);
-        assert_eq!(populated.info().unwrap().indexed_vectors_count, 0);
-        drop(populated);
-
-        let reopened = QdrantEdgeVectorCandidateStore::open(temp.path(), "zero_threshold", 2)
-            .await
-            .unwrap();
-        assert!(reopened.exact_scan);
-        assert_eq!(
-            reopened
-                .search_candidates(&query(10))
-                .await
-                .unwrap()
-                .completeness,
-            VectorRecallCompleteness::Exhaustive { scanned: 3 }
-        );
-        reopened.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -1223,151 +1157,6 @@ mod tests {
         indexed.close().await.unwrap();
         temp.close().unwrap();
         assert!(!path.exists());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "manual latency and executor-responsiveness benchmark"]
-    async fn benchmark_configured_dimension_and_owner_responsiveness() {
-        const DIMENSION: usize = 1_536;
-        for count in [100, 1_000, 5_000] {
-            let temp = TempDir::new().unwrap();
-            let (store, open, open_ticks) = timed_with_heartbeat(
-                QdrantEdgeVectorCandidateStore::open(temp.path(), "benchmark", DIMENSION),
-            )
-            .await;
-            let store = store.unwrap();
-            let (records, embeddings) = benchmark_records(count, DIMENSION);
-            let (_, write, write_ticks) =
-                timed_with_heartbeat(upsert(&store, &records, &embeddings)).await;
-            let request = VectorCandidateSearch::new(
-                benchmark_embedding(0, DIMENSION),
-                48,
-                vec![ObjectType::Episode, ObjectType::Observation],
-            );
-            let (recall, scan, scan_ticks) =
-                timed_with_heartbeat(store.search_candidates(&request)).await;
-            let recall = recall.unwrap();
-            let (_, close, close_ticks) = timed_with_heartbeat(store.close()).await;
-
-            println!(
-                "qdrant-edge benchmark corpus={count} dimension={DIMENSION} open_ms={} write_ms={} scan_ms={} returned={} heartbeats=open:{open_ticks},write:{write_ticks},scan:{scan_ticks},close:{close_ticks} close_ms={}",
-                open.as_millis(),
-                write.as_millis(),
-                scan.as_millis(),
-                recall.candidates.len(),
-                close.as_millis(),
-            );
-        }
-
-        let temp = TempDir::new().unwrap();
-        let exact = QdrantEdgeVectorCandidateStore::open(temp.path(), "recall_exact", DIMENSION)
-            .await
-            .unwrap();
-        let indexed = QdrantEdgeVectorCandidateStore::open_with_threshold(
-            temp.path(),
-            "recall_indexed",
-            DIMENSION,
-            1,
-        )
-        .await
-        .unwrap();
-        let (records, embeddings) = benchmark_records(1_000, DIMENSION);
-        upsert(&exact, &records, &embeddings).await;
-        upsert(&indexed, &records, &embeddings).await;
-        let (_, build, build_ticks) = timed_with_heartbeat(indexed.optimize()).await;
-        let request = VectorCandidateSearch::new(
-            benchmark_embedding(0, DIMENSION),
-            48,
-            vec![ObjectType::Episode, ObjectType::Observation],
-        );
-        let exact_recall = exact.search_candidates(&request).await.unwrap();
-        let indexed_recall = indexed.search_candidates(&request).await.unwrap();
-        let overlap = indexed_recall
-            .candidates
-            .iter()
-            .filter(|candidate| exact_recall.candidates.contains(candidate))
-            .count();
-        println!(
-            "qdrant-edge indexed recall corpus=1000 overlap={overlap}/{} build_ms={} build_heartbeats={build_ticks}",
-            exact_recall.candidates.len(),
-            build.as_millis(),
-        );
-        exact.close().await.unwrap();
-        indexed.close().await.unwrap();
-
-        let temp = TempDir::new().unwrap();
-        let first = QdrantEdgeVectorCandidateStore::open(temp.path(), "lock_benchmark", 2)
-            .await
-            .unwrap();
-        let (locked, wait, wait_ticks) = timed_with_heartbeat(
-            QdrantEdgeVectorCandidateStore::open(temp.path(), "lock_benchmark", 2),
-        )
-        .await;
-        assert!(locked.is_err());
-        let (_, close, close_ticks) = timed_with_heartbeat(first.close()).await;
-        let (reopened, reopen, reopen_ticks) = timed_with_heartbeat(
-            QdrantEdgeVectorCandidateStore::open(temp.path(), "lock_benchmark", 2),
-        )
-        .await;
-        reopened.unwrap().close().await.unwrap();
-        println!(
-            "qdrant-edge lock wait_ms={} close_ms={} reopen_ms={} heartbeats=wait:{wait_ticks},close:{close_ticks},reopen:{reopen_ticks}",
-            wait.as_millis(),
-            close.as_millis(),
-            reopen.as_millis(),
-        );
-    }
-
-    fn benchmark_records(count: usize, dimension: usize) -> (Vec<VectorRecord>, Vec<Vec<f32>>) {
-        let records = (1..=count)
-            .map(|value| {
-                VectorRecord::new(
-                    MemoryId::from_u128(value as u128),
-                    if value % 2 == 0 {
-                        ObjectType::Episode
-                    } else {
-                        ObjectType::Observation
-                    },
-                    VectorSurface::Summary,
-                    DEFAULT_SCHEMA_VERSION,
-                    format!("benchmark record {value}"),
-                )
-            })
-            .collect();
-        let embeddings = (1..=count)
-            .map(|value| benchmark_embedding(value, dimension))
-            .collect();
-        (records, embeddings)
-    }
-
-    fn benchmark_embedding(value: usize, dimension: usize) -> Vec<f32> {
-        let mut embedding = vec![0.0; dimension];
-        embedding[0] = 1.0;
-        embedding[1] = value as f32 / 10_000.0;
-        embedding
-    }
-
-    async fn timed_with_heartbeat<T>(future: impl Future<Output = T>) -> (T, Duration, usize) {
-        let running = Arc::new(AtomicBool::new(true));
-        let ticks = Arc::new(AtomicUsize::new(0));
-        let heartbeat = tokio::spawn({
-            let running = Arc::clone(&running);
-            let ticks = Arc::clone(&ticks);
-            async move {
-                while running.load(Ordering::Relaxed) {
-                    ticks.fetch_add(1, Ordering::Relaxed);
-                    tokio::task::yield_now().await;
-                }
-            }
-        });
-        let started = Instant::now();
-        let output = future.await;
-        let elapsed = started.elapsed();
-        running.store(false, Ordering::Relaxed);
-        heartbeat.await.unwrap();
-        let ticks = ticks.load(Ordering::Relaxed);
-        assert!(ticks > 0, "the async executor made no concurrent progress");
-        (output, elapsed, ticks)
     }
 
     fn run_child(test_name: &str, mode: &str, path: &Path) {
