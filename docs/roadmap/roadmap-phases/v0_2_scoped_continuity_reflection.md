@@ -37,7 +37,7 @@ custom    an application scope key, for domains that already have a scope model
 
 A partial scene degrades gracefully. No participants means no pair recall and no partition, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
 
-There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0022). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
+There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
 Scope keys on derived memories are derived from each memory's scene at write time and are never a caller-facing ID scheme. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer.
 
