@@ -87,7 +87,7 @@ The library should still be usable in ordinary assistant products, but its philo
 Character Memory should sit around the LLM interaction loop. It participates both before generation and after interaction.
 
 1. Observe the current interaction.
-2. Retrieve relevant memories using semantic, temporal, entity, relational, and salience-aware signals.
+2. Recall what the present moment calls for, from the situation itself and from what is being said.
 3. Provide memory context to the LLM in a concise, grounded form.
 4. Generate the assistant response.
 5. Decide what from the interaction is worth remembering.
@@ -111,7 +111,8 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 | Reflection | A higher-level interpretation derived from multiple memories. | Generate summaries, patterns, and stable observations with links back to source episodes. |
 | Character signal | A stable tendency or preference inferred from memory. | Do not overwrite personality arbitrarily. Derive character signals from remembered evidence and attach them to scope. |
 | Continuity | The assistant or character behaves as the same persistent entity over time. | The system should optimize for coherent behavior across sessions, not only recall of isolated facts. |
-| Continuity scope | The scope in which continuity state is meaningful. | Allow continuity to be centered on an entity, entity pair, thread, project, place, character, conversation, or custom application scope. |
+| Scene | The circumstances a memory was formed in, and the circumstances the character is in now: who is present, where and when, what is going on. | A memory is remembered together with its scene, and the present scene is what brings memories to mind. The character knows whether it was there when something happened or was told about it later. |
+| Continuity scope | The scope in which continuity state is meaningful. | The scope a memory belongs to follows from the scene it was formed in; the application should not have to name it. |
 
 ---
 
@@ -121,6 +122,10 @@ Retrieval should model recollection, not search alone. Human-like recall is asso
 
 Retrieved memory is material the character reconstructs a response from, not a record it recites. History should bend the response rather than appear in it as citations. The best continuity is invisible until it is tested.
 
+Recall is situated before it is cued. A person walks into a room already carrying what the room calls for: who is here, what was last said with them, what is owed in either direction, what is in progress, what fell due today, what happened this morning. None of that is brought up by the topic, because there is no topic yet. The character should arrive the same way, and what the conversation then turns to should add to that, never replace it.
+
+Purpose is not something the moment hands to the character. What it is trying to do comes up from what it remembers: an unfinished matter, a promise, a project in progress, a settled tendency. A purpose supplied from outside is a persona assigned for one turn. A purpose that surfaces from memory is accumulated character.
+
 Character Memory should therefore combine multiple retrieval signals:
 
 - **Semantic retrieval** for meaning similarity.
@@ -129,6 +134,7 @@ Character Memory should therefore combine multiple retrieval signals:
 - **Relational retrieval** for connected memories and graph traversal.
 - **Salience-aware retrieval** for memories that matter beyond textual similarity.
 - **Scope-aware retrieval** for continuity contexts that should not be treated as global.
+- **Scene-aware recall** for what the present moment brings up before anything is said: the people here, the place, the time and date, what is in progress, and anything the character was waiting for exactly this moment to do.
 
 A retrieved memory should ideally include why it was retrieved: similar meaning, same thread, same entity, recent event, unresolved thread, repeated pattern, contradiction, relationship relevance, high selectivity, or explicit scope. This makes the system debuggable and reduces arbitrary memory injection.
 
@@ -176,8 +182,8 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **Let memory influence behavior, not dictate it.** The LLM should receive memory as grounded context. It should not be forced into brittle rules from stale memories.
 - **Recall is complete.** The character can find any memory it holds. No memory becomes less reachable because time passed, and no stored measure of importance drifts on its own. What changes with time is rank and expression: recent and important material is offered in detail, old and minor material as gist, and the whole is available when it matters. A person cannot always recover the detail behind the gist. This character can, and that is an advantage to keep, not a trait to imitate away.
 - **Forgetting is always someone's decision.** The record is append-only, and forgetting changes influence, not history. It takes exactly two forms, each intentional, reversible, and inspectable: suppression removes a memory's influence, and supersession replaces it with a corrected memory while keeping the old one as history. A memory that is no longer current, such as a finished project or a relationship that ended, is not forgotten: it leaves current views through a change of currency and stays fully recallable. Destructive deletion is not a memory operation; erasure exists only as an out-of-band operational action for compliance, security remediation, or explicit operator-directed alteration.
-- **Discretion is disclosure, not recall.** A person told something in confidence still knows it in the next room. They choose not to say it, and knowing it still shapes how they act. Recall is therefore never gated by privacy or sensitivity by default. Every memory carries its frame: who was present, who said it, whether it was firsthand or told, and in which setting. Recall reports that frame with the memory so the character can be consistent and careful at once. Where an application must enforce a boundary, it does so as an explicit query-time policy over the frame, never as a property stored on the memory.
-- **A memory's meaning is other memories.** How a memory should be treated comes from what is linked to it: a request not to raise it, a correction, a resolution, a framing, a note about the source. Each of these is itself a remembered event with provenance. The library does not sort memories into treatments or annotate them with instructions, because an experienced fact can mean many things and the boundary between an instruction and an experience is not one the library can draw. Interpreting memories travel with the memory they interpret, and the character reads the neighborhood.
+- **Discretion is disclosure, not recall.** A person told something in confidence still knows it in the next room. They choose not to say it, and knowing it still shapes how they act. Recall is therefore never gated by privacy or sensitivity by default. Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Recall reports that scene with the memory so the character can be consistent and careful at once. Where an application must enforce a boundary, it does so as an explicit query-time policy over the scene, never as a property stored on the memory.
+- **A memory's meaning is other memories.** How a memory should be treated comes from what is linked to it: a request not to raise it, a correction, a resolution, a framing, a note about the source. Each of these is itself a remembered event with provenance. The library does not sort memories into treatments or annotate them with instructions, because an experienced fact can mean many things and the boundary between an instruction and an experience is not one the library can draw. When how a memory should be treated changes, the character's memory of it changes with it, and what it remembers afterward reads as one memory, not as a history of edits.
 - **Expose retrieval rationale.** Implementation designers and application developers need to understand why a memory was retrieved.
 - **Stay backend-agnostic where practical.** The default stack can use OpenAI and Qdrant, but the philosophy should not depend on either vendor.
 
@@ -262,6 +268,7 @@ The implementation should be considered successful if it enables these outcomes:
 - The system can distinguish raw episodes, inferred reflections, and stable character signals.
 - Broad recurring entities do not flood context merely because they are connected to many memories.
 - The assistant feels less like a new instance every session and more like a continuing participant in the user's life or application world.
+- Before anything is said, the character already carries what the moment calls for: who is here, what was last said with them, what is owed, what is in progress, and what fell due.
 - Surfaced detail matches relevance and importance. The character does not volunteer distant trivia, and it recalls the detail fully when asked.
 - Memory failures have a human shape. Uncertainty surfaces as natural hedging with a stated basis, never as confident wrongness about the people and commitments the character knows best, and never as blankness toward something it plainly experienced.
 
@@ -293,7 +300,6 @@ These are questions for the implementation designer to resolve or make explicit:
 - How does the user or application inspect, correct, or delete memories?
 - How are reflections generated, scheduled, and validated?
 - How are relationship-specific or scope-specific memories separated from global character signals?
-- How should retrieval balance recency, similarity, entity relevance, selectivity, scope, and salience?
 - How can the library remain useful without overfitting to one LLM provider, vector backend, or application role model?
 
 ---
