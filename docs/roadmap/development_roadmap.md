@@ -257,7 +257,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 A memory store has one remembering subject, and that subject is an ordinary entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone.
 
 ```text
-the self is an Entity, identified by the application at construction or per scope
+the self is an Entity, identified by the application at construction; a scope may name the same self again and never a different one
 no object type, entity type, or retrieval path treats the self as a special role
 entity types that encode application roles (user, assistant) are not core schema truth
 ```
@@ -1497,7 +1497,7 @@ The earlier v0.4 phase is dissolved as of 2026-09-17 and has no draft. Its piece
 
 ```text
 retrieval traces, section assignments, selectivity and expansion traces, lifecycle omissions   delivered in the v0.1 family; each later phase adds the trace fields its mechanism needs
-RetrievalIntent (ADR-I-0016, unchanged)   Continuity and CurrentState in v0.2; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation
+RetrievalIntent (ADR-I-0016, unchanged)   Continuity in v0.2, where a scene with no topic replaces the need for a CurrentState variant; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation; CurrentState only if a later phase shows one retrieval cannot express its budget
 retention assessment and retention policy hooks   replaced by currency; the draft's archived state contradicted ADR-D-0018, and its redacted and deleted states contradicted ADR-D-0021
 validation rules   the write path already validates; invariant checks over stores are evaluation-repository tooling (ADR-I-0019)
 graph health reports and policy diagnostics   evaluation-repository reports over runs, not library surface

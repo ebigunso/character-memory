@@ -35,7 +35,7 @@ Character is accumulated through remembered experience, and experience has a sub
 
 Invariant: the self is an entity the application identifies, and no core type or retrieval path distinguishes it by kind.
 
-Not covered: whether the self is declared at construction, per scope, or both; a convenience default for single-character applications; the migration away from the user and assistant entity types.
+Not covered: a convenience default for single-character applications; the migration away from the user and assistant entity types.
 
 ## Validation
 

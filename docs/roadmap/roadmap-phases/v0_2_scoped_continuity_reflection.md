@@ -32,14 +32,14 @@ when      the reference time; the only required field, defaulting to now
 who       the participants present, as the IDs the application already supplies to remember (ADR-I-0020); the self is one of them (ADR-D-0020)
 where     a place entity or the conversation key; for a text agent usually the conversation
 what      the activity in progress: a thread or open loop the application received from remember, or nothing, in which case it is inferred from the conversation's recent episodes
-custom    an application scope key, for domains that already have a scope model
+custom    optional scene metadata for domains that already have their own scope model (a game zone, a project code); the application supplies the value it already owns and never looks one up from the library
 ```
 
 A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
-Scope keys on derived memories are derived from each memory's scene at write time and are never a caller-facing ID scheme. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer.
+Scope keys on derived memories are derived from each memory's scene at write time, including any custom value, and are never a caller-facing ID scheme: the library mints no scope identifiers a caller must discover, which is what the exclusion of a scope hint by ID means. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer.
 
 ## 1.1 Partitions as explicit policy
 
@@ -55,7 +55,7 @@ Recall is activation by the cues the scene supplies plus the topic of the curren
 content route     the topic, through vectors; the route retrieval has today
 entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
 time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps the graph already stores
-state route       the latest derived state for the scene's scopes, active loops and commitments in both directions; a graph read filtered by currency
+state route       the latest derived state for the scopes the who and what cues imply, active loops and commitments in both directions; a graph read filtered by currency, so it is the currency-side reading of the same cues rather than a sixth cue kind
 trigger route     stored intentions whose trigger is a participant present or a topic arising
 ```
 
@@ -88,7 +88,7 @@ Only a signal: a scope has accumulated enough since its last reflection to be wo
 # 3. Retrieval changes
 
 ```text
-RetrievalContext takes a scene (when required; who, where, what, custom optional), a topic, an optional partition policy, and an intent (Continuity default; the other ADR-I-0016 variants arrive with the phases that need them)
+RetrievalContext takes a scene (when required; who, where, what, custom optional), a topic, an optional partition policy, and an intent (Continuity, the only variant v0.2 needs, since a scene with no topic replaces a CurrentState variant; the other ADR-I-0016 variants arrive with the phases that need them)
 candidate routes per cue kind with admission floors; the content route is what exists today
 the temporal rationale category is produced; activation records which route admitted each item
 the trace records the scene as given, whether it was partial, the applied partition policy, elapsed time since the pair last met, and every omission on lifecycle or currency grounds with its reason, beside the existing section-limit, partition, and expansion-bound reasons

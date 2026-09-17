@@ -34,7 +34,7 @@ A character that arrives at a moment carrying only what the topic retrieves is a
 
 Invariant: retrieval takes the present scene and activates candidates through a route per cue kind with a floor per route; currency never selects items.
 
-Not covered: the cue kinds' candidate mechanisms, the floors and weights, which are measured defaults, the scene's field names, and the trace's shape for activation.
+Not covered: the cue kinds' candidate mechanisms; the floors and weights, which are measured defaults; how cue kinds map onto routes, including whether several cue kinds share one route, provided each cue kind's admission is measured against starvation by the others and the phase records the mapping; the scene's field names; and the trace's shape for activation.
 
 ## Validation
 
