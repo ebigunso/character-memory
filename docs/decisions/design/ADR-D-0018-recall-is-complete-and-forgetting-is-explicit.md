@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-09-17
 deciders: ["ebigunso"]
@@ -33,7 +33,7 @@ Every behavior the situation catalog attributes to human forgetting traces to a 
 ## Rejected Alternatives
 
 - Stored decay of salience or eligibility: rejected outright; it makes the same query return different memories on different days for no reason a trace can show, and it turns a derived policy value into durable graph truth.
-- A decaying retrieval mode selectable per query, with complete recall as another mode: rejected because consumer applications run the default mode when interacting with the outside world, including when dispatching tasks; reopen only if a deployment class is identified whose ideal behavior requires loss rather than discretion.
+- A decaying retrieval mode selectable per query, with complete recall as another mode: rejected because consumer applications would likely run the default mode when interacting with the outside world, including when dispatching tasks; reopen only if a deployment class is identified whose ideal behavior requires loss rather than discretion.
 - Overwriting or hard-deleting on correction or forgetting: rejected outright; the record is append-only under ADR-D-0021.
 - Archival as a retention state that default retrieval omits: rejected outright; in the default mode it behaves exactly like suppression while promising a retrievability the default path does not deliver, and everything it was meant to express is currency.
 
