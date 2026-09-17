@@ -11,11 +11,11 @@ warrant:
   cost_of_violation: "an engine switch after embedded stores exist in the field rebuilds every character's recall index from graph authority and re-embeds it; two adapters with different admission semantics produce different continuity packs from the same memory, which evaluation evidence would attribute to retrieval regressions"
   cost_of_wrong_preservation: "if the engine's beta API breaks or its footprint proves unacceptable on a target platform and this record is preserved as settled, local deployments carry a dependency that no longer earns its place"
   cost_of_over_extension: "treating the embedded mode as validated for multi-process access misrepresents what the library has validated; treating the index knobs as tuned while they sit at their untuned exact-scan setting would ship approximate recall nobody measured"
-depends_on: [implementation/ADR-I-0003-qdrant-oxigraph-defaults.md, implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md]
+depends_on: [implementation/ADR-I-0034-backend-roles-and-defaults.md, implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md]
 implements: []
-supersedes: [implementation/ADR-I-0003-qdrant-oxigraph-defaults.md]
+supersedes: []
 superseded_by: null
-supersession_scope: partial   # ADR-I-0003's vector-backend default only; its backend roles and its embedded graph description stay authoritative
+supersession_scope: null
 ---
 
 # ADR-I-0023: Embedded Qdrant Edge is the default vector candidate store; the service adapter remains the service mode
@@ -133,7 +133,7 @@ Question asked: which embedded engine, on the two spikes' evidence; the consult'
 
 ## More Information
 
-- ADR-I-0003 remains authoritative for the backend roles (vectors in the service backend family, graph authority in Oxigraph); this record supersedes only its vector-backend default, answering its own revisit clause; its embedded graph description is untouched (ADR-I-0021 made persistent embedded storage the validated graph default without superseding it).
+- ADR-I-0034 records the backend roles (vectors in the service backend family, graph authority in Oxigraph) and points at this record for the vector default.
 - ADR-I-0024 (port contract this adapter implements, including the verdict rule), ADR-I-0025 (the record it stores), and ADR-I-0027 (how the adapter runs the engine and makes writes durable).
 - The two spike reports (2026-09-02) are transient working artifacts; the numbers above are their record.
 - The embedded vector candidate recall phase document in the roadmap-phases design directory.

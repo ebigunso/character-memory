@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: implementation
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: implementation/ADR-I-0025-vector-record-is-a-read-contract.md
-supersession_scope: partial
+superseded_by: ../implementation/ADR-I-0031-stable-cross-store-ids.md
+supersession_scope: null
 ---
 
 # ADR-I-0001: Use stable cross-store IDs and deterministic graph IRIs
+
+Retired on 2026-09-17. Replaced by ADR-I-0031.
 
 ## Context and Problem Statement
 

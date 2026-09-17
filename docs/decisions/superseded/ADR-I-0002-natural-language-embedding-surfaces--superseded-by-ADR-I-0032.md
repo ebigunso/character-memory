@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: implementation
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: implementation/ADR-I-0025-vector-record-is-a-read-contract.md
-supersession_scope: partial
+superseded_by: ../implementation/ADR-I-0032-natural-language-embedding-surfaces.md
+supersession_scope: null
 ---
 
 # ADR-I-0002: Embed natural-language semantic surfaces, not structured metadata templates
+
+Retired on 2026-09-17. Replaced by ADR-I-0032.
 
 ## Context and Problem Statement
 

@@ -13,9 +13,9 @@ warrant:
   cost_of_over_extension: "extending the rule to the graph store would strip graph authority of denormalised fields it legitimately owns"
 depends_on: [implementation/ADR-I-0007-schema-versioning.md, implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md]
 implements: []
-supersedes: [implementation/ADR-I-0005-qdrant-payload-vs-graph-authority.md, implementation/ADR-I-0002-natural-language-embedding-surfaces.md, implementation/ADR-I-0001-stable-cross-store-ids.md]
+supersedes: []
 superseded_by: null
-supersession_scope: partial
+supersession_scope: null
 ---
 
 # ADR-I-0025: The vector record is a read contract — identity, surface, schema version, embedded text

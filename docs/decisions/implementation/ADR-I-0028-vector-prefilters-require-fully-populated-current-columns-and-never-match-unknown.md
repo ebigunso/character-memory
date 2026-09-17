@@ -13,9 +13,9 @@ warrant:
   cost_of_over_extension: "applying this vector-candidate admission rule to graph-authority reasoning would confuse incomplete domain knowledge with a corrupt denormalized index column"
 depends_on: [implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md, implementation/ADR-I-0025-vector-record-is-a-read-contract.md]
 implements: []
-supersedes: [implementation/ADR-I-0024-vector-candidate-recall-reports-completeness-and-prefilters-never-match-unknown.md]
+supersedes: []
 superseded_by: null
-supersession_scope: partial   # takes over ADR-I-0024's prefilter-admission clause only; ADR-I-0024 remains authoritative for completeness reporting
+supersession_scope: null
 ---
 
 # ADR-I-0028: A vector-layer prefilter reads only a fully populated, immutable or synchronised column, and an unknown value never matches
