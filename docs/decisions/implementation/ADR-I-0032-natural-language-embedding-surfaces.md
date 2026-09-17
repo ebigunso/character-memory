@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: implementation
 date: 2026-09-17
 deciders: ["ebigunso"]
