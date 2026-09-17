@@ -266,13 +266,14 @@ Recall is also relative to a moment: retrieval takes a reference time, and elaps
 
 ## 2.15 Recall is complete; forgetting is explicit
 
-No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression, archival, or supersession, each a recorded decision. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
+No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression or supersession, each a recorded decision. What is no longer current leaves current views through a change of currency, not of eligibility; how currency is represented is decided by the phase that introduces it. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
 
 ```text
 write-time attention decides what becomes memory
 query-time ranking weighs salience and elapsed time
 expression offers detail or gist
-suppression, archival, supersession are the only forgetting
+suppression and supersession are the only forgetting
+currency, not eligibility, takes what is over out of current views
 ```
 
 ## 2.16 Interpreting memories travel with the memory they interpret
@@ -1336,6 +1337,7 @@ interpreting memories are admitted with the memory they interpret (invariant 2.1
 open loops and commitments carry an actor and a counterpart, so the character can owe and be owed
 the current-state read takes a reference time and reports elapsed time since the scope was last touched
 no reinforce operation; familiarity and stability derive from evidence at query time
+the archived and deleted retention states and the archive-thread-derived-memories knob are value-audit deletion candidates; thread status keeps dormant and resolved as currency
 ```
 
 ---

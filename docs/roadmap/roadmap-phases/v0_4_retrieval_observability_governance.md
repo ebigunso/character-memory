@@ -138,7 +138,7 @@ stats health issues
 
 ## 2.5 RetentionAssessment
 
-A lifecycle object controlling whether memories are active, archived, suppressed, or quarantined. Erasure is not a retention state; it is an out-of-band operational purge (ADR-D-0021).
+A lifecycle object controlling whether memories are active, suppressed, or quarantined. What is over leaves current views through currency, not through a retention state (ADR-D-0018). Erasure is not a retention state; it is an out-of-band operational purge (ADR-D-0021).
 
 ```json
 {
@@ -156,7 +156,6 @@ Retention states:
 
 ```text
 active
-archived
 suppressed
 quarantined
 ```
@@ -171,7 +170,7 @@ Examples:
 selectivity policy too conservative for scoped broad entities
 fanout policy too permissive for participantEntity episode expansion
 low-information co-occurrence guard rejected N candidate links
-retention policy archived N low-salience stale memories
+currency policy marked N resolved threads not current
 ```
 
 ## 2.7 Additional v0.4 concepts
@@ -265,7 +264,7 @@ detect over-broad clusters and high-fanout cluster expansions
 Implement policy hooks:
 
 ```text
-low salience → archive/downrank
+low salience → downrank
 superseded → exclude from current views
 explicit correction → supersede or suppress
 erasure obligation → out-of-band operational purge, never a retention outcome

@@ -117,7 +117,7 @@ An entity that accepts arbitrary assertions about its own past has no identity; 
 
 ### C6. Departure and loss
 
-A recurring person stops appearing; their relationship memory shifts from active to archival — retrievable for reminiscence, no longer shaping default behavior — with elapsed-time awareness.
+A recurring person stops appearing; their relationship memory shifts from current to past — retrievable for reminiscence, no longer shaping default behavior — with elapsed-time awareness.
 
 ## Cross-cutting qualities
 
