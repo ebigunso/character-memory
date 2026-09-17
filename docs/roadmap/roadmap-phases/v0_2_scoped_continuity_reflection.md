@@ -12,7 +12,7 @@ The phase is judged by what a builder observes, not by structural completeness. 
 
 ## Inherited from the v0.1.5 closeout
 
-- Admission gating and ranking credit for graph-only evidence. The 2026-09-16 re-baseline in the evaluation repository is the planning input: derived memories ingested from dataset summaries took pack slots evidence turns held. Under this draft the item takes a definite shape: the state and time routes have admission floors beside the content route, so derived state and evidence turns are admitted on their own cues rather than competing for vector-scored slots. Pack-admission changes invalidate the pollution and context-size baselines of ADR-I-0022 and re-measure them once.
+- Admission gating and ranking credit for graph-only evidence. The 2026-09-16 re-baseline in the public companion `CharacterMemoryEvals` evaluation repository (a development aid, not core library functionality) is the planning input: derived memories ingested from dataset summaries took pack slots evidence turns held. Under this draft the item takes a definite shape: the state and time routes have admission floors beside the content route, so derived state and evidence turns are admitted on their own cues rather than competing for vector-scored slots. Pack-admission changes invalidate the pollution and context-size baselines of ADR-I-0022 and re-measure them once.
 - Selectivity widening beyond entity roots, which needs retrieval statistics keyed by something other than entities. This phase designs that signal or declines it with recorded evidence.
 - Scoped and person-keyed evaluation scenarios (catalog B1 to B3) before any implementation. Under ADR-D-0019 their meaning changed: B1 and B2 measure that the scene is present and correct on recall and, at the behavioral tier, that the character does not disclose across it. They never measure that a memory failed to surface.
 - The concurrency question. With no background derivation inside the library, the reflection-scheduling form dissolves; what remains is the concurrent-facade-call question the library already has, and the census answers it.
@@ -25,7 +25,7 @@ Caveat: the benchmark gap-bucket baselines rest on small per-bucket samples and 
 
 # 1. The scene
 
-The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting; episodes already carry participants and a source conversation, and this phase makes the scene reportable on every admitted memory. At retrieval it is:
+The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who asserted an observation or derived memory, and whether the character was there, arrive with attribution in v0.4. At retrieval it is:
 
 ```text
 when      the reference time; the only required field, defaulting to now
@@ -35,7 +35,7 @@ what      the activity in progress: a thread or open loop the application receiv
 custom    an application scope key, for domains that already have a scope model
 ```
 
-A partial scene degrades gracefully. No participants means no pair recall and no partition, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
+A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
@@ -53,7 +53,7 @@ Recall is activation by the cues the scene supplies plus the topic of the curren
 
 ```text
 content route     the topic, through vectors; the route retrieval has today
-entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails
+entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
 time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps the graph already stores
 state route       the latest derived state for the scene's scopes, active loops and commitments in both directions; a graph read filtered by currency
 trigger route     stored intentions whose trigger is a participant present or a topic arising
@@ -91,7 +91,7 @@ Only a signal: a scope has accumulated enough since its last reflection to be wo
 RetrievalContext takes a scene (when required; who, where, what, custom optional), a topic, an optional partition policy, and an intent (Continuity default; the other ADR-I-0016 variants arrive with the phases that need them)
 candidate routes per cue kind with admission floors; the content route is what exists today
 the temporal rationale category is produced; activation records which route admitted each item
-the trace records the scene as given, whether it was partial, the applied partition policy, elapsed time since the pair last met, and every omission with its lifecycle or currency reason
+the trace records the scene as given, whether it was partial, the applied partition policy, elapsed time since the pair last met, and every omission on lifecycle or currency grounds with its reason, beside the existing section-limit, partition, and expansion-bound reasons
 selectivity applies beyond entity roots with a new statistics key, or the declination is recorded with evidence
 ```
 
@@ -101,11 +101,11 @@ The seven retrieval modes of the earlier draft, the scope hint by ID, the curren
 
 # 4. Evaluation first
 
-The evaluation-repository plan comes before the library plan, against the maintained smoke config and the library version pin. Scenarios are named by catalog situation and carry their retrieval-tier property:
+The plan in the public companion `CharacterMemoryEvals` evaluation repository, whose tooling is a development aid and not core library functionality, comes before the library plan, against the maintained smoke config and the library version pin. Scenarios are named by catalog situation and carry their retrieval-tier property:
 
 ```text
 B1 person-keyed separation: scene present and correct on recall; non-disclosure at the behavioral tier; partition policy omits across the scene and the trace says so
-B2 group versus one-on-one frames: same topic, different scenes, both recalled, disclosure follows the scene
+B2 group versus one-on-one scenes: same topic, different scenes, both recalled, disclosure follows the scene
 B3 differential relationship states: scope-keyed relationship notes retrieved per scene, current only
 D1 waking into the day and D8 a deadline arrives: due items admitted with no topic
 D4 encountering a person: current state, last interaction, and obligations in both directions on a scene with the person and no topic
@@ -145,10 +145,10 @@ No reflect, reinforce, resolve, or current-state methods. Open loops and commitm
 ```text
 With a scene and no topic, retrieval returns what the moment calls for: the people present's current state and last interaction, active loops and commitments in both directions, the activity's thread in order, items due, date matches, and recent high-salience episodes, with elapsed time since the pair last met.
 A stored intention surfaces when its counterpart appears or its topic arises, and a promise surfaces on its due date, whatever the current topic.
-A memory learned in one setting is admitted when retrieved for another, with its scene reported; a partition applied as a query option omits across the scene and the trace records the applied policy.
+A memory learned in one setting is admitted when retrieved for another, with the scene v0.2 records reported (participants, setting, when); a partition applied as a query option omits across the scene and the trace records the applied policy.
 Under a loud topic, the state and time routes still admit their floor, and the ADR-I-0022 baselines are re-measured once.
 Retrieval produces the temporal rationale category, and catalog D1, D4, D5, D7, D8, D9, D11, and D13 pass at the retrieval tier.
-Currency never removes an item: every omission names a resolution, a supersession, or a suppression, and staleness is reported as age.
+Currency never removes an item: every omission on lifecycle or currency grounds names a resolution, a supersession, or a suppression, and staleness is reported as age.
 A near-verbatim superseding restatement and a churning chain each raise a write-path warning; C4 is the behavioral check.
 Selectivity beyond entity roots is either applied with its new signal or declined with recorded evidence.
 The pack renderer and the example loop exist, and the README describes what ships.
@@ -176,7 +176,7 @@ attribution fields beyond what the scene implies (v0.4)
 ```text
 the scene's field shapes at retrieval and on stored memories, and how "what" is inferred when absent
 how scope keys are derived from a scene at write time and namespaced for custom scopes
-the candidate mechanism per route, the floors, and their measurement design
+the candidate mechanism per route, the floors, whether participants, place, and activity share the entity route's floor, and their measurement design
 the time route's windows: pair recency, cadence, due dates, date matching
 where direction and due date live on the open-loop and commitment subtypes
 the superset and churn warning heuristics and thresholds

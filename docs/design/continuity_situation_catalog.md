@@ -83,9 +83,9 @@ Formality decays into familiarity; in-jokes and shorthand accumulate as behavior
 
 Private knowledge per person and common knowledge from shared settings must never cross: use shared context freely with everyone, never leak one person's confidence to another.
 
-### B2. Group versus one-on-one frames
+### B2. Group versus one-on-one scenes
 
-The same topic exists in a group frame and in private per-member frames with different content.
+The same topic exists in a group scene and in private per-member scenes with different content.
 
 ### B3. Differential relationship states
 

@@ -44,7 +44,7 @@ Not covered: the shape and names of the scene fields; the vocabulary of applicat
 - Retrieval tests show a memory learned in one setting is admitted when retrieved for another, with its scene reported.
 - Tests show a partition applied as a query option omits across the scene and its trace records the applied policy.
 - Schema review rejects any persisted eligibility field tied to audience or sensitivity.
-- Evaluation scenarios for person-keyed separation and group versus private frames measure that the scene is present and correct on recall and, at the behavioral tier, that the character does not disclose across it; they do not measure that a memory failed to surface.
+- Evaluation scenarios for person-keyed separation and group versus private scenes measure that the scene is present and correct on recall and, at the behavioral tier, that the character does not disclose across it; they do not measure that a memory failed to surface.
 
 ## Revisit When
 

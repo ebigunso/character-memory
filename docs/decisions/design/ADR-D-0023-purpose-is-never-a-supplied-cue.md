@@ -18,7 +18,7 @@ The scene that drives recall carries who, where, when, and what is in progress, 
 
 ## Decision
 
-The retrieval input carries no purpose, goal, or intent field. What the character is trying to do surfaces from memory, as an open loop, a commitment, a thread in progress, or a character signal, and once surfaced it re-cues one bounded hop: an open loop pulls the counterpart's objections, a thread pulls its last decision. A dispatched task's purpose reaches recall the same way, because it arrives in the interaction as content and is remembered as an episode with an open loop and its rationale.
+The retrieval input carries no purpose or goal field. What the character is trying to do surfaces from memory, as an open loop, a commitment, a thread in progress, or a character signal, and once surfaced it re-cues one bounded hop: an open loop pulls the counterpart's objections, a thread pulls its last decision. A dispatched task's purpose reaches recall the same way, because it arrives in the interaction as content and is remembered as an episode with an open loop and its rationale.
 
 ## Why
 
@@ -26,19 +26,19 @@ A purpose handed in from outside is a persona assigned for one turn; a purpose t
 
 ## Rejected Alternatives
 
-- A goal or intent field on the retrieval input: rejected outright for the reason in Why.
+- A purpose or goal field on the retrieval input: rejected outright for the reason in Why. Retrieval intent under ADR-I-0016 is a query-time policy selector, not a purpose, and is unaffected.
 - Inferring purpose inside the library from the current turn: rejected outright under ADR-I-0013.
 - Unbounded spreading activation from surfaced purpose: rejected outright; the re-cue is one hop from surfaced state, which keeps it explainable and inside the roadmap's rule against unbounded spreading activation.
 
 ## Decision Boundary
 
-Invariant: no retrieval input carries a purpose, goal, or intent; the re-cue from surfaced state is bounded to one hop and recorded in the trace.
+Invariant: no retrieval input carries a purpose or goal; the re-cue from surfaced state is bounded to one hop and recorded in the trace.
 
 Not covered: which state kinds re-cue, their weights, and how the trace names the re-cue.
 
 ## Validation
 
-- Schema and API review reject any purpose, goal, or intent field on the retrieval input.
+- Schema and API review reject any purpose or goal field on the retrieval input; the ADR-I-0016 retrieval intent is not such a field.
 - A trace shows an item admitted because it serves a surfaced open loop, thread, or commitment, and no item admitted through a second hop.
 - A dispatched task scenario shows its purpose reaching recall through the open loop written from the interaction.
 

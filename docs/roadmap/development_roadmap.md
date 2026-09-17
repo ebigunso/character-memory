@@ -1356,7 +1356,7 @@ A stored intention surfaces when its counterpart appears or its topic arises, an
 A memory learned in one setting is admitted when retrieved for another, with its scene reported; a partition applied as a query option omits across the scene and the trace records the applied policy.
 Under a loud topic, the state and time routes still admit their floor, and the ADR-I-0022 baselines are re-measured once.
 Retrieval produces the temporal rationale category, and the catalog's D1, D4, D5, D7, D8, D9, D11, and D13 situations pass at the retrieval tier.
-Currency never removes an item: every omission from what the moment calls for names a resolution, a supersession, or a suppression, and staleness is reported as age.
+Currency never removes an item: every omission on lifecycle or currency grounds names a resolution, a supersession, or a suppression, and staleness is reported as age.
 A superseding restatement that contains its predecessor nearly verbatim, and a chain that churns, each raise a write-path warning; the retelling-consistency situation is the behavioral check.
 Selectivity beyond entity roots is either applied with its new signal or declined with recorded evidence.
 The pack renderer and the example loop exist, and the README describes what ships.
@@ -1429,7 +1429,7 @@ Give memories a validity in time, a source, and a history of the entities they c
 validity intervals and volatility on derived memories: valid from, valid until, review after
 attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene
 entity aliases, roles, and relationships over time, without destructive overwrite
-current-belief filtering as currency: stale or expired derived memories leave current views and stay recallable
+current-belief filtering as currency: a derived memory past its recorded validity interval leaves current views and stays recallable; staleness without an interval is reported as age, never enforced (invariant 2.15)
 source reliability as derived memories about the source, scoped by domain, never a global score
 ```
 
@@ -1498,7 +1498,7 @@ The earlier v0.4 phase is dissolved as of 2026-09-17 and has no draft. Its piece
 ```text
 retrieval traces, section assignments, selectivity and expansion traces, lifecycle omissions   delivered in the v0.1 family; each later phase adds the trace fields its mechanism needs
 RetrievalIntent (ADR-I-0016, unchanged)   Continuity and CurrentState in v0.2; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation
-retention assessment and retention policy hooks   replaced by currency (ADR-D-0018); the redacted and deleted states were contradictions of ADR-D-0021
+retention assessment and retention policy hooks   replaced by currency; the draft's archived state contradicted ADR-D-0018, and its redacted and deleted states contradicted ADR-D-0021
 validation rules   the write path already validates; invariant checks over stores are evaluation-repository tooling (ADR-I-0019)
 graph health reports and policy diagnostics   evaluation-repository reports over runs, not library surface
 persisted first-class RetrievalTrace objects   only if repeated-coactivation signals need retrieval history (v0.5), decided by measurement
@@ -1624,7 +1624,7 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 
 ## v0.2 API additions
 
-Illustrative shape; retrieval takes the present scene, the same shape remember already takes, and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval.
+Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval.
 
 ```rust
 let scene = Scene::now()

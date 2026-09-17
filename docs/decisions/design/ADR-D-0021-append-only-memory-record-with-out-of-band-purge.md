@@ -23,7 +23,7 @@ The memory record is append-only. Forgetting changes influence, never history, a
 
 Erasure may exist only as an out-of-band operational purge: an administrative action outside memory semantics, owned by the operator or application, never invoked by memory operations, retrieval, lifecycle policy, or character behavior. Its legitimate uses are compliance erasure of personal data, security remediation of records with illegitimate origin, and explicit operator-directed alteration. A purge makes no pretense of preserving continuity and must tombstone dangling provenance targets rather than leave silent gaps.
 
-A record written by a third party or a compromised path and presented as remembered experience the character never had is a forgery, not a memory. Its purge is justified by its origin, never by its content or behavioral effect. Remediation suppresses first, which is immediate, reversible, and preserves forensic evidence, and purges once illegitimate origin is confirmed, so that no later un-suppression can restore the contamination. Genuine experiences that led somewhere unhealthy remain governed by suppression and supersession.
+A record written by a third party or a compromised path and presented as remembered experience the character never had is a forgery, not a memory. A purge on security grounds is justified by the record's origin, never by its content or behavioral effect; compliance erasure and operator-directed alteration are separate out-of-band authorizations that make no continuity claim and are never memory operations. Remediation suppresses first, which is immediate, reversible, and preserves forensic evidence, and purges once illegitimate origin is confirmed, so that no later un-suppression can restore the contamination. Genuine experiences that led somewhere unhealthy remain governed by suppression and supersession.
 
 Permanence applies to the record, not to influence and not to derived indexes. Removing vector points is permissible hygiene because the vector store is rebuildable and non-authoritative, provided it never becomes the sole record of a memory's existence. Personal-data erasure policy is the application's responsibility.
 
@@ -39,7 +39,7 @@ A character's perceived history is its retrievable memory, and keeping the recor
 
 ## Decision Boundary
 
-Invariant: no memory operation, retrieval path, lifecycle policy, or character behavior deletes a record; a purge is invoked only out of band and tombstones dangling provenance targets; a purge of a record is justified by illegitimate origin, never by content.
+Invariant: no memory operation, retrieval path, lifecycle policy, or character behavior deletes a record; a purge is invoked only out of band and tombstones dangling provenance targets; a purge on security grounds is justified by illegitimate origin, never by content, and no purge of any kind is reachable from memory semantics.
 
 Not covered: the design of the purge tool, which is unscheduled until concretely needed; vector de-indexing policy; the application's compliance procedures.
 

@@ -20,7 +20,7 @@ The philosophy forbids hard-coded roles and rejects third-person archive framing
 
 Memory is first-person. A memory store has one remembering subject, and that subject is an ordinary entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone.
 
-The identity of the self is supplied by the application, at construction or per scope. No object type, entity type, or retrieval path treats the self as a special role. Entity types that encode application roles are not core schema truth. Open loops and commitments carry an actor and a counterpart, so the character can owe and be owed.
+The identity of the self is supplied by the application at construction; a scope may name the same self again and never a different one. No object type, entity type, or retrieval path treats the self as a special role. Entity types that encode application roles are not core schema truth. Open loops and commitments carry an actor and a counterpart, so the character can owe and be owed.
 
 ## Why
 
