@@ -1642,7 +1642,7 @@ Illustrative shape; the processor port is the phase's first design question.
 ```rust
 let memory = CharacterMemory::new_with_processor(settings, collection, embed_provider, processor).await?;
 let plan = memory.prepare(RememberInput::transient(raw_interaction), PrepareOptions::generated()).await?;
-let reflection = memory.reflect(ContinuityScope::Entity(person_id), ReflectOptions::default()).await?;
+let reflection = memory.reflect(Scene::now().with_participants([self_id, person_id]), ReflectOptions::default()).await?;
 ```
 
 ## v0.4 API additions

@@ -69,7 +69,7 @@ An item is current when it is the latest in its supersession chain, not resolved
 
 ## 2.2 Prospective memory
 
-Open loops and commitments keep their subtypes (ADR-D-0005) and gain what the trigger route and the renderer need: a direction, an actor and a counterpart, so the character can owe and be owed (ADR-D-0020), and an optional due date. An event-triggered intention surfaces when its counterpart appears or its topic arises (catalog D7); a time-triggered one surfaces on its due date (D8). Resolution goes through the existing link and correct paths; a facade method for it enters only if the scenarios show callers get the recipe wrong.
+Open loops and commitments keep their subtypes (ADR-D-0005) and gain what the trigger route and the renderer need: a direction, an actor and a counterpart, so the character can owe and be owed (ADR-D-0020), and an optional due date. An event-triggered intention surfaces when its counterpart appears or its topic arises (catalog D7); a time-triggered one surfaces on its due date and keeps surfacing while overdue, until it is resolved (D8). Resolution goes through the existing link and correct paths; a facade method for it enters only if the scenarios show callers get the recipe wrong.
 
 ## 2.3 Treatment by supersession
 

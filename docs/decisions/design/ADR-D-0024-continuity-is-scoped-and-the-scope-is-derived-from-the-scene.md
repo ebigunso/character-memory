@@ -52,5 +52,6 @@ A consumer is found whose scope cannot be derived from any scene it can describe
 ## More Information
 
 - ADR-D-0011 in `superseded/` carries the original reasoning of 2026-05-08; its scoping decision is kept here in full.
+- ADR-D-0009's application-provided scope hint is the scene, including its custom value; the caller-facing type name that record mentions as an example of such a hint is the surface this record replaces, and its entity-neutrality decision is unchanged.
 - ADR-D-0019 defines the scene; ADR-D-0022 defines recall as activation by scene cues.
 - The v0.2 design draft carries the derivation questions for planning.
