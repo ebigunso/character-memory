@@ -1,4 +1,8 @@
-# v0.5 Design Draft: Controlled Associative Recall and Clustering
+# v0.5 Design Draft: Long-Horizon Shape and Associative Recall
+
+## Status of this draft
+
+Reframed on 2026-09-17. The phase's first job is long-horizon shape without loss: currency at scale, consolidation of periphery into gist with provenance through the generation port, query-time associative activation over the existing graph with no persisted structure, and familiarity derived from evidence. Decay is not a mechanism (ADR-D-0018). The durable AssociativeUnit, AssociativeMembership, and AssociationSupport design below stays in force as the design for when durable association enters, which happens only when long-horizon evaluations show query-time activation alone misses or costs too much. The roadmap's section 16 governs where this body disagrees.
 
 ## Version intent
 

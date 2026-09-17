@@ -1,4 +1,8 @@
-# v0.6 Design Draft: Assisted Remember Workflow and Memory Candidate Generation
+# v0.3 Design Draft: Memory Generation and Reflection
+
+## Status of this draft
+
+Renumbered from v0.6 on 2026-09-17 when the phase order was rearranged by product value. The body below is the earlier draft and is kept as the starting point for the phase discussion; the roadmap's section 14 carries the decided constraints (caller control, a processor port in the embedding-provider pattern, everything through prepare, validate, and commit, reflection as trigger plus bounded scoped selection plus provenance with no background job, privacy exclusions before external calls, the frame on every generated memory, stability for commitments, the default reading of "forget it") and the open questions the discussion must settle (port shape, default processors, write-time attention policy, admission states, the reflection trigger vocabulary, the behavioral evaluation tier). Where the body and section 14 disagree, section 14 governs.
 
 ## Version intent
 
@@ -32,7 +36,7 @@ The library does not persist the raw input.
 
 ## Relationship to v0.1.3
 
-v0.6 depends on v0.1.3.
+v0.3 depends on v0.1.3.
 
 Model/rule-assisted processors should produce:
 
@@ -56,7 +60,7 @@ commit pipeline
 
 ## Raw input boundary
 
-Raw input passed to v0.6 processors is transient processing input.
+Raw input passed to v0.3 processors is transient processing input.
 
 Character Memory may use that input to produce:
 
@@ -89,22 +93,9 @@ modality
 
 Those references remain opaque provenance handles. They do not require Character Memory core to resolve, retain, search, export, delete, redact, encrypt, or otherwise manage the underlying source material.
 
-## Why this comes after retrieval and governance work
+## Why this comes right after scoped continuity
 
-Generated memories are only useful if the system can evaluate whether they improve recall and continuity.
-
-By v0.6, the roadmap should already have:
-
-```text
-entity selectivity and fanout guardrails
-generation-ready write planning
-scoped continuity and reflection
-factual rigor and temporal validity
-retrieval traces and governance
-association/clustering behavior
-```
-
-Those layers make it possible to judge whether generated candidates help or pollute memory.
+Generated memories are only useful if the system can evaluate whether they improve recall and continuity. The write-plan validation path and the continuity evaluation harness both exist, and the harness already ingests dataset summaries as a stand-in for a generator, so the evidence to judge generated candidates is available now. Every later phase adds structures that only a producer can fill, and the benchmarks should run through the library's own ingestion path as early as possible.
 
 ## Goals
 
@@ -172,7 +163,7 @@ The library may provide default processors, but the commit path remains provider
 
 ## Candidate states
 
-v0.6 may introduce richer candidate/admission states:
+v0.3 may introduce richer candidate/admission states:
 
 ```text
 Proposed
@@ -187,7 +178,7 @@ These states are not required in v0.1.3.
 
 ## Commit policy
 
-v0.6 may add a convenience policy such as:
+v0.3 may add a convenience policy such as:
 
 ```text
 CommitAcceptedCandidates
