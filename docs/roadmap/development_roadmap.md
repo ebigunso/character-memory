@@ -264,6 +264,23 @@ entity types that encode application roles (user, assistant) are not core schema
 
 Recall is also relative to a moment: retrieval takes a reference time, and elapsed time since a memory is a retrieval signal with its own rationale, not only an ordering key.
 
+## 2.15 Recall is complete; forgetting is explicit
+
+No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression, archival, or supersession, each a recorded decision. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
+
+```text
+write-time attention decides what becomes memory
+query-time ranking weighs salience and elapsed time
+expression offers detail or gist
+suppression, archival, supersession are the only forgetting
+```
+
+## 2.16 Interpreting memories travel with the memory they interpret
+
+How a memory should be treated comes from other memories linked to it: a request not to raise it, a correction, a resolution, a framing, a note about its source. There is no treatment category and no annotation plane. When a memory item is admitted to a context pack, the current memory items linked to it item-to-item are admitted with it, and under pack pressure the pair is dropped rather than the neighbor. Item-to-item means the link's other end is an episode, observation, or derived memory; entity-mediated neighbors stay under selectivity and fanout.
+
+Recall is never gated by privacy or sensitivity by default. Every memory carries its frame (who was present, who said it, firsthand or told, in which setting), retrieval reports the frame, and any enforced boundary is an explicit query-time policy over the frame chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
+
 ---
 
 # 3. Version overview
@@ -1312,6 +1329,15 @@ Reflection avoids all-history scans through broad entities.
 Open loops and commitments can be retrieved by scope without assuming who the main actor is.
 ```
 
+## Design items decided 2026-09-17
+
+```text
+interpreting memories are admitted with the memory they interpret (invariant 2.16); this is the strongest case for the graph-only admission item
+open loops and commitments carry an actor and a counterpart, so the character can owe and be owed
+the current-state read takes a reference time and reports elapsed time since the scope was last touched
+no reinforce operation; familiarity and stability derive from evidence at query time
+```
+
 ---
 
 # 14. v0.3: factual rigor, temporal validity, and entity evolution
@@ -1704,9 +1730,6 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 ```rust
 let reflection_scope: Option<ContinuityScope> = None;
 memory.reflect(reflection_scope).await?;
-
-let signal: Option<ReinforcementSignal> = None;
-memory.reinforce(target_id, signal).await?;
 
 let continuity_scope: Option<ContinuityScope> = None;
 let open_loops = memory.get_open_loops(continuity_scope).await?;

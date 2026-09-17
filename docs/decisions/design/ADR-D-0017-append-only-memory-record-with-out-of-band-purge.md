@@ -14,7 +14,7 @@ warrant:
 depends_on: []
 implements: []
 supersedes: [ADR-D-0006-supersession-and-suppression.md]
-superseded_by: null
+superseded_by: ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md
 supersession_scope: partial
 ---
 

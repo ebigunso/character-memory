@@ -305,12 +305,6 @@ Illustrative shape:
 ```rust
 fn reflect(&self, scope: Option<&ContinuityScope>) -> Result<ReflectionResult, MemoryError>;
 
-fn reinforce(
-    &self,
-    target_id: &str,
-    signal: Option<&ReinforcementSignal>,
-) -> Result<(), MemoryError>;
-
 fn get_open_loops(
     &self,
     scope: Option<&ContinuityScope>,
