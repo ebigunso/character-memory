@@ -44,7 +44,7 @@ Retrieval is graph-authoritative and hybrid:
 
 - **Vector candidate recall:** uses embedded Qdrant Edge by default, or an explicit Qdrant service, to find semantically similar memory objects
 - **Graph expansion:** uses Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
-- **Temporal retrieval:** includes memories based on when they happened
+- **Temporal structure:** memories carry when they happened and are ordered by it in the context pack; a time-based retrieval signal is planned and not yet implemented
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 

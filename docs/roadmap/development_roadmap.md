@@ -29,6 +29,10 @@ bounded retrieval that remains useful over long timescales
 
 The design should not be evaluated only by top-k retrieval quality. It should be evaluated by whether a persistent character can behave as the same continuing participant over time while remaining correctable, inspectable, and scoped to grounded memory.
 
+## The v1.0 release-ready state
+
+v1.0 is the text-only release-ready state: a character whose input arrives as text, including transcripts, exercises recall and remembering that let it behave in a human-comparable way in how and what it remembers. The acceptance basis is the [continuity situation catalog](../design/continuity_situation_catalog.md): v1.0 is reached when the catalog's situations are met across the companion, small-circle, and independent-entity deployments, with every retrieval-level property passing deterministically and the behavioral qualities judged. Perception beyond text is an aspiration past v1.0, described in the unnumbered beyond-text horizon, and never a v1.0 gate.
+
 ---
 
 # 2. Cross-version invariants
@@ -81,6 +85,8 @@ current character signals
 current relationship state
 current factual beliefs, once the later belief layer exists
 ```
+
+Current context is presented for shaping behavior, so its rendering favors gist and stance over verbatim episode text.
 
 ## 2.5 Correction supersedes; the record is append-only
 
@@ -246,6 +252,18 @@ public raw-reference resolution
 
 Assisted remember workflows may accept raw or semi-raw input as transient processing input. They produce validated candidates and write plans; they do not persist the raw input.
 
+## 2.14 Memory is first-person
+
+A memory store has one remembering subject, and that subject is an ordinary entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone.
+
+```text
+the self is an Entity, identified by the application at construction or per scope
+no object type, entity type, or retrieval path treats the self as a special role
+entity types that encode application roles (user, assistant) are not core schema truth
+```
+
+Recall is also relative to a moment: retrieval takes a reference time, and elapsed time since a memory is a retrieval signal with its own rationale, not only an ordering key.
+
 ---
 
 # 3. Version overview
@@ -265,7 +283,8 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 | v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
 | v0.5 | Controlled associative recall and clustering | Query-time associative activation, graph-internal AssociativeUnit structures, member-level AssociativeMembership lifecycle, AssociationSupport evidence, cluster summaries, promotion/decay policy, and bounded cluster expansion for serendipitous recall without broad pairwise edge pollution. |
 | v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from caller-provided transient conversation, transcript-like, or structured interaction input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. Raw input is not persisted by Character Memory core. |
-| v1.0+ | Multimodal and embodied expansion | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory, and embodied context through symbolic memory objects and opaque external source references. Raw media and sensor logs are not stored by Character Memory core. |
+| v1.0 | Text-only release-ready state | Defined in section 1: the continuity situation catalog's situations met for text input at both evaluation tiers. Reached by the numbered phases above it. |
+| Beyond text | Multimodal and embodied expansion (unnumbered horizon) | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory, and embodied context through symbolic memory objects and opaque external source references. Raw media and sensor logs are not stored by Character Memory core. An aspiration past v1.0, never a v1.0 gate. |
 
 Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
 
@@ -1564,9 +1583,9 @@ Generated candidates use the same validation and commit path as manual candidate
 
 ---
 
-# 18. v1.0+: multimodal and embodied expansion
+# 18. Beyond text: multimodal and embodied expansion (unnumbered horizon)
 
-Detailed draft: [`v1_0_multimodal_embodied_expansion.md`](roadmap-phases/v1_0_multimodal_embodied_expansion.md)
+Detailed draft: [`beyond_text_multimodal_embodied_expansion.md`](roadmap-phases/beyond_text_multimodal_embodied_expansion.md)
 
 ## New concepts
 
@@ -1588,7 +1607,7 @@ support object/place/action memory
 support embodied context when practical
 ```
 
-This is a future path, not starter scope.
+This is an aspiration past the v1.0 text-only release-ready state. It carries no version number and is never a v1.0 gate.
 
 ---
 
