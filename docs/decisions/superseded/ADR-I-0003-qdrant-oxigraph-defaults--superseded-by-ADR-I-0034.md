@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: implementation
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: implementation/ADR-I-0023-embedded-qdrant-edge-vector-candidate-store.md
-supersession_scope: partial   # the vector-backend default only (embedded Qdrant Edge is the default); backend roles remain authoritative
+superseded_by: ../implementation/ADR-I-0034-backend-roles-and-defaults.md
+supersession_scope: null   # the vector-backend default only (embedded Qdrant Edge is the default); backend roles remain authoritative
 ---
 
 # ADR-I-0003: Use Qdrant and Oxigraph as default storage backends
+
+Retired on 2026-09-17. Replaced by ADR-I-0034.
 
 ## Context and Problem Statement
 
