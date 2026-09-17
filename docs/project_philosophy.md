@@ -48,6 +48,8 @@ Character Memory should not assume that memory is always centered on a single us
 
 Therefore the schema should treat entities equally. A user, assistant, player, protagonist, NPC, place, project, object, faction, organization, or topic can all be continuity anchors. Application-specific layers may interpret domain roles, but the core memory system should not hard-code them.
 
+Memory is first-person. The remembering character is itself an entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone. What the character did yesterday has an answer regardless of who asks. Other people are entities in the character's life, not owners of its memory.
+
 ---
 
 ## 3. Problem Being Solved
@@ -103,7 +105,7 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 |---|---|---|
 | Episode | A remembered event or interaction. | Store event content, time, participants, context, and provenance. Preserve enough episode detail and source provenance for later correction, inspection, and reflection. |
 | Entity | A person, project, place, object, topic, character, organization, or recurring concept. | Extract and link entities so memories can be retrieved through relationships, not only similar wording. Treat entity roles as application-level interpretation, not core schema truth. |
-| Temporal context | When something happened and how events relate over time. | Support recency, sequence, duration, intervals, anniversaries, and change over time. |
+| Temporal context | When something happened and how events relate over time. | Support recency, sequence, duration, intervals, anniversaries, change over time, and elapsed time relative to now. |
 | Relation | A typed or inferred connection between memories and entities. | Represent relationships such as involved in, caused by, follows from, contradicts, resolved by, or similar to. |
 | Salience | Why a memory matters. | Rank and store importance using behavioral, emotional, practical, or relational weight. Salience should evolve. |
 | Reflection | A higher-level interpretation derived from multiple memories. | Generate summaries, patterns, and stable observations with links back to source episodes. |
@@ -116,6 +118,8 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 ## 7. Retrieval Philosophy
 
 Retrieval should model recollection, not search alone. Human-like recall is associative: a person, character, place, time, recurring theme, object, project, or recent emotional tone can bring back relevant memories even when the wording is different.
+
+Retrieved memory is material the character reconstructs a response from, not a record it recites. History should bend the response rather than appear in it as citations. The best continuity is invisible until it is tested.
 
 Character Memory should therefore combine multiple retrieval signals:
 
@@ -164,7 +168,7 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **Prefer episodes over isolated facts.** Facts are useful, but character is shaped by remembered events. Preserve the context in which facts emerged.
 - **Preserve provenance.** Derived reflections and character signals should link back to source memories. This keeps the system auditable and correctable.
 - **Treat raw source material as evidence, not the memory substrate.** Character Memory should model remembered experience through episodes, observations, entities, links, reflections, and current continuity views. Source material should ground those memories through provenance, but the core memory model should not be shaped around raw archival logs.
-- **Make time a first-class dimension.** A timestamp is not enough. The system should understand before and after, recent and old, repeated and one-off, ongoing and resolved.
+- **Make time a first-class dimension.** A timestamp is not enough. The system should understand before and after, recent and old, repeated and one-off, ongoing and resolved, and how long it has been. Recall happens at a moment, and the gap since a memory is part of its meaning: a promise from last week and one from last year are not the same memory, and a person who stopped appearing months ago is remembered differently from one seen yesterday.
 - **Make entities first-class.** People, projects, places, characters, objects, and recurring concepts are anchors for recall. Entity continuity is central to relationship and scope continuity.
 - **Keep entity policy use-case agnostic.** The core library should not special-case user, assistant, player, NPC, protagonist, or other application roles. Application-specific layers can provide scope and role hints.
 - **Bound entity expansion.** Recurring entities should support recall without causing unbounded graph traversal or accidental pairwise link growth.
@@ -201,7 +205,7 @@ The API should reinforce the intended mental model. Names and workflows should m
 
 ### 9.3 Prompt integration expectations
 
-The library should make it easy for an application to insert memory into the LLM context in a concise, grounded form. Memory context should distinguish between raw remembered episodes, derived reflections, and stable character signals.
+The library should make it easy for an application to insert memory into the LLM context in a concise, grounded form. Memory context should distinguish between raw remembered episodes, derived reflections, and stable character signals, so the application can decide what the character says and what it is merely shaped by. Any rendering help the library offers follows that distinction and favors gist and stance over quotation.
 
 Example memory context categories:
 
@@ -221,7 +225,7 @@ Example memory context categories:
 - **Avoid personality overwrites.** Character should be reinforced through memory, not replaced by arbitrary labels.
 - **Avoid false intimacy.** The system should only use memories it actually has and should make corrections possible.
 - **Avoid unexplained recall.** When a memory influences behavior, developers should be able to inspect why it was selected.
-- **Avoid third-person archive framing.** This is not a world chronicle. It is memory for a continuing assistant, character, or relationship context.
+- **Avoid third-person archive framing.** This is not a world chronicle. It is memory for a continuing assistant, character, or relationship context, held from that character's own point of view.
 - **Avoid anthropomorphic claims in documentation.** Describe behavioral continuity and memory-shaped character without claiming consciousness.
 - **Avoid hard-coded role assumptions in the core library.** A system that only understands user/assistant roles will not serve companions, simulations, games, research systems, or developer tools well.
 - **Avoid unbounded traversal through recurring entities.** Entity continuity is valuable, but broad entities need scope, selectivity, and supporting evidence.
@@ -242,6 +246,8 @@ Example memory context categories:
 ---
 
 ## 12. Success Criteria
+
+These outcomes summarize a fuller standard. The continuity situation catalog describes, from lived experience inward, how a character with human-comparable memory behaves: what it recalls unprompted and what it lets fade, how it treats the people it knows well and the ones it barely knows, how it handles being corrected, being told about itself, and the passage of time. The implementation is successful to the degree that a character behaves that way across those situations, whatever it perceives through and whatever mechanism stands behind it.
 
 The implementation should be considered successful if it enables these outcomes:
 

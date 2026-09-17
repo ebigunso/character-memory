@@ -1,8 +1,8 @@
-# v1.0+ Design Draft: Multimodal and Embodied Expansion
+# Beyond Text: Multimodal and Embodied Expansion
 
-## Version intent
+## Intent
 
-This is a future expansion path, not starter scope.
+This is an unnumbered horizon past the v1.0 text-only release-ready state, not a versioned phase and never a v1.0 gate. It records the aspiration and the hooks v0.x keeps open for it.
 
 The v0.x library should support chat and voice transcripts. It should not attempt to fully support robots, continuous video, spatial memory, or embodied action from the beginning.
 
@@ -236,4 +236,4 @@ memory links
 schema versioning
 ```
 
-v1.0+ adds modality-specific interpretation only when there is a real use case.
+Modality-specific interpretation is added only when there is a real use case.

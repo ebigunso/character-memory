@@ -131,3 +131,5 @@ A recurring person stops appearing; their relationship memory shifts from active
 Phase planning: when a roadmap phase introduces continuity concepts, its design document should name the situations here it intends to serve and be reviewed against their ideal behaviors.
 Evaluation planning: the evaluation scenario library should map its scenarios to situations here, and gaps in that mapping are the standing scenario backlog; the mapping itself lives with the scenario library, not in this document.
 Situations whose R-tier substrate can be tested with current concepts should be covered before behavioral evaluation is attempted for them.
+
+Release standard: this catalog is the acceptance basis for the library's release-ready state, as the roadmap defines it. A situation added here widens the release bar, which is why the document changes only when the understanding of the situations themselves changes.
