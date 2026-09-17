@@ -1,8 +1,12 @@
-# v0.3 Design Draft: Factual Rigor, Temporal Validity, and Entity Evolution
+# v0.4 Design Draft: Temporal Validity, Attribution, and Entity Evolution
+
+## Status of this draft
+
+Renumbered from v0.3 and narrowed on 2026-09-17. The phase keeps validity intervals and volatility on derived memories, attribution completing the frame (who asserted, firsthand or told), entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories about the source. The first-class Assertion, Claim, EvidenceLink, BeliefAssessment, and SourceAssessment objects described below are demand-conditional behind ADR-D-0005's revisit clause and enter only when measured use shows corrections and contradictions frequent enough that derived subtypes no longer carry them. The roadmap's section 15 governs where this body disagrees.
 
 ## Version intent
 
-v0.3 adds stronger factual memory without replacing the episode-backed continuity model. It answers:
+v0.4 adds stronger factual memory without replacing the episode-backed continuity model. It answers:
 
 ```text
 Who said this?
@@ -17,7 +21,7 @@ This is a supporting subsystem, not the root of Character Memory.
 
 ---
 
-# 1. Why this comes after v0.1/v0.2
+# 1. Why this comes after scoped continuity and generation
 
 For Character Memory, the first priority is continuity of experience and relationship. But a long-running memory system also needs to handle:
 
@@ -33,7 +37,7 @@ historical aliases
 historical roles and relationships
 ```
 
-v0.3 adds this rigor when the starter system is already useful and scoped continuity exists.
+This phase adds that rigor once scoped continuity exists and generated memory gives it something to be rigorous about.
 
 ---
 
@@ -147,7 +151,7 @@ This may be implemented through claims at first rather than a separate class if 
 
 A single timestamp is not enough.
 
-v0.3 should support:
+v0.4 should support:
 
 ```text
 asserted_at

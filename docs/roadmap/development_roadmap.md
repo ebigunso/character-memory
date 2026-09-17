@@ -191,7 +191,7 @@ Intent:
 
 Preserve human-like "this reminds me of that" recall without letting recurring entities create noisy graph cliques or false continuity.
 
-v0.5 implements this through controlled associative recall, graph-internal associative units, member-level lifecycle, association support evidence, and bounded expansion.
+The long-horizon phase implements this through query-time activation first, and through graph-internal associative units, member-level lifecycle, association support evidence, and bounded expansion only when measurement shows activation alone is not enough.
 
 ## 2.12 Generated and manual writes should share one safe path
 
@@ -213,7 +213,7 @@ future generated input
 
 Future assisted generation should improve usability without weakening Character Memory invariants.
 
-v0.6 generated processors plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+The generation phase's processors (section 14) plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
 
 ## 2.13 Core stores curated memory and opaque source provenance, not raw logs
 
@@ -296,15 +296,15 @@ Recall is never gated by privacy or sensitivity by default. Every memory carries
 | v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md). |
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
-| v0.2 | Scoped continuity and reflection | `ContinuityScope`, scoped reflection, relationship state between arbitrary entities, character signals for continuing entities, open-loop/commitment lifecycle, and current continuity views. |
-| v0.3 | Factual rigor, temporal validity, and entity evolution | Assertions, claims, evidence links, belief assessments, source assessment, temporal validity, entity drift handling, and current-belief views. |
-| v0.4 | Retrieval observability and governance | Retrieval traces, context subgraphs, validation rules, graph health reports, policy diagnostics, rejected expansion traces, cluster/activation diagnostics, and retention assessment. |
-| v0.5 | Controlled associative recall and clustering | Query-time associative activation, graph-internal AssociativeUnit structures, member-level AssociativeMembership lifecycle, AssociationSupport evidence, cluster summaries, promotion/decay policy, and bounded cluster expansion for serendipitous recall without broad pairwise edge pollution. |
-| v0.6 | Assisted remember workflow and memory candidate generation | Model/rule-assisted generation of memory candidates from caller-provided transient conversation, transcript-like, or structured interaction input, using the v0.1.3 write-plan path and later retrieval/governance safeguards. Raw input is not persisted by Character Memory core. |
+| v0.2 | Scoped continuity and retrieval quality | Scope as a value key, current-state reads with elapsed time, the frame on every memory with partitions as explicit policy, open-loop and commitment status and direction, interpreting-neighbor co-retrieval, graph-only admission, selectivity widening or its declination, the temporal signal, a pack renderer, and an example loop. |
+| v0.3 | Memory generation and reflection | A caller-controlled processor port that turns transient raw or structured input, and scoped remembered episodes, into validated candidates and write plans through the v0.1.3 path; privacy exclusions before external calls; the behavioral evaluation tier begins. Raw input is not persisted. |
+| v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the frame, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
+| v0.5 | Long-horizon shape | Currency at scale, consolidation of periphery into gist with provenance, query-time associative activation with no persisted structure, evidence-derived familiarity. Durable associative units enter only on measured demand. |
+| Dissolved | Retrieval observability and governance | Delivered in the v0.1 family or moved to the phases and the evaluation repository that need its pieces (section 17). |
 | v1.0 | Text-only release-ready state | Defined in section 1: the continuity situation catalog's situations met for text input at both evaluation tiers. Reached by the numbered phases above it. |
 | Beyond text | Multimodal and embodied expansion (unnumbered horizon) | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory, and embodied context through symbolic memory objects and opaque external source references. Raw media and sensor logs are not stored by Character Memory core. An aspiration past v1.0, never a v1.0 gate. |
 
-Revisit the split if v0.4 becomes too small after implementation planning, or if advanced association work becomes necessary before full governance. Default preference should remain: observability/governance before advanced association, because association features can create new edges and should be built after the system can explain and validate retrieval behavior.
+The order from v0.2 onward is by builder-visible value with generation early, because every later structure needs a producer and the evaluation harness can now judge generated memory. Durable association structures stay demand-conditional because they create new edges and should be built only after query-time activation has been measured.
 
 ---
 
@@ -797,7 +797,7 @@ This phase is not the full assisted generation workflow.
 v0.1.3:
   package, validate, and commit caller-provided or deterministic memory candidates
 
-v0.6:
+the generation phase:
   generate memory candidates from raw conversation/transcript-like input
 ```
 
@@ -1105,11 +1105,11 @@ RetrievalStatsStore remains derived policy metadata only.
 No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
 ```
 
-## v0.6 integration path
+## Generation-phase integration path
 
-v0.6 model-assisted processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+The generation phase's model-assisted processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
 
-The v0.6 work owns generated-candidate admission states such as:
+The generation phase owns generated-candidate admission states such as:
 
 ```text
 Accepted
@@ -1284,329 +1284,219 @@ No public facade change beyond the telemetry field, the published maximum-surfac
 
 ---
 
-# 13. v0.2: scoped continuity and reflection
+# 13. v0.2: scoped continuity and retrieval quality
 
 Detailed draft: [`v0_2_scoped_continuity_reflection.md`](roadmap-phases/v0_2_scoped_continuity_reflection.md)
+
+The phase order from v0.2 onward was rearranged on 2026-09-17 by product value: what a builder observes on day one comes first, memory generation moves up because every later structure needs a producer and the evaluation harness can now judge generated memory, and the former observability phase is dissolved into the phases that need its pieces (section 17).
 
 ## New concepts
 
 ```text
-ContinuityScope
-ReflectionJob
-RelationshipState
-CharacterSignal
-OpenLoop
-Commitment
-CurrentContinuityView
+ContinuityScope           a value key (entity, entity pair, thread, source conversation, custom), carried on derived memories, never a stored object type
+CurrentState intent       a retrieval intent that reads current continuity state for a scope without vector recall (ADR-I-0016, pulled forward)
+reference time            retrieval takes a moment; elapsed time is a ranking signal with its own rationale (invariant 2.14)
+frame partition           an explicit application-chosen query-time policy over the frame (ADR-D-0019), never a default
+open-loop and commitment status and direction   active or resolved, with an actor and a counterpart, on the existing derived subtypes
+interpreting-neighbor co-retrieval              invariant 2.16, admitted with the memory it interprets
+pack renderer             a canonical rendering of a pack or current-state view, gist and stance over quotation
+example loop              a minimal retrieve, respond, remember loop in the library's own examples
 ```
 
 ## Goals
 
 ```text
-make memory shape future behavior more explicitly
-track active commitments and unresolved scoped matters
-derive relationship/project/entity-specific character signals
-separate current continuity context from raw historical memories
-avoid assuming continuity is centered on one user-assistant relationship
+give a builder the session-open primer: current state for a scope, with elapsed time since
+keep one character across settings: the frame travels with every memory, partitions are explicit policy
+let "you said you would" work: open loops and commitments with status and direction
+admit graph-only evidence and interpreting neighbors so derived memories do not crowd out what was said
+apply selectivity beyond entity roots, or decline it with evidence
+make time a retrieval signal, so that the README's temporal claim becomes true
 ```
 
 ## Inherited obligations from the v0.1.5 closeout
 
 ```text
-own the deferred admission/ranking design item (ranking credit for graph-only evidence)
+own the deferred admission/ranking design item (ranking credit for graph-only evidence); invariant 2.16 is its strongest case
 own the deferred selectivity-widening item (non-entity-keyed statistics or explicit declination)
-build scoped/person-keyed evaluation scenarios before implementing ContinuityScope
-answer the intra-process concurrency question ReflectionJob introduces
-```
-
-## Acceptance criteria additions
-
-```text
-Reflection jobs require explicit or inferred ContinuityScope.
-CurrentContinuityView is generated for a scope.
-RelationshipState can describe arbitrary entity relationships.
-CharacterSignal can attach to any continuing entity or scope.
-Reflection avoids all-history scans through broad entities.
-Open loops and commitments can be retrieved by scope without assuming who the main actor is.
+build scoped/person-keyed evaluation scenarios (catalog B1 to B3) before implementing scope; B1 and B2 measure the frame's presence and non-disclosure, never a failure to surface (ADR-D-0019)
+answer the concurrent-facade-call question; with no background derivation inside the library the reflection-scheduling form of it dissolves
 ```
 
 ## Design items decided 2026-09-17
 
 ```text
-interpreting memories are admitted with the memory they interpret (invariant 2.16); this is the strongest case for the graph-only admission item
+interpreting memories are admitted with the memory they interpret (invariant 2.16)
 open loops and commitments carry an actor and a counterpart, so the character can owe and be owed
 the current-state read takes a reference time and reports elapsed time since the scope was last touched
 no reinforce operation; familiarity and stability derive from evidence at query time
 the archived and deleted retention states and the archive-thread-derived-memories knob are value-audit deletion candidates; thread status keeps dormant and resolved as currency
+the user and assistant entity types are value-audit deletion candidates under ADR-D-0020
+scope is a value, not a seventh object type; a stored scope object needs a consumer a graph query over scope keys cannot serve
 ```
 
----
-
-# 14. v0.3: factual rigor, temporal validity, and entity evolution
-
-Detailed draft: [`v0_3_factual_rigor_temporal_validity_entity_evolution.md`](roadmap-phases/v0_3_factual_rigor_temporal_validity_entity_evolution.md)
-
-## New concepts
+## Not in v0.2
 
 ```text
-Assertion
-Claim
-EvidenceLink
-BeliefAssessment
-SourceAssessment
-TemporalValidity
-EntityStateHistory
-CurrentBeliefView
-```
-
-## Goals
-
-```text
-distinguish source reports from truth
-support contradictions and updates
-track temporal validity and volatility
-represent entity drift over time
-show why factual beliefs are accepted or rejected
-```
-
-This is important, but it should not block the starter because Character Memory's first value is continuity, not full truth maintenance.
-
----
-
-# 15. v0.4: retrieval observability and governance
-
-Detailed draft: [`v0_4_retrieval_observability_governance.md`](roadmap-phases/v0_4_retrieval_observability_governance.md)
-
-## New concepts
-
-```text
-RetrievalTrace
-ActivationTrace
-RejectedExpansionTrace
-ClusterExpansionTrace
-MembershipDecisionTrace
-AssociationCandidateDiagnostic
-CoactivationDiagnostic
-ContextSubgraph
-ValidationRules
-GraphHealthReport
-RetentionAssessment
-PolicyDiagnostics
-```
-
-## Goals
-
-```text
-make retrieval decisions inspectable
-show bounded expansion paths
-validate graph/retrieval invariants
-detect high-fanout relation patterns
-evaluate retention/downranking candidates
-report policy behavior over time
-make rejected low-information expansions inspectable
-show why broad-entity-only expansion was blocked
-show activation paths used during retrieval
-show when weak coactivation was considered but not persisted
-show cluster membership inclusion/exclusion rationale
-diagnose candidate membership promotion, demotion, decay, or rejection
-detect over-broad clusters and high-fanout cluster expansions
-```
-
-## Additional acceptance criteria
-
-```text
-RetrievalTrace can explain why broad entity expansion was limited.
-RetrievalTrace can distinguish strong association, candidate association, and ordinary entity incidence.
-ActivationTrace can show which cues activated which entities, concepts, scopes, threads, or associative units.
-RejectedExpansionTrace records when a low-selectivity entity match was insufficient for expansion.
-ClusterExpansionTrace records which AssociativeUnit was used and which memberships were included, excluded, or considered.
-MembershipDecisionTrace records member status, role, strength, and rationale used during retrieval.
-GraphHealthReport can identify clusters with excessive candidate members, stale memberships, or high expansion fanout.
-Diagnostics remain report-only and do not override Oxigraph lifecycle/currentness/provenance authority.
-```
-
-## Additional non-goal
-
-v0.4 should not implement the associative cluster machinery itself. It should make retrieval decisions and blocked expansions observable so v0.5 can safely add controlled associative recall.
-
-## Retrieval intent
-
-v0.4 adds query-time retrieval intent as part of retrieval governance.
-
-Planned shape:
-
-```rust
-enum RetrievalIntent {
-    Continuity,
-    CurrentState,
-    CorrectionReview,
-    SourceAudit,
-    AssociativeProbe,
-}
-```
-
-`RetrievalIntent` is an input to retrieval policy. It is not persisted on memory objects.
-
-The default intent is `Continuity`.
-
-`SourceAudit` returns provenance paths and source-reference metadata. It does not resolve or search raw logs.
-
-`AssociativeProbe` exposes weak activation and association diagnostics. It does not automatically promote weak associations to durable graph truth.
-
----
-
-# 16. v0.5: controlled associative recall and clustering
-
-Detailed draft: [`v0_5_controlled_associative_recall_clustering.md`](roadmap-phases/v0_5_controlled_associative_recall_clustering.md)
-
-## New concepts
-
-```text
-AssociativeUnit
-AssociativeMembership
-AssociationSupport
-QueryTimeActivation
-AssociationPromotionPolicy
-AssociationDecayPolicy
-ClusterSummary
-```
-
-## Goals
-
-```text
-support human-like serendipitous recall
-avoid broad-entity clique growth
-represent associative structures inside graph authority
-track member-level status, role, support evidence, and rationale
-support query-time activation before durable association
-promote associations only with repeated or multi-signal support
-use summaries and exemplars for retrieval quality
-keep cluster expansion bounded and explainable
-```
-
-## Association support over durable association scores
-
-v0.5 persists association structure and support evidence.
-
-Persisted graph concepts:
-
-```text
-AssociativeUnit
-AssociativeMembership
-AssociativeMembership.status
-AssociativeMembership.role, when needed
-AssociationSupport
-AssociationSupport.support_type
-AssociationSupport.support_source_id
-AssociationSupport.created_at
-```
-
-Derived or rebuildable values:
-
-```text
-membership_strength
-membership_confidence
-membership_salience
-supporting_signal_count
-last_reinforced_at
-activation score
-review priority
-```
-
-Durable graph truth is the associative unit, membership lifecycle, and support evidence. Retrieval-time and maintenance-time policy compute scores from that evidence.
-
----
-
-# 17. v0.6: assisted remember workflow and memory candidate generation
-
-Detailed draft: [`v0_6_assisted_remember_workflow_memory_candidate_generation.md`](roadmap-phases/v0_6_assisted_remember_workflow_memory_candidate_generation.md)
-
-## Intent
-
-Let callers provide bounded raw, transcript-like, or structured interaction input transiently to `remember()`, while the library generates validated memory candidates and write plans.
-
-The caller still decides:
-
-```text
-when to call remember()
-what input to offer
-what processing policy to use
-whether generated candidates are committed, reviewed, or discarded
-where source material is retained outside Character Memory, if retained
-```
-
-The library helps decide:
-
-```text
-how offered experience becomes memory candidates
-how candidates are validated
-how candidates preserve provenance
-how accepted candidates are committed
-```
-
-The library does not persist the raw input.
-
-## Why this comes later
-
-Assisted generation should wait until the memory substrate has stronger retrieval quality, scope handling, factual rigor, observability, governance, and association/clustering behavior.
-
-The generation workflow will be shaped by what the library can store and how retrieval behaves. Implementing it too early risks generating plausible-looking memory objects that degrade continuity.
-
-## Dependency on v0.1.3
-
-v0.6 should use the v0.1.3 write-plan path.
-
-Generated processors should produce:
-
-```text
-MemoryCandidate
-RememberWritePlan
-CandidateProvenance
-RememberDiagnostics
-```
-
-They should not bypass validation or commit directly to stores.
-
-## Possible generated candidates
-
-```text
-Episode candidates
-Observation candidates
-Entity candidates
-Thread/scope link candidates
-DerivedMemory candidates
-salience/admission candidates
-natural embedding surfaces
-memory link candidates
-```
-
-## Non-goals
-
-Do not make v0.6 an autonomous memory agent that scans logs without caller intent.
-
-The caller should still control:
-
-```text
-when raw input is offered
-which raw input is offered
-which processors are enabled
-what privacy policy applies
-whether candidates require review
+reflection that generates text: the generation phase (section 14); v0.2 may emit a "this scope has accumulated enough to reflect on" signal and nothing more
+first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0005)
+a CurrentContinuityView type: it is the pack under the CurrentState intent
+the seven retrieval modes of the earlier draft: intent and scope hint replace them
+ReflectionJob as a stored object
 ```
 
 ## Acceptance criteria
 
 ```text
-Caller can pass raw chat/transcript-like input and receive a RememberWritePlan.
-Generated DerivedMemory candidates include provenance.
-Explicit corrections generate correction candidates.
-Explicit commitments generate commitment/open-loop candidates.
-Entity candidates are resolved through graph authority rather than direct model-minted IDs.
-Thread/scope links are optional and confidence-scored.
-Embedding text is natural language, not metadata dumps.
-Generation diagnostics expose accepted, rejected, and deferred candidates.
-Privacy exclusions are applied before external processor calls.
+A current-state read for a scope returns current derived state and active threads without vector recall, with elapsed time since the scope was last touched.
+A memory learned in one setting is admitted when retrieved for another, with its frame reported; a partition applied as a query option omits across the frame and the trace records the applied policy.
+Open loops and commitments can be retrieved by scope and by direction without assuming who the main actor is; resolution goes through the existing link and correct paths.
+An interpreting neighbor is admitted with the memory it interprets, and pack pressure drops the pair, never the neighbor alone.
+A memory reachable only through graph structure can be admitted over a vector-scored item, and the pollution and context-size baselines of ADR-I-0022 are re-measured once.
+Retrieval produces the temporal rationale category, and the temporal-patterns and departure scenarios pass.
+Selectivity beyond entity roots is either applied with its new signal or declined with recorded evidence.
+The pack renderer and the example loop exist, and the README describes what ships.
+```
+
+---
+
+# 14. v0.3: memory generation and reflection
+
+Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3_memory_generation_and_reflection.md)
+
+## Intent
+
+Let callers offer bounded raw, transcript-like, or structured interaction input transiently, and let the library produce validated memory candidates and write plans from it. Reflection is the same capability applied to remembered episodes within a scope instead of to transient input. The library does not persist the raw input.
+
+This phase moves up from its earlier position as v0.6 because the two reasons for deferring it no longer hold: the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether generated memory helps or pollutes (v0.1.4 onward). Every structure the later phases add needs a producer, and the benchmarks already ingest dataset summaries as a stand-in for one.
+
+## Decided constraints
+
+```text
+generation is caller-controlled: when to call, what input to offer, which processors may run, what privacy policy applies, whether candidates are committed, reviewed, deferred, or discarded
+generation is a port the application implements or a default processor it opts into, in the pattern of the embedding provider; the library never depends on one model vendor
+every generated candidate enters through prepare, validate, and commit (invariant 2.12); nothing bypasses provenance, lifecycle, or graph-authority checks
+reflection is a trigger plus bounded scoped input selection under the v0.1.2 guardrails plus a provenance record tying outputs to input episodes; there is no background job inside the library
+privacy exclusions apply before any external processor call
+the frame (who was present, who said it, firsthand or told, in which setting) is recorded on every generated memory (ADR-D-0019)
+commitments and instructions are written with stability that keeps them from fading in ranking (ADR-D-0018)
+"forget it" defaults to remembering the request as an observation linked to the content; suppression is chosen only when wording and relationship warrant it
+ADR-I-0013's revisit clause is triggered by this phase; deterministic helpers stay deterministic, and inference lives behind the processor boundary
+```
+
+## Open questions for the phase discussion
+
+```text
+the processor port shape: one port with input kinds, or one per candidate family
+whether the library ships default processors, and behind which feature
+write-time attention as an application-supplied admission policy: its default and its tunables
+candidate admission states beyond the v0.1.3 set
+the reflection trigger vocabulary and what a caller receives
+the philosophy principle "the library helps decide what is remembered", written once the above is settled
+the behavioral evaluation tier, scheduled with this phase because the deterministic tier cannot fully measure generated memory
+```
+
+## Acceptance criteria
+
+```text
+Caller can pass raw chat or transcript-like input and receive a RememberWritePlan; the raw input is not persisted.
+Generated candidates preserve caller-supplied source references and spans, and every generated derived memory has provenance.
+Explicit corrections generate correction candidates; explicit commitments generate commitment and open-loop candidates with direction.
+Entity candidates resolve through graph authority rather than model-minted final IDs.
+A reflection over a scope selects bounded input under the selectivity guardrails and its outputs trace to the input episodes.
+Generation diagnostics expose accepted, rejected, deferred, and review-needed candidates.
 Generated candidates use the same validation and commit path as manual candidates.
+The benchmarks run through the library's own ingestion path, and the behavioral tier has its first scenarios.
+```
+
+---
+
+# 15. v0.4: temporal validity, attribution, and entity evolution
+
+Detailed draft: [`v0_4_temporal_validity_attribution_entity_evolution.md`](roadmap-phases/v0_4_temporal_validity_attribution_entity_evolution.md)
+
+## Intent
+
+Give memories a validity in time, a source, and a history of the entities they concern, without introducing a belief ontology. This is the earlier factual-rigor phase narrowed to the parts with builder-visible value.
+
+## In scope
+
+```text
+validity intervals and volatility on derived memories: valid from, valid until, review after
+attribution: who asserted a memory and whether it was firsthand or told, on observations and derived memories, completing the frame
+entity aliases, roles, and relationships over time, without destructive overwrite
+current-belief filtering as currency: stale or expired derived memories leave current views and stay recallable
+source reliability as derived memories about the source, scoped by domain, never a global score
+```
+
+## Demand-conditional, behind ADR-D-0005's revisit clause
+
+```text
+Assertion, Claim, EvidenceLink, BeliefAssessment, SourceAssessment as first-class objects
+a normalized belief ontology and contradiction machinery
+```
+
+These enter only when measured use shows corrections and contradictions frequent enough that derived subtypes no longer carry them.
+
+## Acceptance criteria
+
+```text
+A derived memory can carry a validity interval, and an expired one is omitted from current views with that reason and remains recallable.
+Every observation and derived memory reports who asserted it and whether it was firsthand or told.
+The system can represent that an entity had one name, role, or relationship during one interval and another later.
+Hearsay and being-told-about-yourself scenarios (catalog C3, C5) pass at the retrieval tier.
+Corrections and supersession remain provenance-preserving.
+```
+
+---
+
+# 16. v0.5: long-horizon shape
+
+Detailed draft: [`v0_5_long_horizon_shape_and_associative_recall.md`](roadmap-phases/v0_5_long_horizon_shape_and_associative_recall.md)
+
+## Intent
+
+Keep a memory that accumulates for years usable and human-comparable without losing anything: currency at scale, consolidation of periphery into gist with provenance, and query-time associative recall. Decay is not a mechanism (ADR-D-0018); bounded context comes from ranking, consolidation, and currency.
+
+## In scope
+
+```text
+currency at scale: relationships that ended, threads that resolved, signals no longer reinforced leave current views and stay recallable
+consolidation: periphery summarized into gist as derived memories with provenance, through the generation port
+query-time associative activation over the existing graph, bounded by selectivity, with no persisted structure
+recognition and familiarity derived from evidence: a returning stranger is recognized where a person would not
+persisted retrieval footprints only if repeated-coactivation signals need history, decided by measurement
+```
+
+## Demand-conditional
+
+```text
+durable AssociativeUnit, AssociativeMembership, and AssociationSupport structures with member-level lifecycle (ADR-D-0013, ADR-D-0014, ADR-I-0014, ADR-I-0017 stay in force as the design for when they enter)
+```
+
+They enter only when long-horizon evaluations show query-time activation alone misses or costs too much.
+
+## Acceptance criteria
+
+```text
+Long-horizon scenarios (catalog C2, C6) pass: intimates stay rich, periphery is gist, a departed person is remembered fully and no longer shapes default behavior.
+Query-time activation can retrieve weakly related memories without creating durable pairwise edges, and the trace shows the activation path.
+No memory's eligibility changes with time; every omission from a current view names a currency decision.
+```
+
+---
+
+# 17. Dissolved: retrieval observability and governance
+
+The earlier v0.4 phase is dissolved as of 2026-09-17 and has no draft. Its pieces went where they are needed:
+
+```text
+retrieval traces, section assignments, selectivity and expansion traces, lifecycle omissions   delivered in the v0.1 family; each later phase adds the trace fields its mechanism needs
+RetrievalIntent (ADR-I-0016, unchanged)   Continuity and CurrentState in v0.2; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation
+retention assessment and retention policy hooks   replaced by currency (ADR-D-0018); the redacted and deleted states were contradictions of ADR-D-0021
+validation rules   the write path already validates; invariant checks over stores are evaluation-repository tooling (ADR-I-0019)
+graph health reports and policy diagnostics   evaluation-repository reports over runs, not library surface
+persisted first-class RetrievalTrace objects   only if repeated-coactivation signals need retrieval history (v0.5), decided by measurement
 ```
 
 ---
@@ -1729,58 +1619,44 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 
 ## v0.2 API additions
 
+Illustrative shape; the retrieval context grows a scope hint, an intent, and a reference time, and a renderer turns a pack into prompt text. Resolution of open loops and commitments goes through the existing link and correct paths.
+
 ```rust
-let reflection_scope: Option<ContinuityScope> = None;
-memory.reflect(reflection_scope).await?;
-
-let continuity_scope: Option<ContinuityScope> = None;
-let open_loops = memory.get_open_loops(continuity_scope).await?;
-let commitments = memory.get_commitments(continuity_scope).await?;
-
-let evidence: Option<EvidenceInput> = None;
-memory.resolve_commitment(commitment_id, evidence).await?;
+let context = RetrievalContext::new("what were we working on?")
+    .with_scope(ContinuityScope::Thread(thread_id))
+    .with_intent(RetrievalIntent::CurrentState)
+    .with_reference_time(now);
+let outcome = memory.retrieve(context).await?;
+let prompt_text = outcome.pack.render(RenderStyle::default());
 ```
 
 ## v0.3 API additions
 
+Illustrative shape; the processor port is the phase's first design question.
+
 ```rust
-let assessment = memory.assess_claim(claim_id).await?;
-
-let belief_scope: Option<ContinuityScope> = None;
-let beliefs = memory.get_current_beliefs(belief_scope).await?;
-
-let reviewed = memory.review_stale_beliefs().await?;
+let memory = CharacterMemory::new_with_processor(settings, collection, embed_provider, processor).await?;
+let plan = memory.prepare(RememberInput::transient(raw_interaction), PrepareOptions::generated()).await?;
+let reflection = memory.reflect(ContinuityScope::Entity(person_id), ReflectOptions::default()).await?;
 ```
 
 ## v0.4 API additions
 
-```rust
-let explanation = memory.explain_retrieval(trace_id).await?;
-let report = memory.graph_health_report(scope).await?;
-let validation = memory.validate_graph(scope).await?;
-let context_subgraph = memory.get_context_subgraph(context).await?;
+Illustrative shape; validity and attribution are fields on the existing drafts, and current-belief filtering is currency.
 
-let retention_scope: Option<ContinuityScope> = None;
-let retention_result = memory.apply_retention_policy(retention_scope).await?;
+```rust
+let draft = DerivedMemoryDraft::new(DerivedType::Claim, text)
+    .valid_from(when)
+    .asserted_by(source_entity_id, Attribution::Told);
 ```
 
 ## v0.5 API additions
 
-```rust
-let activation = memory.activate_associative_recall(query, activation_options).await?;
-let unit = memory.get_associative_unit(unit_id).await?;
-let cluster_context = memory.retrieve_associative_context(unit_id, retrieval_mode).await?;
-```
-
-## v0.6 API additions
+Illustrative shape; activation is a retrieval option, not a new surface.
 
 ```rust
-let plan = memory.prepare(raw_interaction_input, generation_options).await?;
-let validation = memory.validate_plan(&plan).await?;
-let outcome = memory.commit(plan, commit_options).await?;
+let context = RetrievalContext::new(query).with_intent(RetrievalIntent::AssociativeProbe);
 ```
-
-Generated processors should produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing validation or committing directly to stores.
 
 ---
 
@@ -1809,7 +1685,7 @@ analytics-heavy stats system
 migration/backfill for nonexistent production data
 ```
 
-Do not implement before v0.5:
+Do not implement before durable associative units are demand-confirmed (v0.5 at the earliest):
 
 ```text
 ordinary low-value pairwise association edges

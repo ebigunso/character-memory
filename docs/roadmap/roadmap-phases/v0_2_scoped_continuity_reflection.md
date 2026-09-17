@@ -200,7 +200,7 @@ active commitments
 current scoped preferences
 active threads
 recent high-salience episodes
-relevant current beliefs once v0.3 exists
+relevant current beliefs once the temporal-validity phase exists
 ```
 
 It is not raw history. It is usable current continuity context.
