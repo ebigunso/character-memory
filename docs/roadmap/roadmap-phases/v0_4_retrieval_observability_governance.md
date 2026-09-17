@@ -138,7 +138,7 @@ stats health issues
 
 ## 2.5 RetentionAssessment
 
-A lifecycle object controlling whether memories are active, archived, suppressed, or quarantined. Erasure is not a retention state; it is an out-of-band operational purge (ADR-D-0017).
+A lifecycle object controlling whether memories are active, archived, suppressed, or quarantined. Erasure is not a retention state; it is an out-of-band operational purge (ADR-D-0021).
 
 ```json
 {

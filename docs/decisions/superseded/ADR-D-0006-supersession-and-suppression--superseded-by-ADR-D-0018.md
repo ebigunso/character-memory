@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: ADR-D-0017-append-only-memory-record-with-out-of-band-purge.md
-supersession_scope: partial
+superseded_by: ../design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md
+supersession_scope: null
 ---
 
 # ADR-D-0006: Use supersession and suppression as default correction/forgetting mechanisms
+
+Retired on 2026-09-17. Replaced by ADR-D-0018.
 
 ## Context and Problem Statement
 
