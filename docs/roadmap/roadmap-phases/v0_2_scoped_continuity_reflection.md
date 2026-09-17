@@ -39,7 +39,7 @@ A partial scene degrades gracefully. No participants means no pair recall and no
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
-Scope keys on derived memories are derived from each memory's scene at write time, including any custom value, and are never a caller-facing ID scheme: the library mints no scope identifiers a caller must discover, which is what the exclusion of a scope hint by ID means. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer.
+Scope keys on derived memories are derived from each memory's scene at write time, including any custom value, and are never a caller-facing ID scheme: the library mints no scope identifiers a caller must discover, which is what the exclusion of a scope hint by ID means. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer (ADR-D-0024, which replaces ADR-D-0011's caller-facing scope object with derived scope keys).
 
 ## 1.1 Partitions as explicit policy
 

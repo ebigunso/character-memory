@@ -1497,7 +1497,7 @@ The earlier v0.4 phase is dissolved as of 2026-09-17 and has no draft. Its piece
 
 ```text
 retrieval traces, section assignments, selectivity and expansion traces, lifecycle omissions   delivered in the v0.1 family; each later phase adds the trace fields its mechanism needs
-RetrievalIntent (ADR-I-0016, unchanged)   Continuity in v0.2, where a scene with no topic replaces the need for a CurrentState variant; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation; CurrentState only if a later phase shows one retrieval cannot express its budget
+RetrievalIntent (ADR-I-0016, unchanged: all five variants remain the enum)   Continuity is the only variant v0.2 implements, since a scene with no topic serves the current-state case; CurrentState, CorrectionReview, and SourceAudit are implemented by the phases that need them (temporal validity at the latest); AssociativeProbe with query-time activation
 retention assessment and retention policy hooks   replaced by currency; the draft's archived state contradicted ADR-D-0018, and its redacted and deleted states contradicted ADR-D-0021
 validation rules   the write path already validates; invariant checks over stores are evaluation-repository tooling (ADR-I-0019)
 graph health reports and policy diagnostics   evaluation-repository reports over runs, not library surface

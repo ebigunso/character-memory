@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts.md]
+depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md]
 ---
 
 # ADR-D-0020: Memory is first-person, and the remembering character is an ordinary entity named by the application
@@ -50,5 +50,5 @@ A deployment requires several remembering subjects to share one store with disti
 ## More Information
 
 - ADR-D-0009 establishes entity-neutral retrieval policy.
-- ADR-D-0011 establishes scope continuity around arbitrary entities.
+- ADR-D-0024 establishes scoped continuity with the scope derived from the scene.
 - The continuity situation catalog's independent-entity situations describe the target behavior.
