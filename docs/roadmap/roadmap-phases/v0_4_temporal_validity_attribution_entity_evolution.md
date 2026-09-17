@@ -2,7 +2,7 @@
 
 ## Status of this draft
 
-Renumbered from v0.3 and narrowed on 2026-09-17. The phase keeps validity intervals and volatility on derived memories, attribution completing the frame (who asserted, firsthand or told), entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories about the source. The first-class Assertion, Claim, EvidenceLink, BeliefAssessment, and SourceAssessment objects described below are demand-conditional behind ADR-D-0005's revisit clause and enter only when measured use shows corrections and contradictions frequent enough that derived subtypes no longer carry them. The roadmap's section 15 governs where this body disagrees.
+Renumbered from v0.3 and narrowed on 2026-09-17. The phase keeps validity intervals and volatility on derived memories, attribution completing the scene (who asserted, whether the character was there), entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories about the source. The first-class Assertion, Claim, EvidenceLink, BeliefAssessment, and SourceAssessment objects described below are demand-conditional behind ADR-D-0005's revisit clause and enter only when measured use shows corrections and contradictions frequent enough that derived subtypes no longer carry them. The roadmap's section 15 governs where this body disagrees.
 
 ## Version intent
 
