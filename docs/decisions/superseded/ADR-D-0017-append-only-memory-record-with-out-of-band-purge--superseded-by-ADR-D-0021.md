@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-06-12
 deciders: ["ebigunso"]
@@ -13,12 +13,14 @@ warrant:
   cost_of_over_extension: ""
 depends_on: []
 implements: []
-supersedes: [ADR-D-0006-supersession-and-suppression.md]
-superseded_by: null
-supersession_scope: partial
+supersedes: [ADR-D-0006-supersession-and-suppression--superseded-by-ADR-D-0018.md]
+superseded_by: ../design/ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md
+supersession_scope: null
 ---
 
 # ADR-D-0017: Keep the memory record append-only, with erasure as an out-of-band operational action
+
+Retired on 2026-09-17. Replaced by ADR-D-0021.
 
 ## Context and Problem Statement
 

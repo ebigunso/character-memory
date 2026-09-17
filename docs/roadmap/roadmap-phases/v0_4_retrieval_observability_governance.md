@@ -112,7 +112,7 @@ Examples:
 ```text
 DerivedMemory must have provenance.
 Current CharacterSignal must be derived from episodes/reflections.
-Suppressed/deleted memories must not appear in default retrieval.
+Suppressed memories must not appear in default retrieval.
 Superseded memories must not appear in current views.
 Thread membership should have confidence.
 Low-selectivity co-occurrence alone should not create durable links.
@@ -138,7 +138,7 @@ stats health issues
 
 ## 2.5 RetentionAssessment
 
-A lifecycle object controlling whether memories are active, archived, suppressed, redacted, or deleted.
+A lifecycle object controlling whether memories are active, suppressed, or quarantined. What is over leaves current views through currency, not through a retention state (ADR-D-0018). Erasure is not a retention state; it is an out-of-band operational purge (ADR-D-0021).
 
 ```json
 {
@@ -156,11 +156,8 @@ Retention states:
 
 ```text
 active
-archived
 suppressed
 quarantined
-redacted
-deleted
 ```
 
 ## 2.6 PolicyDiagnostics
@@ -173,7 +170,7 @@ Examples:
 selectivity policy too conservative for scoped broad entities
 fanout policy too permissive for participantEntity episode expansion
 low-information co-occurrence guard rejected N candidate links
-retention policy archived N low-salience stale memories
+currency policy marked N resolved threads not current
 ```
 
 ## 2.7 Additional v0.4 concepts
@@ -267,11 +264,11 @@ detect over-broad clusters and high-fanout cluster expansions
 Implement policy hooks:
 
 ```text
-low salience → archive/downrank
+low salience → downrank
 superseded → exclude from current views
 explicit correction → supersede or suppress
-explicit deletion → delete/redact according to policy
-sensitive → access-control or redact
+erasure obligation → out-of-band operational purge, never a retention outcome
+sensitive → frame reported at recall; enforced boundaries are explicit query-time policy (ADR-D-0019)
 poisoning risk → quarantine
 ```
 
@@ -342,7 +339,7 @@ ValidationRules detect links created only from low-selectivity co-occurrence.
 GraphHealthReport identifies high-degree entities and high-fanout relation types.
 RetentionAssessment can identify old, low-salience, rarely retrieved memories without automatically deleting them.
 Policy diagnostics can show when selectivity/fanout settings are too aggressive or too permissive.
-Suppressed/deleted memories do not appear in default retrieval.
+Suppressed memories do not appear in default retrieval.
 Current views exclude superseded memories.
 ```
 

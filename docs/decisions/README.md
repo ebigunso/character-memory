@@ -1,6 +1,6 @@
 # Decision Records
 
-This directory contains decision records (ADRs), split into two tracks so high-level design decisions do not mix with implementation choices. New records follow [template.md](template.md).
+This directory contains decision records (ADRs), split into two tracks so high-level design decisions do not mix with implementation choices. New records follow the harness template `durable-docs-authoring/references/adr-template.md`, copied here as `template.md` when the repository keeps its own; the admission test, form, lifecycle, and acceptance rules are in the harness reference `durable-docs-authoring/references/adr.md`.
 
 ## Directory layout
 ```text
@@ -18,22 +18,14 @@ docs/decisions/
 
 ## Numbering and tracks
 
-Separate numbering per track; IDs are never reused.
-- `ADR-D-NNNN` — design track: use when overlooking the decision would risk violating the core Character Memory philosophy: episode-backed continuity, provenance, correction, reflection, scoped continuity, or entity-neutral recall.
-- `ADR-I-NNNN` — implementation track: use when the decision is primarily about how the library is built: storage contracts, indexing, IDs, schema versions, retrieval bounds, fanout policy, derived stats, and integration behavior.
+Separate numbering per track; a number is taken at merge, merged IDs are never reused, and a gap in an active directory means a retirement.
+- `ADR-D-NNNN` — design track: use when overlooking the decision would risk violating the core Character Memory philosophy: episode-backed continuity, provenance, correction, reflection, scoped continuity, complete recall, or entity-neutral recall.
+- `ADR-I-NNNN` — implementation track: use when the decision is primarily about how the system is built (storage, APIs, schemas, tooling, operations).
 
 ## Lifecycle and the superseded/ archive
-- Active track directories list only governing decisions; numbering gaps signal archived history.
-- On full supersession or retirement, the record moves to `superseded/` — a single flat folder where the track prefix in the filename preserves identity — renamed with a self-describing suffix: `--superseded-by-ADR-X-NNNN` or `--retired`.
-- Partial supersession stays in place: the record remains authoritative for its surviving clauses, with `supersession_scope` and reciprocal frontmatter links recording the split.
-- In records predating the current template, a blank warrant means it was not recorded at decision time, not an authoring omission. Fill blank newer frontmatter fields only when the record is substantively revisited.
-
-## Authoring rules
-- One decision per record. A choice of component and a choice of how that component is run or made durable are separate decisions with separate records.
-- A record encodes a locked-in decision. A deciding factor is deferred only when it is out of reach because of external factors, never when the same change produces the evidence.
-- The decision body pins the system's design and, at most, the behaviour of a narrow part of the implementation. Code shapes go in a non-binding appendix, never in the decision.
-- Every protected clause is checked against the project philosophy: it stays only if a philosophy goal (continuity, provenance, inspectable recall, correction) is what it protects. Current state is recorded under "Not covered", not as an invariant.
-- Records read the same at any time. No wording that hinges on when the record was written ("this phase", "later decision", "at decision time", "once", "already", change verbs such as "gains" or "moves"); history is anchored to named records, versions, and absolute dates, and Implementation Impact describes the resulting state.
+- Active track directories list only governing records, one decision each, each complete on its own.
+- A record is immutable once merged; a changed decision is a new record, and the old one is retired.
+- On retirement the record gets a header line under its title ("Retired on DATE. Replaced by ADR-X." or "Retired on DATE; nothing in it still binds.") and moves to `superseded/`, a single flat folder where the track prefix in the filename preserves identity, renamed with `--superseded-by-ADR-X-NNNN` or `--retired`. Retired records are frozen.
 
 ## Status values
-`accepted`, `rejected`, `superseded`, `deprecated`. Records capture decisions, not undecided proposals.
+`proposed` (a draft on a branch, before a human has accepted it on its own), `accepted` (accepted explicitly; immutable once merged), `superseded` (retired). Acceptance and immutability are separate: acceptance is the human's yes, immutability is the merge.

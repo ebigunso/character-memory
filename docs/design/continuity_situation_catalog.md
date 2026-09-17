@@ -117,12 +117,12 @@ An entity that accepts arbitrary assertions about its own past has no identity; 
 
 ### C6. Departure and loss
 
-A recurring person stops appearing; their relationship memory shifts from active to archival — retrievable for reminiscence, no longer shaping default behavior — with elapsed-time awareness.
+A recurring person stops appearing; their relationship memory shifts from current to past — retrievable for reminiscence, no longer shaping default behavior — with elapsed-time awareness.
 
 ## Cross-cutting qualities
 
 - Recall is shaped, not recited: history bends responses instead of appearing as citations; the best continuity is invisible until tested.
-- Forgetting has a human shape: peripheral detail fades, gist and emotional valence persist, importance resists fade, and reminding refreshes.
+- Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and the full memory remains findable when it matters.
 - Memory failures are human-shaped: graded confidence surfaces as natural hedging, never as confident wrongness about core relationships, and never as blankness toward an intimate.
 - Perfect verbatim recall of distant trivia is as continuity-breaking as amnesia: it reads as surveillance, not memory.
 
