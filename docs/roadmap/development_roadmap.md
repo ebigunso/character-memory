@@ -266,7 +266,7 @@ Recall is also relative to a moment: retrieval takes a reference time, and elaps
 
 ## 2.15 Recall is complete; forgetting is explicit
 
-No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression or supersession, each a recorded decision. What is no longer current leaves current views through a change of currency, not of eligibility. An item is current when it is the latest in its supersession chain and not resolved; currency selects versions and never selects or removes items; staleness is the age since a memory's last evidence, reported and never enforced. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
+No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression or supersession, each a recorded decision. What is no longer current leaves current views through a change of currency, not of eligibility. An item is current when it is the latest in its supersession chain, not resolved, and, if it carries a validity interval recorded at write time, within that interval; currency selects versions and never selects or removes items; staleness is the age since a memory's last evidence, reported and never enforced. An interval is a fact recorded when the memory was written, so expiry is a known event, not a decay. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
 
 ```text
 write-time attention decides what becomes memory
@@ -1429,7 +1429,7 @@ Give memories a validity in time, a source, and a history of the entities they c
 validity intervals and volatility on derived memories: valid from, valid until, review after
 attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene
 entity aliases, roles, and relationships over time, without destructive overwrite
-current-belief filtering as currency: a derived memory past its recorded validity interval leaves current views and stays recallable; staleness without an interval is reported as age, never enforced (invariant 2.15)
+current-belief filtering as currency: a derived memory past the validity interval recorded when it was written is not current under invariant 2.15 and stays recallable; staleness without an interval is reported as age, never enforced
 source reliability as derived memories about the source, scoped by domain, never a global score
 ```
 

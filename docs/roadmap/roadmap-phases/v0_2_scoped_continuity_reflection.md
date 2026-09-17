@@ -65,7 +65,7 @@ The section budgets of the pack stay as output categories. Floors are per route,
 
 ## 2.1 Currency and staleness
 
-An item is current when it is the latest in its supersession chain and not resolved. Currency selects versions, never items, and never removes anything (ADR-D-0018, invariant 2.15). Staleness is the age since a memory's last supporting evidence, reported and never enforced: a relationship state last supported fourteen months ago is current and stale, and the character behaves accordingly. Events that end currency are all things that happened and were written: a correction supersedes, a resolution resolves, a farewell or a "let's drop it" closes a thread. The stored current flag on derived memories is at most a cache of the chain.
+An item is current when it is the latest in its supersession chain, not resolved, and, once v0.4 adds validity intervals recorded at write time, within its interval. Currency selects versions, never items, and never removes anything (ADR-D-0018, invariant 2.15). Staleness is the age since a memory's last supporting evidence, reported and never enforced: a relationship state last supported fourteen months ago is current and stale, and the character behaves accordingly. Events that end currency are all things that happened and were written: a correction supersedes, a resolution resolves, a farewell or a "let's drop it" closes a thread. The stored current flag on derived memories is at most a cache of the chain.
 
 ## 2.2 Prospective memory
 
