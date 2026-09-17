@@ -11,7 +11,7 @@ warrant:
   cost_of_violation: "an engine switch after embedded stores exist in the field rebuilds every character's recall index from graph authority and re-embeds it; two adapters with different admission semantics produce different continuity packs from the same memory, which evaluation evidence would attribute to retrieval regressions"
   cost_of_wrong_preservation: "if the engine's beta API breaks or its footprint proves unacceptable on a target platform and this record is preserved as settled, local deployments carry a dependency that no longer earns its place"
   cost_of_over_extension: "treating the embedded mode as validated for multi-process access misrepresents what the library has validated; treating the index knobs as tuned while they sit at their untuned exact-scan setting would ship approximate recall nobody measured"
-depends_on: [implementation/ADR-I-0034-backend-roles-and-defaults.md, implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md]
+depends_on: [implementation/ADR-I-0021-embedded-persistent-oxigraph-default.md]
 implements: []
 supersedes: []
 superseded_by: null

@@ -257,7 +257,7 @@ Assisted remember workflows may accept raw or semi-raw input as transient proces
 A memory store has one remembering subject, and that subject is an ordinary entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone.
 
 ```text
-the self is an Entity, identified by the application at construction or per scope
+the self is an Entity, identified by the application at construction; a scope may name the same self again and never a different one
 no object type, entity type, or retrieval path treats the self as a special role
 entity types that encode application roles (user, assistant) are not core schema truth
 ```
@@ -266,7 +266,7 @@ Recall is also relative to a moment: retrieval takes a reference time, and elaps
 
 ## 2.15 Recall is complete; forgetting is explicit
 
-No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression or supersession, each a recorded decision. What is no longer current leaves current views through a change of currency, not of eligibility; how currency is represented is decided by the phase that introduces it. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
+No memory becomes less reachable because time passed, and no stored measure of importance, confidence, or stability changes without a write that carries provenance. Eligibility changes only through suppression or supersession, each a recorded decision. What is no longer current leaves current views through a change of currency, not of eligibility. An item is current when it is the latest in its supersession chain, not resolved, and, if it carries a validity interval recorded at write time, within that interval; currency selects versions and never selects or removes items; staleness is the age since a memory's last evidence, reported and never enforced. An interval is a fact recorded when the memory was written, so expiry is a known event, not a decay. Human-shaped fading is produced by ranking and expression, never by retention. Familiarity and the weight of repeated evidence are derived from provenance at query time, so there is no reinforce operation. See [ADR-D-0018](../decisions/design/ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md).
 
 ```text
 write-time attention decides what becomes memory
@@ -276,11 +276,13 @@ suppression and supersession are the only forgetting
 currency, not eligibility, takes what is over out of current views
 ```
 
-## 2.16 Interpreting memories travel with the memory they interpret
+## 2.16 Recall is situated, and the scene travels with every memory
 
-How a memory should be treated comes from other memories linked to it: a request not to raise it, a correction, a resolution, a framing, a note about its source. There is no treatment category and no annotation plane. When a memory item is admitted to a context pack, the current memory items linked to it item-to-item are admitted with it, and under pack pressure the pair is dropped rather than the neighbor. Item-to-item means the link's other end is an episode, observation, or derived memory; entity-mediated neighbors stay under selectivity and fanout.
+Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
 
-Recall is never gated by privacy or sensitivity by default. Every memory carries its frame (who was present, who said it, firsthand or told, in which setting), retrieval reports the frame, and any enforced boundary is an explicit query-time policy over the frame chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
+Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through vectors; entities, threads, and places through the graph; time and dates through timestamps; stored intentions through their trigger) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
+
+How a memory should be treated is a change of the character's state about it, carried by supersession with a restatement rather than an appended note; there is no treatment category and no annotation plane. The write path warns on a replacement that contains its predecessor nearly verbatim and on a chain that churns.
 
 ---
 
@@ -296,9 +298,9 @@ Recall is never gated by privacy or sensitivity by default. Every memory carries
 | v0.1.4 | Continuity evaluation harness | Finished. Deterministic long-horizon evaluation harness implemented in the public companion `CharacterMemoryEvals` repository as a development aid, not core library functionality: synthetic interaction fixtures, a minimal example assistant loop, continuity-oriented retrieval-quality metrics, selectivity/fanout measurement, and hub-entity stress scenarios. |
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md). |
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
-| v0.2 | Scoped continuity and retrieval quality | Scope as a value key, current-state reads with elapsed time, the frame on every memory with partitions as explicit policy, open-loop and commitment status and direction, interpreting-neighbor co-retrieval, graph-only admission, selectivity widening or its declination, the temporal signal, a pack renderer, and an example loop. |
+| v0.2 | Situated recall and scoped continuity | The scene on every memory and as the retrieval input, situated activation with a candidate route and an admission floor per cue kind, prospective memory (direction and due date on commitments and open loops, surfacing on their trigger), the currency invariant with staleness reported, treatment by supersession with write-path warnings, scene partitions as explicit policy, selectivity widening or its declination, a pack renderer, and an example loop. |
 | v0.3 | Memory generation and reflection | A caller-controlled processor port that turns transient raw or structured input, and scoped remembered episodes, into validated candidates and write plans through the v0.1.3 path; privacy exclusions before external calls; the behavioral evaluation tier begins. Raw input is not persisted. |
-| v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the frame, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
+| v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the scene, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
 | v0.5 | Long-horizon shape | Currency at scale, consolidation of periphery into gist with provenance, query-time associative activation with no persisted structure, evidence-derived familiarity. Durable associative units enter only on measured demand. |
 | Dissolved | Retrieval observability and governance | Delivered in the v0.1 family or moved to the phases and the evaluation repository that need its pieces (section 17). |
 | v1.0 | Text-only release-ready state | Defined in section 1: the continuity situation catalog's situations met for text input at both evaluation tiers. Reached by the numbered phases above it. |
@@ -1284,55 +1286,55 @@ No public facade change beyond the telemetry field, the published maximum-surfac
 
 ---
 
-# 13. v0.2: scoped continuity and retrieval quality
+# 13. v0.2: situated recall and scoped continuity
 
 Detailed draft: [`v0_2_scoped_continuity_reflection.md`](roadmap-phases/v0_2_scoped_continuity_reflection.md)
 
-The phase order from v0.2 onward was rearranged on 2026-09-17 by product value: what a builder observes on day one comes first, memory generation moves up because every later structure needs a producer and the evaluation harness can now judge generated memory, and the former observability phase is dissolved into the phases that need its pieces (section 17).
+The phase order from v0.2 onward was rearranged on 2026-09-17 by product value: what a builder observes on day one comes first, memory generation moves up because every later structure needs a producer and the evaluation harness can now judge generated memory, and the former observability phase is dissolved into the phases that need its pieces (section 17). The phase's shape was settled the same day against the catalog's section D, a day's recall.
 
 ## New concepts
 
 ```text
-ContinuityScope           a value key (entity, entity pair, thread, source conversation, custom), carried on derived memories, never a stored object type
-CurrentState intent       a retrieval intent that reads current continuity state for a scope without vector recall (ADR-I-0016, pulled forward)
-reference time            retrieval takes a moment; elapsed time is a ranking signal with its own rationale (invariant 2.14)
-frame partition           an explicit application-chosen query-time policy over the frame (ADR-D-0019), never a default
-open-loop and commitment status and direction   active or resolved, with an actor and a counterpart, on the existing derived subtypes
-interpreting-neighbor co-retrieval              invariant 2.16, admitted with the memory it interprets
-pack renderer             a canonical rendering of a pack or current-state view, gist and stance over quotation
-example loop              a minimal retrieve, respond, remember loop in the library's own examples
+scene                       the circumstances a memory was formed in and the circumstances recall happens in: who is present, where, when, and what is in progress; "what" may reference a thread or open loop the application received from remember, or be inferred from the conversation's recent episodes; only the reference time is required, and a partial scene degrades gracefully
+situated activation         recall is activation by the cues the scene supplies plus the topic; a candidate route per cue kind (content, entity and thread and place, time and date, stored trigger) and an admission floor per route (ADR-D-0022); purpose is never a cue (ADR-D-0023)
+prospective memory          open loops and commitments carry a direction (actor, counterpart) and an optional due date, and surface on their trigger: a counterpart appearing, a topic arising, a date arriving
+currency invariant          latest in its supersession chain and not resolved; selects versions, never items; staleness reported as age, never enforced (invariant 2.15)
+treatment by supersession   a change in how a memory should be treated supersedes it with a restatement; write-path warnings for near-verbatim replacement text and for chain churn; expression quality is the writer's and is measured by the retelling-consistency situation
+scene partition             an explicit application-chosen query-time policy over the scene (ADR-D-0019), never a default
+pack renderer               a canonical rendering of a pack, gist and stance over quotation
+example loop                a minimal retrieve, respond, remember loop in the library's own examples
 ```
 
 ## Goals
 
 ```text
-give a builder the session-open primer: current state for a scope, with elapsed time since
-keep one character across settings: the frame travels with every memory, partitions are explicit policy
-let "you said you would" work: open loops and commitments with status and direction
-admit graph-only evidence and interpreting neighbors so derived memories do not crowd out what was said
+let a character arrive carrying what the moment calls for: the people here, what was last said with them, what is owed, what is in progress, what fell due (catalog D1, D4, D5, D8, D11)
+keep one character across settings: the scene travels with every memory, partitions are explicit policy
+let "you said you would" work in both directions, and let a stored intention surface on its trigger (D7, D8)
+admit what the scene brings up beside what the topic brings up, so derived state and evidence turns do not starve each other
 apply selectivity beyond entity roots, or decline it with evidence
-make time a retrieval signal, so that the README's temporal claim becomes true
+make time a retrieval cue, so that the README's temporal claim becomes true
 ```
 
 ## Inherited obligations from the v0.1.5 closeout
 
 ```text
-own the deferred admission/ranking design item (ranking credit for graph-only evidence); invariant 2.16 is its strongest case
+own the deferred admission/ranking design item: it takes the shape of admission floors for the state and time routes beside the content route, and the ADR-I-0022 baselines are re-measured once
 own the deferred selectivity-widening item (non-entity-keyed statistics or explicit declination)
-build scoped/person-keyed evaluation scenarios (catalog B1 to B3) before implementing scope; B1 and B2 measure the frame's presence and non-disclosure, never a failure to surface (ADR-D-0019)
-answer the concurrent-facade-call question; with no background derivation inside the library the reflection-scheduling form of it dissolves
+build scoped/person-keyed evaluation scenarios (catalog B1 to B3) before implementing the scene; B1 and B2 measure the scene's presence and non-disclosure, never a failure to surface (ADR-D-0019)
+answer the concurrent-facade-call question; with no background derivation inside the library the reflection-scheduling form dissolves
 ```
 
 ## Design items decided 2026-09-17
 
 ```text
-interpreting memories are admitted with the memory they interpret (invariant 2.16)
-open loops and commitments carry an actor and a counterpart, so the character can owe and be owed
-the current-state read takes a reference time and reports elapsed time since the scope was last touched
+currency is an invariant, not a retrieval driver; the stored current flag is at most a cache of the chain and joins the value-audit deletion candidates
+purpose is emergent and never a field on the retrieval input
+open loops and commitments carry an actor, a counterpart, and an optional due date
 no reinforce operation; familiarity and stability derive from evidence at query time
 the archived and deleted retention states and the archive-thread-derived-memories knob are value-audit deletion candidates; thread status keeps dormant and resolved as currency
 the user and assistant entity types are value-audit deletion candidates under ADR-D-0020
-scope is a value, not a seventh object type; a stored scope object needs a consumer a graph query over scope keys cannot serve
+scope keys on derived memories are derived from each memory's scene at write time and are never a caller-facing ID scheme; a stored scope object needs a consumer a graph query cannot serve
 ```
 
 ## Not in v0.2
@@ -1340,20 +1342,22 @@ scope is a value, not a seventh object type; a stored scope object needs a consu
 ```text
 reflection that generates text: the generation phase (section 14); v0.2 may emit a "this scope has accumulated enough to reflect on" signal and nothing more
 first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0005)
-a CurrentContinuityView type: it is the pack under the CurrentState intent
-the seven retrieval modes of the earlier draft: intent and scope hint replace them
-ReflectionJob as a stored object
+a current-state view type: a scene with no topic is the same retrieval with the content route empty
+a scope hint by ID, a goal or purpose field, or any retrieval mode enumeration
+involuntary recall from weak cues (D12): the long-horizon phase
+attribution fields beyond what the scene already implies (v0.4)
 ```
 
 ## Acceptance criteria
 
 ```text
-A current-state read for a scope returns current derived state and active threads without vector recall, with elapsed time since the scope was last touched.
-A memory learned in one setting is admitted when retrieved for another, with its frame reported; a partition applied as a query option omits across the frame and the trace records the applied policy.
-Open loops and commitments can be retrieved by scope and by direction without assuming who the main actor is; resolution goes through the existing link and correct paths.
-An interpreting neighbor is admitted with the memory it interprets, and pack pressure drops the pair, never the neighbor alone.
-A memory reachable only through graph structure can be admitted over a vector-scored item, and the pollution and context-size baselines of ADR-I-0022 are re-measured once.
-Retrieval produces the temporal rationale category, and the temporal-patterns and departure scenarios pass.
+With a scene and no topic, retrieval returns what the moment calls for: the people present's current state and last interaction, active loops and commitments in both directions, the activity's thread in order, items due, date matches, and recent high-salience episodes, with elapsed time since the pair last met.
+A stored intention surfaces when its counterpart appears or its topic arises, and a promise surfaces on its due date, whatever the current topic.
+A memory learned in one setting is admitted when retrieved for another, with its scene reported; a partition applied as a query option omits across the scene and the trace records the applied policy.
+Under a loud topic, the state and time routes still admit their floor, and the ADR-I-0022 baselines are re-measured once.
+Retrieval produces the temporal rationale category, and the catalog's D1, D4, D5, D7, D8, D9, D11, and D13 situations pass at the retrieval tier.
+Currency never removes an item: every omission on lifecycle or currency grounds names a resolution, a supersession, or a suppression, and staleness is reported as age.
+A superseding restatement that contains its predecessor nearly verbatim, and a chain that churns, each raise a write-path warning; the retelling-consistency situation is the behavioral check.
 Selectivity beyond entity roots is either applied with its new signal or declined with recorded evidence.
 The pack renderer and the example loop exist, and the README describes what ships.
 ```
@@ -1378,7 +1382,7 @@ generation is a port the application implements or a default processor it opts i
 every generated candidate enters through prepare, validate, and commit (invariant 2.12); nothing bypasses provenance, lifecycle, or graph-authority checks
 reflection is a trigger plus bounded scoped input selection under the v0.1.2 guardrails plus a provenance record tying outputs to input episodes; there is no background job inside the library
 privacy exclusions apply before any external processor call
-the frame (who was present, who said it, firsthand or told, in which setting) is recorded on every generated memory (ADR-D-0019)
+the scene (who was present, who said it, whether the character was there, in which setting) is recorded on every generated memory (ADR-D-0019)
 commitments and instructions are written with stability that keeps them from fading in ranking (ADR-D-0018)
 "forget it" defaults to remembering the request as an observation linked to the content; suppression is chosen only when wording and relationship warrant it
 ADR-I-0013's revisit clause is triggered by this phase; deterministic helpers stay deterministic, and inference lives behind the processor boundary
@@ -1423,9 +1427,9 @@ Give memories a validity in time, a source, and a history of the entities they c
 
 ```text
 validity intervals and volatility on derived memories: valid from, valid until, review after
-attribution: who asserted a memory and whether it was firsthand or told, on observations and derived memories, completing the frame
+attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene
 entity aliases, roles, and relationships over time, without destructive overwrite
-current-belief filtering as currency: stale or expired derived memories leave current views and stay recallable
+current-belief filtering as currency: a derived memory past the validity interval recorded when it was written is not current under invariant 2.15 and stays recallable; staleness without an interval is reported as age, never enforced
 source reliability as derived memories about the source, scoped by domain, never a global score
 ```
 
@@ -1465,6 +1469,7 @@ currency at scale: relationships that ended, threads that resolved, signals no l
 consolidation: periphery summarized into gist as derived memories with provenance, through the generation port
 query-time associative activation over the existing graph, bounded by selectivity, with no persisted structure
 recognition and familiarity derived from evidence: a returning stranger is recognized where a person would not
+involuntary recall from weak partial cues (catalog D12), low precision and low cost when wrong
 persisted retrieval footprints only if repeated-coactivation signals need history, decided by measurement
 ```
 
@@ -1492,8 +1497,8 @@ The earlier v0.4 phase is dissolved as of 2026-09-17 and has no draft. Its piece
 
 ```text
 retrieval traces, section assignments, selectivity and expansion traces, lifecycle omissions   delivered in the v0.1 family; each later phase adds the trace fields its mechanism needs
-RetrievalIntent (ADR-I-0016, unchanged)   Continuity and CurrentState in v0.2; CorrectionReview and SourceAudit with the temporal-validity phase; AssociativeProbe with query-time activation
-retention assessment and retention policy hooks   replaced by currency (ADR-D-0018); the redacted and deleted states were contradictions of ADR-D-0021
+RetrievalIntent (ADR-I-0016, unchanged: all five variants remain the enum)   Continuity is the only variant v0.2 implements, since a scene with no topic serves the current-state case; CurrentState, CorrectionReview, and SourceAudit are implemented by the phases that need them (temporal validity at the latest); AssociativeProbe with query-time activation
+retention assessment and retention policy hooks   replaced by currency; the draft's archived state contradicted ADR-D-0018, and its redacted and deleted states contradicted ADR-D-0021
 validation rules   the write path already validates; invariant checks over stores are evaluation-repository tooling (ADR-I-0019)
 graph health reports and policy diagnostics   evaluation-repository reports over runs, not library surface
 persisted first-class RetrievalTrace objects   only if repeated-coactivation signals need retrieval history (v0.5), decided by measurement
@@ -1619,14 +1624,14 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 
 ## v0.2 API additions
 
-Illustrative shape; the retrieval context grows a scope hint, an intent, and a reference time, and a renderer turns a pack into prompt text. Resolution of open loops and commitments goes through the existing link and correct paths.
+Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval.
 
 ```rust
-let context = RetrievalContext::new("what were we working on?")
-    .with_scope(ContinuityScope::Thread(thread_id))
-    .with_intent(RetrievalIntent::CurrentState)
-    .with_reference_time(now);
-let outcome = memory.retrieve(context).await?;
+let scene = Scene::now()
+    .with_participants([self_id, alice_id])
+    .with_conversation("channel-42")
+    .with_activity(thread_id);
+let outcome = memory.retrieve(RetrievalContext::in_scene(scene).with_topic("what were we working on?")).await?;
 let prompt_text = outcome.pack.render(RenderStyle::default());
 ```
 
@@ -1637,7 +1642,7 @@ Illustrative shape; the processor port is the phase's first design question.
 ```rust
 let memory = CharacterMemory::new_with_processor(settings, collection, embed_provider, processor).await?;
 let plan = memory.prepare(RememberInput::transient(raw_interaction), PrepareOptions::generated()).await?;
-let reflection = memory.reflect(ContinuityScope::Entity(person_id), ReflectOptions::default()).await?;
+let reflection = memory.reflect(Scene::now().with_participants([self_id, person_id]), ReflectOptions::default()).await?;
 ```
 
 ## v0.4 API additions

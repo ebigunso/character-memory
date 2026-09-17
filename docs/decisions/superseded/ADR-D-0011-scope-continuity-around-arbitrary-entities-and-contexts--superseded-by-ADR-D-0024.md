@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-05-08
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: null
+superseded_by: ../design/ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md
 supersession_scope: null
 ---
 
 # ADR-D-0011: Scope continuity around arbitrary entities and contexts
+
+Retired on 2026-09-17. Replaced by ADR-D-0024.
 
 ## Context and Problem Statement
 

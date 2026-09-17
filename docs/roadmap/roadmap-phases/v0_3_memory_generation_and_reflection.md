@@ -2,7 +2,7 @@
 
 ## Status of this draft
 
-Renumbered from v0.6 on 2026-09-17 when the phase order was rearranged by product value. The body below is the earlier draft and is kept as the starting point for the phase discussion; the roadmap's section 14 carries the decided constraints (caller control, a processor port in the embedding-provider pattern, everything through prepare, validate, and commit, reflection as trigger plus bounded scoped selection plus provenance with no background job, privacy exclusions before external calls, the frame on every generated memory, stability for commitments, the default reading of "forget it") and the open questions the discussion must settle (port shape, default processors, write-time attention policy, admission states, the reflection trigger vocabulary, the behavioral evaluation tier). Where the body and section 14 disagree, section 14 governs.
+Renumbered from v0.6 on 2026-09-17 when the phase order was rearranged by product value. The body below is the earlier draft and is kept as the starting point for the phase discussion; the roadmap's section 14 carries the decided constraints (caller control, a processor port in the embedding-provider pattern, everything through prepare, validate, and commit, reflection as trigger plus bounded scoped selection plus provenance with no background job, privacy exclusions before external calls, the scene on every generated memory, stability for commitments, the default reading of "forget it") and the open questions the discussion must settle (port shape, default processors, write-time attention policy, admission states, the reflection trigger vocabulary, the behavioral evaluation tier). Where the body and section 14 disagree, section 14 governs.
 
 ## Version intent
 

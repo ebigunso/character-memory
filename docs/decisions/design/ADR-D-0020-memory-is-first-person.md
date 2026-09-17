@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts.md]
+depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md]
 ---
 
 # ADR-D-0020: Memory is first-person, and the remembering character is an ordinary entity named by the application
@@ -20,7 +20,7 @@ The philosophy forbids hard-coded roles and rejects third-person archive framing
 
 Memory is first-person. A memory store has one remembering subject, and that subject is an ordinary entity in its own graph. Its actions are episodes it participated in, its promises are its commitments, and its history persists between interactions with anyone.
 
-The identity of the self is supplied by the application, at construction or per scope. No object type, entity type, or retrieval path treats the self as a special role. Entity types that encode application roles are not core schema truth. Open loops and commitments carry an actor and a counterpart, so the character can owe and be owed.
+The identity of the self is supplied by the application at construction; a scope may name the same self again and never a different one. No object type, entity type, or retrieval path treats the self as a special role. Entity types that encode application roles are not core schema truth. Open loops and commitments carry an actor and a counterpart, so the character can owe and be owed.
 
 ## Why
 
@@ -35,7 +35,7 @@ Character is accumulated through remembered experience, and experience has a sub
 
 Invariant: the self is an entity the application identifies, and no core type or retrieval path distinguishes it by kind.
 
-Not covered: whether the self is declared at construction, per scope, or both; a convenience default for single-character applications; the migration away from the user and assistant entity types.
+Not covered: a convenience default for single-character applications; the migration away from the user and assistant entity types.
 
 ## Validation
 
@@ -50,5 +50,5 @@ A deployment requires several remembering subjects to share one store with disti
 ## More Information
 
 - ADR-D-0009 establishes entity-neutral retrieval policy.
-- ADR-D-0011 establishes scope continuity around arbitrary entities.
+- ADR-D-0024 establishes scoped continuity with the scope derived from the scene.
 - The continuity situation catalog's independent-entity situations describe the target behavior.

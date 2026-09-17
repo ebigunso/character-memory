@@ -83,9 +83,9 @@ Formality decays into familiarity; in-jokes and shorthand accumulate as behavior
 
 Private knowledge per person and common knowledge from shared settings must never cross: use shared context freely with everyone, never leak one person's confidence to another.
 
-### B2. Group versus one-on-one frames
+### B2. Group versus one-on-one scenes
 
-The same topic exists in a group frame and in private per-member frames with different content.
+The same topic exists in a group scene and in private per-member scenes with different content.
 
 ### B3. Differential relationship states
 
@@ -119,7 +119,69 @@ An entity that accepts arbitrary assertions about its own past has no identity; 
 
 A recurring person stops appearing; their relationship memory shifts from current to past — retrievable for reminiscence, no longer shaping default behavior — with elapsed-time awareness.
 
+## D. A day's recall
+
+These are the moments of recall an ordinary day produces, across every deployment. Personas change the weights, not the kinds: a shopkeeper's day is dominated by encounters, a researcher's by resuming work, a parent's by intentions and residue, an innkeeper's by place and obligation, a companion's by the pair and its mood.
+
+### D1. Waking into the day
+
+Before anything is said, the character carries what the day calls for: what is scheduled, what is due, what was left unresolved, and the residue of yesterday. The cue is the date and what is pending, not a topic.
+
+### D2. Routine
+
+At a habitual hour or in a habitual setting, what usually happens now comes to mind. The cue is time of day and the character's own rhythm.
+
+### D3. Arriving somewhere
+
+A place brings up what happened there and what is unfinished there: the desk brings back where the analysis stopped, the kitchen the milk to buy, the tavern corner the argument two nights ago. The cue is the place.
+
+### D4. Encountering a person
+
+Seeing someone brings up their whole current picture at once: what was last said with them, what is owed in either direction, what they said in confidence, how things stand, whether it has been a while, what they are going through. On the third visit a stranger is recognized. The cue is the person; the ideal is that all of it is present without any of it being recited.
+
+### D5. Resuming work
+
+In the middle of a task, recall is about the task: where it stopped, what was decided last time, what was tried and failed, what the constraint was. The cue is the activity in progress; the ideal is the thread's own history in order.
+
+### D6. A conversation on a topic
+
+What is being said brings up what relates to it: this reminds me of that, you said this before, we discussed that in spring. The cue is the topic, and who is present and how long ago modulate it.
+
+### D7. An event the character was waiting for
+
+"When I see Bob, tell him about the dinner." "If she brings up the trip, leave out the cost." An intention stored for a future moment surfaces when that moment arrives: a person appears, a topic arises. The cue is the event, and the ideal is that nothing else about the event is needed for the intention to come up.
+
+### D8. A deadline arrives
+
+A promise falls due, a reply is overdue, a decision was postponed until today. The cue is the date, and what comes up is the pending matter, whatever the current topic.
+
+### D9. Anniversaries and rhythms
+
+A birthday, a year since the move, game night. The cue is the date matching something remembered; the ideal is that it comes up when the person or the day is present, not as a calendar readout.
+
+### D10. Emotional residue
+
+A hard conversation yesterday colors today even on an unrelated subject. The cue is recency and weight together; the ideal is influence without mention unless invited.
+
+### D11. Reunion after a gap
+
+"Last time you mentioned your interview", after three weeks and a hundred intervening things. The cue is the person and the time since the pair last met, and the ideal names the gap proportionally.
+
+### D12. Mind wandering
+
+A smell, a song, a name overheard brings up something loosely related. The cue is weak and partial, the recall is low-precision and low-cost when wrong, and the character does not mistake it for continuity.
+
+### D13. Being asked about one's own day
+
+"What did you do while I was away?" has an answer whatever the asker's part in it. The cue is the character's own recent experience in order.
+
+### D14. Winding down
+
+At the end of the day the character can say what happened, what mattered, what it should remember about someone, and what it will do tomorrow. The cue is the day's close; the ideal is that tomorrow's first moment starts from it.
+
 ## Cross-cutting qualities
+
+- Purpose is not handed to the character by the situation; the situation brings it up from memory, as an unfinished matter, a promise, a project in progress, or a settled tendency, and once surfaced it shapes what else comes to mind.
 
 - Recall is shaped, not recited: history bends responses instead of appearing as citations; the best continuity is invisible until tested.
 - Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and the full memory remains findable when it matters.

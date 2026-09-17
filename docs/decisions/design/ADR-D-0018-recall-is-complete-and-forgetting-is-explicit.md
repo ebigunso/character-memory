@@ -28,7 +28,7 @@ Human-shaped fading is a property of ranking and expression: recent and importan
 
 ## Why
 
-Every behavior the situation catalog attributes to human forgetting traces to a mechanism that loses nothing: attention at write time, ranking and expression at recall, and the three explicit operations for every case where influence should stop. A memory that faded on its own cannot be found when it is needed and cannot be explained from any trace, which fails both the roles that rely on the character most and the principle that recall is inspectable.
+Every behavior the situation catalog attributes to human forgetting traces to a mechanism that loses nothing: attention at write time, ranking and expression at recall, and the two explicit operations for every case where influence should stop. A memory that faded on its own cannot be found when it is needed and cannot be explained from any trace, which fails both the roles that rely on the character most and the principle that recall is inspectable.
 
 ## Rejected Alternatives
 
