@@ -213,7 +213,7 @@ future generated input
 
 Future assisted generation should improve usability without weakening Character Memory invariants.
 
-The generation phase's processors (section 14) plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+Reflection (section 14), the library's one producer of interpreted memory, produces plans for the existing write-plan path rather than inventing a parallel persistence pipeline.
 
 ## 2.13 Core stores curated memory and opaque source provenance, not raw logs
 
@@ -250,7 +250,7 @@ public raw-reference resolution
 
 `raw_ref` and source-span fields are opaque provenance handles. They identify caller-managed source material but are not themselves raw source storage.
 
-Assisted remember workflows may accept raw or semi-raw input as transient processing input. They produce validated candidates and write plans; they do not persist the raw input. A short-term store beside core memory may hold recent trace until consolidation (invariant 2.17); it is not core memory storage, nothing in it enters graph authority or the durable vector store, and it is not a log to be searched or exported.
+Core memory never persists raw input. Recent raw snippets are held as trace in a short-term store beside core memory until consolidation turns them into curated memory and releases them (invariant 2.17); an application may also offer a session's text to reflection directly, transiently, without it being held. The short-term store it is not core memory storage, nothing in it enters graph authority or the durable vector store, and it is not a log to be searched or exported.
 
 ## 2.14 Memory is first-person
 
@@ -280,7 +280,7 @@ currency, not eligibility, takes what is over out of current views
 
 Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
 
-Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through vectors; entities, threads, and places through the graph; time and dates through timestamps; stored intentions through their trigger) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
+Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through each store's content lookup, vectors in durable memory and a lexical or vector index in the short-term store of v0.3; entities, threads, and places through the graph; time and dates through timestamps; stored intentions through their trigger) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
 
 How a memory should be treated is a change of the character's state about it, carried by supersession with a restatement rather than an appended note; there is no treatment category and no annotation plane. The write path warns on a replacement that contains its predecessor nearly verbatim and on a chain that churns.
 
@@ -1127,21 +1127,11 @@ RetrievalStatsStore remains derived policy metadata only.
 No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
 ```
 
-## Generation-phase integration path
+## Reflection's integration path
 
-The generation phase's model-assisted processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+Reflection, the v0.3 producer of interpreted memory (section 14), produces `MemoryCandidate` and `RememberWritePlan` values for this path rather than bypassing validation and commit. There is one completion port and no set of per-step processors.
 
-The generation phase owns generated-candidate admission states such as:
-
-```text
-Accepted
-Deferred
-NeedsReview
-Rejected
-Invalid
-```
-
-v0.1.3 keeps candidate state simpler unless implementation clearly requires more.
+A reflected candidate passes validation or fails it with a diagnostic, and its trace stays until a plan commits. Richer admission states, such as deferred or needing review, are not part of the v0.3 design and enter only if its plan finds a need. v0.1.3 keeps candidate state simple.
 
 ---
 
@@ -1671,10 +1661,13 @@ let prompt_text = outcome.pack.render(RenderStyle::default());
 Illustrative shape; the mechanical write, the signal, and reflection through the consumer's model.
 
 ```rust
-memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;
-let signal = memory.reflection_signal(&scene).await?;
 let memory = memory.with_completion_provider(provider);
-let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;
+let written = memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;
+if written.signal.level >= SignalLevel::Ready {
+    // the application decides when; reflection may run in the background
+    let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;
+}
+let snapshot = memory.reflection_signal(&scene).await?; // optional: the same signal without a write or a recall
 ```
 
 ## v0.4 API additions

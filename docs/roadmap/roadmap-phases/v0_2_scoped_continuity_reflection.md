@@ -35,7 +35,7 @@ what      the activity in progress: a thread or open loop the application receiv
 custom    optional scene metadata for domains that already have their own scope model (a game zone, a project code); the application supplies the value it already owns and never looks one up from the library
 ```
 
-A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
+A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is reflection's work in v0.3 and never an input requirement; how uncertain identity is represented is a v0.3 planning question.
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
@@ -52,7 +52,7 @@ Recall is never gated by the scene by default (ADR-D-0019). An application that 
 Recall is activation by the cues the scene supplies plus the topic of the current turn (ADR-D-0022). Nothing scores every memory, so each cue kind has its own route for finding candidates, and each route has an admission floor in the pack so no cue kind can starve another:
 
 ```text
-content route     the topic, through vectors; the route retrieval has today
+content route     the topic, through each store's content lookup: vectors in durable memory, which is the route retrieval has today, and whatever index the short-term store of v0.3 uses
 entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
 time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps the graph already stores
 state route       the latest derived state for the scopes the who and what cues imply, active loops and commitments in both directions; a graph read filtered by currency, so it is the currency-side reading of the same cues rather than a sixth cue kind

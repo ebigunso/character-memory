@@ -116,8 +116,9 @@ the behavioral tier's first scenarios: tact, discretion across scenes, retelling
 Illustrative shape:
 
 ```rust
-memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;     // mechanical, no model; a note is one kind of trace, not the name of the write
-let signal = memory.reflection_signal(&scene).await?;                            // how much accumulated, and why
+let written = memory.trace(&scene, Trace::exchange("raw text of what happened")).await?; // mechanical, no model; a note is one kind of trace
+let signal = written.signal;                                                     // every write and recall outcome carries it: level and reason
+let snapshot = memory.reflection_signal(&scene).await?;                          // optional: the same signal without a write or a recall
 let memory = memory.with_completion_provider(provider);                          // the consumer's model
 let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;          // validated, then releases trace
 ```
