@@ -291,18 +291,18 @@ Durable memory is written only through the validated write path: consolidation b
 ```text
 structure within one event is immediate: segmentation and binding to the scene, mechanically
 structure across events is consolidation: gist, state, patterns, beliefs
-recent trace is reachable by every recall route, including topic, and the reader comprehends it as it reads
+recent trace is reachable by scene, time, entity, and topic, never through the state or stored-intention routes, and the reader comprehends it as it reads
 a change of state before consolidation is discovered at recall, not recorded at write
 the short-term store is outside core memory and covered by purge; trace leaves it only by consolidation, never by expiry, and overlong retention is reported loudly
 ```
 
 ## 2.18 The timeline has no unexplained holes
 
-Every span the character was present for is covered, however quiet: before consolidation by its trace, afterward by a durable account, and after an out-of-band purge by a marker that it was present. A span is absent only when all three are missing. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, and consolidation never releases a span's trace without leaving an account of it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
+Every span the character was present for is covered, however quiet: before consolidation by its trace, afterward by a durable account. A span is absent only when both are missing; an out-of-band purge lies outside this guarantee by ADR-D-0021's definition. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, and consolidation never releases a span's trace without leaving an account of it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
 
 ## 2.19 Interpreted memory carries its evidence
 
-Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution, the speaker for what was said and the character for what it inferred, and its producer, the reflection and prompt version for a reflection output or the caller for a deliberately authored plan, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution, the speaker for what was said and the character for what it inferred, and its producer, the reflection and prompt version for a reflection output or the caller for a deliberately authored plan, and the write path rejects what that evidence cannot structurally support, checking structure and grounding and never the truth of a label, which evaluation measures: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
 
 ---
 
@@ -1316,7 +1316,7 @@ The phase order from v0.2 onward was rearranged on 2026-09-17 by product value: 
 
 ```text
 scene                       the circumstances a memory was formed in and the circumstances recall happens in: who is present, where, when, and what is in progress; "what" may reference a thread or open loop the application received from remember, or be inferred from the conversation's recent episodes; only the reference time is required, and a partial scene degrades gracefully
-situated activation         recall is activation by the cues the scene supplies plus the topic; a candidate route per cue kind (content, entity and thread and place, time and date, stored trigger) and an admission floor per route (ADR-D-0022); purpose is never a cue (ADR-D-0023); routes are defined over a store-neutral candidate contract so the short-term store of v0.3 can join them
+situated activation         recall is activation by the cues the scene supplies plus the topic; a candidate route per cue kind (content, entity and thread and place, time and date, stored trigger) and an admission floor per route (ADR-D-0022); purpose is never a cue (ADR-D-0023); the content, entity, and time routes are defined over a store-neutral candidate contract so the short-term store of v0.3 can join them, while the state and trigger routes read interpreted durable memory only
 prospective memory          open loops and commitments carry a direction (actor, counterpart) and an optional due date, and surface on their trigger: a counterpart appearing, a topic arising, a date arriving
 currency invariant          latest in its supersession chain and not resolved; selects versions, never items; staleness reported as age, never enforced (invariant 2.15)
 treatment by supersession   a change in how a memory should be treated supersedes it with a restatement; write-path warnings for near-verbatim replacement text and for chain churn; expression quality is the writer's and is measured by the retelling-consistency situation
@@ -1400,11 +1400,11 @@ This phase moved up from its earlier position as v0.6 because the write-plan val
 ```text
 short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026)
 mechanical write      no language-model call, no judgment; lexical indexing by default calls no model at all, and an opted-in vector index costs one embedding per write; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
-recall across stores  the short-term store joins every v0.2 route, including topic; current-conversation items are marked; the reader comprehends trace as it reads
+recall across stores  the short-term store joins the content, entity, and time routes; the state and trigger routes read durable memory only, and surfaced state reaches trace through the one re-cue hop; current-conversation items are marked; the reader comprehends trace as it reads
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        register, stated versus inferred, promotion thresholds, attribution, contradictions held, trace untrusted, self-revision (ADR-D-0028)
-presence accounting   scene boundaries report presence; every present span is covered by its trace, then by a durable account, or by a purge marker, and only a span with none of them is absent (ADR-D-0027)
+presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
 the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated (ADR-I-0035)
 memory tool           optional; the character's model noting something; a short-term entry with its origin, a claim, never a durable write
 ```

@@ -20,7 +20,7 @@ A character must know at once what it just did and what it was just told, and a 
 
 Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits a plan. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in the short-term store and nowhere else.
 
-Immediacy comes from recall. Recent trace is reachable by every recall route, the reader comprehends it as it reads, and a change to how things stand is discovered at recall by bringing recent trace alongside the durable state it may bear on. Reflection later records the change properly. A note made through a memory tool is the character noting something, with the turn that prompted it as its origin; it is a claim to be weighed, never a fact copied forward.
+Immediacy comes from recall. Recent trace is reachable by scene, time, entity, and topic, which are the cues a mechanical write can carry; the state and stored-intention routes read interpreted durable memory and never read trace. The reader comprehends trace as it reads, and a change to how things stand is discovered at recall by bringing recent trace alongside the durable state it may bear on. Reflection later records the change properly. A note made through a memory tool is the character noting something, with the turn that prompted it as its origin; it is a claim to be weighed, never a fact copied forward.
 
 ## Why
 

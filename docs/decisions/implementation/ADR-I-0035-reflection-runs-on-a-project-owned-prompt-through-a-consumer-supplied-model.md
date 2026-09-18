@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [../design/ADR-D-0025-durable-memory-has-one-writer.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
+depends_on: [../design/ADR-D-0025-durable-memory-has-one-writer.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0027-every-span-of-presence-is-accounted-for.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
 ---
 
 # ADR-I-0035: Reflection runs on a default prompt the project owns, through a completion port the consumer implements, and the library hard-codes no model
@@ -20,7 +20,7 @@ Consolidation needs a language model. A port alone means nobody can reflect with
 
 The library ships a default reflection prompt that the project owns, versions, and evaluates, and the consumer may override it. The consumer supplies the model by implementing a minimal completion port, in the pattern of the embedding provider. The library carries no model client and names no model.
 
-The library asks the model for structured output and validates it through prepare, validate, and commit, including the evidence rules of ADR-D-0028, so a weak or misprompted model yields diagnostics and an unreleased trace, never bad memory. The prompt version is recorded on everything a reflection produces. Privacy exclusions are applied before the prompt is built. Reflection's input is bounded, and a long span is processed in order in bounded pieces. Short-term entries are released only after the plan that consumed them commits, and the release is idempotent.
+The library asks the model for structured output and validates it through prepare, validate, and commit, including the evidence rules of ADR-D-0028, so output that is malformed, ungrounded, or structurally unsupported yields diagnostics and an unreleased trace. This is structural validation, not semantic safety: a schema-valid misjudgment can still commit, which is why outputs carry their prompt version, evaluation measures them, and a later reflection can supersede them. The prompt version is recorded on everything a reflection produces. Privacy exclusions are applied before the prompt is built. Reflection's input is bounded, and a long span is processed in order in bounded pieces. Short-term entries are released only after the plan that consumed them commits, and the release is idempotent.
 
 Scheduling is the application's: the library reports how much a scope has accumulated since its last reflection, and why, and selects a scope's bounded input; it never runs reflection on its own. Reflection is safe to run beside recall and mechanical writes on the same memory.
 

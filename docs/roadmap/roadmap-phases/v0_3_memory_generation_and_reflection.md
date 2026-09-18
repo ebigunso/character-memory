@@ -12,9 +12,9 @@ The answer is the human one. Experience leaves a literal trace at once, cheaply 
 |---|---|---|
 | Holds | Literal trace, its scene, its index | Gist, observations, state, patterns, signals |
 | Structured by | The boundaries the application reports, binding to the scene | Finer segmentation, integration across events |
-| Reached by | Every recall route, including topic | Every recall route |
+| Reached by | Scene, time, entity, and topic | Every recall route |
 | Comprehension | At recall, by the reader | At consolidation, by reflection |
-| Lifetime | Until consolidated, however long; never expires | Permanent, append-only |
+| Lifetime | Until consolidated, however long; never expires | Append-only; removed only by out-of-band purge |
 
 ---
 
@@ -40,7 +40,7 @@ An application may give its character's model a tool for noting something the mo
 
 # 2. Recall across both stores
 
-The short-term store joins every candidate route v0.2 defines. Recent trace is reached by scene, by time, by entity through the participants' identities, and by topic, because it is indexed when written. Items that belong to the conversation the character is currently in are marked, so the application can drop what its window already holds. Trace is presented as recent and unconsolidated, and the reader comprehends it as it reads.
+The short-term store joins the content, entity, and time routes v0.2 defines. It never feeds the state route or the stored-intention trigger route, which read interpreted durable memory; section 2.1 describes how surfaced state reaches trace. Recent trace is reached by scene, by time, by entity through the participants' identities, and by topic, because it is indexed when written. Items that belong to the conversation the character is currently in are marked, so the application can drop what its window already holds. Trace is presented as recent and unconsolidated, and the reader comprehends it as it reads.
 
 ## 2.1 Knowing how things stand before reflection
 
@@ -70,8 +70,8 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene, the identifiers of the entries it consolidated, and, where the application supplied one, its source pointer; an episode may be marked unfinished
-observations, with their register and who said it
+gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; an episode may be marked unfinished
+observations, each quoting the words it rests on and naming their entry, with their register and who said it
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
@@ -130,7 +130,7 @@ A mechanical write makes no language-model call, no model call of any kind in th
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated, and entries of the current conversation are marked.
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
-After reflection commits, consumed entries are gone, a source pointer that was supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
+After reflection commits, consumed entries are gone, every source pointer its entries supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
@@ -147,7 +147,7 @@ a model client or a named model in the library
 a scheduler or background job in the library
 durable writes from the memory tool, from tool results, or from any unvalidated path
 raw text in graph authority or the durable vector store
-reprocessing old scenes from source after their trace was consolidated and released, unless the application kept the source; what consolidation kept is recoverable in full forever, and the literal wording it let go is not
+reprocessing old scenes from source after their trace was consolidated and released, unless the application kept the source; what consolidation kept stays recoverable in full for as long as memory holds it, which an out-of-band purge can end, and the literal wording it let go is not
 validity intervals as structured fields and the fuller attribution work (v0.4); who-said-it on reflection outputs is in this phase
 connections across scopes, and which durable surfaces need vectors (v0.5)
 ```
