@@ -298,7 +298,7 @@ the short-term store is outside core memory and covered by purge; trace leaves i
 
 ## 2.18 The timeline has no unexplained holes
 
-Every span the character was present for is accounted for in durable memory, however quiet, and a span with no account means it was absent. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, so a present span is always covered by its trace or by the account consolidation wrote from it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
+Every span the character was present for is covered, however quiet: before consolidation by its trace, afterward by a durable account, and after an out-of-band purge by a marker that it was present. A span is absent only when all three are missing. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, and consolidation never releases a span's trace without leaving an account of it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
 
 ## 2.19 Interpreted memory carries its evidence
 
@@ -1404,7 +1404,7 @@ recall across stores  the short-term store joins every v0.2 route, including top
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        register, stated versus inferred, promotion thresholds, attribution, contradictions held, trace untrusted, self-revision (ADR-D-0028)
-presence accounting   scene boundaries report presence; every present span has a durable account (ADR-D-0027)
+presence accounting   scene boundaries report presence; every present span is covered by its trace, then by a durable account, or by a purge marker, and only a span with none of them is absent (ADR-D-0027)
 the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated (ADR-I-0035)
 memory tool           optional; the character's model noting something; a short-term entry with its origin, a claim, never a durable write
 ```

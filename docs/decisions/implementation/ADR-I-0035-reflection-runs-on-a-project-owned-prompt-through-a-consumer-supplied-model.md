@@ -14,7 +14,7 @@ depends_on: [../design/ADR-D-0025-durable-memory-has-one-writer.md, ../design/AD
 
 ## Context and Problem Statement
 
-Consolidation needs a language model. A port alone means nobody can reflect without writing a prompt and a client, and then trace accumulates indefinitely and the character never forms lasting memory from it, which defeats the design. A bundled model client means the library tracks vendors and versions forever and excludes anyone running a model it does not support. The fork is what the library ships and what the consumer supplies.
+Consolidation needs a language model. A port alone means nobody can reflect without authoring a quality-critical prompt as well as integrating a model, and then trace accumulates indefinitely and the character never forms lasting memory from it, which defeats the design. A bundled model client means the library tracks vendors and versions forever and excludes anyone running a model it does not support. The fork is what the library ships and what the consumer supplies.
 
 ## Decision
 
@@ -30,7 +30,7 @@ Owning the prompt keeps the quality-critical instructions with the project that 
 
 ## Rejected Alternatives
 
-- A port with no default prompt: rejected because reflection is then unusable out of the box, so trace accumulates without ever being consolidated.
+- A port with no default prompt: rejected because every consumer would have to author and evaluate a quality-critical prompt before trace could ever be consolidated; the default removes prompt authoring, while integrating a model stays the consumer's by design.
 - A bundled client for named models: rejected because of the maintenance surface and because it excludes unsupported models; reopen only as an optional companion crate outside the library.
 - Free-text reflection output parsed heuristically: rejected outright; the write path validates structure.
 - A scheduler inside the library: rejected because only the application knows when the character is idle and what a call costs; the library provides the signal and the selection.

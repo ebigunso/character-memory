@@ -70,14 +70,14 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene and, where the application supplied one, its source pointer; an episode may be marked unfinished
+gist episodes, each with its scene, the identifiers of the entries it consolidated, and, where the application supplied one, its source pointer; an episode may be marked unfinished
 observations, with their register and who said it
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
 promotions: a pattern citing its episodes; a belief resting on a persistent pattern
 weight, judged here from the trace
-an account of every span of presence, however quiet
+a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
 nothing else, when nothing else happened
 ```
 

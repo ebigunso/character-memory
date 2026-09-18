@@ -10,7 +10,7 @@ superseded_by: null
 depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md]
 ---
 
-# ADR-D-0027: Every span the character was present for is accounted for in durable memory, and absence is known as absence
+# ADR-D-0027: Every span the character was present for is covered, by its trace or by a durable account, and absence is known as absence
 
 ## Context and Problem Statement
 
@@ -18,11 +18,11 @@ On an ordinary day the honest result of reflecting is very little, and it is tem
 
 ## Decision
 
-The character's timeline has no unexplained holes. Every span in which it was present is accounted for by something durable, an episode or the day's gist, even when all that can be said is that the span was quiet. "Nothing" may describe interpretation and never the record. A span with no trace at all means the character was absent, and recall can say so.
+The character's timeline has no unexplained holes. Every span in which it was present is covered: before consolidation by its trace in the short-term store, and afterward by something durable, an episode or the day's gist, even when all that can be said is that the span was quiet. Consolidation never releases a span's trace without leaving a durable account of it. "Nothing" may describe interpretation and never the record.
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. An out-of-band purge that removes unconsolidated trace leaves a marker that the character was present for that span and that its content was purged, as ADR-D-0021 requires of any purge, so erasure is never read as absence. Only a span with neither trace, account, nor marker means absence.
+Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. An out-of-band purge that removes unconsolidated trace leaves a marker that the character was present for that span and that its content was purged, so erasure is never read as absence. This record requires that marker; ADR-D-0021 requires tombstones only for dangling provenance targets and makes no continuity claim for a purge. A span is absent only when trace, durable account, and purge marker are all missing, and recall can then say so.
 
 ## Why
 
