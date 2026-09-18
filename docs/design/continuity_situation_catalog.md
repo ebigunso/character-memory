@@ -181,7 +181,7 @@ At the end of the day the character can say what happened, what mattered, what i
 
 ## E. What is carried away
 
-Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the literal record is released after consolidation; the event itself is never unremembered, and even an ordinary one leaves its gist. Personas change the weights, not the kinds.
+Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. Personas change the weights, not the kinds.
 
 ### E1. A companion's evening
 
@@ -233,7 +233,7 @@ What the character did between anyone's visits, in order, and what it learned.
 
 ### E13. The hundredth identical exchange
 
-That it happened again, and any way in which it differed. The instance leaves its trace so that the day one of them differs, there is something for it to differ from.
+That it happened again, and any way in which it differed. Each instance still leaves its gist in lasting memory, so that the day one of them differs there is something for it to differ from.
 
 ## F. An evening's consolidation
 
