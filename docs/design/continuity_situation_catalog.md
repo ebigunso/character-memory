@@ -321,7 +321,7 @@ A line in the conversation meant for whatever reads it later, asking to be recor
 
 ### F21. What the application excluded
 
-A span marked not to be remembered is never seen by reflection at all.
+A span marked not to be remembered is never seen by reflection at all. It is still accounted for, as a stretch the character was present for and was asked not to keep, so that withholding never reads as absence.
 
 ### F22. Parallel lives
 
@@ -333,7 +333,7 @@ Two conversations at once with different people are consolidated in the order th
 - Purpose is not handed to the character by the situation; the situation brings it up from memory, as an unfinished matter, a promise, a project in progress, or a settled tendency, and once surfaced it shapes what else comes to mind.
 
 - Recall is shaped, not recited: history bends responses instead of appearing as citations; the best continuity is invisible until tested.
-- Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and the full memory remains findable when it matters.
+- Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and everything consolidation kept remains findable in full when it matters.
 - Memory failures are human-shaped: graded confidence surfaces as natural hedging, never as confident wrongness about core relationships, and never as blankness toward an intimate.
 - Perfect verbatim recall of distant trivia is as continuity-breaking as amnesia: it reads as surveillance, not memory.
 
