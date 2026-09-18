@@ -1412,7 +1412,7 @@ memory tool           optional; the character's model noting something; a short-
 ## Decided constraints
 
 ```text
-the library schedules nothing; it reports per-scope accumulation with its reason and selects bounded input; the application decides when
+the library executes reflection when the application calls it and starts none on its own; it reports per-scope accumulation with its reason and selects bounded input; the application decides when
 reflection is safe beside recall and writes, and whether to await it is the application's choice
 privacy exclusions apply before the prompt is built; the trace is data to the model, never instruction
 commitments and instructions are written with stability that keeps them from fading in ranking (ADR-D-0018)

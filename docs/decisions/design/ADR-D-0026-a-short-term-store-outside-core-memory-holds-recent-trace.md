@@ -46,7 +46,7 @@ Not covered: the index method, lexical, vector, or both, which is decided by mea
 
 - A mechanical write makes no model call and no write to graph authority or the durable vector store.
 - A scenario asks by topic about something from earlier the same day before any reflection, and recall returns it marked as recent and unconsolidated.
-- After consolidation commits, the consumed entries are gone and the durable episode carries the application's source pointer.
+- After consolidation commits, the consumed entries are gone, and where the application supplied a source pointer the durable episode carries it; an entry written without one consolidates just the same.
 - No public operation lists, searches, or exports the store's contents outside recall and consolidation.
 
 ## Revisit When

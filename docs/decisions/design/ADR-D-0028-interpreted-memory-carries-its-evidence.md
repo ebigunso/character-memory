@@ -18,7 +18,7 @@ Consolidation is done by a language model the library does not choose, running a
 
 ## Decision
 
-Every interpreted memory states the evidence it rests on, and the validated write path rejects a candidate its evidence does not support. Register belongs to observations, since it describes how something was said. Every other interpreted output, a restated state, a commitment, a resolution, a pattern, a belief, names the observations and episodes it rests on, and the rules below are checked through them. A gist episode's evidence is the trace it consolidates, identified by its scene and source pointer.
+Every interpreted memory states the evidence it rests on, and the validated write path rejects a candidate its evidence does not support. Register belongs to observations, since it describes how something was said. Every other interpreted output, a restated state, a commitment, a resolution, a pattern, a belief, names the observations and episodes it rests on, and the rules below are checked through them. A gist episode's evidence is the trace it consolidates, identified by its scene and, where one was given, its source pointer.
 
 - **Register.** An observation records whether what was said was literal, in jest, hypothetical, fiction, or quoted. Only the literal can support a change of state.
 - **Stated and inferred.** What a person states plainly about themselves, or gives as a standing instruction, may become attributed state from one instance. What is inferred from behavior may not.

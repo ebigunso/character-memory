@@ -70,7 +70,7 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene and the application's source pointer; an episode may be marked unfinished
+gist episodes, each with its scene and, where the application supplied one, its source pointer; an episode may be marked unfinished
 observations, with their register and who said it
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
@@ -91,7 +91,7 @@ A default prompt the project owns and versions, overridable, run through a minim
 
 ## 3.5 When it runs
 
-The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, or a possible change of state. It selects a scope's bounded input. It never runs reflection itself. Trace never expires: neglect is answered with a warning that escalates with volume and age and, past a threshold, is reported loudly on every write and every recall, because dropping experience that was never reflected on can only make memory poorer (ADR-D-0026). The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
+The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, or a possible change of state. It selects a scope's bounded input. It executes reflection, the prompt, the validation, the commit, and the release, when the application calls it, and never starts one on its own: only the schedule is the application's. Trace never expires: neglect is answered with a warning that escalates with volume and age and, past a threshold, is reported loudly on every write and every recall, because dropping experience that was never reflected on can only make memory poorer (ADR-D-0026). The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
 
 ---
 
@@ -128,7 +128,7 @@ A mechanical write makes no model call and writes only to the short-term store; 
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated, and entries of the current conversation are marked.
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
-After reflection commits, consumed entries are gone, the durable episode carries the source pointer, and a second run over the same entries produces no duplicates.
+After reflection commits, consumed entries are gone, a source pointer that was supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
