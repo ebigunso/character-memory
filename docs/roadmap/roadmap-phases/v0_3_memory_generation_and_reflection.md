@@ -31,7 +31,7 @@ a bundle     one entry per event as the application sees it, which is the only s
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the quote and the caller's own source reference, because the library cannot verify words against a source it never held. Existing callers must therefore supply register, attribution, and grounding, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the quote and the caller's own source reference, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: register and declared grounding on observations, the supporting observations and episodes on every other interpreted memory, and attribution and producer on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
