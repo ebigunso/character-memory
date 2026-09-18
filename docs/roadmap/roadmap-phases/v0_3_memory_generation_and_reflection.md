@@ -58,7 +58,7 @@ Lexical, vector, or both, behind the same candidate-route contract, decided by m
 
 # 3. Reflection
 
-Reflection is the only producer of interpreted memory and, with deliberate callers, the only writer of durable memory. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits.
+Reflection is the library's only producer of interpreted memory. A caller may still author interpreted memory deliberately through the same validated path, held to the same evidence rules, and between them they are the only writers of durable memory. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits.
 
 ## 3.1 Two units
 
@@ -83,7 +83,7 @@ nothing else, when nothing else happened
 
 ## 3.3 What the write path enforces
 
-The evidence rules of ADR-D-0028: only the literal supports state; the stated may become attributed state from one instance and the inferred may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern; claims about the character never stand alone; contradictions are held, not resolved; every output names the reflection and prompt version that produced it. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
+The evidence rules of ADR-D-0028: only the literal supports state; the stated may become attributed state from one instance and the inferred may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern; claims about the character never stand alone; contradictions are held, not resolved; every reflection output names the reflection and prompt version that produced it, and a caller-authored plan names the caller. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
 
 ## 3.4 The processor
 

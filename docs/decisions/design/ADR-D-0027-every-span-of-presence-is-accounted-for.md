@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md]
+depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md]
 ---
 
 # ADR-D-0027: Every span the character was present for is accounted for in durable memory, and absence is known as absence

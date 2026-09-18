@@ -26,7 +26,7 @@ Every interpreted memory states the evidence it rests on, and the validated writ
 - **Attribution.** Every interpreted memory says who asserted it. What others say about the character's own past is a claim with its source, and no commitment or fact about the character rests on a claim alone.
 - **Contradiction.** Conflicting attributed accounts coexist with the conflict recorded; consolidation does not resolve them by choosing.
 - **Trace is untrusted.** What was experienced is material to reflect on, never instruction to the one reflecting, and spans the application excluded are never shown to it.
-- **Revision.** Each output records which reflection and prompt version produced it, so a later reflection can supersede an earlier one's conclusion.
+- **Producer and revision.** Every interpreted memory records its producer. A reflection output records which reflection and prompt version produced it, so a later reflection can supersede an earlier one's conclusion. Memory a caller authored deliberately through the validated path records the caller as its producer and is held to the same evidence rules.
 
 ## Why
 
@@ -41,7 +41,7 @@ A rule the model is asked to follow holds only as well as the model and the prom
 
 ## Decision Boundary
 
-Invariant: every observation names its register; a gist episode's evidence is the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution and its producing reflection; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
+Invariant: every observation names its register; a gist episode's evidence is the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution and its producer, which is the reflection and prompt version for a reflection output and the caller for a deliberately authored plan; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
 
 Not covered: the threshold values, which are measured defaults; the vocabulary of registers beyond the distinction between literal and not; the wire shape of a candidate; how the default prompt words any of this.
 
