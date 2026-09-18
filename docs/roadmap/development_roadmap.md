@@ -250,7 +250,7 @@ public raw-reference resolution
 
 `raw_ref` and source-span fields are opaque provenance handles. They identify caller-managed source material but are not themselves raw source storage.
 
-Core memory never persists raw input. Recent raw snippets are held as trace in a short-term store beside core memory until consolidation turns them into curated memory and releases them (invariant 2.17). Reflection has no other input: text reaches it only as trace, because exclusion, presence accounting, and grounding are applied at the mechanical write. An application importing a history writes it as trace with its own times and reflects. The short-term store is not core memory storage, nothing in it enters graph authority or the durable vector store, and it is not a log to be searched or exported.
+Core memory never persists raw input. Recent raw snippets are held as trace in a short-term store beside core memory until consolidation turns them into curated memory and releases them (invariant 2.17). Raw source text reaches reflection only as trace, beside what durable memory already holds for the scope, because exclusion, presence accounting, and grounding are applied at the mechanical write. An application importing a history writes it as trace with its own times and reflects. The short-term store is not core memory storage, nothing in it enters graph authority or the durable vector store, and it is not a log to be searched or exported.
 
 ## 2.14 Memory is first-person
 
@@ -1381,7 +1381,7 @@ Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3
 
 ## Intent
 
-Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory on a guess. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
+Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory without stated evidence the write path can check; whether a judgment is right is measured, not guaranteed. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
 
 This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was settled on 2026-09-19 and replaces the earlier idea of generation on every remember call.
 

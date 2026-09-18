@@ -4,7 +4,7 @@ Rewritten on 2026-09-19 after the generation-phase discussion. It replaces the r
 
 ## Version intent
 
-Until this phase every lasting memory is authored by the caller, so the structures v0.2 reads are as good as the application's own extraction. This phase makes the library able to form memory from experience, under two constraints that shaped everything in it: a routine write must cost no language-model call, or applications will not write, and nothing may enter lasting memory on a guess.
+Until this phase every lasting memory is authored by the caller, so the structures v0.2 reads are as good as the application's own extraction. This phase makes the library able to form memory from experience, under two constraints that shaped everything in it: a routine write must cost no language-model call, or applications will not write, and nothing enters lasting memory without stated evidence the write path can check; whether a judgment is right is measured, not guaranteed.
 
 The answer is the human one. Experience leaves a literal trace at once, cheaply and without judgment. The character can reach that trace immediately, by what it was about as well as by when and with whom. Afterward, when there is time, reflection decides what lasts. Structure within one event is immediate; structure across events is what consolidation does.
 
