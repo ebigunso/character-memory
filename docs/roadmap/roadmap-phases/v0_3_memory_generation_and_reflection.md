@@ -129,7 +129,7 @@ Something from earlier the same day is recalled by topic before any reflection, 
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, the durable episode carries the source pointer, and a second run over the same entries produces no duplicates.
-A quiet present span has a durable account; an absent span has none; a span whose trace was dropped unconsolidated has an account of the loss; recall tells the three apart.
+A quiet present span has a durable account; an absent span has none; a span whose trace was dropped unconsolidated has an account of the loss; an excluded span has an account that it was withheld; recall tells them apart.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
@@ -145,7 +145,7 @@ a model client or a named model in the library
 a scheduler or background job in the library
 durable writes from the memory tool, from tool results, or from any unvalidated path
 raw text in graph authority or the durable vector store
-reprocessing old scenes from source beyond the store's horizon, unless the application kept the source
+reprocessing old scenes from source beyond the store's horizon, unless the application kept the source; what consolidation kept is recoverable in full forever, and the literal wording it let go is not
 validity intervals as structured fields and the fuller attribution work (v0.4); who-said-it on reflection outputs is in this phase
 connections across scopes, and which durable surfaces need vectors (v0.5)
 ```

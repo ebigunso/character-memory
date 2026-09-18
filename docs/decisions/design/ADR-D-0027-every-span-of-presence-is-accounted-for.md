@@ -22,7 +22,7 @@ The character's timeline has no unexplained holes. Every span in which it was pr
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Trace that must be dropped before it was consolidated, because the short-term store reached its horizon or its ceiling, is never dropped silently. The library itself writes a durable account that the character was present for that span and that what happened was not kept, through the validated path, with the span and its scene and no interpretation. A present span therefore always has an account, of what happened or of the fact that it was lost, and only a span with no account at all means absence. A character can then say "I was there, and I cannot recall it", which is different from both a quiet afternoon and not having been there.
+Trace that must be dropped before it was consolidated, because the short-term store reached its horizon or its ceiling, is never dropped silently. The library itself writes a durable account that the character was present for that span and that what happened was not kept, through the validated path, with the span and its scene and no interpretation. A span the application excluded from memory is accounted for the same way: the character was present, and what happened was withheld at the application's request. A present span therefore always has an account, of what happened, of the fact that it was lost, or of the fact that it was withheld, and only a span with no account at all means absence. A character can then say "I was there, and I cannot recall it", which is different from both a quiet afternoon and not having been there.
 
 ## Why
 
@@ -37,7 +37,7 @@ Memory is first-person, and a first-person history that cannot distinguish rest 
 
 ## Decision Boundary
 
-Invariant: every span of presence is covered by a durable account, of what happened or of the fact that its trace was lost unconsolidated; unconsolidated trace is never dropped without that account; an uncovered span means absence; consolidation never drops a span for being empty.
+Invariant: every span of presence is covered by a durable account, of what happened, of the fact that its trace was lost unconsolidated, or of the fact that it was withheld by exclusion; unconsolidated trace is never dropped without that account; an uncovered span means absence; consolidation never drops a span for being empty.
 
 Not covered: how scene boundaries are reported, how quiet spans are summarized or grouped within the day's gist, and how recall phrases absence.
 
