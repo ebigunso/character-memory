@@ -72,6 +72,7 @@ the day's pass     the character's own day: a first-person gist, the small encou
 
 ```text
 gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; an episode may be marked unfinished
+entity candidates for the people, places, and things the trace names, each resolved through graph authority to an existing entity, proposed as new, or, when it is unclear whether two references are one, kept separate with a possible-same link; reflection never mints a final identity and never merges on a guess
 observations, each quoting the words it rests on and naming their entry, with their register and who said it
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
@@ -84,7 +85,7 @@ nothing else, when nothing else happened
 
 ## 3.3 What the write path enforces
 
-The evidence rules of ADR-D-0028: only the literal supports state; the stated may become attributed state from one instance and the inferred may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern; claims about the character never stand alone; contradictions are held, not resolved; every reflection output names the reflection and prompt version that produced it, and a caller-authored plan names the caller. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
+Entity candidates resolve through graph authority: a candidate names an existing entity by an identity graph authority confirms, or is proposed as new, or carries a possible-same link; a model-supplied identity that graph authority does not hold fails validation, and nothing merges two entities. The evidence rules of ADR-D-0028: only the literal supports state; the stated may become attributed state from one instance and the inferred may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern; claims about the character never stand alone; contradictions are held, not resolved; every reflection output names the reflection and prompt version that produced it, and a caller-authored plan names the caller. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
 
 ## 3.4 The processor
 
@@ -135,6 +136,7 @@ Reflection with a test double for the completion port runs end to end without a 
 After reflection commits, consumed entries are gone, every source pointer its entries supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span's content is never stored, indexed, recalled, or sent to a model, only its marker remains, and a retroactive exclusion of unconsolidated trace leaves the same state; an exclusion issued while a reflection that selected the entry is in flight makes that reflection's commit fail, so nothing derived from the entry is written.
+Names and references in trace become entity candidates resolved through graph authority: a known person is linked, an unknown one is proposed as new, an unclear one is kept separate with a possible-same link, a model-minted identity fails validation, and nothing is merged (catalog F14).
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
@@ -170,7 +172,7 @@ the promotion thresholds as measured defaults
 the completion port's signature and the output schema
 how the renderer labels unconsolidated items and notes
 the concurrent-facade-call census result and whether anything in the write path needs a guard
-how custom scene values and entity uncertainty ("possibly the same person") are represented ahead of v0.4
+how custom scene values are represented, and the exact form of the possible-same link ahead of v0.4's entity evolution work
 ```
 
 Implementation records expected with the plan, each written when its contract is set: the short-term store's index and bounds, the release contract, the signal, and the output schema.

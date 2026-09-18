@@ -1392,6 +1392,7 @@ short-term store      beside core memory: scene, raw snippet, time, kind, source
 mechanical write      no language-model call, no judgment; lexical indexing by default calls no model at all, and an opted-in vector index costs one embedding per write; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
 recall across stores  the short-term store joins the content, entity, and time routes; the state and trigger routes read durable memory only, and surfaced state reaches trace through the one re-cue hop; current-conversation items are marked; the reader comprehends trace as it reads
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal
+entity resolution     reflection proposes entity candidates and graph authority resolves them; no model-minted identities, no merges on a guess
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        register, stated versus inferred, promotion thresholds, attribution, contradictions held, trace untrusted, self-revision (ADR-D-0028)
 presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
@@ -1427,6 +1428,7 @@ A task completed or a fact changed before reflection is known at recall when its
 Reflection runs end to end through a test double of the completion port; rule-breaking output commits nothing and releases nothing; a second run produces no duplicates.
 A quiet present span has a durable account, an absent span has none, and recall tells them apart.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.
+Names and references in trace become entity candidates resolved through graph authority, with unclear identity kept separate under a possible-same link and nothing merged on a guess.
 A backlog is consolidated in order, and a later reflection can supersede an earlier one's conclusion.
 The benchmarks run through mechanical writes plus reflection with frozen reflection outputs, and the behavioral tier has its first scenarios.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
