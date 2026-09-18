@@ -22,7 +22,7 @@ The library ships a default reflection prompt that the project owns, versions, a
 
 The library asks the model for structured output and validates it through prepare, validate, and commit, including the evidence rules of ADR-D-0028, so output that is malformed, ungrounded, or structurally unsupported yields diagnostics and an unreleased trace. This is structural validation, not semantic safety: a schema-valid misjudgment can still commit, which is why outputs carry their prompt version, evaluation measures them, and a later reflection can supersede them. The prompt version is recorded on everything a reflection produces. Excluded content never reaches the prompt because it was never stored: exclusion is applied at the mechanical write (ADR-D-0026), and the prompt builder checks again as a second guard. Reflection's input is bounded, and a long span is processed in order in bounded pieces. Short-term entries are released only after the plan that consumed them commits, and the release is idempotent.
 
-Scheduling is the application's: the library reports how much a scope has accumulated since its last reflection, and why, and selects a scope's bounded input; it never runs reflection on its own. Reflection is safe to run beside recall and mechanical writes on the same memory.
+Scheduling is the application's: the library reports how much a scope has accumulated since its last reflection, and why, and selects a scope's bounded input; it never runs reflection on its own. Reflection is safe to run beside recall, mechanical writes, and exclusions on the same memory. It records which entries it selected and the version of each, and commit checks them again: if any selected entry has since been excluded or otherwise changed, the plan is rejected, nothing commits, nothing is released, and a later reflection selects afresh. An exclusion therefore always wins over a reflection in flight. What it cannot do is recall text already sent to the model before the exclusion was issued; the guarantee is that excluded text is never sent after it is excluded and never produces memory.
 
 ## Why
 
@@ -47,6 +47,7 @@ Not covered: the port's exact signature, the output schema, the prompt text, the
 - Malformed or rule-breaking model output produces diagnostics, commits nothing, and releases nothing.
 - Outputs carry the prompt version; an overridden prompt carries the consumer's identifier.
 - A reflection running beside concurrent recall and writes on the same scope leaves a consistent supersession chain.
+- An entry excluded after a reflection selected it and before that reflection commits causes the commit to be rejected: nothing derived from it is written, nothing is released, and the next reflection does not see its content.
 
 ## Revisit When
 
