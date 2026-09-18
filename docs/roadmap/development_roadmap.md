@@ -1423,7 +1423,7 @@ purge propagation: when a source is purged, what happens to restated state that 
 ```text
 A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and writes only to the short-term store.
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated.
-A task completed or a fact changed before reflection is known at recall with the durable record unchanged.
+A task completed or a fact changed before reflection is known at recall when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward; the durable record is unchanged and the miss rate is measured.
 Reflection runs end to end through a test double of the completion port; rule-breaking output commits nothing and releases nothing; a second run produces no duplicates.
 A quiet present span has a durable account, an absent span has none, and recall tells them apart.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.

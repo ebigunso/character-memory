@@ -20,7 +20,7 @@ A character must know at once what it just did and what it was just told, and a 
 
 Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits a plan. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in the short-term store and nowhere else.
 
-Immediacy comes from recall. Recent trace is reachable by scene, time, entity, and topic, which are the cues a mechanical write can carry; the state and stored-intention routes read interpreted durable memory and never read trace. The reader comprehends trace as it reads, and a change to how things stand is discovered at recall by bringing recent trace alongside the durable state it may bear on. Reflection later records the change properly. A note made through a memory tool is the character noting something, with the turn that prompted it as its origin; it is a claim to be weighed, never a fact copied forward.
+Immediacy comes from recall. Recent trace is reachable by scene, time, entity, and topic, which are the cues a mechanical write can carry; the state and stored-intention routes read interpreted durable memory and never read trace. The reader comprehends trace as it reads, and a change to how things stand is discovered at recall by bringing recent trace alongside the durable state it may bear on. Reflection later records the change properly. Discovery at recall is best effort by nature: it succeeds when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward. A note made through a memory tool is the character noting something, with the turn that prompted it as its origin; it is a claim to be weighed, never a fact copied forward.
 
 ## Why
 
@@ -42,7 +42,7 @@ Not covered: the short-term store's shape and bounds (ADR-D-0026), how recall br
 ## Validation
 
 - No code path from a mechanical write or a memory tool reaches graph authority or the durable vector store.
-- A scenario in which a task is completed and the character is asked about it before any reflection shows the open item and the newer trace together, and the durable record unchanged.
+- A scenario in which a task is completed and the character is asked about it before any reflection shows the open item and the newer trace together, and the durable record unchanged; a scenario whose change shares no words or meaning with the state and lies outside the recency floor is recorded as the measured miss it is, not asserted away.
 - A planted note is recalled as the character's note with its origin and produces no commitment at reflection without support in the record.
 
 ## Revisit When

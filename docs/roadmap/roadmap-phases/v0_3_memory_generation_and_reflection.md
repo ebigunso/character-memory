@@ -49,7 +49,7 @@ A change of state is not recorded at write time. It is discovered at recall: whe
 
 At write time the library compares a new line against the scope's small set of current state, by the same lookup the store uses, and when a line overlaps a current item it raises that scope's reflection signal with the reason that state may have changed. The application can then run a small reflection over that item and those lines soon.
 
-Where this degrades: a line that shares neither words nor meaning with the state it changes may be missed by the hop. On the same day the recency floor usually carries it; beyond that it is found at reflection.
+This is best effort, and the acceptance criteria say so. A line that shares neither words nor meaning with the state it changes may be missed by the hop. On the same day the recency floor usually carries it; beyond that it is found only at reflection, however long that takes, since trace never expires and the application owns the schedule. The overlap signal and the accumulation warning exist to bring that reflection forward, and the miss rate is a measured quantity, not a guarantee.
 
 ## 2.2 The lookup
 
@@ -130,7 +130,7 @@ let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;         
 ```text
 A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and writes only to the short-term store; an oversize entry is refused or visibly truncated.
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated, and entries of the current conversation are marked.
-A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
+A task completed or a fact changed before reflection is known at recall when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward; the durable record is unchanged; an overlapping line raises the scope's signal with its reason; the miss rate on the changed-fact scenarios is measured and recorded.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, every source pointer its entries supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
