@@ -41,7 +41,7 @@ A rule the model is asked to follow holds only as well as the model and the prom
 
 ## Decision Boundary
 
-Invariant: every observation names its register; every interpreted memory names its attribution, the observations and episodes it rests on, and its producing reflection; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
+Invariant: every observation names its register; a gist episode's evidence is the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution and its producing reflection; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
 
 Not covered: the threshold values, which are measured defaults; the vocabulary of registers beyond the distinction between literal and not; the wire shape of a candidate; how the default prompt words any of this.
 

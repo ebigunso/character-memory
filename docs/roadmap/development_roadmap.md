@@ -302,7 +302,7 @@ Every span the character was present for is accounted for in durable memory, how
 
 ## 2.19 Interpreted memory carries its evidence
 
-Every observation names its register, and every interpreted memory names its attribution, the observations and episodes it rests on, and the reflection that produced it, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution and the reflection that produced it, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
 
 ---
 
