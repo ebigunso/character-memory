@@ -52,7 +52,7 @@ Where this degrades: a line that shares neither words nor meaning with the state
 
 ## 2.2 The lookup
 
-Lexical, vector, or both, behind the same candidate-route contract, decided by measurement in the public companion `CharacterMemoryEvals` repository, whose tooling is a development aid and not core library functionality. The measurement separates paraphrase from repetition, what the recency floor already covers, unsegmented scripts such as Japanese where default tokenizers fail, a changed fact stated in different words than the fact it changes, and write-side cost, since the query embedding is already paid at recall and a vector index costs one embedding per write. The prior is lexical by default, vectors where the embedder is local or cheap, and both where both exist, since the reader tolerates a few irrelevant recent lines better than a missing one.
+Lexical, vector, or both, behind the same candidate-route contract, decided by measurement in the public companion evaluation repository `CharacterMemoryEvals`, whose tooling is a development aid and not core library functionality. The measurement separates paraphrase from repetition, what the recency floor already covers, unsegmented scripts such as Japanese where default tokenizers fail, a changed fact stated in different words than the fact it changes, and write-side cost, since the query embedding is already paid at recall and a vector index costs one embedding per write. The prior is lexical by default, vectors where the embedder is local or cheap, and both where both exist, since the reader tolerates a few irrelevant recent lines better than a missing one.
 
 ---
 

@@ -40,7 +40,7 @@ Two stores with different jobs is how fast and slow memory are usually described
 
 Invariant: recent trace lives outside core memory and drains only by consolidation; unconsolidated trace is never dropped by the library, and overlong retention is reported loudly; it is written mechanically; it is indexed for recall and reached only through recall and consolidation; it never enters graph authority or the durable vector store; purge covers it.
 
-Not covered: the index method, lexical, vector, or both, which is decided by measurement; the entry bounds; the warning's thresholds and form; the storage engine; how the release is made idempotent; whether an application may choose to keep consolidated trace longer for reprocessing.
+Not covered: the index method, lexical, vector, or both, which is decided by measurement; the entry bounds; the warning's thresholds and form; the storage engine; how the release is made idempotent.
 
 ## Validation
 
@@ -57,4 +57,4 @@ Deployments show the need to reprocess old scenes from source often enough that 
 
 - ADR-D-0015 stays in force: core memory stores no raw source material, and this store is the separate, outside-core arrangement that record anticipates.
 - ADR-D-0025 makes this store the only destination of in-the-moment input.
-- The fast-store lookup measurement, including paraphrase, unsegmented scripts such as Japanese, and a changed fact stated in different words, is planned in the public companion `CharacterMemoryEvals` repository, a development aid and not core library functionality.
+- The fast-store lookup measurement, including paraphrase, unsegmented scripts such as Japanese, and a changed fact stated in different words, is planned in the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality.

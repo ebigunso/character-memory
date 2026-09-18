@@ -289,7 +289,7 @@ How a memory should be treated is a change of the character's state about it, ca
 Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in a short-term store beside core memory and nowhere else. Immediacy comes from recall over that trace, never from an early durable write. See [ADR-D-0025](../decisions/design/ADR-D-0025-durable-memory-has-one-writer.md) and [ADR-D-0026](../decisions/design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md).
 
 ```text
-structure within one event is immediate: segmentation and binding to the scene, mechanically
+structure within one event is immediate: the boundaries the application reports and binding to the scene, mechanically; finer segmentation is consolidation's
 structure across events is consolidation: gist, state, patterns, beliefs
 recent trace is reachable by scene, time, entity, and topic, never through the state or stored-intention routes, and the reader comprehends it as it reads
 a change of state before consolidation is discovered at recall, not recorded at write

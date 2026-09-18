@@ -54,5 +54,5 @@ Structured output proves unattainable on the models consumers actually run, or t
 
 ## More Information
 
-- The evaluation harness in the public companion `CharacterMemoryEvals` repository, a development aid and not core library functionality, pins the prompt version and freezes reflection outputs the way it freezes embeddings.
+- The evaluation harness in the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality, pins the prompt version and freezes reflection outputs the way it freezes embeddings.
 - The guide page on when to write and when to reflect is a deliverable of the generation phase.
