@@ -293,12 +293,12 @@ structure within one event is immediate: segmentation and binding to the scene, 
 structure across events is consolidation: gist, state, patterns, beliefs
 recent trace is reachable by every recall route, including topic, and the reader comprehends it as it reads
 a change of state before consolidation is discovered at recall, not recorded at write
-the short-term store is bounded, draining, outside core memory, and covered by purge
+the short-term store is outside core memory and covered by purge; trace leaves it only by consolidation, never by expiry, and overlong retention is reported loudly
 ```
 
 ## 2.18 The timeline has no unexplained holes
 
-Every span the character was present for is accounted for in durable memory, however quiet, and a span with no account means it was absent. "Nothing" may describe interpretation and never the record. Trace dropped before it was consolidated leaves a durable account of the loss, so a lost span is known as lost and never mistaken for absence. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
+Every span the character was present for is accounted for in durable memory, however quiet, and a span with no account means it was absent. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, so a present span is always covered by its trace or by the account consolidation wrote from it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
 
 ## 2.19 Interpreted memory carries its evidence
 
@@ -1398,7 +1398,7 @@ This phase moved up from its earlier position as v0.6 because the write-plan val
 ## New concepts
 
 ```text
-short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; bounded, indexed, draining, covered by purge (ADR-D-0026)
+short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026)
 mechanical write      no model call, no judgment; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
 recall across stores  the short-term store joins every v0.2 route, including topic; current-conversation items are marked; the reader comprehends trace as it reads
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal

@@ -14,7 +14,7 @@ The answer is the human one. Experience leaves a literal trace at once, cheaply 
 | Structured by | The boundaries the application reports, binding to the scene | Finer segmentation, integration across events |
 | Reached by | Every recall route, including topic | Every recall route |
 | Comprehension | At recall, by the reader | At consolidation, by reflection |
-| Lifetime | Until consolidated, within a horizon | Permanent, append-only |
+| Lifetime | Until consolidated, however long; never expires | Permanent, append-only |
 
 ---
 
@@ -91,7 +91,7 @@ A default prompt the project owns and versions, overridable, run through a minim
 
 ## 3.5 When it runs
 
-The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, approach of the store's horizon or ceiling, or a possible change of state. It selects a scope's bounded input. It never runs reflection itself. If entries must be dropped at the horizon or the ceiling without having been consolidated, the library writes a durable account that the span was present and its trace was lost (ADR-D-0027), so a neglected store produces known gaps, never false absence. The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
+The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, or a possible change of state. It selects a scope's bounded input. It never runs reflection itself. Trace never expires: neglect is answered with a warning that escalates with volume and age and, past a threshold, is reported loudly on every write and every recall, because dropping experience that was never reflected on can only make memory poorer (ADR-D-0026). The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
 
 ---
 
@@ -129,7 +129,7 @@ Something from earlier the same day is recalled by topic before any reflection, 
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, the durable episode carries the source pointer, and a second run over the same entries produces no duplicates.
-A quiet present span has a durable account; an absent span has none; a span whose trace was dropped unconsolidated has an account of the loss; an excluded span has an account that it was withheld; recall tells them apart.
+A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
@@ -145,7 +145,7 @@ a model client or a named model in the library
 a scheduler or background job in the library
 durable writes from the memory tool, from tool results, or from any unvalidated path
 raw text in graph authority or the durable vector store
-reprocessing old scenes from source beyond the store's horizon, unless the application kept the source; what consolidation kept is recoverable in full forever, and the literal wording it let go is not
+reprocessing old scenes from source after their trace was consolidated and released, unless the application kept the source; what consolidation kept is recoverable in full forever, and the literal wording it let go is not
 validity intervals as structured fields and the fuller attribution work (v0.4); who-said-it on reflection outputs is in this phase
 connections across scopes, and which durable surfaces need vectors (v0.5)
 ```
@@ -159,7 +159,7 @@ Open discussion, to be held before this phase's plan is approved: purge propagat
 Planning questions:
 
 ```text
-entry size, rate, horizon, and ceiling; the storage engine
+entry size and rate; the overlong-retention warning's thresholds and form; the storage engine
 identity and granularity between a short-term entry and the episode it becomes; idempotent release
 the overlap signal's heuristic and thresholds
 the promotion thresholds as measured defaults
