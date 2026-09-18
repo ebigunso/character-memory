@@ -33,7 +33,7 @@ Owning the prompt keeps the quality-critical instructions with the project that 
 - A port with no default prompt: rejected because every consumer would have to author and evaluate a quality-critical prompt before trace could ever be consolidated; the default removes prompt authoring, while integrating a model stays the consumer's by design.
 - A bundled client for named models: rejected because of the maintenance surface and because it excludes unsupported models; reopen only as an optional companion crate outside the library.
 - Free-text reflection output parsed heuristically: rejected outright; the write path validates structure.
-- A scheduler inside the library: rejected because only the application knows when the character is idle and what a call costs; the library provides the signal and the selection.
+- A scheduler inside the library, including an opt-in background worker that triggers on scene boundaries and accumulation: rejected because what counts as a finished conversation or a finished action log differs widely between applications, and only the application knows it and what a call costs; any default timing would be an arbitrary assumption that constrains how the library can be used. Reflection needs no idle character, so the application is free to start it in the background whenever it judges an event finished; the library provides the signal, the selection, and safe concurrent execution.
 
 ## Decision Boundary
 
