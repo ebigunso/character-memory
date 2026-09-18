@@ -18,7 +18,7 @@ Consolidation is done by a language model the library does not choose, running a
 
 ## Decision
 
-Every interpreted memory states the evidence it rests on, and the validated write path rejects a candidate its evidence does not support.
+Every interpreted memory states the evidence it rests on, and the validated write path rejects a candidate its evidence does not support. Register belongs to observations, since it describes how something was said. Every other interpreted output, a restated state, a commitment, a resolution, a pattern, a belief, names the observations and episodes it rests on, and the rules below are checked through them. A gist episode's evidence is the trace it consolidates, identified by its scene and source pointer.
 
 - **Register.** An observation records whether what was said was literal, in jest, hypothetical, fiction, or quoted. Only the literal can support a change of state.
 - **Stated and inferred.** What a person states plainly about themselves, or gives as a standing instruction, may become attributed state from one instance. What is inferred from behavior may not.
@@ -41,7 +41,7 @@ A rule the model is asked to follow holds only as well as the model and the prom
 
 ## Decision Boundary
 
-Invariant: interpreted memory names its register, its attribution, its supporting episodes, and its producing reflection; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
+Invariant: every observation names its register; every interpreted memory names its attribution, the observations and episodes it rests on, and its producing reflection; state rests only on the literal; inferred beliefs meet their promotion threshold; claims about the character never stand alone; validation rejects what fails these.
 
 Not covered: the threshold values, which are measured defaults; the vocabulary of registers beyond the distinction between literal and not; the wire shape of a candidate; how the default prompt words any of this.
 

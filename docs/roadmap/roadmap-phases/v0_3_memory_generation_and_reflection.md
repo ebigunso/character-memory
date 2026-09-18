@@ -11,7 +11,7 @@ The answer is the human one. Experience leaves a literal trace at once, cheaply 
 | | Short-term store, waking | Durable memory, after reflection |
 |---|---|---|
 | Holds | Literal trace, its scene, its index | Gist, observations, state, patterns, signals |
-| Structured by | Segmentation, binding to the scene | Integration across events |
+| Structured by | The boundaries the application reports, binding to the scene | Finer segmentation, integration across events |
 | Reached by | Every recall route, including topic | Every recall route |
 | Comprehension | At recall, by the reader | At consolidation, by reflection |
 | Lifetime | Until consolidated, within a horizon | Permanent, append-only |
@@ -26,7 +26,7 @@ A write takes the scene and a raw snippet of what happened: a conversation line 
 entry        the scene, the snippet, its time, its kind (exchange, action, note, boundary), the application's source pointer if given
 bounded      each entry has a size limit; oversize input is refused or visibly truncated, never silently stored
 a dump       a result too large to snippet is written as its action line and a pointer
-a bundle     one entry per event as the application sees it; segmentation is reflection's job
+a bundle     one entry per event as the application sees it, which is the only segmentation done at write time; splitting a bundle into finer events is reflection's job
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
@@ -91,7 +91,7 @@ A default prompt the project owns and versions, overridable, run through a minim
 
 ## 3.5 When it runs
 
-The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, approach of the store's horizon or ceiling, or a possible change of state. It selects a scope's bounded input. It never runs reflection itself. The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
+The library reports, per scope, how much has accumulated since the last reflection and why: volume, age, approach of the store's horizon or ceiling, or a possible change of state. It selects a scope's bounded input. It never runs reflection itself. If entries must be dropped at the horizon or the ceiling without having been consolidated, the library writes a durable account that the span was present and its trace was lost (ADR-D-0027), so a neglected store produces known gaps, never false absence. The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection is safe to run beside recall and writes on the same memory; whether to await it is the application's choice, and a character should not pause mid-conversation to reflect.
 
 ---
 
@@ -113,7 +113,7 @@ the behavioral tier's first scenarios: tact, discretion across scenes, retelling
 Illustrative shape:
 
 ```rust
-memory.note(&scene, Trace::exchange("raw text of what happened")).await?;      // mechanical, no model
+memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;     // mechanical, no model; a note is one kind of trace, not the name of the write
 let signal = memory.reflection_signal(&scene).await?;                            // how much accumulated, and why
 let memory = memory.with_completion_provider(provider);                          // the consumer's model
 let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;          // validated, then releases trace
@@ -129,7 +129,7 @@ Something from earlier the same day is recalled by topic before any reflection, 
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, the durable episode carries the source pointer, and a second run over the same entries produces no duplicates.
-A quiet present span has a durable account; an absent span has none; recall tells them apart.
+A quiet present span has a durable account; an absent span has none; a span whose trace was dropped unconsolidated has an account of the loss; recall tells the three apart.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.

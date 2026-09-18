@@ -298,11 +298,11 @@ the short-term store is bounded, draining, outside core memory, and covered by p
 
 ## 2.18 The timeline has no unexplained holes
 
-Every span the character was present for is accounted for in durable memory, however quiet, and a span with no account means it was absent. "Nothing" may describe interpretation and never the record. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
+Every span the character was present for is accounted for in durable memory, however quiet, and a span with no account means it was absent. "Nothing" may describe interpretation and never the record. Trace dropped before it was consolidated leaves a durable account of the loss, so a lost span is known as lost and never mistaken for absence. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
 
 ## 2.19 Interpreted memory carries its evidence
 
-Every interpreted memory names its register, its attribution, its supporting episodes, and the reflection that produced it, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+Every observation names its register, and every interpreted memory names its attribution, the observations and episodes it rests on, and the reflection that produced it, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
 
 ---
 
@@ -1670,7 +1670,7 @@ let prompt_text = outcome.pack.render(RenderStyle::default());
 Illustrative shape; the mechanical write, the signal, and reflection through the consumer's model.
 
 ```rust
-memory.note(&scene, Trace::exchange("raw text of what happened")).await?;
+memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;
 let signal = memory.reflection_signal(&scene).await?;
 let memory = memory.with_completion_provider(provider);
 let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;
