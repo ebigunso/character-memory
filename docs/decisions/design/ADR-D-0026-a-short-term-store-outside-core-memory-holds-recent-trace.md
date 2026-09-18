@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0015-keep-raw-source-storage-outside-core.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0025-durable-memory-has-one-writer.md]
+depends_on: [ADR-D-0015-keep-raw-source-storage-outside-core.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0023-purpose-is-never-a-supplied-cue.md, ADR-D-0025-durable-memory-has-one-writer.md]
 ---
 
 # ADR-D-0026: A short-term store outside core memory holds recent trace until consolidation, and recall reaches it by scene, time, entity, and topic
@@ -20,7 +20,7 @@ A person remembers this morning this afternoon, by what it was about, before any
 
 Recent experience is held in a short-term store beside core memory, not inside it. A mechanical write puts there the scene, the raw snippet of what happened, its time, and the application's source pointer if one was given, with no language-model call and no judgment. Indexing is mechanical too: lexical by default, which calls no model of any kind, and where the consumer opts into a vector index, one embedding per write, which encodes text for lookup and interprets nothing. Scene boundaries are written the same way, with no content required.
 
-Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the content, entity, and time routes beside durable memory, and marks what belongs to the current conversation. It never feeds the state route or the stored-intention route, which read interpreted durable memory; surfaced state reaches trace only through the one bounded re-cue hop. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge of ADR-D-0021. The purge path of ADR-D-0021 covers it.
+Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the content, entity, and time routes beside durable memory, and marks what belongs to the current conversation. It never feeds the state route or the stored-intention route, which read interpreted durable memory; surfaced state reaches trace only through the one bounded re-cue hop of ADR-D-0023. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge of ADR-D-0021. The purge path of ADR-D-0021 covers it.
 
 It is never core memory: nothing in it enters graph authority or the durable vector store, it is not a memory substrate, and it is reachable only through recall and consolidation, never as a log to be searched or exported.
 
@@ -57,4 +57,5 @@ Deployments show the need to reprocess old scenes from source often enough that 
 
 - ADR-D-0015 stays in force: core memory stores no raw source material, and this store is the separate, outside-core arrangement that record anticipates.
 - ADR-D-0025 makes this store the only destination of in-the-moment input.
+- ADR-D-0023 defines the one bounded re-cue hop through which surfaced state reaches trace.
 - The fast-store lookup measurement, including paraphrase, unsegmented scripts such as Japanese, and a changed fact stated in different words, is planned in the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality.
