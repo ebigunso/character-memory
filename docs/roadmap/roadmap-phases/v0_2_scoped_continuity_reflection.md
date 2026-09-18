@@ -61,7 +61,7 @@ trigger route     stored intentions whose trigger is a participant present or a 
 
 Importance and recency weight activation. Surfaced state re-cues one bounded hop: an open loop pulls the counterpart's objections, a thread pulls its last decision. A scene with no topic is the same retrieval with the content route empty; there is no separate current-state call. Elapsed time since the pair last met is reported with the result.
 
-The section budgets of the pack stay as output categories. Floors are per route, and the plan calibrates them by measurement in the pattern of ADR-I-0022.
+The section budgets of the pack stay as output categories. Floors are per route, and the plan calibrates them by measurement in the pattern of ADR-I-0022. Routes are defined over a store-neutral candidate contract, so the short-term store that v0.3 introduces joins every route without changing this design.
 
 ## 2.1 Currency and staleness
 
@@ -165,6 +165,7 @@ a current-state view type, a scope hint by ID, a purpose field, a retrieval-mode
 a stored scope object without a named consumer
 interpreting-neighbor co-retrieval
 involuntary recall from weak cues, D12 (v0.5)
+the short-term store and the mechanical write (v0.3, beside reflection)
 reinforce, decay, archival
 attribution fields beyond what the scene implies (v0.4)
 ```
