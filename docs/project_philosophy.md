@@ -90,10 +90,10 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 2. Recall what the present moment calls for, from the situation itself and from what is being said.
 3. Provide memory context to the LLM in a concise, grounded form.
 4. Generate the assistant response.
-5. Decide what from the interaction is worth remembering.
-6. Store new episodes with time, entities, relations, salience, and provenance.
-7. Reflect periodically to connect episodes into higher-level patterns.
-8. Use those patterns to reinforce character continuity over future interactions.
+5. Keep a trace of what happened, as it happened.
+6. Know at once how things now stand, before there has been time to reflect.
+7. Reflect afterward to decide what lasts: what the experience meant, what changed, what repeats, and what to carry forward.
+8. Use what lasts to reinforce character continuity over future interactions.
 
 **Key implication:** memory retrieval should not be treated as a final answer. It is context for situated behavior.
 
@@ -104,10 +104,11 @@ Character Memory should sit around the LLM interaction loop. It participates bot
 | Concept | Meaning | Implementation implication |
 |---|---|---|
 | Episode | A remembered event or interaction. | Store event content, time, participants, context, and provenance. Preserve enough episode detail and source provenance for later correction, inspection, and reflection. |
+| Trace | What happened, kept as it happened, before it has been reflected on. | Recent experience is held literally and briefly. Consolidation turns it into lasting memory and lets the literal record go. |
 | Entity | A person, project, place, object, topic, character, organization, or recurring concept. | Extract and link entities so memories can be retrieved through relationships, not only similar wording. Treat entity roles as application-level interpretation, not core schema truth. |
 | Temporal context | When something happened and how events relate over time. | Support recency, sequence, duration, intervals, anniversaries, change over time, and elapsed time relative to now. |
 | Relation | A typed or inferred connection between memories and entities. | Represent relationships such as involved in, caused by, follows from, contradicts, resolved by, or similar to. |
-| Salience | Why a memory matters. | Judge importance at write time using behavioral, emotional, practical, or relational weight. At recall, weigh it against evidence and elapsed time rather than against a stored score that drifts. |
+| Salience | Why a memory matters. | Judge importance when the experience is consolidated, using behavioral, emotional, practical, or relational weight. At recall, weigh it against evidence and elapsed time rather than against a stored score that drifts. |
 | Reflection | A higher-level interpretation derived from multiple memories. | Generate summaries, patterns, and stable observations with links back to source episodes. |
 | Character signal | A stable tendency or preference inferred from memory. | Do not overwrite personality arbitrarily. Derive character signals from remembered evidence and attach them to scope. |
 | Continuity | The assistant or character behaves as the same persistent entity over time. | The system should optimize for coherent behavior across sessions, not only recall of isolated facts. |
@@ -184,6 +185,10 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **Forgetting is always someone's decision.** The record is append-only, and forgetting changes influence, not history. It takes exactly two forms, each intentional, reversible, and inspectable: suppression removes a memory's influence, and supersession replaces it with a corrected memory while keeping the old one as history. A memory that is no longer current, such as a finished project or a relationship that ended, is not forgotten: it leaves current views through a change of currency and stays fully recallable. Destructive deletion is not a memory operation; erasure exists only as an out-of-band operational action for compliance, security remediation, or explicit operator-directed alteration.
 - **Discretion is disclosure, not recall.** A person told something in confidence still knows it in the next room. They choose not to say it, and knowing it still shapes how they act. Recall is therefore never gated by privacy or sensitivity by default. Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Recall reports that scene with the memory so the character can be consistent and careful at once. Where an application must enforce a boundary, it does so as an explicit query-time policy over the scene, never as a property stored on the memory.
 - **A memory's meaning is other memories.** How a memory should be treated comes from what is linked to it: a request not to raise it, a correction, a resolution, a framing, a note about the source. Each of these is itself a remembered event with provenance. The library does not sort memories into treatments or annotate them with instructions, because an experienced fact can mean many things and the boundary between an instruction and an experience is not one the library can draw. When how a memory should be treated changes, the character's memory of it changes with it, and what it remembers afterward reads as one memory, not as a history of edits.
+- **Everything experienced leaves a trace; what lasts is decided afterward.** A person cannot know at the moment which remark will matter in a year, and the character should not have to either. What happened is kept as it happened, cheaply and without judgment. Deciding what it meant, what changed, what repeats, and what to carry forward happens later, when there is time to reflect and more is known. Nothing is lost for having seemed unimportant at the time.
+- **The character knows how things stand before it has reflected.** It remembers this morning this afternoon: what it just did, what it was told an hour ago, what changed since yesterday. Recent experience is as reachable by what it was about as old experience is, and more literal.
+- **The character knows when it was there.** A quiet afternoon is part of its life and is remembered as quiet. A stretch it was absent for is known as absence. It never confuses nothing happening with not having been there.
+- **What lasts must have earned it.** One remark is an observation, not a trait. A tendency is believed only after it repeats, and is held as a tendency. What someone states plainly about themselves can be taken at their word; what is inferred about them cannot, from one instance. What was said in jest, in play, or as a supposition is remembered as that and never as fact. What others say about the character's own past is a claim, weighed against what it remembers.
 - **Expose retrieval rationale.** Implementation designers and application developers need to understand why a memory was retrieved.
 - **Stay backend-agnostic where practical.** The default stack can use OpenAI and Qdrant, but the philosophy should not depend on either vendor.
 
@@ -229,7 +234,7 @@ Example memory context categories:
 ## 10. What the System Should Avoid
 
 - **Avoid looking like a generic RAG wrapper.** RAG retrieves information. Character Memory should preserve continuity of experience.
-- **Avoid turning every interaction into a permanent fact.** Not everything is worth remembering. Memory write policy matters.
+- **Avoid turning every remark into a lasting fact.** Everything leaves a trace, but few things deserve to become a belief, and the difference is decided with evidence and time.
 - **Avoid personality overwrites.** Character should be reinforced through memory, not replaced by arbitrary labels.
 - **Avoid false intimacy.** The system should only use memories it actually has and should make corrections possible.
 - **Avoid unexplained recall.** When a memory influences behavior, developers should be able to inspect why it was selected.
@@ -269,6 +274,9 @@ The implementation should be considered successful if it enables these outcomes:
 - Broad recurring entities do not flood context merely because they are connected to many memories.
 - The assistant feels less like a new instance every session and more like a continuing participant in the user's life or application world.
 - Before anything is said, the character already carries what the moment calls for: who is here, what was last said with them, what is owed, what is in progress, and what fell due.
+- The character can say what it did earlier today, and knows what changed an hour ago, without having had time to reflect.
+- It can tell a quiet stretch from an absence.
+- It does not mistake a joke for a fact, a single remark for a trait, or someone's claim about its past for its own memory.
 - Surfaced detail matches relevance and importance. The character does not volunteer distant trivia, and it recalls the detail fully when asked.
 - Memory failures have a human shape. Uncertainty surfaces as natural hedging with a stated basis, never as confident wrongness about the people and commitments the character knows best, and never as blankness toward something it plainly experienced.
 
@@ -294,11 +302,8 @@ The README should then explain hybrid retrieval, typical assistant loop, constru
 
 These are questions for the implementation designer to resolve or make explicit:
 
-- What qualifies an interaction as worth remembering?
-- How is salience judged at write time?
 - How are memory contradictions represented?
 - How does the user or application inspect, correct, or delete memories?
-- How are reflections generated, scheduled, and validated?
 - How are relationship-specific or scope-specific memories separated from global character signals?
 - How can the library remain useful without overfitting to one LLM provider, vector backend, or application role model?
 
