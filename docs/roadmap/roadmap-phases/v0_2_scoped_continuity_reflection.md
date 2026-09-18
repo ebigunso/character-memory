@@ -53,8 +53,8 @@ Recall is activation by the cues the scene supplies plus the topic of the curren
 
 ```text
 content route     the topic, through each store's content lookup: vectors in durable memory, which is the route retrieval has today, and whatever index the short-term store of v0.3 uses
-entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
-time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps the graph already stores
+entity route      the participants, the place, the activity's thread, through the graph in durable memory, and in v0.3 through the participants and setting recorded on each short-term entry, which needs no graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
+time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps, the graph's in durable memory and, in v0.3, each short-term entry's own
 state route       the latest derived state for the scopes the who and what cues imply, active loops and commitments in both directions; a graph read filtered by currency, so it is the currency-side reading of the same cues rather than a sixth cue kind
 trigger route     stored intentions whose trigger is a participant present or a topic arising
 ```
