@@ -302,7 +302,7 @@ Every span the character was present for is accounted for in durable memory, how
 
 ## 2.19 Interpreted memory carries its evidence
 
-Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution and its producer, the reflection and prompt version for a reflection output or the caller for a deliberately authored plan, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution, the speaker for what was said and the character for what it inferred, and its producer, the reflection and prompt version for a reflection output or the caller for a deliberately authored plan, and the write path rejects what the evidence does not support: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
 
 ---
 
@@ -319,7 +319,7 @@ Every observation names its register; a gist episode rests on the trace it conso
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md). |
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
 | v0.2 | Situated recall and scoped continuity | The scene on every memory and as the retrieval input, situated activation with a candidate route and an admission floor per cue kind, prospective memory (direction and due date on commitments and open loops, surfacing on their trigger), the currency invariant with staleness reported, treatment by supersession with write-path warnings, scene partitions as explicit policy, selectivity widening or its declination, a pack renderer, and an example loop. |
-| v0.3 | Trace, consolidation, and reflection | A short-term store beside core memory written mechanically with no model call, recall across both stores including by topic, changes of state discovered at recall, reflection as the library's one producer of interpreted memory, with evidence rules enforced at the write path for reflection and deliberate callers alike, presence accounting, a project-owned default prompt run through a consumer-supplied model, and the behavioral evaluation tier. |
+| v0.3 | Trace, consolidation, and reflection | A short-term store beside core memory written mechanically with no language-model call, recall across both stores including by topic, changes of state discovered at recall, reflection as the library's one producer of interpreted memory, with evidence rules enforced at the write path for reflection and deliberate callers alike, presence accounting, a project-owned default prompt run through a consumer-supplied model, and the behavioral evaluation tier. |
 | v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the scene, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
 | v0.5 | Long-horizon shape | Currency at scale, consolidation of periphery into gist with provenance, query-time associative activation with no persisted structure, evidence-derived familiarity. Durable associative units enter only on measured demand. |
 | Dissolved | Retrieval observability and governance | Delivered in the v0.1 family or moved to the phases and the evaluation repository that need its pieces (section 17). |
@@ -1365,7 +1365,7 @@ first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object type
 a current-state view type: a scene with no topic is the same retrieval with the content route empty
 a scope hint by ID, a goal or purpose field, or any retrieval mode enumeration
 involuntary recall from weak cues (D12): the long-horizon phase
-the short-term store and the mechanical write: v0.3, beside reflection, since a store that never drains only expires
+the short-term store and the mechanical write: v0.3, beside reflection, since trace is released only by consolidation and would otherwise only accumulate
 attribution fields beyond what the scene already implies (v0.4)
 ```
 
@@ -1391,7 +1391,7 @@ Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3
 
 ## Intent
 
-Make the library able to form memory from experience under two constraints: a routine write costs no model call, and nothing enters lasting memory on a guess. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
+Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory on a guess. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
 
 This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was settled on 2026-09-19 and replaces the earlier idea of generation on every remember call.
 
@@ -1399,7 +1399,7 @@ This phase moved up from its earlier position as v0.6 because the write-plan val
 
 ```text
 short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026)
-mechanical write      no model call, no judgment; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
+mechanical write      no language-model call, no judgment; lexical indexing by default calls no model at all, and an opted-in vector index costs one embedding per write; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
 recall across stores  the short-term store joins every v0.2 route, including topic; current-conversation items are marked; the reader comprehends trace as it reads
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
@@ -1430,7 +1430,7 @@ purge propagation: when a source is purged, what happens to restated state that 
 ## Acceptance criteria
 
 ```text
-A mechanical write makes no model call and writes only to the short-term store.
+A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and writes only to the short-term store.
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated.
 A task completed or a fact changed before reflection is known at recall with the durable record unchanged.
 Reflection runs end to end through a test double of the completion port; rule-breaking output commits nothing and releases nothing; a second run produces no duplicates.

@@ -18,9 +18,9 @@ A person remembers this morning this afternoon, by what it was about, before any
 
 ## Decision
 
-Recent experience is held in a short-term store beside core memory, not inside it. A mechanical write puts there the scene, the raw snippet of what happened, its time, and the application's source pointer if one was given, with no model call and no judgment. Scene boundaries are written the same way, with no content required.
+Recent experience is held in a short-term store beside core memory, not inside it. A mechanical write puts there the scene, the raw snippet of what happened, its time, and the application's source pointer if one was given, with no language-model call and no judgment. Indexing is mechanical too: lexical by default, which calls no model of any kind, and where the consumer opts into a vector index, one embedding per write, which encodes text for lookup and interprets nothing. Scene boundaries are written the same way, with no content required.
 
-Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the same candidate routes as durable memory and marks what belongs to the current conversation. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge. The purge path of ADR-D-0021 covers it.
+Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the same candidate routes as durable memory and marks what belongs to the current conversation. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge, which leaves a marker that the character was present for the span it removed (ADR-D-0027). The purge path of ADR-D-0021 covers it.
 
 It is never core memory: nothing in it enters graph authority or the durable vector store, it is not a memory substrate, and it is reachable only through recall and consolidation, never as a log to be searched or exported.
 
@@ -44,7 +44,7 @@ Not covered: the index method, lexical, vector, or both, which is decided by mea
 
 ## Validation
 
-- A mechanical write makes no model call and no write to graph authority or the durable vector store.
+- A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and no write to graph authority or the durable vector store.
 - A scenario asks by topic about something from earlier the same day before any reflection, and recall returns it marked as recent and unconsolidated.
 - After consolidation commits, the consumed entries are gone, and where the application supplied a source pointer the durable episode carries it; an entry written without one consolidates just the same.
 - No public operation lists, searches, or exports the store's contents outside recall and consolidation.

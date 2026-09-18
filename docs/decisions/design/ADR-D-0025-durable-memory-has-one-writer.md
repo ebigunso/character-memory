@@ -14,7 +14,7 @@ depends_on: [ADR-D-0012-separate-memory-candidates-from-committed-memory.md, ADR
 
 ## Context and Problem Statement
 
-A character must know at once what it just did and what it was just told, and a routine write must cost no model call, or applications will not write. The obvious shortcuts all write durable memory early: map a tool result onto the commitment it fulfils, let the character's model note a fact straight into memory, treat a conversation line as a recorded state change. Each needs interpretation to be right, a tool result is unstructured output, a note can be wrong or planted, a line may be jest, and each is a separate way to corrupt memory that lasts. The fork is whether immediacy is bought with early durable writes or with recall over what was just experienced.
+A character must know at once what it just did and what it was just told, and a routine write must cost no language-model call, or applications will not write. The obvious shortcuts all write durable memory early: map a tool result onto the commitment it fulfils, let the character's model note a fact straight into memory, treat a conversation line as a recorded state change. Each needs interpretation to be right, a tool result is unstructured output, a note can be wrong or planted, a line may be jest, and each is a separate way to corrupt memory that lasts. The fork is whether immediacy is bought with early durable writes or with recall over what was just experienced.
 
 ## Decision
 

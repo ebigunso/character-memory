@@ -4,7 +4,7 @@ Rewritten on 2026-09-19 after the generation-phase discussion. It replaces the r
 
 ## Version intent
 
-Until this phase every lasting memory is authored by the caller, so the structures v0.2 reads are as good as the application's own extraction. This phase makes the library able to form memory from experience, under two constraints that shaped everything in it: a routine write must cost no model call, or applications will not write, and nothing may enter lasting memory on a guess.
+Until this phase every lasting memory is authored by the caller, so the structures v0.2 reads are as good as the application's own extraction. This phase makes the library able to form memory from experience, under two constraints that shaped everything in it: a routine write must cost no language-model call, or applications will not write, and nothing may enter lasting memory on a guess.
 
 The answer is the human one. Experience leaves a literal trace at once, cheaply and without judgment. The character can reach that trace immediately, by what it was about as well as by when and with whom. Afterward, when there is time, reflection decides what lasts. Structure within one event is immediate; structure across events is what consolidation does.
 
@@ -20,7 +20,7 @@ The answer is the human one. Experience leaves a literal trace at once, cheaply 
 
 # 1. The mechanical write
 
-A write takes the scene and a raw snippet of what happened: a conversation line or exchange, a tool result's action line, a note the character's model chose to make. It makes no model call and no judgment, and it lands only in the short-term store (ADR-D-0025, ADR-D-0026). Scene boundaries are written the same way with no content, which is how presence is reported (ADR-D-0027).
+A write takes the scene and a raw snippet of what happened: a conversation line or exchange, a tool result's action line, a note the character's model chose to make. It makes no language-model call and no judgment, and with the default lexical index no model call of any kind; an opted-in vector index costs one embedding per write, which encodes text for lookup and interprets nothing, and it lands only in the short-term store (ADR-D-0025, ADR-D-0026). Scene boundaries are written the same way with no content, which is how presence is reported (ADR-D-0027).
 
 ```text
 entry        the scene, the snippet, its time, its kind (exchange, action, note, boundary), the application's source pointer if given
@@ -58,7 +58,7 @@ Lexical, vector, or both, behind the same candidate-route contract, decided by m
 
 # 3. Reflection
 
-Reflection is the library's only producer of interpreted memory. A caller may still author interpreted memory deliberately through the same validated path, held to the same evidence rules, and between them they are the only writers of durable memory. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits.
+Reflection is the library's only producer of interpreted memory. A caller may still author interpreted memory deliberately. Both only produce plans: the validated path of prepare, validate, and commit is the one writer of durable memory (ADR-D-0025), and it holds both to the same evidence rules. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits.
 
 ## 3.1 Two units
 
@@ -124,7 +124,7 @@ let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;         
 # 6. Acceptance criteria
 
 ```text
-A mechanical write makes no model call and writes only to the short-term store; an oversize entry is refused or visibly truncated.
+A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and writes only to the short-term store; an oversize entry is refused or visibly truncated.
 Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated, and entries of the current conversation are marked.
 A task completed or a fact changed before reflection is known at recall, with the durable record unchanged; an overlapping line raises the scope's signal with its reason.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.

@@ -22,7 +22,7 @@ The character's timeline has no unexplained holes. Every span in which it was pr
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. Only a span with neither trace nor account means absence.
+Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. An out-of-band purge that removes unconsolidated trace leaves a marker that the character was present for that span and that its content was purged, as ADR-D-0021 requires of any purge, so erasure is never read as absence. Only a span with neither trace, account, nor marker means absence.
 
 ## Why
 
@@ -36,7 +36,7 @@ Memory is first-person, and a first-person history that cannot distinguish rest 
 
 ## Decision Boundary
 
-Invariant: every span of presence is covered, by trace awaiting consolidation or by a durable account of what happened or of the fact that it was withheld by exclusion; a span with neither means absence; consolidation never drops a span for being empty.
+Invariant: every span of presence is covered, by trace awaiting consolidation or by a durable account of what happened, of the fact that it was withheld by exclusion, or of the fact that it was purged; a span with none of these means absence; consolidation never drops a span for being empty.
 
 Not covered: how scene boundaries are reported, how quiet spans are summarized or grouped within the day's gist, and how recall phrases absence.
 
@@ -44,7 +44,7 @@ Not covered: how scene boundaries are reported, how quiet spans are summarized o
 
 - A scenario with a quiet present span and an absent span of equal length shows a durable account for the first, none for the second, and recall distinguishing them.
 - Consolidation over an empty span commits an account and releases the boundary entries.
-- A present span that has not yet been consolidated is recognized as present from its trace, and recall distinguishes remembered, withheld, and absent.
+- A present span that has not yet been consolidated is recognized as present from its trace, and recall distinguishes remembered, withheld, purged, and absent.
 
 ## Revisit When
 
