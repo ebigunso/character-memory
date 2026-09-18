@@ -22,7 +22,7 @@ The character's timeline has no unexplained holes. Every span in which it was pr
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. A span is absent only when it has neither trace nor durable account, and recall can then say so.
+Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. The exclusion is applied at the mechanical write, which keeps a marker for the span and none of its content (ADR-D-0026), and consolidation turns that marker into the durable account. A span is absent only when it has neither trace nor durable account, and recall can then say so.
 
 This guarantee covers everything memory operations do. An out-of-band purge lies outside it by ADR-D-0021's own definition: a purge makes no pretense of preserving continuity and is not reachable from memory semantics, so a span whose only coverage was purged may afterward read as absence. What a purge tombstones is that record's concern and the purge tool's design.
 

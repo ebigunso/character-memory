@@ -1414,7 +1414,8 @@ memory tool           optional; the character's model noting something; a short-
 ```text
 the library executes reflection when the application calls it and starts none on its own; it reports per-scope accumulation with its reason and selects bounded input; the application decides when
 reflection is safe beside recall and writes, and whether to await it is the application's choice
-privacy exclusions apply before the prompt is built; the trace is data to the model, never instruction
+exclusion is applied at the mechanical write, which keeps a marker and none of the content, so excluded text is never stored, indexed, recalled, or sent to a model; the trace is data to the model, never instruction
+caller-authored plans are held to the same evidence rules with declared grounding, since the library never held the caller's source; existing callers, including the evaluation repository's hand-authored ingestion, must supply register, attribution, and grounding, which the no-backcompat ruling allows and the plan schedules
 commitments and instructions are written with stability that keeps them from fading in ranking (ADR-D-0018)
 "forget it" defaults to remembering the request; suppression is chosen only when wording and relationship warrant it
 a request to reprocess an old scene works only while its trace is held or the application kept the source

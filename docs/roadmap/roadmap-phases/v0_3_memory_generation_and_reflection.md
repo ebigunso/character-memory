@@ -24,13 +24,14 @@ A write takes the scene and a raw snippet of what happened: a conversation line 
 
 ```text
 entry        the scene, the snippet, its time, its kind (exchange, action, note, boundary), the application's source pointer if given
+excluded     a span the application marks as not to be remembered leaves a marker of the span and its scene and none of its content; excluding still-unconsolidated trace replaces its content with the same marker and de-indexes it
 bounded      each entry has a size limit; oversize input is refused or visibly truncated, never silently stored
 a dump       a result too large to snippet is written as its action line and a pointer
 a bundle     one entry per event as the application sees it, which is the only segmentation done at write time; splitting a bundle into finer events is reflection's job
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays as it is for a caller that deliberately authors durable memory. It is the same path reflection uses.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the quote and the caller's own source reference, because the library cannot verify words against a source it never held. Existing callers must therefore supply register, attribution, and grounding, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
@@ -87,7 +88,7 @@ The evidence rules of ADR-D-0028: only the literal supports state; the stated ma
 
 ## 3.4 The processor
 
-A default prompt the project owns and versions, overridable, run through a minimal completion port the consumer implements; no model is named and no client is shipped (ADR-I-0035). Output is structured and validated. Exclusions are applied before the prompt is built, the trace is presented to the model as data, and input is bounded, with a long span or a backlog processed in order in bounded pieces, each reading what the previous one wrote.
+A default prompt the project owns and versions, overridable, run through a minimal completion port the consumer implements; no model is named and no client is shipped (ADR-I-0035). Output is structured and validated. Excluded content never reaches the prompt because it was never stored, and the prompt builder checks again as a second guard. The trace is presented to the model as data, and input is bounded, with a long span or a backlog processed in order in bounded pieces, each reading what the previous one wrote.
 
 ## 3.5 When it runs
 
@@ -132,7 +133,7 @@ A task completed or a fact changed before reflection is known at recall, with th
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, every source pointer its entries supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
-A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span never reaches the prompt.
+A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span's content is never stored, indexed, recalled, or sent to a model, only its marker remains, and a retroactive exclusion of unconsolidated trace leaves the same state.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
