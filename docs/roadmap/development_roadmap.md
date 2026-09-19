@@ -284,9 +284,9 @@ Recall is activation by the cues the present scene supplies, with the topic of t
 
 How a memory should be treated is a change of the character's state about it, carried by supersession with a restatement rather than an appended note; there is no treatment category and no annotation plane. The write path warns on a replacement that contains its predecessor nearly verbatim and on a chain that churns.
 
-## 2.17 Durable memory has one writer, and the moment lands as trace
+## 2.17 Experience enters durable memory by one path, and the moment lands as trace
 
-Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in a short-term store beside core memory and nowhere else. Immediacy comes from recall over that trace, never from an early durable write. See [ADR-D-0025](../decisions/design/ADR-D-0025-durable-memory-has-one-writer.md) and [ADR-D-0026](../decisions/design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md).
+Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in a short-term store beside core memory and nowhere else. Immediacy comes from recall over that trace, never from an early durable write. See [ADR-D-0025](../decisions/design/ADR-D-0025-experience-enters-durable-memory-by-one-path.md) and [ADR-D-0026](../decisions/design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md).
 
 ```text
 structure within one event is immediate: the boundaries the application reports and binding to the scene, mechanically; finer segmentation is consolidation's

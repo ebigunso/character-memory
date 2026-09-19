@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0015-keep-raw-source-storage-outside-core.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0023-purpose-is-never-a-supplied-cue.md, ADR-D-0025-durable-memory-has-one-writer.md]
+depends_on: [ADR-D-0015-keep-raw-source-storage-outside-core.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0023-purpose-is-never-a-supplied-cue.md, ADR-D-0025-experience-enters-durable-memory-by-one-path.md]
 ---
 
 # ADR-D-0026: A short-term store outside core memory holds recent trace until consolidation, and recall reaches it by scene, time, entity, and topic

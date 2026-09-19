@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0002-derived-memory-provenance.md, ADR-D-0025-durable-memory-has-one-writer.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../implementation/ADR-I-0015-record-producer-and-rationale-origin-in-candidate-provenance.md]
+depends_on: [ADR-D-0002-derived-memory-provenance.md, ADR-D-0025-experience-enters-durable-memory-by-one-path.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../implementation/ADR-I-0015-record-producer-and-rationale-origin-in-candidate-provenance.md]
 ---
 
 # ADR-D-0028: Interpreted memory carries its evidence, and the write path rejects what that evidence cannot structurally support

@@ -10,7 +10,7 @@ superseded_by: null
 depends_on: [ADR-D-0012-separate-memory-candidates-from-committed-memory.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ../implementation/ADR-I-0012-use-prepare-validate-commit-write-workflow.md]
 ---
 
-# ADR-D-0025: Durable memory has one writer, the validated write path, and everything that happens in the moment lands as trace
+# ADR-D-0025: Experience enters durable memory by one path, the validated write path, and everything that happens in the moment lands as trace
 
 ## Context and Problem Statement
 
