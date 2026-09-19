@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -18,7 +18,7 @@ A character must know at once what it just did and what it was just told, and a 
 
 ## Decision
 
-Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits a plan. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in the short-term store and nowhere else.
+New memory enters the durable record only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits a plan. The deliberate acts on memory that already exists, a correction, a forgetting, a direct link, keep their own admission checks; they are decisions about memory, not ways for experience to enter it. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in the short-term store and nowhere else.
 
 Immediacy comes from recall. Recent trace is reachable by scene, time, entity, and topic, which are the cues a mechanical write can carry; the state and stored-intention routes read interpreted durable memory and never read trace. The reader comprehends trace as it reads, and a change to how things stand is discovered at recall by bringing recent trace alongside the durable state it may bear on. Reflection later records the change properly. Discovery at recall is best effort by nature: it succeeds when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward. A note made through a memory tool is the character noting something, with the turn that prompted it as its origin; it is a claim to be weighed, never a fact copied forward.
 
@@ -35,7 +35,7 @@ Interpretation at the moment of experience is either paid for on every write or 
 
 ## Decision Boundary
 
-Invariant: nothing writes durable memory except a validated plan; in-the-moment input of every kind is trace; a note is a claim with its origin recorded; a change of state before consolidation is served by recall, not by an early durable write.
+Invariant: nothing forms new durable memory except a validated plan, and corrections, forgettings, and direct links act only on memory that already exists; in-the-moment input of every kind is trace; a note is a claim with its origin recorded; a change of state before consolidation is served by recall, not by an early durable write.
 
 Not covered: the short-term store's shape and bounds (ADR-D-0026), how recall brings trace alongside durable state, the signal that suggests early reflection, and the memory tool's surface.
 
