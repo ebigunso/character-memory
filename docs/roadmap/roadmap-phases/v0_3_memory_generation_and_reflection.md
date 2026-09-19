@@ -32,7 +32,7 @@ a bundle     one entry per event as the application sees it, which is the only s
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes, entities, and possible-same and containment links, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
@@ -80,7 +80,7 @@ the scene as consolidated: beside what was given, the people and places reflecti
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
-promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library, and no output carries a model-supplied confidence
+promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library, and no output carries a model-supplied confidence, the existing confidence field being filled by the library from the cited evidence
 weight, judged here from the trace
 a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
 nothing else, when nothing else happened
