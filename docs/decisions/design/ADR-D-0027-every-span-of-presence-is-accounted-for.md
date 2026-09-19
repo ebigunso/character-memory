@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md]
+depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ADR-D-0031-trace-never-expires-and-leaves-only-by-consolidation.md, ADR-D-0032-what-is-excluded-is-never-kept.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md]
 ---
 
 # ADR-D-0027: Every span the character was present for is covered, by its trace or by a durable account, and absence is known as absence
@@ -22,7 +22,7 @@ The character's timeline has no unexplained holes. Every span in which it was pr
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Unconsolidated trace is never dropped (ADR-D-0026), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. The exclusion is applied at the mechanical write, which keeps a marker for the span and none of its content (ADR-D-0026), and consolidation turns that marker into the durable account. A span is absent only when it has neither trace nor durable account, and recall can then say so.
+Unconsolidated trace is never dropped (ADR-D-0031), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. The exclusion is applied at the mechanical write, which keeps a marker for the span and none of its content (ADR-D-0032), and consolidation turns that marker into the durable account. A span is absent only when it has neither trace nor durable account, and recall can then say so.
 
 This guarantee covers everything memory operations do. An out-of-band purge lies outside it by ADR-D-0021's own definition: a purge makes no pretense of preserving continuity and is not reachable from memory semantics, so a span whose only coverage was purged may afterward read as absence. What a purge tombstones is that record's concern and the purge tool's design.
 

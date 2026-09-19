@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: implementation
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [../design/ADR-D-0025-durable-memory-has-one-writer.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0027-every-span-of-presence-is-accounted-for.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ../design/ADR-D-0029-the-scene-is-given-as-perceived-and-consolidation-owns-identity.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
+depends_on: [../design/ADR-D-0025-durable-memory-has-one-writer.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0032-what-is-excluded-is-never-kept.md, ../design/ADR-D-0027-every-span-of-presence-is-accounted-for.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ../design/ADR-D-0029-the-scene-is-given-as-perceived-and-consolidation-owns-identity.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
 ---
 
 # ADR-I-0035: Reflection runs on a default prompt the project owns, through a completion port the consumer implements, and the library hard-codes no model

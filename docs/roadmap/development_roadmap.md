@@ -306,7 +306,7 @@ Every interpreted memory states the evidence it rests on, and the write path rej
 
 ## 2.20 A memory is held as experience
 
-No interpreted memory carries a confidence score or a numeric measure of emotion: how firmly something is held is read from how it was formed and what is linked to it. An episode keeps how it felt to the character, in words, and that is never revised; a later change of heart is a new memory beside it. How someone seemed is an impression, the character's own, and supports a conclusion about them only through a pattern. See [ADR-D-0030](../decisions/design/ADR-D-0030-a-memory-is-held-as-experience-not-as-a-scored-fact.md).
+No interpreted memory carries a confidence score or a numeric measure of emotion: how firmly something is held is read from how it was formed and what is linked to it. An episode keeps how it felt to the character, in words, and that is never revised; a later change of heart is a new memory beside it. How someone seemed is an impression, the character's own, and supports a conclusion about them only through a pattern. See [ADR-D-0030](../decisions/design/ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) and [ADR-D-0033](../decisions/design/ADR-D-0033-a-memory-keeps-how-it-felt.md).
 
 ---
 
@@ -1392,14 +1392,14 @@ This phase moved up from its earlier position as v0.6 because the write-plan val
 ## New concepts
 
 ```text
-short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026)
+short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026, ADR-D-0031)
 mechanical write      no language-model call, no judgment; lexical indexing by default calls no model at all, and an opted-in vector index costs one embedding per write; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
 recall across stores  the short-term store joins the content, entity, and time routes; the state and trigger routes read durable memory only, and surfaced state reaches trace through the one re-cue hop; current-conversation items are marked; the reader comprehends trace as it reads
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises its stretch's reflection signal
 entity resolution     reflection proposes entity candidates and graph authority resolves them; no model-minted identities, no merges on a guess
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        grounding by locator, register, own versus perceived, attribution copied or judged with its basis, the bar following attribution, computed promotion thresholds, contradictions held, trace untrusted (ADR-D-0028)
-memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt and that is never revised; impressions are the character's own observations (ADR-D-0030)
+memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt and that is never revised; impressions are the character's own observations (ADR-D-0030, ADR-D-0033)
 the scene as perceived  only the time is required; descriptions, keys where they exist, perception labels; never resolved by the application; identity kept consistent at consolidation, with possible-same and containment links (ADR-D-0029)
 presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
 the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated; which prompt ran is reported on the outcome, not stored per memory (ADR-I-0035)

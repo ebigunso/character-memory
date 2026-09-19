@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -67,5 +67,5 @@ Measurement shows a threshold rule rejects correct conclusions often enough to c
 ## More Information
 
 - ADR-D-0002 requires provenance on derived memory; ADR-I-0015 records producer and rationale origin on candidates and keeps them off committed memory.
-- ADR-D-0030 decides that a memory carries no confidence score and adds the impression, how someone seemed, as a third thing an observation may record.
+- ADR-D-0030 decides that a memory carries no confidence score, and ADR-D-0033 adds the impression, how someone seemed, as a third thing an observation may record.
 - The generation phase's design draft states the write-path rules in full.
