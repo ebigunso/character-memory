@@ -181,7 +181,7 @@ At the end of the day the character can say what happened, what mattered, what i
 
 ## E. What is carried away
 
-Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. Personas change the weights, not the kinds.
+Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. The one exception is what the application asked not to be remembered (F21): of that, only the fact that the character was present is kept. Personas change the weights, not the kinds.
 
 ### E1. A companion's evening
 
@@ -301,7 +301,7 @@ The memory of the thing carries the constraint as one memory, with its scene.
 
 ### F16. Endings
 
-Someone dies or leaves for good. The event is recorded, how things stand with them is restated, and what was owed to them is closed as moot, not as done.
+Someone dies or leaves for good. The event is recorded, how things stand with them is restated, and what the ending made impossible or pointless is closed as moot, not as done. What can still be honored, returning what was borrowed, carrying out a promise, finishing a handoff, stays owed.
 
 ### F17. A lapsed promise
 
