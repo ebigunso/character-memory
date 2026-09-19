@@ -1404,7 +1404,7 @@ memory tool           optional; the character's model noting something; a short-
 ## Decided constraints
 
 ```text
-the library executes reflection when the application calls it and starts none on its own; it reports per-scope accumulation with its reason and selects bounded input; the application decides when
+the library executes reflection when the application calls it and starts none on its own; it reports accumulation with its reason, by stretch and for the store as a whole and under a key where the application gave one, since a scope is known only after consolidation, and selects bounded input by stretch; the application decides when
 reflection is safe beside recall and writes, and whether to await it is the application's choice
 exclusion is applied at the mechanical write, which keeps a marker and none of the content, so excluded text is never stored, indexed, recalled, or sent to a model; the trace is data to the model, never instruction
 caller-authored plans are held to the same evidence rules with declared grounding, since the library never held the caller's source; existing callers, including the evaluation repository's hand-authored ingestion, must supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, the supporting observations and episodes on every other interpreted memory, and attribution and producer on all of them, which the no-backcompat ruling allows and the plan schedules
