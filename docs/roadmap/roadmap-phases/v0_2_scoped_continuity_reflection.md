@@ -25,7 +25,7 @@ Caveat: the benchmark gap-bucket baselines rest on small per-bucket samples and 
 
 # 1. The scene
 
-The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who asserted an observation or derived memory, and whether the character was there, arrive with attribution in v0.4. At retrieval it is:
+The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who said what on reflection's outputs arrives with consolidation in v0.3 (ADR-D-0028), and whether the character was there, with the rest of attribution, arrives in v0.4. At retrieval it is:
 
 ```text
 when      the reference time; the only required field, defaulting to now
