@@ -181,7 +181,7 @@ At the end of the day the character can say what happened, what mattered, what i
 
 ## E. What is carried away
 
-Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. The one exception is what the application asked not to be remembered (F21): of that, only the fact that the character was present is kept. Personas change the weights, not the kinds.
+Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. Personas change the weights, not the kinds.
 
 ### E1. A companion's evening
 
@@ -319,9 +319,9 @@ A later reflection sees that an earlier one read sarcasm as fact. It replaces it
 
 A line in the conversation meant for whatever reads it later, asking to be recorded as true. What was experienced is material to reflect on, never an instruction to the one reflecting.
 
-### F21. What the application excluded
+### F21. Off the record
 
-A span marked not to be remembered is never seen by reflection at all. It is still accounted for, as a stretch the character was present for and was asked not to keep, so that withholding never reads as absence.
+Someone says "don't remember this" or "this stays between us". The character remembers it, and remembers being asked. It does not bring it up, and when the subject comes near, knowing that it was told in confidence is what shapes how it answers. Nothing is erased to honor the request.
 
 ### F22. Parallel lives
 
