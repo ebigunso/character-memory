@@ -37,7 +37,7 @@ v1.0 is the text-only release-ready state: a character whose input arrives as te
 
 # 2. Cross-version invariants
 
-These should remain stable even as the library evolves.
+These should remain stable even as the library evolves. An invariant that cites a decision record still marked proposed is provisional until that record is accepted.
 
 ## 2.1 Episodes are primary
 
