@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -41,7 +41,7 @@ Two stores with different jobs is how fast and slow memory are usually described
 
 Invariant: recent trace lives outside core memory; it is written mechanically, with no language-model call; it is indexed for recall and reached only through recall and consolidation; it never enters graph authority or the durable vector store; consolidation drains it.
 
-Not covered: how long trace is held, which ADR-D-0031 decides; what happens to a span the application asks not to be remembered, which ADR-D-0032 decides; which index method serves recall best, which is decided by measurement, provided the default write calls no model; the entry bounds; the storage engine, and with it who protects the store at rest and keeps one character's trace from another's, the library or the host application.
+Not covered: how long trace is held, which ADR-D-0031 decides; which index method serves recall best, which is decided by measurement, provided the default write calls no model; the entry bounds; the storage engine, and with it who protects the store at rest and keeps one character's trace from another's, the library or the host application.
 
 ## Validation
 

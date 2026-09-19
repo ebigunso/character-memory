@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -20,7 +20,7 @@ Every memory carries its scene and recall takes the present scene as its cue (AD
 
 The application gives the scene as the character would perceive it, and never resolves, normalizes, or looks anything up. Only the time is required. Who is present, where, what is going on, and anything else about the situation are each given as whatever the application has: a description in words, a label from its own perception such as a recognized voice, a key it already owns, any combination, or nothing. A key is a strengthening where one exists and is never assumed. The description may come from the application's perception, its configuration, or the character's own model noting its situation, and a change of situation is written as it happens, so a description is as fine and as changeable as the moment is.
 
-A description is never an identity. On trace it is stored as given, indexed with the entry's text, and handed to reflection as evidence about the situation, which may be wrong as any perception may. Nothing is created in durable memory at the mechanical write or at recall (ADR-D-0025): making sense of who and what a description refers to is consolidation's work, and ADR-D-0034 says what that sense consists of. Because a description can name the very thing that was to be withheld, it is content where exclusion is concerned (ADR-D-0032).
+A description is never an identity. On trace it is stored as given, indexed with the entry's text, and handed to reflection as evidence about the situation, which may be wrong as any perception may. Nothing is created in durable memory at the mechanical write or at recall (ADR-D-0025): making sense of who and what a description refers to is consolidation's work, and ADR-D-0034 says what that sense consists of.
 
 Keys keep the meaning earlier records gave them. A key for a person, place, or thing is the caller-supplied identity of ADR-I-0020, so the same key reaches the same entity with no lookup surface. A key for a context that is no entity, a conversation, a channel, a game zone, is the scope value ADR-D-0024 already takes and never becomes an entity.
 
@@ -39,7 +39,7 @@ What is known about a situation mostly exists only in the moment, and reflection
 
 ## Decision Boundary
 
-Invariant: only the time is required of a scene; every other part is given as perceived, as a description, a perception label, a key, any combination, or nothing; a description is never an identity, the application never resolves one, and it is content where exclusion is concerned; nothing durable is created at the mechanical write or at recall; an identity key is a caller-supplied identity under ADR-I-0020 and a setting key is a scope value under ADR-D-0024; recall takes the same references and reports whether each was resolved, ambiguous, or unknown.
+Invariant: only the time is required of a scene; every other part is given as perceived, as a description, a perception label, a key, any combination, or nothing; a description is never an identity, and the application never resolves one; nothing durable is created at the mechanical write or at recall; an identity key is a caller-supplied identity under ADR-I-0020 and a setting key is a scope value under ADR-D-0024; recall takes the same references and reports whether each was resolved, ambiguous, or unknown.
 
 Not covered: what an entity is and how references come to be understood as the same or different, which ADR-D-0034 decides; the field shapes of a scene and of a reference; how a description cue is matched, which is measured; how reflection gathers stretches of trace into a pass.
 
@@ -47,7 +47,6 @@ Not covered: what an entity is and how references come to be understood as the s
 
 - A deployment that supplies only the time, the entries, and free descriptions of the situation writes trace, recalls the same day by those descriptions, and consolidates without the application supplying or storing any identifier.
 - An ambiguous reference at recall activates each candidate and the retrieval trace says it was ambiguous; an unknown one activates none and the trace says so.
-- After a span is excluded, a search for a word that appeared only in its scene description finds nothing.
 - Where an identity key is given, repeated writes under changed display names reach one entity.
 
 ## Revisit When

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -30,7 +30,7 @@ Interpretation at the moment of experience is either paid for on every write or 
 
 - Mapping tool results or events onto remembered state at write time: rejected outright as a library behavior, because the mapping is interpretation; an application that itself keeps the identity of a memory it created may still resolve it through the ordinary link operation as a deliberate act.
 - Letting a memory tool write durable memory: rejected outright; it makes lasting memory depend on a model's phrasing mid-response and gives whoever is talking to the character a way to plant facts.
-- Requiring a generation call on every write: rejected because applications will write rarely or not at all, and the character then has no memory of today until someone pays. An application that prefers to pay per session still uses the one path: it writes the session as trace and reflects at once. There is no second input path into reflection, because exclusion, presence accounting, and grounding are all applied at the mechanical write and a path around it would bypass them.
+- Requiring a generation call on every write: rejected because applications will write rarely or not at all, and the character then has no memory of today until someone pays. An application that prefers to pay per session still uses the one path: it writes the session as trace and reflects at once. There is no second input path into reflection, because presence accounting and grounding both rest on the mechanical write and a path around it would bypass them.
 - Treating raw lines as recorded state changes and linking them at write time: rejected outright; deciding that a line is a state change, and of what, is the interpretation being deferred.
 
 ## Decision Boundary

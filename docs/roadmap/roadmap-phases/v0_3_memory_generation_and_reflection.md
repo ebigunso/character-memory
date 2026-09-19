@@ -25,7 +25,7 @@ A write takes the scene as the character perceives it (ADR-D-0029) and a raw sni
 ```text
 entry        the scene, the snippet, its time, whether it is the character's own output or something it perceived, marked part by part where an entry such as a turn pair holds both, its kind (exchange, action, note, boundary; a note is anything the character itself noted, including a passing thought or how something landed, so a thought is a note and needs no kind of its own), the application's source pointer if given, and a speaker hint on the entry or a part of it where the application has one
 the scene    only the time is required; who, where, what, and anything else about the situation are given as perceived: a description in words, a key the application already owns, a perception label, any combination, or nothing; a change of situation is written as it happens; the application never resolves, normalizes, or looks anything up, and a description is stored as given and indexed with the entry's text
-excluded     a span the application marks as not to be remembered leaves a marker of the span and its scene and none of its content, and a scene's descriptions, perception labels, and speaker hints are content here, so the marker keeps only the time and any keys the application gives when it excludes (ADR-D-0029); excluding still-unconsolidated trace replaces its content with the same marker and de-indexes it
+redaction    the library has no exclusion (ADR-D-0032): what the application must never hold it removes before it writes, and it still writes the entry, with the secret gone or with a plain note that a private exchange took place, so nothing forbidden is stored and the timeline has no hole
 bounded      each entry has a size limit; oversize input is refused or visibly truncated, never silently stored
 a dump       a result too large to snippet is written as its action line and a pointer
 a bundle     one entry per event as the application sees it, which is the only segmentation done at write time; splitting a bundle into finer events is reflection's job
@@ -60,7 +60,7 @@ Lexical, vector, or both, behind the same candidate-route contract, decided by m
 
 # 3. Reflection
 
-Reflection is the library's only producer of interpreted memory. A caller may still author interpreted memory deliberately. Both only produce plans: the validated path of prepare, validate, and commit is the one way new memory enters the durable record (ADR-D-0025), and it holds both to the same evidence rules. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits. It records the entries it selected with their versions, and commit rejects the plan if any of them was excluded or changed in the meantime, so an exclusion wins over a reflection whose claim is not yet marked committing; one issued after that waits its turn and reports the entry as already consolidated with the memories derived from it (ADR-I-0035).
+Reflection is the library's only producer of interpreted memory. A caller may still author interpreted memory deliberately. Both only produce plans: the validated path of prepare, validate, and commit is the one way new memory enters the durable record (ADR-D-0025), and it holds both to the same evidence rules. It reads before it writes: a scope's short-term trace, that scope's current durable state, and the existing observations and patterns a new one might repeat or depart from, selected under the v0.1.2 guardrails, plus who the self is. It writes through prepare, validate, and commit, and it releases the trace it consumed only after the plan commits.
 
 ## 3.1 Two units
 
@@ -110,7 +110,7 @@ what stays on the memory       the basis of its grounding and of its attribution
 
 ## 3.4 The processor
 
-A default prompt the project owns and versions, overridable, run through a minimal completion port the consumer implements; no model is named and no client is shipped (ADR-I-0035). Output is structured and validated. Content excluded when it is written never reaches the prompt because it was never stored, and the prompt builder checks again as a second guard; content excluded later is kept out of every prompt built from then on, and what an in-flight reflection had already sent cannot be unsent. The trace is presented to the model as data, and input is bounded, with a long span or a backlog processed in order in bounded pieces, each reading what the previous one wrote.
+A default prompt the project owns and versions, overridable, run through a minimal completion port the consumer implements; no model is named and no client is shipped (ADR-I-0035). Output is structured and validated. The trace is presented to the model as data, and input is bounded, with a long span or a backlog processed in order in bounded pieces, each reading what the previous one wrote.
 
 ## 3.5 When it runs
 
@@ -120,17 +120,16 @@ The accumulation signal has two audiences. The application receives it on every 
 
 ## 3.6 Consolidation as one recoverable operation
 
-ADR-I-0035 states what must hold: an entry is consolidated by at most one reflection, a crash leaves a consolidation finished or not begun, operations that change durable memory are serialized and invisible to recall while in progress, and an exclusion prevails until durable writing begins. This is the protocol the plan starts from; the plan may change it so long as those hold.
+ADR-I-0035 states what must hold: an entry is consolidated by at most one reflection, a crash leaves a consolidation finished or not begun, and operations that change durable memory are serialized and invisible to recall while in progress. This is the protocol the plan starts from; the plan may change it so long as those hold.
 
 ```text
 claim        a reflection atomically claims the entries it selects, in the short-term store, recording each entry's version; a claimed entry is not selectable by another reflection
 abort        every exit before the committing mark, malformed output, a validation failure, a port error or timeout, cancellation, a rejected commit, ends the claim, discards any recorded plan, and frees the entries with their trace intact
 plan         the validated plan is recorded against the claim before commit, and its identifiers are derived from the entries it consolidates, so committing it again writes nothing new
-turn         a reflection's commit, a caller's commit, a correction, a forgetting, a direct link, and an exclusion each take one serialized turn within the process that owns the embedded stores; recall is a reader and never runs inside a turn; the model call is outside any turn
+turn         a reflection's commit, a caller's commit, a correction, a forgetting, and a direct link each take one serialized turn within the process that owns the embedded stores; recall is a reader and never runs inside a turn; the model call is outside any turn
 recheck      at its turn a reflection's commit checks that the claimed entries' versions are unchanged and that the durable memories it read and supersedes are still current; otherwise it aborts
 committing   after the recheck and before the first durable write the claim is marked committing; objects and links are written, and the trace is released, within the same turn
 recovery     on open, before the first recall, a committing claim is finished by replaying its recorded plan and releasing, which completes a partial write because identifiers are derived and writes are upserts; any other claim is aborted; an I/O failure after the mark is replayed in process
-exclusion    before the mark it changes the entry's version and the commit aborts; after the mark it waits its turn and reports the entry as already consolidated with the memories the recorded plan derived from it, for the application to suppress or purge; text already sent to a model cannot be unsent
 ```
 
 ---
@@ -140,7 +139,7 @@ exclusion    before the mark it changes the entry's version and the commit abort
 These are the measurements this phase consumes and when, from the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality. The harness work that produces them is planned and tracked there, not here.
 
 ```text
-catalog E and F at the retrieval tier: what lasts and what is let go; presence accounting; promotion thresholds; register; what a speaker stated against what the character concludes; claims; contradictions; interruption; endings; self-revision; hostile trace; exclusions
+catalog E and F at the retrieval tier: what lasts and what is let go; presence accounting; promotion thresholds; register; what a speaker stated against what the character concludes; claims; contradictions; interruption; endings; self-revision; hostile trace
 same-day recall by topic before any reflection; a changed fact before reflection, including stated in different words
 the lookup measurement of section 2.2
 measurements with reflection in the loop that are deterministic and free of paid calls, which this library supports by reporting which prompt ran and by taking the model through a port a harness can replay
@@ -173,8 +172,8 @@ Something from earlier the same day is recalled by topic before any reflection, 
 A task completed or a fact changed before reflection is known at recall when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward; the durable record is unchanged; an overlapping line raises its stretch's signal with its reason; the miss rate on the changed-fact scenarios is measured and recorded.
 Reflection with a test double for the completion port runs end to end without a network; malformed or rule-breaking output commits nothing and releases nothing.
 After reflection commits, consumed entries are gone, every source pointer its entries supplied is carried on the durable episode, an entry written without one consolidates just the same, and a second run over the same entries produces no duplicates.
-A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
-A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; a span excluded when it is written has its content never stored, indexed, recalled, or sent to a model, and only its marker remains; a retroactive exclusion of unconsolidated trace leaves the same stored state and keeps the content out of every prompt built afterward, without claiming to unsend what an in-flight reflection had already sent; an exclusion issued before a reflection that selected the entry marks its claim committing makes that reflection's commit fail, so nothing derived from the entry is written, and one issued after the mark waits its turn and reports the entry as already consolidated with the memories derived from it.
+A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
+A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.
 Names and references in trace become notions and beliefs about them: a known person's notion is reused, an unknown one forms a new notion, sameness is a belief a later reflection can supersede, a model-minted identity fails validation, and nothing is merged (catalog F14). A notion's standing changes by one belief, the next recall reads what rests on it through that belief, current state is restated first in bounded passes, and episodes are never restated.
 A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and a reflection's outcome names the prompt that ran, the project's version or a digest of an overriding prompt's text.
 A transcript of several people heard as one perceived stream yields observations whose attribution is recorded as judged, and a commitment of the character that cites only perceived entries fails validation.

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: implementation
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [../design/ADR-D-0025-experience-enters-durable-memory-by-one-path.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0032-what-is-excluded-is-never-kept.md, ../design/ADR-D-0027-every-span-of-presence-is-accounted-for.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ../design/ADR-D-0029-the-scene-is-given-as-perceived-and-the-application-never-resolves-it.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
+depends_on: [../design/ADR-D-0025-experience-enters-durable-memory-by-one-path.md, ../design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../design/ADR-D-0027-every-span-of-presence-is-accounted-for.md, ../design/ADR-D-0028-interpreted-memory-carries-its-evidence.md, ../design/ADR-D-0029-the-scene-is-given-as-perceived-and-the-application-never-resolves-it.md, ADR-I-0012-use-prepare-validate-commit-write-workflow.md, ADR-I-0013-deterministic-helpers-do-not-infer-high-level-meaning.md]
 ---
 
 # ADR-I-0035: Reflection runs on a default prompt the project owns, through a completion port the consumer implements, and the library hard-codes no model
@@ -24,7 +24,7 @@ The library asks the model for structured output and validates it through prepar
 
 Scheduling is the application's. The library reports what has accumulated since the last reflection and why, selects a reflection's bounded input, and runs a reflection when it is called; it never starts one on its own.
 
-Reflection may run in the background beside everything else, and the library makes that safe. An entry is consolidated by at most one reflection, and a reflection that ends without committing, for any reason, leaves its trace intact and free to be selected again. Consolidation is recoverable: after a crash it is either finished exactly as it was planned or not begun, never partial, never duplicated, and never composed afresh over the same trace. Every operation that changes durable memory, and every exclusion, takes its turn one at a time, and recall never observes one in progress; the model call happens outside any turn, so nothing waits on a model. An exclusion prevails over a reflection until that reflection begins its durable writes; one that arrives later is told which memories came from the excluded entry, so the application can suppress or purge them. What no design can do is unsend text a model has already received, so a retroactive exclusion keeps text out of every later prompt and makes no claim about an earlier one.
+Reflection may run in the background beside everything else, and the library makes that safe. An entry is consolidated by at most one reflection, and a reflection that ends without committing, for any reason, leaves its trace intact and free to be selected again. Consolidation is recoverable: after a crash it is either finished exactly as it was planned or not begun, never partial, never duplicated, and never composed afresh over the same trace. Every operation that changes durable memory takes its turn one at a time, and recall never observes one in progress; the model call happens outside any turn, so nothing waits on a model.
 
 ## Why
 
@@ -40,7 +40,7 @@ Owning the prompt keeps the quality-critical instructions with the project that 
 
 ## Decision Boundary
 
-Invariant: the project owns a versioned default prompt that consumers may override; the model arrives only through the consumer's port; output is structured and validated; which prompt ran is reported on the outcome and never stored per memory; the library schedules nothing; an entry is consolidated by at most one reflection, and an uncommitted reflection leaves its trace intact; after a crash a consolidation is finished as planned or not begun; operations that change durable memory, and exclusions, are serialized, and recall never observes one in progress; an exclusion prevails until a reflection's durable writes begin.
+Invariant: the project owns a versioned default prompt that consumers may override; the model arrives only through the consumer's port; output is structured and validated; which prompt ran is reported on the outcome and never stored per memory; the library schedules nothing; an entry is consolidated by at most one reflection, and an uncommitted reflection leaves its trace intact; after a crash a consolidation is finished as planned or not begun; operations that change durable memory are serialized, and recall never observes one in progress.
 
 Not covered: the protocol that achieves the concurrency and recovery guarantees, which the generation phase's design draft describes and its plan settles; the port's exact signature, the output schema, the prompt text, the signal's thresholds and how accumulation is counted, the piece size, and the guide's recommended schedules.
 
@@ -53,7 +53,6 @@ Not covered: the protocol that achieves the concurrency and recovery guarantees,
 - A process killed at any point in a consolidation reopens to a state in which that consolidation is complete or absent, with no partial memory, no duplicate, and no trace lost.
 - Recall running beside a commit returns the state before it or the state after it, never part of it, and never a consolidated memory beside the trace it came from.
 - A correction and a reflection that touch the same memory leave its supersession chain with one head, in either order.
-- An exclusion issued before a reflection's durable writes begin leaves nothing derived from the excluded entry; one issued after reports the memories derived from it.
 
 ## Revisit When
 

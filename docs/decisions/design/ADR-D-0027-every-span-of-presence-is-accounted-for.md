@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ADR-D-0031-trace-never-expires-and-leaves-only-by-consolidation.md, ADR-D-0032-what-is-excluded-is-never-kept.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md]
+depends_on: [ADR-D-0020-memory-is-first-person.md, ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ADR-D-0031-trace-never-expires-and-leaves-only-by-consolidation.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md]
 ---
 
 # ADR-D-0027: Every span the character was present for is covered, by its trace or by a durable account, and absence is known as absence
@@ -22,7 +22,7 @@ The character's timeline has no unexplained holes. Every span in which it was pr
 
 Presence is reported mechanically by scene boundaries, which need no content, and consolidation turns an empty span into a line of the day's gist.
 
-Unconsolidated trace is never dropped (ADR-D-0031), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span the application excluded from memory is accounted for as well: the character was present, and what happened was withheld at the application's request. The exclusion is applied at the mechanical write, which keeps a marker for the span and none of its content (ADR-D-0032), and consolidation turns that marker into the durable account. A span is absent only when it has neither trace nor durable account, and recall can then say so.
+Unconsolidated trace is never dropped (ADR-D-0031), so a span the character was present for is always covered: by trace still awaiting consolidation, or by the durable account consolidation wrote from it. A span is absent only when it has neither trace nor durable account, and recall can then say so.
 
 This guarantee covers everything memory operations do. An out-of-band purge lies outside it by ADR-D-0021's own definition: a purge makes no pretense of preserving continuity and is not reachable from memory semantics, so a span whose only coverage was purged may afterward read as absence. What a purge tombstones is that record's concern and the purge tool's design.
 
@@ -38,7 +38,7 @@ Memory is first-person, and a first-person history that cannot distinguish rest 
 
 ## Decision Boundary
 
-Invariant: every span of presence is covered, by trace awaiting consolidation or by a durable account of what happened or of the fact that it was withheld by exclusion; a span with neither means absence; an out-of-band purge is outside this guarantee; consolidation never drops a span for being empty.
+Invariant: every span of presence is covered, by trace awaiting consolidation or by a durable account of what happened; a span with neither means absence; an out-of-band purge is outside this guarantee; consolidation never drops a span for being empty.
 
 Not covered: how scene boundaries are reported, how quiet spans are summarized or grouped within the day's gist, and how recall phrases absence.
 
@@ -46,7 +46,7 @@ Not covered: how scene boundaries are reported, how quiet spans are summarized o
 
 - A scenario with a quiet present span and an absent span of equal length shows a durable account for the first, none for the second, and recall distinguishing them.
 - Consolidation over an empty span commits an account and releases the boundary entries.
-- A present span that has not yet been consolidated is recognized as present from its trace, and recall distinguishes remembered, withheld, and absent.
+- A present span that has not yet been consolidated is recognized as present from its trace, and recall distinguishes what it was present for from what it was absent for.
 
 ## Revisit When
 
