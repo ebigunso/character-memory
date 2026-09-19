@@ -75,7 +75,7 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ```text
 gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; an episode may be marked unfinished
 entity candidates for the people, places, and things the trace names, each resolved through graph authority to an existing entity, proposed as new, or, when it is unclear whether two references are one, kept separate with a possible-same link; reflection never mints a final identity and never merges on a guess; each candidate, possible-same link, and containment link points at where the reference appears in an entry's text or scene
-observations, each naming its entry and quoting the words it rests on, with their register and who said it; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
+observations, each naming its entry and quoting the words it rests on, with their register and who said it for speech, and who acted, with no register, for an event; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
 the scene as consolidated: beside what was given, the people and places reflection resolved, places containing one another where they do, each part marked as given or resolved
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
@@ -123,7 +123,7 @@ Illustrative shape:
 
 ```rust
 let scene = Scene::now().described("the kitchen of Kohta's house, evening; Kohta is cooking"); // as perceived; keys are optional
-let written = memory.trace(&scene, Trace::perceived("raw text of what was heard")).await?; // mechanical, no model; Trace::own(..) for the character's output, a note is one kind of trace
+let written = memory.trace(&scene, Trace::perceived("raw text of what was heard")).await?; // mechanical, no language-model call; Trace::own(..) for the character's output, a note is one kind of trace
 let signal = written.signal;                                                     // every write and recall outcome carries it: level and reason
 let snapshot = memory.reflection_signal(&scene).await?;                          // optional: the same signal without a write or a recall
 let memory = memory.with_completion_provider(provider);                          // the consumer's model
