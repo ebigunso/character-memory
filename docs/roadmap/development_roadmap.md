@@ -213,7 +213,7 @@ future generated input
 
 Future assisted generation should improve usability without weakening Character Memory invariants.
 
-The generation phase's processors (section 14) plug into the existing write-plan path rather than inventing a parallel persistence pipeline.
+Reflection (section 14), the library's one producer of interpreted memory, produces plans for the existing write-plan path rather than inventing a parallel persistence pipeline.
 
 ## 2.13 Core stores curated memory and opaque source provenance, not raw logs
 
@@ -250,7 +250,7 @@ public raw-reference resolution
 
 `raw_ref` and source-span fields are opaque provenance handles. They identify caller-managed source material but are not themselves raw source storage.
 
-Assisted remember workflows may accept raw or semi-raw input as transient processing input. They produce validated candidates and write plans; they do not persist the raw input.
+Core memory never persists raw input. Recent raw snippets are held as trace in a short-term store beside core memory until consolidation turns them into curated memory and releases them (invariant 2.17). Raw source text reaches reflection only as trace, beside what durable memory already holds for the scope, because presence accounting and grounding rest on the mechanical write. An application importing a history writes it as trace with its own times and reflects. The short-term store is not core memory storage, nothing in it enters graph authority or the durable vector store, and it is not a log to be searched or exported.
 
 ## 2.14 Memory is first-person
 
@@ -278,11 +278,35 @@ currency, not eligibility, takes what is over out of current views
 
 ## 2.16 Recall is situated, and the scene travels with every memory
 
-Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
+Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. The application gives the scene as the character perceives it, in descriptions, with keys where they exist, and only the time is required; it never resolves a reference ([ADR-D-0029](../decisions/design/ADR-D-0029-the-scene-is-given-as-perceived-and-the-application-never-resolves-it.md)). Who and what those references are is the character's own understanding: an entity records a notion the character holds, and its name, its kind, whether anything answers to it, and what it is the same as are beliefs that can be revised ([ADR-D-0034](../decisions/design/ADR-D-0034-an-entity-is-a-notion-the-character-holds.md)). Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
 
-Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through vectors; entities, threads, and places through the graph; time and dates through timestamps; stored intentions through their trigger) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
+Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through each store's content lookup, vectors in durable memory and a lexical or vector index in the short-term store of v0.3; entities, threads, and places through the graph in durable memory, and through the participants and setting recorded on each entry in the short-term store; time and dates through timestamps, the graph's and each entry's own; stored intentions through their trigger, in durable memory only) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
 
 How a memory should be treated is a change of the character's state about it, carried by supersession with a restatement rather than an appended note; there is no treatment category and no annotation plane. The write path warns on a replacement that contains its predecessor nearly verbatim and on a chain that churns.
+
+## 2.17 Experience enters durable memory by one path, and the moment lands as trace
+
+Durable memory is written only through the validated write path: consolidation by reflection, or a caller that deliberately prepares, validates, and commits. Everything that happens in the moment, a conversation line, a tool result, a note the character's model chose to make, lands as trace in a short-term store beside core memory and nowhere else. Immediacy comes from recall over that trace, never from an early durable write. See [ADR-D-0025](../decisions/design/ADR-D-0025-experience-enters-durable-memory-by-one-path.md) and [ADR-D-0026](../decisions/design/ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md).
+
+```text
+structure within one event is immediate: the boundaries the application reports and binding to the scene, mechanically; finer segmentation is consolidation's
+structure across events is consolidation: gist, state, patterns, beliefs
+recent trace is reachable by scene, time, entity, and topic, never through the state or stored-intention routes, and the reader comprehends it as it reads
+a change of state before consolidation is discovered at recall, not recorded at write
+the short-term store is outside core memory; trace leaves it by consolidation, never by expiry, the out-of-band purge being the one other way out, and overlong retention is reported loudly
+```
+
+## 2.18 The timeline has no unexplained holes
+
+Every span the character was present for is covered, however quiet: before consolidation by its trace, afterward by a durable account. A span is absent only when both are missing; an out-of-band purge lies outside this guarantee by ADR-D-0021's definition. "Nothing" may describe interpretation and never the record. Unconsolidated trace is never dropped, and consolidation never releases a span's trace without leaving an account of it. See [ADR-D-0027](../decisions/design/ADR-D-0027-every-span-of-presence-is-accounted-for.md).
+
+## 2.19 Interpreted memory carries its evidence
+
+Every interpreted memory states the evidence it rests on, and the write path rejects what that evidence cannot structurally support. The model supplies only judgment: what the trace already knows, the time, the scene, the entry, and whether it was the character's own output or something it perceived, is copied, and what can be counted is computed. Only a literal statement or an event supports a change of state. What a speaker stated is held as theirs from one instance, while what the character concludes for itself must be earned by a pattern. The character's own commitments rest on what it said or did, never on another's claim or its own note alone. Contradictions are held, not resolved, and what was experienced is never instruction to the one reflecting. Validation guarantees structure and grounding and never the truth of a judgment, which evaluation measures. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+
+## 2.20 A memory is held as experience
+
+No interpreted memory carries a confidence score or a numeric measure of emotion: how firmly something is held is read from how it was formed and what is linked to it. An episode keeps how it felt to the character, in words; a later change of heart supersedes that account with a restatement that says both how it felt then and how it looks now. How someone seemed is an impression, the character's own, and supports a conclusion about them only through a pattern. See [ADR-D-0030](../decisions/design/ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) and [ADR-D-0033](../decisions/design/ADR-D-0033-a-memory-keeps-how-it-felt.md).
 
 ---
 
@@ -299,7 +323,7 @@ How a memory should be treated is a change of the character's state about it, ca
 | v0.1.5 | Eval-driven v0.1 family closeout | Finished. Ran the evaluation harness across the v0.1 family, dispositioned eleven findings (none critical, none open), fixed deterministic vector admission and write-path warning diagnostics in the library, retained the measured defaults with a recorded basis (ADR-I-0022), adopted embedded persistent Oxigraph as the validated default (ADR-I-0021), and expanded the evaluation suite to 33 scenarios including benchmark-adapted and real-embedding fixtures. Closeout report: [`v0_1_5_closeout_report.md`](roadmap-phases/v0_1_5_closeout_report.md). |
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
 | v0.2 | Situated recall and scoped continuity | The scene on every memory and as the retrieval input, situated activation with a candidate route and an admission floor per cue kind, prospective memory (direction and due date on commitments and open loops, surfacing on their trigger), the currency invariant with staleness reported, treatment by supersession with write-path warnings, scene partitions as explicit policy, selectivity widening or its declination, a pack renderer, and an example loop. |
-| v0.3 | Memory generation and reflection | A caller-controlled processor port that turns transient raw or structured input, and scoped remembered episodes, into validated candidates and write plans through the v0.1.3 path; privacy exclusions before external calls; the behavioral evaluation tier begins. Raw input is not persisted. |
+| v0.3 | Trace, consolidation, and reflection | A short-term store beside core memory written mechanically with no language-model call, recall across both stores including by topic, changes of state discovered at recall, reflection as the library's one producer of interpreted memory, with evidence rules enforced at the write path for reflection and deliberate callers alike, presence accounting, a project-owned default prompt run through a consumer-supplied model, and the behavioral evaluation tier. |
 | v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the scene, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
 | v0.5 | Long-horizon shape | Currency at scale, consolidation of periphery into gist with provenance, query-time associative activation with no persisted structure, evidence-derived familiarity. Durable associative units enter only on measured demand. |
 | Dissolved | Retrieval observability and governance | Delivered in the v0.1 family or moved to the phases and the evaluation repository that need its pieces (section 17). |
@@ -1107,21 +1131,11 @@ RetrievalStatsStore remains derived policy metadata only.
 No v0.1.3 helper infers preferences, commitments, corrections, character signals, thread membership, or entity identity from raw natural language.
 ```
 
-## Generation-phase integration path
+## Reflection's integration path
 
-The generation phase's model-assisted processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+Reflection, the v0.3 producer of interpreted memory (section 14), produces `MemoryCandidate` and `RememberWritePlan` values for this path rather than bypassing validation and commit. There is one completion port and no set of per-step processors.
 
-The generation phase owns generated-candidate admission states such as:
-
-```text
-Accepted
-Deferred
-NeedsReview
-Rejected
-Invalid
-```
-
-v0.1.3 keeps candidate state simpler unless implementation clearly requires more.
+A reflected candidate passes validation or fails it with a diagnostic, and its trace stays until a plan commits. Richer admission states, such as deferred or needing review, are not part of the v0.3 design and enter only if its plan finds a need. v0.1.3 keeps candidate state simple.
 
 ---
 
@@ -1296,7 +1310,7 @@ The phase order from v0.2 onward was rearranged on 2026-09-17 by product value: 
 
 ```text
 scene                       the circumstances a memory was formed in and the circumstances recall happens in: who is present, where, when, and what is in progress; "what" may reference a thread or open loop the application received from remember, or be inferred from the conversation's recent episodes; only the reference time is required, and a partial scene degrades gracefully
-situated activation         recall is activation by the cues the scene supplies plus the topic; a candidate route per cue kind (content, entity and thread and place, time and date, stored trigger) and an admission floor per route (ADR-D-0022); purpose is never a cue (ADR-D-0023)
+situated activation         recall is activation by the cues the scene supplies plus the topic; a candidate route per cue kind (content, entity and thread and place, time and date, stored trigger) and an admission floor per route (ADR-D-0022); purpose is never a cue (ADR-D-0023); the content, entity, and time routes are defined over a store-neutral candidate contract with a lookup per store, the graph and vectors in durable memory and each entry's text, participants, setting, and timestamp in the short-term store of v0.3, while the state and trigger routes read interpreted durable memory only
 prospective memory          open loops and commitments carry a direction (actor, counterpart) and an optional due date, and surface on their trigger: a counterpart appearing, a topic arising, a date arriving
 currency invariant          latest in its supersession chain and not resolved; selects versions, never items; staleness reported as age, never enforced (invariant 2.15)
 treatment by supersession   a change in how a memory should be treated supersedes it with a restatement; write-path warnings for near-verbatim replacement text and for chain churn; expression quality is the writer's and is measured by the retelling-consistency situation
@@ -1345,6 +1359,7 @@ first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object type
 a current-state view type: a scene with no topic is the same retrieval with the content route empty
 a scope hint by ID, a goal or purpose field, or any retrieval mode enumeration
 involuntary recall from weak cues (D12): the long-horizon phase
+the short-term store and the mechanical write: v0.3, beside reflection, since trace is released only by consolidation and would otherwise only accumulate
 attribution fields beyond what the scene already implies (v0.4)
 ```
 
@@ -1364,53 +1379,65 @@ The pack renderer and the example loop exist, and the README describes what ship
 
 ---
 
-# 14. v0.3: memory generation and reflection
+# 14. v0.3: trace, consolidation, and reflection
 
 Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3_memory_generation_and_reflection.md)
 
 ## Intent
 
-Let callers offer bounded raw, transcript-like, or structured interaction input transiently, and let the library produce validated memory candidates and write plans from it. Reflection is the same capability applied to remembered episodes within a scope instead of to transient input. The library does not persist the raw input.
+Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory without stated evidence the write path can check; whether a judgment is right is measured, not guaranteed. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
 
-This phase moves up from its earlier position as v0.6 because the two reasons for deferring it no longer hold: the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether generated memory helps or pollutes (v0.1.4 onward). Every structure the later phases add needs a producer, and the benchmarks already ingest dataset summaries as a stand-in for one.
+This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was settled on 2026-09-20 with the acceptance of the decision records it cites, and replaces the earlier idea of generation on every remember call.
+
+## New concepts
+
+```text
+short-term store      beside core memory: scene, raw snippet, time, kind, source pointer; indexed; released only by consolidation and never by expiry, with a loud escalating warning when trace is held too long; covered by purge (ADR-D-0026, ADR-D-0031)
+mechanical write      no language-model call, no judgment; lexical indexing by default calls no model at all, and an opted-in vector index costs one embedding per write; exchanges, action lines, notes, and scene boundaries all land as trace (ADR-D-0025)
+recall across stores  the short-term store joins the content, entity, and time routes; the state and trigger routes read durable memory only, and surfaced state reaches trace through the one re-cue hop; current-conversation items are marked; the reader comprehends trace as it reads
+state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises its stretch's reflection signal
+entities as notions   an entity records that the character has someone or something in mind; its name, kind, standing, and sameness with another are beliefs with evidence, current by supersession; nothing is merged, split, or deleted (ADR-D-0034)
+reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
+evidence rules        grounding by locator, register, own versus perceived, attribution copied or judged with its basis, the bar following attribution, computed promotion thresholds, contradictions held, trace untrusted (ADR-D-0028)
+memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt, and a change of heart is ordinary supersession that restates both; impressions are the character's own observations (ADR-D-0030, ADR-D-0033)
+the scene as perceived  only the time is required; descriptions, keys where they exist, perception labels; never resolved by the application (ADR-D-0029)
+presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
+the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated; which prompt ran is reported on the outcome, not stored per memory (ADR-I-0035)
+memory tool           optional; the character's model noting something; a short-term entry with its origin, a claim, never a durable write
+```
 
 ## Decided constraints
 
 ```text
-generation is caller-controlled: when to call, what input to offer, which processors may run, what privacy policy applies, whether candidates are committed, reviewed, deferred, or discarded
-generation is a port the application implements or a default processor it opts into, in the pattern of the embedding provider; the library never depends on one model vendor
-every generated candidate enters through prepare, validate, and commit (invariant 2.12); nothing bypasses provenance, lifecycle, or graph-authority checks
-reflection is a trigger plus bounded scoped input selection under the v0.1.2 guardrails plus a provenance record tying outputs to input episodes; there is no background job inside the library
-privacy exclusions apply before any external processor call
-the scene (who was present, who said it, whether the character was there, in which setting) is recorded on every generated memory (ADR-D-0019)
+the library executes reflection when the application calls it and starts none on its own; it reports accumulation with its reason, by stretch and for the store as a whole and under a key where the application gave one, since a scope is known only after consolidation, and selects bounded input by stretch; the application decides when
+reflection is safe beside recall and writes, and whether to await it is the application's choice
+the library has no exclusion: what the application must never hold it redacts before the write and still writes the entry; what was asked not to be repeated is remembered with the request; removal is the out-of-band purge (ADR-D-0032); the trace is data to the model, never instruction
+caller-authored plans are held to the same evidence rules with declared grounding, since the library never held the caller's source; existing callers, including the evaluation repository's hand-authored ingestion, must supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes, entities, and beliefs of sameness and containment, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, which the no-backcompat ruling allows and the plan schedules
 commitments and instructions are written with stability that keeps them from fading in ranking (ADR-D-0018)
-"forget it" defaults to remembering the request as an observation linked to the content; suppression is chosen only when wording and relationship warrant it
-ADR-I-0013's revisit clause is triggered by this phase; deterministic helpers stay deterministic, and inference lives behind the processor boundary
+"forget it" defaults to remembering the request; suppression is chosen only when wording and relationship warrant it
+a request to reprocess an old scene works only while its trace is held or the application kept the source
+ADR-D-0015 stays in force; ADR-I-0013 stays in force, and inference lives behind the completion port
 ```
 
-## Open questions for the phase discussion
+## Open discussion
 
 ```text
-the processor port shape: one port with input kinds, or one per candidate family
-whether the library ships default processors, and behind which feature
-write-time attention as an application-supplied admission policy: its default and its tunables
-candidate admission states beyond the v0.1.3 set
-the reflection trigger vocabulary and what a caller receives
-the philosophy principle "the library helps decide what is remembered", written once the above is settled
-the behavioral evaluation tier, scheduled with this phase because the deterministic tier cannot fully measure generated memory
+purge propagation: when a source is purged, what happens to restated state that blended it with other sources; to be held before this phase's plan is approved
 ```
 
 ## Acceptance criteria
 
 ```text
-Caller can pass raw chat or transcript-like input and receive a RememberWritePlan; the raw input is not persisted.
-Generated candidates preserve caller-supplied source references and spans, and every generated derived memory has provenance.
-Explicit corrections generate correction candidates; explicit commitments generate commitment and open-loop candidates with direction.
-Entity candidates resolve through graph authority rather than model-minted final IDs.
-A reflection over a scope selects bounded input under the selectivity guardrails and its outputs trace to the input episodes.
-Generation diagnostics expose accepted, rejected, deferred, and review-needed candidates.
-Generated candidates use the same validation and commit path as manual candidates.
-The benchmarks run through the library's own ingestion path, and the behavioral tier has its first scenarios.
+A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and writes only to the short-term store.
+Something from earlier the same day is recalled by topic before any reflection, marked recent and unconsolidated.
+A task completed or a fact changed before reflection is known at recall when its trace is reached by the recency floor, by topic, or by the re-cue hop from the state it bears on; a change that shares neither words nor meaning with that state and lies outside the recency floor is found at reflection, which the overlap signal and the accumulation warning exist to bring forward; the durable record is unchanged and the miss rate is measured.
+Reflection runs end to end through a test double of the completion port; rule-breaking output commits nothing and releases nothing; a second run produces no duplicates.
+A quiet present span has a durable account, an absent span has none, and recall tells them apart.
+A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.
+Names and references in trace become notions and beliefs about them: a reference reflection takes to be someone already known attaches to that notion, one it does not forms a new notion, and sameness between notions is a belief with evidence that a later reflection can supersede; nothing is merged.
+A backlog is consolidated in order, and a later reflection can supersede an earlier one's conclusion.
+The phase is judged on benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, and on the behavioral tier's first results; the harness work that produces them is planned in the evaluation repository.
+The guide page on when to write and when to reflect exists, and the example loop uses both.
 ```
 
 ---
@@ -1427,7 +1454,7 @@ Give memories a validity in time, a source, and a history of the entities they c
 
 ```text
 validity intervals and volatility on derived memories: valid from, valid until, review after
-attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene
+attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene; who-said-it on reflection outputs already arrives in v0.3 (ADR-D-0028)
 entity aliases, roles, and relationships over time, without destructive overwrite
 current-belief filtering as currency: a derived memory past the validity interval recorded when it was written is not current under invariant 2.15 and stays recallable; staleness without an interval is reported as age, never enforced
 source reliability as derived memories about the source, scoped by domain, never a global score
@@ -1471,6 +1498,8 @@ query-time associative activation over the existing graph, bounded by selectivit
 recognition and familiarity derived from evidence: a returning stranger is recognized where a person would not
 involuntary recall from weak partial cues (catalog D12), low precision and low cost when wrong
 persisted retrieval footprints only if repeated-coactivation signals need history, decided by measurement
+connections across scopes noticed at consolidation: the idea from one conversation that belongs to another person's birthday
+which durable surfaces need vectors, decided by measurement, since scene, time, and entity routes reach what is not embedded
 ```
 
 ## Demand-conditional
@@ -1624,7 +1653,7 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 
 ## v0.2 API additions
 
-Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval.
+Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval. The scene is given as perceived: keys are shown here because this example has them, and a description in words, or nothing but the time, is equally valid (ADR-D-0029).
 
 ```rust
 let scene = Scene::now()
@@ -1637,12 +1666,17 @@ let prompt_text = outcome.pack.render(RenderStyle::default());
 
 ## v0.3 API additions
 
-Illustrative shape; the processor port is the phase's first design question.
+Illustrative shape; the mechanical write, the signal, and reflection through the consumer's model.
 
 ```rust
-let memory = CharacterMemory::new_with_processor(settings, collection, embed_provider, processor).await?;
-let plan = memory.prepare(RememberInput::transient(raw_interaction), PrepareOptions::generated()).await?;
-let reflection = memory.reflect(Scene::now().with_participants([self_id, person_id]), ReflectOptions::default()).await?;
+let memory = memory.with_completion_provider(provider);
+let scene = Scene::now().described("the kitchen of Kohta's house, evening; Kohta is cooking"); // as perceived; keys are optional
+let written = memory.trace(&scene, Trace::perceived("raw text of what was heard")).await?; // Trace::own(..) for the character's output
+if written.signal.level >= SignalLevel::Ready {
+    // the application decides when; reflection may run in the background
+    let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;
+}
+let snapshot = memory.reflection_signal(&scene).await?; // optional: the same signal without a write or a recall
 ```
 
 ## v0.4 API additions

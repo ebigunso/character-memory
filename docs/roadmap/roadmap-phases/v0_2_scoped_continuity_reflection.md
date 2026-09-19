@@ -25,17 +25,19 @@ Caveat: the benchmark gap-bucket baselines rest on small per-bucket samples and 
 
 # 1. The scene
 
-The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who asserted an observation or derived memory, and whether the character was there, arrive with attribution in v0.4. At retrieval it is:
+The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who said what on reflection's outputs arrives with consolidation in v0.3 (ADR-D-0028), and whether the character was there, with the rest of attribution, arrives in v0.4. At retrieval it is:
 
 ```text
 when      the reference time; the only required field, defaulting to now
-who       the participants present, as the IDs the application already supplies to remember (ADR-I-0020); the self is one of them (ADR-D-0020)
-where     a place entity or the conversation key; for a text agent usually the conversation
+who       the participants present, each given as perceived: a description, a name as heard, a perception label, a key or ID the application already owns (ADR-I-0020), or any combination; the self is one of them (ADR-D-0020)
+where     the place as perceived, a description as fine as the moment needs, or a key such as the conversation; for a text agent usually the conversation
 what      the activity in progress: a thread or open loop the application received from remember, or nothing, in which case it is inferred from the conversation's recent episodes
 custom    optional scene metadata for domains that already have their own scope model (a game zone, a project code); the application supplies the value it already owns and never looks one up from the library
 ```
 
-A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is a generation-phase processor, not an input requirement.
+Only the time is required, and the application never resolves, normalizes, or looks anything up (ADR-D-0029). An identity key cues its one entity, a setting key, a conversation, channel, zone, or project code, cues the memories whose scope it belongs to and never an entity, and an exact name cues every entity that bears it, which may be several; a description is a content cue over the entities and scenes memory holds, so an ambiguous reference activates each thing it could mean and an unknown one activates nothing, and the trace reports which. Recall reads entities through what the character currently believes about them (ADR-D-0034), so a memory formed in the kitchen is reached from the house, and what is held under two names for one person is reached by either. Keeping identity consistent across drifting wording is consolidation's work in v0.3, never the application's.
+
+A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is reflection's work in v0.3 and never an input requirement; where it is unclear whether two references are one, consolidation forms separate notions and holds their sameness as a belief (ADR-D-0034).
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
@@ -52,16 +54,16 @@ Recall is never gated by the scene by default (ADR-D-0019). An application that 
 Recall is activation by the cues the scene supplies plus the topic of the current turn (ADR-D-0022). Nothing scores every memory, so each cue kind has its own route for finding candidates, and each route has an admission floor in the pack so no cue kind can starve another:
 
 ```text
-content route     the topic, through vectors; the route retrieval has today
-entity route      the participants, the place, the activity's thread, through the graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
-time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps the graph already stores
+content route     the topic, through each store's content lookup: vectors in durable memory, which is the route retrieval has today, and whatever index the short-term store of v0.3 uses
+entity route      the participants, the place, the activity's thread, through the graph in durable memory, and in v0.3 through the participants and setting recorded on each short-term entry, which needs no graph; expansion under the v0.1.2 guardrails; whether these three cues share one floor or get sub-floors is a planning question (section 8)
+time route        recency for this pair, recency for the character, a range when the topic names one, due dates, date matches, cadence-relative silence, all over timestamps, the graph's in durable memory and, in v0.3, each short-term entry's own
 state route       the latest derived state for the scopes the who and what cues imply, active loops and commitments in both directions; a graph read filtered by currency, so it is the currency-side reading of the same cues rather than a sixth cue kind
 trigger route     stored intentions whose trigger is a participant present or a topic arising
 ```
 
 Importance and recency weight activation. Surfaced state re-cues one bounded hop: an open loop pulls the counterpart's objections, a thread pulls its last decision. A scene with no topic is the same retrieval with the content route empty; there is no separate current-state call. Elapsed time since the pair last met is reported with the result.
 
-The section budgets of the pack stay as output categories. Floors are per route, and the plan calibrates them by measurement in the pattern of ADR-I-0022.
+The section budgets of the pack stay as output categories. Floors are per route, and the plan calibrates them by measurement in the pattern of ADR-I-0022. The content, entity, and time routes are defined over a store-neutral candidate contract, so the short-term store that v0.3 introduces joins them without changing this design. The state and trigger routes read interpreted durable memory only.
 
 ## 2.1 Currency and staleness
 
@@ -127,6 +129,8 @@ Behavioral-tier judging is scheduled with the generation phase; this phase absor
 
 Illustrative shape:
 
+The scene is given as perceived: keys are shown here because this example has them, and a description in words, or nothing but the time, is equally valid (ADR-D-0029).
+
 ```rust
 let scene = Scene::now()
     .with_participants([self_id, alice_id])
@@ -165,6 +169,7 @@ a current-state view type, a scope hint by ID, a purpose field, a retrieval-mode
 a stored scope object without a named consumer
 interpreting-neighbor co-retrieval
 involuntary recall from weak cues, D12 (v0.5)
+the short-term store and the mechanical write (v0.3, beside reflection)
 reinforce, decay, archival
 attribution fields beyond what the scene implies (v0.4)
 ```
