@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 adr_type: design
 date: 2026-09-19
 deciders: ["ebigunso"]
@@ -18,11 +18,11 @@ A person remembers this morning this afternoon, by what it was about, before any
 
 ## Decision
 
-Recent experience is held in a short-term store beside core memory, not inside it. A mechanical write puts there the scene, the raw snippet of what happened, its time, and the application's source pointer if one was given, with no language-model call and no judgment. Indexing is mechanical too: lexical by default, which calls no model of any kind, and where the consumer opts into a vector index, one embedding per write, which encodes text for lookup and interprets nothing. Scene boundaries are written the same way, with no content required.
+Recent experience is held in a short-term store beside core memory, not inside it. A mechanical write puts there the scene, the raw snippet of what happened, its time, and the application's source pointer if one was given, with no language-model call and no judgment. Indexing is mechanical too, and in its default configuration a write calls no model of any kind; an index that needs an embedding is the consumer's choice and interprets nothing. Scene boundaries are written the same way, with no content required.
 
-Exclusion is applied at the mechanical write. For a span the application marks as not to be remembered, the store keeps a marker of the span and its scene and none of its content, so excluded text is never stored, never indexed, never recalled, and never shown to a model. If the application excludes a span whose trace is still unconsolidated, the library replaces that entry's content with the same marker, removes it from the index, and changes the entry's version, so a reflection that had already selected it fails at commit and writes nothing derived from it (ADR-I-0035). Once something has been consolidated, stopping its influence is suppression and removing it is the out-of-band purge.
+Exclusion is applied at the mechanical write. For a span the application marks as not to be remembered, the store keeps a marker of the span and its scene and none of its content, so text excluded as it is written is never stored, and so is never indexed, recalled, or shown to a model. If the application excludes a span whose trace is still unconsolidated, the library replaces that entry's content with the same marker and removes it from the index; how that meets a reflection already under way is ADR-I-0035's. Once something has been consolidated, stopping its influence is suppression and removing it is the out-of-band purge.
 
-Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the content, entity, and time routes beside durable memory, and marks what belongs to the current conversation. It never feeds the state route or the stored-intention route, which read interpreted durable memory; surfaced state reaches trace only through the one bounded re-cue hop of ADR-D-0023. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge of ADR-D-0021. The purge path of ADR-D-0021 covers it.
+Trace never expires. An entry stays until consolidation has consumed it, however long that takes, because dropping experience that was never reflected on can only produce poorer memory than was possible. What grows with neglect is the warning: the accumulation signal escalates with volume and age, and past a threshold the library reports loudly, on every write and every recall, that trace has been held longer than it should be. Each entry is bounded in size, and oversize input is refused or visibly truncated. It is indexed when written, so recent trace is reachable by topic as well as by scene, time, and entity; recall reads it through the content, entity, and time routes beside durable memory, and marks what belongs to the current conversation. It never feeds the state route or the stored-intention route, which read interpreted durable memory; surfaced state reaches trace only through the one bounded re-cue hop of ADR-D-0023. Consolidation reads it, writes durable memory through the validated path, and releases what it consumed. Release after consolidation is the only way an entry leaves the store, apart from the out-of-band purge of ADR-D-0021, whose scope includes this store.
 
 It is never core memory: nothing in it enters graph authority or the durable vector store, it is not a memory substrate, and it is reachable only through recall and consolidation, never as a log to be searched or exported.
 
@@ -40,14 +40,14 @@ Two stores with different jobs is how fast and slow memory are usually described
 
 ## Decision Boundary
 
-Invariant: recent trace lives outside core memory and drains only by consolidation; unconsolidated trace is never dropped by the library, and overlong retention is reported loudly; it is written mechanically; it is indexed for recall and reached only through recall and consolidation; it never enters graph authority or the durable vector store; purge covers it.
+Invariant: recent trace lives outside core memory and drains only by consolidation; unconsolidated trace is never dropped by the library, and overlong retention is reported loudly; it is written mechanically; it is indexed for recall and reached only through recall and consolidation; it never enters graph authority or the durable vector store; it lies within the scope of the out-of-band purge.
 
-Not covered: the index method, lexical, vector, or both, which is decided by measurement; the entry bounds; the warning's thresholds and form; the storage engine; how the release is made idempotent.
+Not covered: which index method serves recall best, which is decided by measurement, provided the default write calls no model; the entry bounds; the warning's thresholds and form; the storage engine, and with it who protects the store at rest, keeps one character's trace from another's, and deletes securely, the library or the host application; what the store does as it nears the capacity it was given, short of dropping trace; how the release is made idempotent.
 
 ## Validation
 
-- An excluded span leaves a marker and no content: its text is absent from the store, the index, recall, and any prompt, and a retroactive exclusion of unconsolidated trace leaves the same state.
-- A mechanical write makes no language-model call, no model call of any kind in the default lexical configuration, and no write to graph authority or the durable vector store.
+- A span excluded as it is written leaves a marker and no content: its text is absent from the store, the index, recall, and every prompt, and a retroactive exclusion of unconsolidated trace leaves the same stored state.
+- A mechanical write makes no language-model call, no model call of any kind in the default configuration, and no write to graph authority or the durable vector store.
 - A scenario asks by topic about something from earlier the same day before any reflection, and recall returns it marked as recent and unconsolidated.
 - After consolidation commits, the consumed entries are gone, and the durable episode carries every source pointer its consolidated entries supplied; an entry written without one consolidates just the same.
 - No public operation lists, searches, or exports the store's contents outside recall and consolidation.

@@ -32,7 +32,7 @@ a bundle     one entry per event as the application sees it, which is the only s
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes, entities, and possible-same and containment links, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes, entities, and possible-same and containment links, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, and the confidence field leaves interpreted memory (ADR-D-0030), a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
@@ -73,14 +73,15 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; an episode may be marked unfinished
+gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; the gist is the character's own account and says how the episode felt to it, which is never revised afterward (ADR-D-0030); an episode may be marked unfinished
 entity candidates for the people, places, and things the trace names, each resolved through graph authority to an existing entity, proposed as new, or, when it is unclear whether two references are one, kept separate with a possible-same link; reflection never mints a final identity and never merges on a guess; each candidate, possible-same link, and containment link points at where the reference appears in an entry's text or scene
-observations, each naming its entry and quoting the words it rests on, with their register and who said it for speech, and who acted, with no register, for an event; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
+observations, each naming its entry and quoting the words it rests on, with their register and who said it for speech, who acted, with no register, for an event, and how someone seemed, as the character's own impression; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
 the scene as consolidated: beside what was given, the people and places reflection resolved, places containing one another where they do, each part marked as given or resolved
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
-promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library, and no output carries a model-supplied confidence, the existing confidence field being filled by the library from the cited evidence
+promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library
+reappraisals: what the character now makes of an earlier episode, as a new memory beside it that never supersedes how it felt
 weight, judged here from the trace
 a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
 nothing else, when nothing else happened
@@ -88,7 +89,24 @@ nothing else, when nothing else happened
 
 ## 3.3 What the write path enforces
 
-Entity candidates resolve through graph authority: a candidate names an existing entity by an identity graph authority confirms, or is proposed as new, or carries a possible-same link; a model-supplied identity that graph authority does not hold fails validation, nothing merges two entities, and a candidate or a possible-same or containment link whose reference is not found in the entry it cites fails, so no entity enters that the trace does not mention and no relation enters unless at least one of its ends is found in the cited trace, the other being found there too or being an entity graph authority already holds, while whether the words support the relation remains the model's reading, measured by evaluation; a caller-authored entity or link declares its source reference instead, and a possible-same or containment link is admitted through the direct link operation only with the same grounding. The evidence rules of ADR-D-0028: an observation's quote is found in the entry it cites; only a literal statement or an observed event supports state, an event observation carrying no register and naming who acted; what a speaker stated may become state held as theirs from one instance, and what the character concludes for itself may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern, counted by the library; a commitment or fact about the character rests on its own speech or action entries, never on a note, a thought, or a perceived claim alone; contradictions are held, not resolved, and one party's account never supersedes another's; every interpreted memory keeps the basis of its grounding and of its attribution, while producer kind stays write-time provenance on the plan (ADR-I-0015). The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
+The evidence rules are ADR-D-0028's, and this section states them at the grain the plan implements. A candidate that fails any of them is a diagnostic, and its trace stays. The near-verbatim and churn warnings of v0.2 apply to restatements.
+
+```text
+copied, never model-supplied   an observation's time, scene as given, and entry; whether the entry, or the part of a turn-pair entry, is the character's own or perceived
+computed by the library        how many distinct episodes a pattern cites and over how long
+grounding, observations        the entry and a locator within one part of it; for text the quoted words, distinctive in length and compared after normalization, found in the cited entry and kept on the observation within a bound
+grounding, entities and links  an entity candidate points at where its reference appears, in an entry's text or its scene as given; a possible-same or containment link needs at least one end found in the cited trace, the other found there too or being an entity graph authority already holds; whether the words support the relation is the model's reading, measured by evaluation
+grounding, gists               the entries consolidated, all of which are covered by exactly one gist
+declared grounding             a caller-authored observation, episode, entity, or link declares the caller's own source reference; an observation also declares own or perceived, and the quote and speaker for speech or the actor for an event; the rules read a declared basis as they read a recorded one, and the direct link operation admits a possible-same or containment link only with grounding
+entity resolution              a candidate names an existing entity graph authority confirms, is proposed as new, or carries a possible-same link; a model-supplied identity graph authority does not hold fails, and nothing merges two entities
+what an observation records    speech with its register and who said it; an event with who acted and no register; an impression, how someone seemed, attributed to the character (ADR-D-0030)
+what supports state            only a literal statement or an event
+the bar follows attribution    what a speaker stated may become state held as theirs from one literal observation; what the character concludes for itself needs a pattern citing several distinct episodes, a belief needs a persistent pattern, and a belief about itself meets the strictest bar
+the character's commitments    rest on its own speech or action entries, never on a note, a thought, or a perceived claim alone
+contradictions                 held with the conflict recorded; one party's account never supersedes another's
+judged attribution             names an entity candidate or unknown; a speaker hint is weighed and may be overruled from the content; the basis, copied, judged, or declared, stays on the memory
+what stays on the memory       the basis of its grounding and of its attribution; producer kind stays write-time provenance on the plan (ADR-I-0015); no confidence score (ADR-D-0030)
+```
 
 ## 3.4 The processor
 
@@ -99,6 +117,21 @@ A default prompt the project owns and versions, overridable, run through a minim
 The library reports what has accumulated since the last reflection, and why, for the stretch a write or a recall belongs to and for the store as a whole, and also under a key where the application gave one; accumulation is counted over stretches because a stretch exists at the mechanical write and a scope is known only once consolidation has resolved it. The reasons are volume, age, or a possible change of state. It selects a reflection's bounded input by stretch. It executes reflection, the prompt, the validation, the commit, and the release, when the application calls it, and never starts one on its own: only the schedule is the application's. Trace never expires: neglect is answered with a warning that escalates with volume and age and, past a threshold, is reported loudly on every write and every recall, because dropping experience that was never reflected on can only make memory poorer (ADR-D-0026). The application schedules, and the guide recommends a scope's pass at session end when the signal says so and a day's pass once daily. Reflection needs no idle character. Unlike a person, the character does not have to rest to consolidate: the application may start reflection in the background the moment it judges an event finished, and the character carries on. It is safe to run beside recall and writes on the same memory, and whether to await it is the application's choice. What reflection does want is a finished event, since reflecting on half an exchange concludes too early, and only the application knows when a conversation or an action log has ended, which is why the library never decides when.
 
 The accumulation signal has two audiences. The application receives it on every write and recall outcome, with a level and a reason, so it never has to poll. The developer receives it as log severity that escalates with the level, and when a memory is opened, which is when someone is most likely watching. It is never rendered to the character as tiredness, which would perform a limitation the character does not have, and it never reaches an end user. Neglect still degrades recall for real reasons, a noisier lookup and more literal text in the pack, which is the reason to consolidate promptly.
+
+## 3.6 Consolidation as one recoverable operation
+
+ADR-I-0035 states what must hold: an entry is consolidated by at most one reflection, a crash leaves a consolidation finished or not begun, operations that change durable memory are serialized and invisible to recall while in progress, and an exclusion prevails until durable writing begins. This is the protocol the plan starts from; the plan may change it so long as those hold.
+
+```text
+claim        a reflection atomically claims the entries it selects, in the short-term store, recording each entry's version; a claimed entry is not selectable by another reflection
+abort        every exit before the committing mark, malformed output, a validation failure, a port error or timeout, cancellation, a rejected commit, ends the claim, discards any recorded plan, and frees the entries with their trace intact
+plan         the validated plan is recorded against the claim before commit, and its identifiers are derived from the entries it consolidates, so committing it again writes nothing new
+turn         a reflection's commit, a caller's commit, a correction, a forgetting, a direct link, and an exclusion each take one serialized turn within the process that owns the embedded stores; recall is a reader and never runs inside a turn; the model call is outside any turn
+recheck      at its turn a reflection's commit checks that the claimed entries' versions are unchanged and that the durable memories it read and supersedes are still current; otherwise it aborts
+committing   after the recheck and before the first durable write the claim is marked committing; objects and links are written, and the trace is released, within the same turn
+recovery     on open, before the first recall, a committing claim is finished by replaying its recorded plan and releasing, which completes a partial write because identifiers are derived and writes are upserts; any other claim is aborted; an I/O failure after the mark is replayed in process
+exclusion    before the mark it changes the entry's version and the commit aborts; after the mark it waits its turn and reports the entry as already consolidated with the memories the recorded plan derived from it, for the application to suppress or purge; text already sent to a model cannot be unsent
+```
 
 ---
 
@@ -183,6 +216,11 @@ the concurrent-facade-call census result and whether anything in the write path 
 how custom scene values are represented, and the exact forms of the possible-same and containment links ahead of v0.4's entity evolution work
 how stretches that belong to one relationship or thread are gathered into a scope's pass
 the forms of a locator and of a speaker hint
+who protects the short-term store at rest, keeps one character's trace from another's, and deletes securely, the library or the host application, decided before a storage engine is chosen
+what the store does as it nears the capacity it was given, short of dropping trace
+whether the confidence on thread membership and other links goes the way of the confidence on interpreted memory (ADR-D-0030)
+whether a consumer can correct or forget a reflection-written memory with only what it was handed, given ADR-I-0020
+the consolidation protocol of section 3.6, including the conditional upsert the write path itself still lacks
 ```
 
 Implementation records expected with the plan, each written when its contract is set: the short-term store's index and bounds, the release contract, the signal, and the output schema.
