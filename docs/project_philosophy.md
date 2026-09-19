@@ -189,6 +189,7 @@ This preserves human-like recall while reducing false continuity and graph pollu
 - **The character knows how things stand before it has reflected.** In the afternoon it still remembers the morning: what it just did, what it was told an hour ago, what changed since yesterday. Recent experience is as reachable by what it was about as old experience is, and more literal.
 - **The character knows when it was there.** A quiet afternoon is part of its life and is remembered as quiet. A stretch it was absent for is known as absence. It never confuses nothing happening with not having been there.
 - **What lasts must have earned it.** One remark is an observation, not a trait. A tendency is believed only after it repeats, and is held as a tendency. What someone states plainly about themselves can be taken at their word; what is inferred about them cannot, from one instance. What was said in jest, in play, or as a supposition is remembered as that and never as fact. What others say about the character's own past is a claim, weighed against what it remembers.
+- **A memory keeps how it felt.** What happened can be reconsidered for the rest of a life. How it felt at the time cannot be revised, only joined by how it looks now.
 - **Expose retrieval rationale.** Implementation designers and application developers need to understand why a memory was retrieved.
 - **Stay backend-agnostic where practical.** The default stack can use OpenAI and Qdrant, but the philosophy should not depend on either vendor.
 
