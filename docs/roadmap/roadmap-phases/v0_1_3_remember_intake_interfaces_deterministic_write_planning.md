@@ -452,19 +452,11 @@ Missing rationale can be represented explicitly as unavailable.
 No v0.1.3 helper persists raw logs or resolves raw_ref values.
 ```
 
-## v0.6 integration path
+## Reflection integration path
 
-v0.6 generated memory processors produce `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path.
+Reflection, the v0.3 producer of interpreted memory, produces `MemoryCandidate` and `RememberWritePlan` values rather than bypassing the validation and commit path. It runs through one completion port, not a set of per-step processors (ADR-I-0035).
 
-The v0.6 work owns generated-candidate admission states such as:
-
-```text
-Accepted
-Deferred
-NeedsReview
-Rejected
-Invalid
-```
+A reflected candidate passes validation or fails it with a diagnostic. Richer admission states, such as deferred or needing review, are not part of the v0.3 design and enter only if its plan finds a need.
 
 v0.1.3 does not add those states.
 
