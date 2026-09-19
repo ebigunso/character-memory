@@ -1431,7 +1431,7 @@ A quiet present span has a durable account, an absent span has none, and recall 
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.
 Names and references in trace become entity candidates resolved through graph authority, with unclear identity kept separate under a possible-same link and nothing merged on a guess.
 A backlog is consolidated in order, and a later reflection can supersede an earlier one's conclusion.
-The benchmarks run through mechanical writes plus reflection with frozen reflection outputs, and the behavioral tier has its first scenarios.
+The phase is judged on benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, and on the behavioral tier's first results; the harness work that produces them is planned in the evaluation repository.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
 ```
 

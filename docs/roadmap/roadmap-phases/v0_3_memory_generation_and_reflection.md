@@ -103,13 +103,15 @@ The accumulation signal has two audiences. The application receives it on every 
 
 # 4. Evaluation first
 
+These are the measurements this phase consumes and when, from the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality. The harness work that produces them is planned and tracked there, not here.
+
 ```text
-catalog E and F at the retrieval tier: what lasts and what is let go; presence accounting; promotion thresholds; register; stated versus inferred; claims; contradictions; interruption; endings; self-revision; hostile trace; exclusions
+catalog E and F at the retrieval tier: what lasts and what is let go; presence accounting; promotion thresholds; register; what a speaker stated against what the character concludes; claims; contradictions; interruption; endings; self-revision; hostile trace; exclusions
 same-day recall by topic before any reflection; a changed fact before reflection, including stated in different words
 the lookup measurement of section 2.2
-reflection in the loop: the prompt version pinned and reflection outputs frozen, as embeddings are frozen, so runs stay deterministic and free of paid calls
-the benchmarks ingested through mechanical writes plus reflection rather than hand-authored ingestion, which replaces the dataset summaries now standing in for a generator
-the behavioral tier's first scenarios: tact, discretion across scenes, retelling consistency
+measurements with reflection in the loop that are deterministic and free of paid calls, which this library supports by reporting which prompt ran and by taking the model through a port a harness can replay
+benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, before the phase is judged complete
+the behavioral tier's first results: tact, discretion across scenes, retelling consistency
 ```
 
 ---
@@ -155,7 +157,7 @@ The guide page on when to write and when to reflect exists, and the example loop
 a model client or a named model in the library
 a scheduler or background job in the library
 durable writes from the memory tool, from tool results, or from any unvalidated path
-raw text in graph authority or the durable vector store
+trace text in graph authority or the durable vector store, beyond the bounded quote an observation keeps as part of itself (ADR-D-0028)
 reprocessing old scenes from source after their trace was consolidated and released, unless the application kept the source; what consolidation kept stays recoverable in full for as long as memory holds it, which an out-of-band purge can end, and the literal wording it let go is not
 validity intervals as structured fields and the fuller attribution work (v0.4); who-said-it on reflection outputs is in this phase
 connections across scopes, and which durable surfaces need vectors (v0.5)
