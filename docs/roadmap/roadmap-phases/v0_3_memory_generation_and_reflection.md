@@ -217,7 +217,7 @@ how custom scene values are represented, and the exact forms of the possible-sam
 how stretches that belong to one relationship or thread are gathered into a scope's pass
 the forms of a locator and of a speaker hint
 who protects the short-term store at rest, keeps one character's trace from another's, and deletes securely, the library or the host application, decided before a storage engine is chosen
-what the store does as it nears the capacity it was given, short of dropping trace
+what the store does as it nears the capacity it was given, short of dropping trace, and how a write it refuses shows in presence accounting
 whether the confidence on thread membership and other links goes the way of the confidence on interpreted memory (ADR-D-0030)
 whether a consumer can correct or forget a reflection-written memory with only what it was handed, given ADR-I-0020
 the consolidation protocol of section 3.6, including the conditional upsert the write path itself still lacks
