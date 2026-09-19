@@ -37,7 +37,7 @@ v1.0 is the text-only release-ready state: a character whose input arrives as te
 
 # 2. Cross-version invariants
 
-These should remain stable even as the library evolves. An invariant that cites a decision record still marked proposed is provisional until that record is accepted.
+These should remain stable even as the library evolves.
 
 ## 2.1 Episodes are primary
 
@@ -1387,7 +1387,7 @@ Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3
 
 Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory without stated evidence the write path can check; whether a judgment is right is measured, not guaranteed. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
 
-This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was worked out on 2026-09-19, subject to the acceptance of the decision records it cites, and replaces the earlier idea of generation on every remember call.
+This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was settled on 2026-09-20 with the acceptance of the decision records it cites, and replaces the earlier idea of generation on every remember call.
 
 ## New concepts
 
@@ -1407,8 +1407,6 @@ memory tool           optional; the character's model noting something; a short-
 ```
 
 ## Decided constraints
-
-A constraint below that rests on a decision record still marked proposed is provisional until the decider accepts that record, and changes or goes if the record does.
 
 ```text
 the library executes reflection when the application calls it and starts none on its own; it reports accumulation with its reason, by stretch and for the store as a whole and under a key where the application gave one, since a scope is known only after consolidation, and selects bounded input by stretch; the application decides when
