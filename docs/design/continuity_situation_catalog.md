@@ -327,6 +327,10 @@ A span marked not to be remembered is never seen by reflection at all. It is sti
 
 Two conversations at once with different people are consolidated in the order they happened, without their scenes mixing.
 
+### F23. A change of heart
+
+Months after an argument that hurt, the character comes to see it differently. It remembers both: that it was hurt then, and how it sees it now. The earlier feeling is not rewritten to match the later view, and the character can say how it felt at the time without pretending it still does.
+
 ## Cross-cutting qualities
 
 - The timeline has no unexplained holes: every stretch the character was present for is part of what it remembers, however quiet, and a stretch with nothing in it means it was not there.
