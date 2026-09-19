@@ -61,5 +61,6 @@ Measurement shows that reading notions through current beliefs makes recall by p
 ## More Information
 
 - ADR-D-0029 decides what the application supplies; this record decides what becomes of it.
+- The continuity situation catalog's F14 and F24 to F26 describe the target behavior: names, the friend who never existed, two names for one person and the reverse, and being told the world is otherwise.
 - ADR-D-0028's grounding rules apply to these beliefs as to any interpreted memory, including that a belief relating two notions is grounded in where at least one of them is mentioned.
 - The temporal-validity phase's planned work on entity aliases, roles over time, and correction is, under this record, ordinary supersession of beliefs about a notion.
