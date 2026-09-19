@@ -29,11 +29,13 @@ The scene is the circumstances a memory was formed in and the circumstances reca
 
 ```text
 when      the reference time; the only required field, defaulting to now
-who       the participants present, as the IDs the application already supplies to remember (ADR-I-0020); the self is one of them (ADR-D-0020)
-where     a place entity or the conversation key; for a text agent usually the conversation
+who       the participants present, each given as perceived: a description, a name as heard, a perception label, a key or ID the application already owns (ADR-I-0020), or any combination; the self is one of them (ADR-D-0020)
+where     the place as perceived, a description as fine as the moment needs, or a key such as the conversation; for a text agent usually the conversation
 what      the activity in progress: a thread or open loop the application received from remember, or nothing, in which case it is inferred from the conversation's recent episodes
 custom    optional scene metadata for domains that already have their own scope model (a game zone, a project code); the application supplies the value it already owns and never looks one up from the library
 ```
+
+Only the time is required, and the application never resolves, normalizes, or looks anything up (ADR-D-0029). A key or an exact name cues its entity; a description is a content cue over the entities and scenes memory holds, so an ambiguous reference activates each thing it could mean and an unknown one activates nothing, and the trace reports which. Recall follows possible-same and containment links, so a memory formed in the kitchen is reached from the house. Keeping identity consistent across drifting wording is consolidation's work in v0.3, never the application's.
 
 A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is reflection's work in v0.3 and never an input requirement; how uncertain identity is represented is a v0.3 planning question.
 
@@ -126,6 +128,8 @@ Behavioral-tier judging is scheduled with the generation phase; this phase absor
 # 5. Public API additions
 
 Illustrative shape:
+
+The scene is given as perceived: keys are shown here because this example has them, and a description in words, or nothing but the time, is equally valid (ADR-D-0029).
 
 ```rust
 let scene = Scene::now()

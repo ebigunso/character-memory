@@ -278,7 +278,7 @@ currency, not eligibility, takes what is over out of current views
 
 ## 2.16 Recall is situated, and the scene travels with every memory
 
-Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
+Every memory carries its scene: who was present, who said it, whether the character was there when it happened, and in which setting. Retrieval takes the present scene, who is present, where, when, and what is in progress, and reports each admitted memory's scene. The application gives the scene as the character perceives it, in descriptions, with keys where they exist, and only the time is required; it never resolves a reference, and keeping identity consistent is consolidation's work ([ADR-D-0029](../decisions/design/ADR-D-0029-the-scene-is-given-as-perceived-and-consolidation-owns-identity.md)). Recall is never gated by privacy or sensitivity by default; an enforced boundary is an explicit query-time policy over the scene chosen by the application. See [ADR-D-0019](../decisions/design/ADR-D-0019-discretion-is-disclosure-not-recall.md).
 
 Recall is activation by the cues the present scene supplies, with the topic of the current turn as one cue among them. Each cue kind has its own way of finding candidates (content through each store's content lookup, vectors in durable memory and a lexical or vector index in the short-term store of v0.3; entities, threads, and places through the graph in durable memory, and through the participants and setting recorded on each entry in the short-term store; time and dates through timestamps, the graph's and each entry's own; stored intentions through their trigger, in durable memory only) and its own admission floor, so no cue kind can starve another. See [ADR-D-0022](../decisions/design/ADR-D-0022-recall-is-activation-by-scene-cues.md). Purpose is never a supplied cue: it surfaces from memory as an open loop, a commitment, a thread, or a signal, and once surfaced it re-cues one bounded hop. See [ADR-D-0023](../decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md).
 
@@ -302,7 +302,7 @@ Every span the character was present for is covered, however quiet: before conso
 
 ## 2.19 Interpreted memory carries its evidence
 
-Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution, the speaker for what was said and the character for what it inferred, and its producer, the reflection and prompt version for a reflection output or the caller for a deliberately authored plan, and the write path rejects what that evidence cannot structurally support, checking structure and grounding and never the truth of a label, which evaluation measures: only the literal supports state, the inferred needs repetition where the stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
+Every observation names its register; a gist episode rests on the trace it consolidates, and every other interpreted memory names the observations and episodes it rests on; every interpreted memory names its attribution, the speaker for what was said and the character for what it inferred, and the basis of that attribution, copied from the character's own trace and judged for what it perceived, and its producer kind, reflection or caller; an observation's time and scene are copied from the entry it cites, promotion counts are computed from the cited evidence, no memory carries a model-supplied confidence, and the write path rejects what that evidence cannot structurally support, checking structure and grounding and never the truth of a label, which evaluation measures: only the literal supports state, what the character concludes for itself needs repetition where what a speaker stated does not, a belief rests on a persistent pattern, a claim about the character never stands alone, contradictions are held rather than resolved, and what was experienced is never instruction to the one reflecting. See [ADR-D-0028](../decisions/design/ADR-D-0028-interpreted-memory-carries-its-evidence.md).
 
 ---
 
@@ -1394,9 +1394,10 @@ recall across stores  the short-term store joins the content, entity, and time r
 state before reflection   discovered at recall: a surfaced durable item cues the short-term store one bounded hop; an overlapping new line raises the scope's reflection signal
 entity resolution     reflection proposes entity candidates and graph authority resolves them; no model-minted identities, no merges on a guess
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
-evidence rules        register, stated versus inferred, promotion thresholds, attribution, contradictions held, trace untrusted, self-revision (ADR-D-0028)
+evidence rules        grounding by locator, register, own versus perceived, attribution copied or judged with its basis, the bar following attribution, computed promotion thresholds, contradictions held, trace untrusted (ADR-D-0028)
+the scene as perceived  only the time is required; descriptions, keys where they exist, perception labels; never resolved by the application; identity kept consistent at consolidation, with possible-same and containment links (ADR-D-0029)
 presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
-the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated (ADR-I-0035)
+the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated; which prompt ran is reported on the outcome, not stored per memory (ADR-I-0035)
 memory tool           optional; the character's model noting something; a short-term entry with its origin, a claim, never a durable write
 ```
 
@@ -1647,7 +1648,7 @@ v0.1.5 retained the measured configuration defaults (ADR-I-0022) and added no ne
 
 ## v0.2 API additions
 
-Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval.
+Illustrative shape; retrieval takes the present scene, built from the same information remember already takes (participants, source conversation, timestamps), and a renderer turns a pack into prompt text. There is no scope hint by ID, no purpose field, and no separate current-state call: a scene without a topic is the same retrieval. The scene is given as perceived: keys are shown here because this example has them, and a description in words, or nothing but the time, is equally valid (ADR-D-0029).
 
 ```rust
 let scene = Scene::now()
@@ -1664,7 +1665,8 @@ Illustrative shape; the mechanical write, the signal, and reflection through the
 
 ```rust
 let memory = memory.with_completion_provider(provider);
-let written = memory.trace(&scene, Trace::exchange("raw text of what happened")).await?;
+let scene = Scene::now().described("the kitchen of Kohta's house, evening; Kohta is cooking"); // as perceived; keys are optional
+let written = memory.trace(&scene, Trace::perceived("raw text of what was heard")).await?; // Trace::own(..) for the character's output
 if written.signal.level >= SignalLevel::Ready {
     // the application decides when; reflection may run in the background
     let outcome = memory.reflect(&scene, ReflectOptions::default()).await?;

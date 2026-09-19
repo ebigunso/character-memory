@@ -20,10 +20,11 @@ The answer is the human one. Experience leaves a literal trace at once, cheaply 
 
 # 1. The mechanical write
 
-A write takes the scene and a raw snippet of what happened: a conversation line or exchange, a tool result's action line, a note the character's model chose to make. It makes no language-model call and no judgment, and with the default lexical index no model call of any kind; an opted-in vector index costs one embedding per write, which encodes text for lookup and interprets nothing, and it lands only in the short-term store (ADR-D-0025, ADR-D-0026). Scene boundaries are written the same way with no content, which is how presence is reported (ADR-D-0027).
+A write takes the scene as the character perceives it (ADR-D-0029) and a raw snippet of what happened: a conversation line or exchange, a tool result's action line, a note the character's model chose to make. It makes no language-model call and no judgment, and with the default lexical index no model call of any kind; an opted-in vector index costs one embedding per write, which encodes text for lookup and interprets nothing, and it lands only in the short-term store (ADR-D-0025, ADR-D-0026). Scene boundaries are written the same way with no content, which is how presence is reported (ADR-D-0027).
 
 ```text
-entry        the scene, the snippet, its time, its kind (exchange, action, note, boundary), the application's source pointer if given
+entry        the scene, the snippet, its time, whether it is the character's own output or something it perceived, its kind (exchange, action, note, boundary), the application's source pointer if given, and a speaker hint on the entry or a part of it where the application has one
+the scene    only the time is required; who, where, what, and anything else about the situation are given as perceived: a description in words, a key the application already owns, a perception label, any combination, or nothing; a change of situation is written as it happens; the application never resolves, normalizes, or looks anything up, and a description is stored as given and indexed with the entry's text
 excluded     a span the application marks as not to be remembered leaves a marker of the span and its scene and none of its content; excluding still-unconsolidated trace replaces its content with the same marker and de-indexes it
 bounded      each entry has a size limit; oversize input is refused or visibly truncated, never silently stored
 a dump       a result too large to snippet is written as its action line and a pointer
@@ -53,7 +54,7 @@ This is best effort, and the acceptance criteria say so. A line that shares neit
 
 ## 2.2 The lookup
 
-Lexical, vector, or both, behind the same candidate-route contract, decided by measurement in the public companion evaluation repository `CharacterMemoryEvals`, whose tooling is a development aid and not core library functionality. The measurement separates paraphrase from repetition, what the recency floor already covers, unsegmented scripts such as Japanese where default tokenizers fail, a changed fact stated in different words than the fact it changes, and write-side cost, since the query embedding is already paid at recall and a vector index costs one embedding per write. The prior is lexical by default, vectors where the embedder is local or cheap, and both where both exist, since the reader tolerates a few irrelevant recent lines better than a missing one.
+Lexical, vector, or both, behind the same candidate-route contract, decided by measurement in the public companion evaluation repository `CharacterMemoryEvals`, whose tooling is a development aid and not core library functionality. The measurement separates paraphrase from repetition, what the recency floor already covers, unsegmented scripts such as Japanese where default tokenizers fail, a changed fact stated in different words than the fact it changes, how well a described person or place reaches the right trace and the right entity (ADR-D-0029), and write-side cost, since the query embedding is already paid at recall and a vector index costs one embedding per write. The prior is lexical by default, vectors where the embedder is local or cheap, and both where both exist, since the reader tolerates a few irrelevant recent lines better than a missing one.
 
 ---
 
@@ -73,11 +74,12 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ```text
 gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; an episode may be marked unfinished
 entity candidates for the people, places, and things the trace names, each resolved through graph authority to an existing entity, proposed as new, or, when it is unclear whether two references are one, kept separate with a possible-same link; reflection never mints a final identity and never merges on a guess
-observations, each quoting the words it rests on and naming their entry, with their register and who said it
+observations, each naming its entry and quoting the words it rests on, with their register and who said it; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
+the scene as consolidated: beside what was given, the people and places reflection resolved, places containing one another where they do, each part marked as given or resolved
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
-promotions: a pattern citing its episodes; a belief resting on a persistent pattern
+promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library, and no output carries a model-supplied confidence
 weight, judged here from the trace
 a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
 nothing else, when nothing else happened
@@ -85,7 +87,7 @@ nothing else, when nothing else happened
 
 ## 3.3 What the write path enforces
 
-Entity candidates resolve through graph authority: a candidate names an existing entity by an identity graph authority confirms, or is proposed as new, or carries a possible-same link; a model-supplied identity that graph authority does not hold fails validation, and nothing merges two entities. The evidence rules of ADR-D-0028: only the literal supports state; the stated may become attributed state from one instance and the inferred may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern; claims about the character never stand alone; contradictions are held, not resolved; every reflection output names the reflection and prompt version that produced it, and a caller-authored plan names the caller. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
+Entity candidates resolve through graph authority: a candidate names an existing entity by an identity graph authority confirms, or is proposed as new, or carries a possible-same link; a model-supplied identity that graph authority does not hold fails validation, and nothing merges two entities. The evidence rules of ADR-D-0028: an observation's quote is found in the entry it cites; only the literal supports state; what a speaker stated may become state held as theirs from one instance, and what the character concludes for itself may not; a pattern cites several distinct episodes and a belief rests on a persistent pattern, counted by the library; a commitment or fact about the character rests on its own entries, never on a perceived claim alone; contradictions are held, not resolved, and one party's account never supersedes another's; every interpreted memory records its producer kind, reflection or caller. The near-verbatim and churn warnings of v0.2 apply to restatements. A candidate that fails is a diagnostic, and its trace stays.
 
 ## 3.4 The processor
 
@@ -117,7 +119,8 @@ the behavioral tier's first scenarios: tact, discretion across scenes, retelling
 Illustrative shape:
 
 ```rust
-let written = memory.trace(&scene, Trace::exchange("raw text of what happened")).await?; // mechanical, no model; a note is one kind of trace
+let scene = Scene::now().described("the kitchen of Kohta's house, evening; Kohta is cooking"); // as perceived; keys are optional
+let written = memory.trace(&scene, Trace::perceived("raw text of what was heard")).await?; // mechanical, no model; Trace::own(..) for the character's output, a note is one kind of trace
 let signal = written.signal;                                                     // every write and recall outcome carries it: level and reason
 let snapshot = memory.reflection_signal(&scene).await?;                          // optional: the same signal without a write or a recall
 let memory = memory.with_completion_provider(provider);                          // the consumer's model
@@ -137,7 +140,9 @@ After reflection commits, consumed entries are gone, every source pointer its en
 A quiet present span has a durable account; an absent span has none; a present span not yet consolidated is known as present from its trace; an excluded span has an account that it was withheld; recall tells them apart. Trace held past the warning threshold is reported loudly and is never dropped.
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory; an excluded span's content is never stored, indexed, recalled, or sent to a model, only its marker remains, and a retroactive exclusion of unconsolidated trace leaves the same state; an exclusion issued while a reflection that selected the entry is in flight makes that reflection's commit fail, so nothing derived from the entry is written.
 Names and references in trace become entity candidates resolved through graph authority: a known person is linked, an unknown one is proposed as new, an unclear one is kept separate with a possible-same link, a model-minted identity fails validation, and nothing is merged (catalog F14).
-A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and outputs name their reflection and prompt version.
+A backlog is consolidated in order; a later reflection can supersede an earlier one's conclusion, and a reflection's outcome names the prompt that ran.
+A transcript of several people heard as one perceived stream yields observations whose attribution is recorded as judged, and a commitment of the character that cites only perceived entries fails validation.
+A deployment that supplies only the time, the entries, and free descriptions of the situation writes, recalls the same day, and consolidates into entities with no identifier from the application; the same place described in drifting words becomes one entity or entities joined by a possible-same link, and recall reaches what is held under each.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
 ```
@@ -172,7 +177,9 @@ the promotion thresholds as measured defaults
 the completion port's signature and the output schema
 how the renderer labels unconsolidated items and notes
 the concurrent-facade-call census result and whether anything in the write path needs a guard
-how custom scene values are represented, and the exact form of the possible-same link ahead of v0.4's entity evolution work
+how custom scene values are represented, and the exact forms of the possible-same and containment links ahead of v0.4's entity evolution work
+how reflection selects a scope's trace when the scene carries no key
+the forms of a locator and of a speaker hint
 ```
 
 Implementation records expected with the plan, each written when its contract is set: the short-term store's index and bounds, the release contract, the signal, and the output schema.

@@ -20,7 +20,7 @@ Consolidation needs a language model. A port alone means nobody can reflect with
 
 The library ships a default reflection prompt that the project owns, versions, and evaluates, and the consumer may override it. The consumer supplies the model by implementing a minimal completion port, in the pattern of the embedding provider. The library carries no model client and names no model.
 
-The library asks the model for structured output and validates it through prepare, validate, and commit, including the evidence rules of ADR-D-0028, so output that is malformed, ungrounded, or structurally unsupported yields diagnostics and an unreleased trace. This is structural validation, not semantic safety: a schema-valid misjudgment can still commit, which is why outputs carry their prompt version, evaluation measures them, and a later reflection can supersede them. The prompt version is recorded on everything a reflection produces. Excluded content never reaches the prompt because it was never stored: exclusion is applied at the mechanical write (ADR-D-0026), and the prompt builder checks again as a second guard. Reflection's input is bounded, and a long span is processed in order in bounded pieces. Short-term entries are released only after the plan that consumed them commits, and the release is idempotent.
+The library asks the model for structured output and validates it through prepare, validate, and commit, including the evidence rules of ADR-D-0028, so output that is malformed, ungrounded, or structurally unsupported yields diagnostics and an unreleased trace. This is structural validation, not semantic safety: a schema-valid misjudgment can still commit, which is why evaluation measures them and a later reflection can supersede them. Which prompt ran is reported on the reflection's outcome and in the log, and is not stored on the memories a reflection produces: supersession never reads it, consumed trace is gone so nothing can be re-reflected by version, the evaluation harness pins the prompt in its own manifest, and a prompt identifier without the model that ran it, which the library never knows, identifies little. Excluded content never reaches the prompt because it was never stored: exclusion is applied at the mechanical write (ADR-D-0026), and the prompt builder checks again as a second guard. Reflection's input is bounded, and a long span is processed in order in bounded pieces. Short-term entries are released only after the plan that consumed them commits, and the release is idempotent.
 
 Scheduling is the application's: the library reports how much a scope has accumulated since its last reflection, and why, and selects a scope's bounded input; it never runs reflection on its own. Reflection is safe to run beside recall, mechanical writes, and exclusions on the same memory. It records which entries it selected and the version of each, and commit checks them again: if any selected entry has since been excluded or otherwise changed, the plan is rejected, nothing commits, nothing is released, and a later reflection selects afresh. An exclusion therefore always wins over a reflection in flight. What it cannot do is recall text already sent to the model before the exclusion was issued; the guarantee is that excluded text is never sent after it is excluded and never produces memory.
 
@@ -33,11 +33,12 @@ Owning the prompt keeps the quality-critical instructions with the project that 
 - A port with no default prompt: rejected because every consumer would have to author and evaluate a quality-critical prompt before trace could ever be consolidated; the default removes prompt authoring, while integrating a model stays the consumer's by design.
 - A bundled client for named models: rejected because of the maintenance surface and because it excludes unsupported models; reopen only as an optional companion crate outside the library.
 - Free-text reflection output parsed heuristically: rejected outright; the write path validates structure.
+- The prompt version recorded on every memory a reflection produces: rejected because nothing reads it, as above, it costs a field on every interpreted memory, and it obliges every consumer who overrides the prompt to keep a versioning scheme; an application that wants the history keeps the outcome it was handed. Reopen as one record per reflection run if a need to find a run's outputs appears.
 - A scheduler inside the library, including an opt-in background worker that triggers on scene boundaries and accumulation: rejected because what counts as a finished conversation or a finished action log differs widely between applications, and only the application knows it and what a call costs; any default timing would be an arbitrary assumption that constrains how the library can be used. Reflection needs no idle character, so the application is free to start it in the background whenever it judges an event finished; the library provides the signal, the selection, and safe concurrent execution.
 
 ## Decision Boundary
 
-Invariant: the project owns a versioned default prompt that consumers may override; the model arrives only through the consumer's port; output is structured and validated; the prompt version is recorded on outputs; trace is released only after commit; the library schedules nothing.
+Invariant: the project owns a versioned default prompt that consumers may override; the model arrives only through the consumer's port; output is structured and validated; which prompt ran is reported on the outcome and never stored per memory; trace is released only after commit; the library schedules nothing.
 
 Not covered: the port's exact signature, the output schema, the prompt text, the signal's thresholds, the piece size, and the guide's recommended schedules.
 
@@ -45,7 +46,7 @@ Not covered: the port's exact signature, the output schema, the prompt text, the
 
 - Reflection runs end to end with a test double implementing the completion port and no network.
 - Malformed or rule-breaking model output produces diagnostics, commits nothing, and releases nothing.
-- Outputs carry the prompt version; an overridden prompt carries the consumer's identifier.
+- A reflection's outcome names the prompt that ran, the project's version or that the prompt was overridden, and no stored memory carries it.
 - A reflection running beside concurrent recall and writes on the same scope leaves a consistent supersession chain.
 - An entry excluded after a reflection selected it and before that reflection commits causes the commit to be rejected: nothing derived from it is written, nothing is released, and the next reflection does not see its content.
 
@@ -55,5 +56,5 @@ Structured output proves unattainable on the models consumers actually run, or t
 
 ## More Information
 
-- The evaluation harness in the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality, pins the prompt version and freezes reflection outputs the way it freezes embeddings.
+- The evaluation harness in the public companion evaluation repository `CharacterMemoryEvals`, a development aid and not core library functionality, pins the prompt version in its own run manifest and freezes reflection outputs the way it freezes embeddings.
 - The guide page on when to write and when to reflect is a deliverable of the generation phase.
