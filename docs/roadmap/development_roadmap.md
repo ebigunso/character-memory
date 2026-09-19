@@ -293,7 +293,7 @@ structure within one event is immediate: the boundaries the application reports 
 structure across events is consolidation: gist, state, patterns, beliefs
 recent trace is reachable by scene, time, entity, and topic, never through the state or stored-intention routes, and the reader comprehends it as it reads
 a change of state before consolidation is discovered at recall, not recorded at write
-the short-term store is outside core memory and covered by purge; trace leaves it only by consolidation, never by expiry, and overlong retention is reported loudly
+the short-term store is outside core memory; trace leaves it by consolidation, never by expiry, the out-of-band purge being the one other way out, and overlong retention is reported loudly
 ```
 
 ## 2.18 The timeline has no unexplained holes
