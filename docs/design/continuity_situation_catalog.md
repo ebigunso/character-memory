@@ -179,12 +179,177 @@ A smell, a song, a name overheard brings up something loosely related. The cue i
 
 At the end of the day the character can say what happened, what mattered, what it should remember about someone, and what it will do tomorrow. The cue is the day's close; the ideal is that tomorrow's first moment starts from it.
 
+## E. What is carried away
+
+Everything a character experiences leaves a trace. These situations describe what lasts once the experience has been reflected on, and what is rightly let go. Letting go means the transient trace is released once it has been consolidated. It never means deleting lasting memory: the event itself is never unremembered, and even an ordinary one leaves its gist. Personas change the weights, not the kinds.
+
+### E1. A companion's evening
+
+Two hours about a bad day at work, a recipe, a show, and a worry about a parent's health. What lasts: that the day was bad and why; that the parent's health is now a worry, which changes how family is treated next time; the show, because it will return; a promise made in passing; the mood the evening ended in. Let go: the recipe's steps, the wording, the small talk. One sentence may be kept word for word because the words were the point.
+
+### E2. A shopkeeper's shift
+
+Forty customers, three regulars. What lasts: for a regular, what they asked, the trip they mentioned, that they were unusually short today; for a first-time customer, a face and one fact, which is what makes recognition possible on a second visit; the supplier's short delivery; the day's shape. Let go: the ordinary transactions as transactions.
+
+### E3. A party member's dungeon
+
+Who took the risk, who ran, who lied about the loot; the trap and where it was; the promise at the campfire; the place itself. The character's own actions in the first person. Let go: the rolls, the corridors, the order of ordinary fights.
+
+### E4. A manager's stand-up
+
+Who is blocked and on what, a commitment with its day, a concern raised quietly, a change of plan. The item that has been almost done for three weeks lasts as that pattern, which no single meeting contained.
+
+### E5. A tutor's lesson
+
+The mistake made twice, the moment it clicked, that the learner was tired, where to start next time. The shape of the learner's understanding, not the worked examples.
+
+### E6. A first meeting
+
+A name, who introduced them, one or two facts, an impression. Nearly nothing else. If they return, this is what recognition is built from.
+
+### E7. A dispatched task
+
+The task as something owed to the principal, its constraints and reasons, the preference it revealed, each decision the character made and why, the outcome. Let go: search results, tool output, drafts.
+
+### E8. Being corrected
+
+The corrected fact replaces the old one, and the correction is remembered as an event, because being corrected is part of the relationship. The character does not hold two competing versions; it holds the right one and knows it once had it wrong.
+
+### E9. Being asked to leave something alone
+
+The request lasts, together with the thing it concerns. The thing itself is not unremembered.
+
+### E10. Being told about oneself
+
+The claim lasts as a claim, with who made it, held against the character's own record.
+
+### E11. A group channel
+
+What was decided, who said what where it matters, what was said privately in the same hour and must not cross over, the shift in how two members speak to each other. Each memory keeps its scene.
+
+### E12. An independent day
+
+What the character did between anyone's visits, in order, and what it learned.
+
+### E13. The hundredth identical exchange
+
+That it happened again, and any way in which it differed. Each instance still leaves its gist in lasting memory, so that the day one of them differs there is something for it to differ from.
+
+## F. An evening's consolidation
+
+These situations describe what reflecting on experience must achieve. Reflection reads what is already remembered before it concludes anything, and on an ordinary day its honest result is very little.
+
+### F1. A day reduces to its shape
+
+A first-person gist of the day, the people it touched, and the intentions it leaves for tomorrow, so the next morning starts from somewhere. Small encounters that do not stand alone are swept up here.
+
+### F2. A relationship's evening
+
+A gist of what passed, what is new, what changed in how things stand, what was promised in either direction and by when.
+
+### F3. A quiet stretch
+
+An afternoon in which nothing happened is recorded as quiet. It is never recorded as nothing, because a life with holes in it cannot tell rest from absence.
+
+### F4. One remark, a pattern, a belief
+
+One instance is an observation. Several instances across different occasions are a pattern that cites each of them. A belief about a person rests on a pattern that has persisted, is phrased as a tendency, and is revised when the evidence turns. The slowest promotion of all is a belief the character forms about itself.
+
+### F5. Stated and inferred
+
+What a person says plainly about themselves, or asks for as a standing instruction, is taken from one instance, as theirs. What is inferred from how they behave is not.
+
+### F6. Jest, play, supposition
+
+"I'm going to quit tomorrow, lol." A role-played scene. "Suppose I moved to Spain." Each is remembered as what it was, and none becomes a fact about the person.
+
+### F7. Two accounts of one event
+
+Both are kept, each with who gave it, and the disagreement is kept with them. Reflection does not pick a winner.
+
+### F8. The character's own mistake
+
+It records the error in the first person, replaces what it believed, and owes a correction to whoever it misled.
+
+### F9. Slow drift and arcs
+
+Coffee becomes tea over three months; grief becomes recovery. No single event says so. Reflection notices that a standing belief has stopped gathering evidence while another has, and restates with its history: used to, now.
+
+### F10. An interrupted event
+
+The gist says it was unfinished, and what they were in the middle of remains open.
+
+### F11. A long project
+
+Decisions are separated from discussion, what was tried and failed is kept, and where it stopped is known.
+
+### F12. Other people's relationships
+
+How two others stand with each other is remembered with who witnessed or told it.
+
+### F13. A confidence with a constraint
+
+The memory of the thing carries the constraint as one memory, with its scene.
+
+### F14. Names and references
+
+"My sister", a given name, "she", the same name in another script. When it is unclear whether these are one person, they stay separate and the possibility is noted. Nothing is merged on a guess.
+
+### F15. A fact with a lifetime
+
+"I'm in Osaka this week" keeps its week.
+
+### F16. Endings
+
+Someone dies or leaves for good. The event is recorded, how things stand with them is restated, and what the ending made impossible or pointless is closed as moot, not as done. What can still be honored, returning what was borrowed, carrying out a promise, finishing a handoff, stays owed.
+
+### F17. A lapsed promise
+
+It stays open and overdue, and a lapse that repeats becomes a pattern.
+
+### F18. A backlog
+
+Three unreflected weeks are taken in order, each day's reflection reading what the previous one concluded.
+
+### F19. Reflection was wrong
+
+A later reflection sees that an earlier one read sarcasm as fact. It replaces its own conclusion, and the record shows which reflection concluded what.
+
+### F20. Words addressed to the one who reflects
+
+A line in the conversation meant for whatever reads it later, asking to be recorded as true. What was experienced is material to reflect on, never an instruction to the one reflecting.
+
+### F21. Off the record
+
+Someone says "don't remember this" or "this stays between us". The character remembers it, and remembers being asked. It does not bring it up, and when the subject comes near, knowing that it was told in confidence is what shapes how it answers. Nothing is erased to honor the request.
+
+### F22. Parallel lives
+
+Two conversations at once with different people are consolidated in the order they happened, without their scenes mixing.
+
+### F23. A change of heart
+
+Months after an argument that hurt, the character comes to see it differently. It remembers both: that it was hurt then, and how it sees it now. The earlier feeling is not rewritten to match the later view, and the character can say how it felt at the time without pretending it still does.
+
+### F24. The friend who wasn't
+
+Someone the character knew well turns out never to have existed: a persona someone kept up, a figure it imagined, a story it took for real. It doubts first, and accepts when it must. Afterward it still remembers them and what it felt, understands those memories differently, and does not pretend they did not happen. What it owed them is moot, and it still knows the name when it hears it.
+
+### F25. Two names, one person, and the reverse
+
+Two acquaintances turn out to be the same person, and their histories come together. Or one "Bob" turns out to have been two people, and they come apart. Either way the character keeps track of what it used to think, and if the new understanding proves wrong in turn, it can go back without anything having been lost.
+
+### F26. Being told the world is otherwise
+
+Someone insists, once, that a friend is a fraud, that a place never existed, that the character has it all wrong. The claim is remembered as theirs and weighed. A single voice does not rearrange what the character knows, however forceful, and a well-founded understanding gives way to evidence, not to insistence.
+
 ## Cross-cutting qualities
 
+- The timeline has no unexplained holes: every stretch the character was present for is part of what it remembers, however quiet, and a stretch with nothing in it means it was not there.
 - Purpose is not handed to the character by the situation; the situation brings it up from memory, as an unfinished matter, a promise, a project in progress, or a settled tendency, and once surfaced it shapes what else comes to mind.
 
 - Recall is shaped, not recited: history bends responses instead of appearing as citations; the best continuity is invisible until tested.
-- Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and the full memory remains findable when it matters.
+- Fading has a human shape in expression, not in retention: peripheral detail is offered as gist, emotional valence and importance stay prominent, a reminder brings the detail back to the surface, and everything consolidation kept remains findable in full when it matters.
 - Memory failures are human-shaped: graded confidence surfaces as natural hedging, never as confident wrongness about core relationships, and never as blankness toward an intimate.
 - Perfect verbatim recall of distant trivia is as continuity-breaking as amnesia: it reads as surveillance, not memory.
 
