@@ -32,7 +32,7 @@ a bundle     one entry per event as the application sees it, which is the only s
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the quote, the caller's own source reference, whether the words were the character's own or perceived, and who said them, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: register and declared grounding on observations, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the quote, the caller's own source reference, whether the words were the character's own or perceived, and who said them, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
@@ -66,6 +66,7 @@ Reflection is the library's only producer of interpreted memory. A caller may st
 
 ```text
 a scope's pass     one relationship or thread that accumulated enough to deserve its own consolidation
+selection          trace is taken by stretch, the entries under one scene between two boundaries, plus entries sharing a given key, which is mechanical and needs no entity; the stretch's references are then resolved, and durable neighbors are read by the scope keys of what was resolved (ADR-D-0029, ADR-D-0024)
 the day's pass     the character's own day: a first-person gist, the small encounters that do not stand alone, quiet spans, and tomorrow's intentions
 ```
 
@@ -180,7 +181,7 @@ the completion port's signature and the output schema
 how the renderer labels unconsolidated items and notes
 the concurrent-facade-call census result and whether anything in the write path needs a guard
 how custom scene values are represented, and the exact forms of the possible-same and containment links ahead of v0.4's entity evolution work
-how reflection selects a scope's trace when the scene carries no key
+how stretches that belong to one relationship or thread are gathered into a scope's pass
 the forms of a locator and of a speaker hint
 ```
 
