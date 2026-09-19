@@ -306,7 +306,7 @@ Every interpreted memory states the evidence it rests on, and the write path rej
 
 ## 2.20 A memory is held as experience
 
-No interpreted memory carries a confidence score or a numeric measure of emotion: how firmly something is held is read from how it was formed and what is linked to it. An episode keeps how it felt to the character, in words, and that is never revised; a later change of heart is a new memory beside it. How someone seemed is an impression, the character's own, and supports a conclusion about them only through a pattern. See [ADR-D-0030](../decisions/design/ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) and [ADR-D-0033](../decisions/design/ADR-D-0033-a-memory-keeps-how-it-felt.md).
+No interpreted memory carries a confidence score or a numeric measure of emotion: how firmly something is held is read from how it was formed and what is linked to it. An episode keeps how it felt to the character, in words; a later change of heart supersedes that account with a restatement that says both how it felt then and how it looks now. How someone seemed is an impression, the character's own, and supports a conclusion about them only through a pattern. See [ADR-D-0030](../decisions/design/ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) and [ADR-D-0033](../decisions/design/ADR-D-0033-a-memory-keeps-how-it-felt.md).
 
 ---
 
@@ -1399,7 +1399,7 @@ state before reflection   discovered at recall: a surfaced durable item cues the
 entities as notions   an entity records that the character has someone or something in mind; its name, kind, standing, and sameness with another are beliefs with evidence, current by supersession; nothing is merged, split, or deleted (ADR-D-0034)
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        grounding by locator, register, own versus perceived, attribution copied or judged with its basis, the bar following attribution, computed promotion thresholds, contradictions held, trace untrusted (ADR-D-0028)
-memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt and that is never revised; impressions are the character's own observations (ADR-D-0030, ADR-D-0033)
+memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt, and a change of heart is ordinary supersession that restates both; impressions are the character's own observations (ADR-D-0030, ADR-D-0033)
 the scene as perceived  only the time is required; descriptions, keys where they exist, perception labels; never resolved by the application (ADR-D-0029)
 presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
 the processor         a project-owned, versioned, overridable default prompt; a consumer-implemented completion port; no model named, no client shipped; structured output validated; which prompt ran is reported on the outcome, not stored per memory (ADR-I-0035)

@@ -73,7 +73,7 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; the gist is the character's own account and says how the episode felt to it where the character's own entries, its words, actions, thoughts, or notes, show it, and states no feeling where they do not; what it says is never revised afterward (ADR-D-0033); an episode may be marked unfinished
+gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; the gist is the character's own account and says how the episode felt to it where the character's own entries, its words, actions, thoughts, or notes, show it, and states no feeling where they do not (ADR-D-0033); an episode may be marked unfinished
 notions and beliefs about them, for the people, places, and things the trace names (ADR-D-0034): a reference taken to be someone already known attaches to that notion, one that is not forms a new notion, and what a notion is called, what kind of thing it is, that two notions are of one thing, that one place lies within another, are beliefs with evidence; reflection never merges, splits, or deletes, and each such output points at where the reference appears in an entry's text or scene
 observations, each naming its entry and quoting the words it rests on, with their register and who said it for speech, who acted, with no register, for an event, and how someone seemed, as the character's own impression; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
 the scene as consolidated: beside what was given, the people and places reflection resolved, places containing one another where they do, each part marked as given or resolved
@@ -81,7 +81,7 @@ restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
 promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library
-reappraisals: what the character now makes of an earlier episode, as a new memory beside it that never supersedes how it felt
+reappraisals: a change of heart about an earlier episode supersedes its account with a restatement that says both how it felt then and how it looks now
 weight, judged here from the trace
 a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
 nothing else, when nothing else happened
