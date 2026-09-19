@@ -44,7 +44,7 @@ Not covered: the vocabulary of feelings; how much of a gist is given to feeling;
 ## Validation
 
 - A topic that landed badly once is approached with that in mind the next time it comes up, and a hard conversation colors the following day without being mentioned unless invited (the catalog's A3 and D10).
-- After the character reconsiders an old hurt, recall returns both how it felt then and how it sees it now, and the earlier feeling is not superseded.
+- After the character reconsiders an old hurt, recall returns both how it felt then and how it sees it now, and the earlier feeling is not superseded (the catalog's F23).
 - A single impression that someone seemed tired produces no state about that person; repeated impressions across episodes can.
 - Schema and API review find no numeric emotion field.
 
