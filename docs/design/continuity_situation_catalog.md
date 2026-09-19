@@ -331,6 +331,18 @@ Two conversations at once with different people are consolidated in the order th
 
 Months after an argument that hurt, the character comes to see it differently. It remembers both: that it was hurt then, and how it sees it now. The earlier feeling is not rewritten to match the later view, and the character can say how it felt at the time without pretending it still does.
 
+### F24. The friend who wasn't
+
+Someone the character knew well turns out never to have existed: a persona someone kept up, a figure it imagined, a story it took for real. It doubts first, and accepts when it must. Afterward it still remembers them and what it felt, understands those memories differently, and does not pretend they did not happen. What it owed them is moot, and it still knows the name when it hears it.
+
+### F25. Two names, one person, and the reverse
+
+Two acquaintances turn out to be the same person, and their histories come together. Or one "Bob" turns out to have been two people, and they come apart. Either way the character keeps track of what it used to think, and if the new understanding proves wrong in turn, it can go back without anything having been lost.
+
+### F26. Being told the world is otherwise
+
+Someone insists, once, that a friend is a fraud, that a place never existed, that the character has it all wrong. The claim is remembered as theirs and weighed. A single voice does not rearrange what the character knows, however forceful, and a well-founded understanding gives way to evidence, not to insistence.
+
 ## Cross-cutting qualities
 
 - The timeline has no unexplained holes: every stretch the character was present for is part of what it remembers, however quiet, and a stretch with nothing in it means it was not there.
