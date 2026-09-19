@@ -18,7 +18,7 @@ The philosophy names emotional weight as part of why a memory matters and recent
 
 ## Decision
 
-An episode keeps how it felt. The gist of an episode is the character's own account (ADR-D-0020) and says, in words, how the episode landed for it. That is a fact about the experience, fixed when the memory is formed, and it is never revised: the character was hurt that evening whatever it later comes to think. A later change of heart is a new memory that stands beside the first, "I was hurt then; I see it differently now", and never overwrites the feeling it reconsiders. What the character makes of things may be superseded. What it felt at the time may not.
+An episode keeps how it felt. The gist of an episode is the character's own account (ADR-D-0020) and says, in words, how the episode landed for it, where the trace shows it: in what the character itself said and did, in a thought or a note it made at the time. Where nothing shows how it felt, the gist does not supply a feeling. That is a fact about the experience, fixed when the memory is formed, and it is never revised: the character was hurt that evening whatever it later comes to think. A later change of heart is a new memory that stands beside the first, "I was hurt then; I see it differently now", and never overwrites the feeling it reconsiders. What the character makes of things may be superseded. What it felt at the time may not.
 
 How others seemed is kept the same way, as an impression: an observation that is neither something said nor something that happened, attributed to the character as its own perception and grounded like any observation in what gave rise to it. One impression stands as an observation of that moment. A conclusion about the person drawn from impressions is the character's own and must be earned by a pattern, as ADR-D-0028 requires.
 
@@ -37,7 +37,7 @@ How something felt never becomes false, and it is what lets a character approach
 
 ## Decision Boundary
 
-Invariant: an episode's gist says how it felt to the character; that feeling is never superseded, and a reappraisal is a new memory beside it; an impression is an observation attributed to the character as its own perception, grounded like any other, and supports a conclusion about a person only through a pattern; no memory carries a numeric measure of emotion, and feeling has no recall route of its own.
+Invariant: an episode's gist says how it felt to the character where the character's own trace shows it, and invents no feeling where it does not; that feeling is never superseded, and a reappraisal is a new memory beside it; an impression is an observation attributed to the character as its own perception, grounded like any other, and supports a conclusion about a person only through a pattern; no memory carries a numeric measure of emotion, and feeling has no recall route of its own.
 
 Not covered: the vocabulary of feelings; how much of a gist is given to feeling; how a rendered pack words it; how feeling enters the judgment of an episode's weight.
 
@@ -46,6 +46,7 @@ Not covered: the vocabulary of feelings; how much of a gist is given to feeling;
 - A topic that landed badly once is approached with that in mind the next time it comes up, and a hard conversation colors the following day without being mentioned unless invited (the catalog's A3 and D10).
 - After the character reconsiders an old hurt, recall returns both how it felt then and how it sees it now, and the earlier feeling is not superseded (the catalog's F23).
 - A single impression that someone seemed tired produces no state about that person; repeated impressions across episodes can.
+- An episode whose trace shows no reaction from the character consolidates into a gist that states none.
 - Schema and API review find no numeric emotion field.
 
 ## Revisit When
