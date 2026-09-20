@@ -90,7 +90,7 @@ These graph checks remain decisive when vector deletion or indexing fails. A sta
 
 ## Retrieval And Derived Statistics
 
-Graph queries select the named graphs required for object hydration, source lookup, thread lookup, name lookup or bounded expansion. Expansion is bounded by depth, object and relation scope, lifecycle policy and fanout caps.
+Source lookup, thread lookup, name lookup and bounded expansion query the named graphs they need. Object hydration currently reads every stored quad into a subject map before picking the requested objects, so its cost grows with the store and not with the request; a targeted read is the known improvement. Expansion is bounded by depth, object and relation scope, lifecycle policy and fanout caps.
 
 The retrieval stats store maintains derived entity/relation/object and global counters. Its `total_count` includes all indexed edges, `active_count` restricts retention to active, and `current_count` additionally excludes superseded interpreted-memory endpoints. Its cached `is_current` value is a projection input rather than a persisted memory field or a source of graph authority.
 

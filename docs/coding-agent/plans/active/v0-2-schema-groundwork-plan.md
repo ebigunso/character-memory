@@ -1,6 +1,6 @@
 # Plan: v0.2 schema groundwork
 
-- status: approved
+- status: in_progress
 - generated: 2026-09-20
 - last_updated: 2026-09-20
 - work_type: code
@@ -12,11 +12,11 @@
 - The archived and deleted retention states, the archive machinery, the five lifecycle options whose only legal value is their default, the deferred-destructive placeholder, the stability measure, the scope hint, the operation id and idempotency key, and the confidence on interpreted memory and on links are gone from the domain, the drafts, the graph mapping, the stats store and the public surface, and nothing behaves differently except that they can no longer be supplied and that forgetting a thread no longer deletes the thread's own vector, which made the thread unreachable against ADR-D-0018.
 - There is no stored current flag. A memory is current when its retention allows it and no interpreted memory supersedes it; a superseding memory can be written through the validated write path, and `correct` no longer rewrites the memory it supersedes.
 - An entity carries its identity and nothing else. What the character holds about it is ordinary interpreted memory about it; a belief may carry a known-as assertion, and the library can find every notion currently known by an exact name. An application can give a name it already owns before any experience exists, and that grounding is recorded as given.
-- The README describes what ships; every task's PR is green in CI; the companion evaluation repository's Task_4 has the library commit it needs.
+- The README describes what ships; every task's PR is green in CI; Task_4 of the plan in `CharacterMemoryEvals`, the public companion evaluation repository whose tooling is a development aid and not core library functionality, has the library commit it needs.
 
 ## Planner-added requirements
 - A crate-internal query "current known-as beliefs by normalized name". Needed because: with no name on the entity there is otherwise no way to honor the v0.2 draft's "an exact name cues every entity that bears it", and the scene slice builds on it; it is not a facade lookup, so ADR-I-0020 stands.
-- Commit derives, in the same graph batch as the memory, an About link from a belief to each notion it is about and a Supersedes link for each memory it supersedes. Needed because: bounded expansion and the currency readers follow explicit links, not the ids a memory lists. The memory's own lists stay the one thing an author writes; the links are an index derived from them at commit, never authored, so a caller-built plan cannot omit them and the two cannot disagree.
+- Commit derives, in the same graph batch as the memory, an About link from a belief to each notion it is about and a Supersedes link for each memory it supersedes. Needed because: bounded expansion and the currency readers follow explicit links, not the ids a memory lists. The memory's own lists stay the one thing an author writes; the links are an index derived from them at commit, never authored, so a caller-built plan cannot omit them and the two cannot disagree: an authored About link between an interpreted memory and an entity, in either orientation, is rejected, at plan validation and in `link`, the same way an authored Supersedes link is, since expansion and stats treat both directions as the same subject pair (About links between other kinds of object are unaffected).
 - A marker on a belief about a notion that its grounding was given by the application, accepted in place of source experiences only on a memory that has at least one notion among its subjects and no sources. Needed because: the source floor otherwise rejects a name given before any experience exists, and a source-less memory with no marker is indistinguishable from a defect (ADR-D-0028).
 
 ## Scope / Non-goals
@@ -59,7 +59,7 @@
   - README.md
 - depends_on: []
 - description: |
-  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; the two aliased schema-version constants (keep one); `operation_id`, `idempotency_key`, the `PrepareOptions` override and the remember input hash whose only consumer is that key, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
+  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; `operation_id`, `idempotency_key`, the `PrepareOptions` override and the remember input hash whose only consumer is that key, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
 - acceptance:
   - None of the deleted names appears in `src`, `tests` or `README.md`, and no deleted field is accepted by a draft or emitted to the graph or the stats store.
   - Forgetting a thread's members still suppresses them and removes their vectors; nothing deletes a thread's own vector any more, so a thread stays reachable (ADR-D-0018).
@@ -112,11 +112,11 @@
   - docs/decisions/**
 - depends_on: [Task_2]
 - description: |
-  The entity keeps its id, type tag, creation time and schema version; name, aliases, entity type (the enum goes), canonical key, summary and the updated time go. The entity has no embedding surface and leaves the default candidate object types. An interpreted memory may carry assertions (subject notion, predicate, name) with a closed predicate vocabulary of one, known as; the graph stores, beside the name as given, a normalized literal (Unicode NFKC through the `unicode-normalization` crate as a direct dependency, then case-folded, then whitespace-collapsed), and a crate-internal query on the graph authority port returns the notions currently known by an exact name, several when the name is shared. The query's first production reader is the scene slice; until then it is exercised by tests, and a scoped allow that cites the scene slice is acceptable if the lint demands it. A belief about a notion may be marked as given by the application, which satisfies the source floor in place of source experiences: only with at least one notion subject and no sources. Commit derives the About links the Planner-added requirements name. Two decisions here may deserve records, each held to invariants with mechanism left in this plan: the form of a belief about a notion (an ordinary interpreted memory; assertions with a closed vocabulary; the assertion is the character's own commitment), and how a belief the application gives enters (which closes an item ADR-D-0034 and ADR-D-0028 leave uncovered). Propose each if its admission test passes and let the test choose the record type (`durable-docs-authoring`); the decider accepts or returns them.
+  The entity keeps its id, type tag, creation time and schema version; name, aliases, entity type (the enum goes), canonical key, summary and the updated time go. The entity has no embedding surface and leaves the default candidate object types. An interpreted memory may carry assertions (subject notion, predicate, name) with a closed predicate vocabulary of one, known as; the graph stores, beside the name as given, a normalized literal (Unicode NFKC through the `unicode-normalization` crate as a direct dependency, then lowercased with the standard library, then whitespace-collapsed; full Unicode case folding is a known ceiling, taken up when a multilingual name miss is observed, and the literal is derived so it can be re-derived), and a crate-internal query on the graph authority port returns the notions currently known by an exact name, several when the name is shared. The query's first production reader is the scene slice; until then it is exercised by tests, and a scoped allow that cites the scene slice is acceptable if the lint demands it. A belief about a notion may be marked as given by the application, which satisfies the source floor in place of source experiences: only with at least one notion subject and no sources. Commit derives the About links the Planner-added requirements name. Two decisions here may deserve records, each held to invariants with mechanism left in this plan: the form of a belief about a notion (an ordinary interpreted memory; assertions with a closed vocabulary; the assertion is the character's own commitment), and how a belief the application gives enters (which closes an item ADR-D-0034 and ADR-D-0028 leave uncovered). Propose each if its admission test passes and let the test choose the record type (`durable-docs-authoring`); the decider accepts or returns them.
 - acceptance:
   - An application creates a notion and gives its name before any experience exists, in one write plan; the name is found by the exact-name query; a second notion given the same name makes the query return both.
   - Renaming is an ordinary supersession: the new name is found, the old name is not, and the old belief is still there as history.
-  - A belief reached by content leads to its notion through a generated link, and expansion from that notion works as it does today.
+  - A belief reached by content leads to its notion through a generated link, and expansion from that notion works as it does today; an authored About link between an interpreted memory and an entity is rejected in either orientation, at plan validation and in `link`, whether or not the entity is among the memory's subjects.
   - A memory with neither sources nor the given marker is still rejected; the marker is rejected on a memory with sources and on a memory with no notion subject; an assertion whose subject is not among the memory's subjects is rejected; an unknown predicate is rejected.
   - No code path reads a name, kind or summary from an entity, and the README's restart recipe still works with caller-supplied ids.
 - validation:
@@ -146,7 +146,10 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-21 Waves 1 to 3 implemented, reviewed and pushed: [Task_1, Task_2, Task_3]
+  - Summary: Task_1 deletions (PR 113); Task_2 currency read from the chain, a correction is a supersession and nothing else (PR 115); Task_3 the entity as a notion with a known-as assertion, the given marker and derived About links for every subject (PR 116). Stack: 112, 113, 115, 116.
+  - Validation evidence: each task's four gates passed for the worker and independently for the Tier D reviewer (Task_3: 368 reported, 364 exercised, 4 opt-in service cases left to CI). Tier D found and the worker fixed at the root: a stale rustdoc (Task_1); a generated Supersedes link retargetable through `link`, and a replay that reindexed a superseded memory (Task_2); a same-plan link-id collision between an authored and a derived link (Task_3). Tier A reviewed the Task_3 public shape, README and both proposed records.
+  - Notes: ADR-D-0035 and ADR-D-0036 were accepted by the decider on 2026-09-21 and marked accepted on the Task_3 branch. Task_3 stays pending until PR 116 rejects an authored About link between an interpreted memory and an entity at both entry points (in progress after external review), and Task_1 until the PR 113 review fixes land. Not done until: those, CI on each PR including the service-parity job, and the merges. After PR 116 merges, its commit goes to the companion repository's Task_4.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -157,6 +160,34 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - A consequence the plan review surfaced, for the decider's eye at approval: with no predecessor rewrite, a correction no longer suppresses what it corrects; the corrected version is superseded history, reachable under the include-superseded policy, and the two correction options that said otherwise are deleted.
   - User approval: yes, 2026-09-20, for the decisions above, and the same day for the plan as reviewed (Tier D approved at a5186cd, Tier A applied), including the consequence that a correction is a supersession and nothing else.
   - Record proposed: up to two in Task_3, one decision each (the form of a belief about a notion; how an application-given belief enters), type chosen by the admission test; the name query and the entity surface are mechanism and stay in this plan. Acceptance pending.
+
+- 2026-09-20 Decision: a superseded memory leaves the content index on both supersession paths.
+  - Trigger / new insight: `correct` deletes its predecessor's vector today, while an ordinary commit that supersedes a memory would leave the predecessor's vector in place, so the two paths would differ once a corrected predecessor stays Active.
+  - Plan delta (what changed): Task_2 makes them equivalent by deleting the predecessor's vector on an ordinary superseding commit too, after the graph batch. History stays in the graph and is reached from the successor through the Supersedes link under the include-superseded policy.
+  - Tradeoffs considered: keeping predecessor vectors on both paths was rejected, because every restatement would leave a near-duplicate competing for the fixed candidate budget and the ADR-I-0022 baselines would shift for no gain. This differs from the thread vector of Task_1: a thread with no vector was unreachable, a superseded memory is reachable from its successor.
+  - User approval: not needed; it keeps today's behavior for corrections and extends it to the new path.
+  - Record proposed: none
+
+- 2026-09-20 Decision: entity selectivity is kept without a production input until the scene slice.
+  - Trigger / new insight: the selectivity calculation only acts on Entity vector roots, and Task_3 removes the entity's vector surface, so the policy loses its reachable input.
+  - Plan delta (what changed): Task_3 keeps the policy (measured and accepted in ADR-I-0022), gives it a direct entity-id input, and moves its tests to that input; its production reader returns with the scene slice, where participants given by key become entity roots. Until then a name reaches its notion through a belief found by content and the derived About link, bounded by the static fanout caps. Extending selectivity to reached entities is retrieval policy and waits for the scene and route slices, with measurement.
+  - Tradeoffs considered: deleting the policy and rebuilding it one slice later was rejected as churn on a measured mechanism; extending it now was rejected as unmeasured retrieval policy inside a schema task.
+  - User approval: not needed; reported to the decider as a consequence to know about. The companion repository's re-baseline measures the movement.
+  - Record proposed: none
+
+- 2026-09-21 Decision: About links are derived for every subject of every interpreted memory; the Orchestrator's narrower brief is withdrawn.
+  - Trigger / new insight: the Task_3 brief scoped the derivation to memories that carry an assertion or the given marker, to avoid moving baselines. The Tier A review showed that this leaves a doubt, a kind or a hearsay belief unreachable from its notion and its subject ids unchecked, against ADR-D-0034 and the proposed ADR-D-0035, and makes the grounding marker control traversal.
+  - Plan delta (what changed): the memory's own subject list is what an author writes; commit derives an About link for every subject, in the same graph batch, and every subject id must exist. This is the plan's own wording ("to each notion it is about") and the same single-source rule as Supersedes; it also closes the gap the census found between the About edges the stats count and the links expansion can follow.
+  - Tradeoffs considered: retrieval counts move for interpreted memories whose subjects were not linked before; the companion repository stops authoring its own About links for the same pairs, and its re-baseline measures the rest.
+  - User approval: not needed; it restores the approved plan text.
+  - Record proposed: none
+
+- 2026-09-21 Decision: the two schema-version aliases stay.
+  - Trigger / new insight: external review of PR 113 pointed out that accepted ADR-I-0007 names all three schema-version constants as the exposed spelling. Accepted records are immutable and are not partially superseded.
+  - Plan delta (what changed): the aliases are restored and removed from Task_1's deletion list. Replacing a whole record to drop two aliases is not worth it.
+  - Tradeoffs considered: two redundant constants remain in the public surface.
+  - User approval: not needed.
+  - Record proposed: none
 
 ## Notes
 - Risks: Task_1 is wide (public surface, graph vocabulary, stats tables) and mechanical; the census site lists are the checklist. Task_3 changes what the vector index holds, which can move retrieval results for fixtures that matched on an entity's name; that is expected and is measured in the companion repository.
