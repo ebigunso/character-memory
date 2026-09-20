@@ -43,7 +43,7 @@ Embedding text uses natural language, for example `User preference: Prefer deter
 
 ## Indexing And Currency
 
-Indexing consults incoming graph supersession evidence before embedding interpreted memories. Already-superseded memories are excluded, including when an older plan is replayed. A graph-query failure is reported through the typed vector-indexing repair outcome; it does not permit unverified re-indexing. The [indexing service](../../../src/usecases/vector_indexing.rs) owns this admission check.
+Embedding happens before a write takes its turn, so no turn holds a model call; inside the turn, indexing consults incoming graph supersession evidence before writing any interpreted memory's vector. Already-superseded memories are excluded, including when an older plan is replayed. A graph-query failure is reported through the typed vector-indexing repair outcome; it does not permit unverified re-indexing. The [indexing service](../../../src/usecases/vector_indexing.rs) owns this admission check.
 
 Record embeddings with zero norm are rejected before the adapter call, and dimensions must match the configured store. Query embeddings must satisfy the same cosine-search constraints. A successor derives `Supersedes` links from its predecessor list and schedules predecessor-vector deletion. If deletion fails, graph supersession still excludes those predecessors from default retrieval and the write outcome reports the maintenance failure.
 
