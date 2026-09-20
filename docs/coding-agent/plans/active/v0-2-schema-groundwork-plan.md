@@ -59,7 +59,7 @@
   - README.md
 - depends_on: []
 - description: |
-  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; the two aliased schema-version constants (keep one); `operation_id`, `idempotency_key`, the `PrepareOptions` override and the remember input hash whose only consumer is that key, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
+  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; `operation_id`, `idempotency_key`, the `PrepareOptions` override and the remember input hash whose only consumer is that key, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
 - acceptance:
   - None of the deleted names appears in `src`, `tests` or `README.md`, and no deleted field is accepted by a draft or emitted to the graph or the stats store.
   - Forgetting a thread's members still suppresses them and removes their vectors; nothing deletes a thread's own vector any more, so a thread stays reachable (ADR-D-0018).
@@ -180,6 +180,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Plan delta (what changed): the memory's own subject list is what an author writes; commit derives an About link for every subject, in the same graph batch, and every subject id must exist. This is the plan's own wording ("to each notion it is about") and the same single-source rule as Supersedes; it also closes the gap the census found between the About edges the stats count and the links expansion can follow.
   - Tradeoffs considered: retrieval counts move for interpreted memories whose subjects were not linked before; the companion repository stops authoring its own About links for the same pairs, and its re-baseline measures the rest.
   - User approval: not needed; it restores the approved plan text.
+  - Record proposed: none
+
+- 2026-09-21 Decision: the two schema-version aliases stay.
+  - Trigger / new insight: external review of PR 113 pointed out that accepted ADR-I-0007 names all three schema-version constants as the exposed spelling. Accepted records are immutable and are not partially superseded.
+  - Plan delta (what changed): the aliases are restored and removed from Task_1's deletion list. Replacing a whole record to drop two aliases is not worth it.
+  - Tradeoffs considered: two redundant constants remain in the public surface.
+  - User approval: not needed.
   - Record proposed: none
 
 ## Notes
