@@ -3,7 +3,7 @@ status: accepted
 adr_type: design
 date: 2026-09-21
 deciders: ["ebigunso"]
-consulted: ["GPT-6"]
+consulted: ["GPT-6 Astra"]
 informed: []
 supersedes: []
 superseded_by: null

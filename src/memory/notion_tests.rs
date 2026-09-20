@@ -525,7 +525,7 @@ async fn given_belief_correction_requires_declared_grounding_and_replays() {
     assert_eq!(written.trace.unwrap().superseded_by.len(), 1);
     assert!(!written
         .vector_maintained_object_ids
-        .contains(&MemoryObjectRef::new(ObjectType::DerivedMemory, subject)));
+        .contains(&MemoryObjectRef::new(ObjectType::Entity, subject)));
     let replay = memory.correct(correction).await.unwrap();
     assert!(replay.graph_mutated_object_ids.is_empty());
     assert!(replay.graph_mutated_link_ids.is_empty());
