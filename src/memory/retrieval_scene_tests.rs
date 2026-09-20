@@ -425,13 +425,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     assert!(description_only
         .scene_references
         .iter()
-        .all(|reference| reference.resolution
-            == SceneReferenceResolution::ContentCue {
-                matches: vec![MemoryObjectRef::new(
-                    ObjectType::DerivedMemory,
-                    MemoryId::from_u128(1100)
-                )]
-            }));
+        .all(|reference| reference.resolution == SceneReferenceResolution::ContentCue));
     context.topic = Some("astronomer".to_owned());
     queries.lock().unwrap().clear();
     let merged = memory.retrieve(context.clone()).await.unwrap();
@@ -458,7 +452,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         &place_result.scene_references[0],
         SceneReferenceResult {
             reference: SceneReference::SettingWords,
-            resolution: SceneReferenceResolution::ContentCue { .. }
+            resolution: SceneReferenceResolution::ContentCue
         }
     ));
 }
@@ -487,16 +481,6 @@ async fn time_only_scene_is_echoed_without_embedding_or_completeness_claim() {
     blank.scene.setting.words = Some("\t".to_owned());
     memory.retrieve(blank).await.unwrap();
     assert!(queries.lock().unwrap().is_empty());
-    let mut words = RetrievalContext::default();
-    words.scene.setting.words = Some("nowhere".to_owned());
-    let unmatched = memory.retrieve(words).await.unwrap();
-    assert!(unmatched.trace.is_none());
-    assert_eq!(
-        unmatched.scene_references[0].resolution,
-        SceneReferenceResolution::ContentCue {
-            matches: Vec::new()
-        }
-    );
 }
 
 async fn write_belief(

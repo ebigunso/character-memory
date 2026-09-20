@@ -90,7 +90,7 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
-        let mut searches = HashMap::new();
+        let mut searches = HashSet::new();
         let mut all_candidates = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
@@ -100,7 +100,7 @@ where
                 .into_iter()
                 .map(|(reference, text)| (Some(reference), text)),
         ) {
-            if !searches.contains_key(text) {
+            if searches.insert(text) {
                 let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
                 let embedding = self.embedder.embed(&input).await?;
                 dimension = embedding.len();
@@ -111,22 +111,12 @@ where
                 );
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
-                let reached = recall
-                    .candidates
-                    .iter()
-                    .map(|candidate| {
-                        MemoryObjectRef::new(candidate.object_type, candidate.object_id)
-                    })
-                    .collect::<Vec<_>>();
                 all_candidates.extend(recall.candidates.iter().cloned());
-                searches.insert(text.to_owned(), reached);
             }
             if let Some(reference) = reference {
                 references.push(SceneReferenceResult {
                     reference,
-                    resolution: SceneReferenceResolution::ContentCue {
-                        matches: searches[text].clone(),
-                    },
+                    resolution: SceneReferenceResolution::ContentCue,
                 });
             }
         }
