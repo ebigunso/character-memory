@@ -172,6 +172,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - User approval: not needed; reported to the decider as a consequence to know about. The companion repository's re-baseline measures the movement.
   - Record proposed: none
 
+- 2026-09-21 Decision: About links are derived for every subject of every interpreted memory; the Orchestrator's narrower brief is withdrawn.
+  - Trigger / new insight: the Task_3 brief scoped the derivation to memories that carry an assertion or the given marker, to avoid moving baselines. The Tier A review showed that this leaves a doubt, a kind or a hearsay belief unreachable from its notion and its subject ids unchecked, against ADR-D-0034 and the proposed ADR-D-0035, and makes the grounding marker control traversal.
+  - Plan delta (what changed): the memory's own subject list is what an author writes; commit derives an About link for every subject, in the same graph batch, and every subject id must exist. This is the plan's own wording ("to each notion it is about") and the same single-source rule as Supersedes; it also closes the gap the census found between the About edges the stats count and the links expansion can follow.
+  - Tradeoffs considered: retrieval counts move for interpreted memories whose subjects were not linked before; the companion repository stops authoring its own About links for the same pairs, and its re-baseline measures the rest.
+  - User approval: not needed; it restores the approved plan text.
+  - Record proposed: none
+
 ## Notes
 - Risks: Task_1 is wide (public surface, graph vocabulary, stats tables) and mechanical; the census site lists are the checklist. Task_3 changes what the vector index holds, which can move retrieval results for fixtures that matched on an entity's name; that is expected and is measured in the companion repository.
 - Edge cases: forgetting a rename leaves the notion with no current name, and the repair is a new belief, not un-suppression; two beliefs naming one notion at once (a nickname and a given name) are both current, since neither supersedes the other; normalization must not merge names that differ only by script in ways a person would not (keep it to case, whitespace and Unicode normalization).
