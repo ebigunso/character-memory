@@ -1,9 +1,11 @@
+pub(crate) mod belief;
 mod lifecycle;
 mod object_ref;
 mod retrieval;
 pub(crate) mod schema;
 mod write_validation;
 
+pub use belief::{BeliefAssertion, BeliefPredicate, BeliefValidationError};
 pub use lifecycle::{LifecycleDtoValidationError, SourceReferenceKind};
 pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
@@ -69,7 +71,6 @@ impl FromStr for ObjectType {
 pub enum VectorSurface {
     Summary,
     Text,
-    Name,
     DerivedText,
     Query,
 }
@@ -79,7 +80,6 @@ impl fmt::Display for VectorSurface {
         formatter.write_str(match self {
             Self::Summary => "summary",
             Self::Text => "text",
-            Self::Name => "name",
             Self::DerivedText => "derived_text",
             Self::Query => "query",
         })
@@ -93,7 +93,6 @@ impl FromStr for VectorSurface {
         match value {
             "summary" => Ok(Self::Summary),
             "text" => Ok(Self::Text),
-            "name" => Ok(Self::Name),
             "derived_text" => Ok(Self::DerivedText),
             "query" => Ok(Self::Query),
             _ => Err(format!("unknown vector surface token: {value}")),
@@ -130,21 +129,6 @@ impl ObjectType {
 pub enum Modality {
     Chat,
     VoiceTranscript,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityType {
-    Person,
-    User,
-    Assistant,
-    Project,
-    Concept,
-    Tool,
-    Document,
-    Place,
-    Organization,
-    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -245,8 +229,11 @@ pub enum DomainValidationError {
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
 
-    #[error("derived memory must reference at least one source episode or observation")]
+    #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]
     MissingDerivedSource,
+
+    #[error(transparent)]
+    InvalidBelief(#[from] BeliefValidationError),
 
     #[error("{field} must be in 0.0..=1.0 and finite, got {value}")]
     InvalidScore { field: &'static str, value: f32 },
@@ -349,13 +336,7 @@ impl Observation {
 pub struct Entity {
     pub id: MemoryId,
     pub object_type: ObjectType,
-    pub entity_type: EntityType,
-    pub name: String,
-    pub aliases: Vec<String>,
-    pub canonical_key: Option<String>,
-    pub summary: Option<String>,
     pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
     pub schema_version: String,
 }
 
@@ -401,6 +382,10 @@ pub struct DerivedMemory {
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
+    /// The character's commitments about subjects in `entity_ids`.
+    pub assertions: Vec<BeliefAssertion>,
+    /// Source-free grounding given by the application; requires at least one notion subject.
+    pub given_by_application: bool,
     pub salience_score: f32,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
@@ -416,8 +401,15 @@ impl DerivedMemory {
             self.object_type,
             ObjectType::DerivedMemory,
         )?;
-        if self.derived_from_episode_ids.is_empty() && self.derived_from_observation_ids.is_empty()
-        {
+        let has_sources = !self.derived_from_episode_ids.is_empty()
+            || !self.derived_from_observation_ids.is_empty();
+        belief::validate_belief(
+            &self.entity_ids,
+            has_sources,
+            self.given_by_application,
+            &self.assertions,
+        )?;
+        if !has_sources && !self.given_by_application {
             return Err(DomainValidationError::MissingDerivedSource);
         }
         if self.supersedes.contains(&self.id) {
@@ -552,7 +544,6 @@ mod token_tests {
         for surface in [
             VectorSurface::Summary,
             VectorSurface::Text,
-            VectorSurface::Name,
             VectorSurface::DerivedText,
             VectorSurface::Query,
         ] {

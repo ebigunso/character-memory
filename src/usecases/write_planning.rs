@@ -396,7 +396,6 @@ fn complete_entity_draft(
 ) -> EntityDraft {
     draft.id.get_or_insert(id);
     draft.created_at.get_or_insert(defaults.created_at);
-    draft.updated_at.get_or_insert(defaults.created_at);
     draft
         .schema_version
         .get_or_insert_with(|| defaults.schema_version.clone());
@@ -426,7 +425,10 @@ fn complete_derived_draft(
     observation_id: MemoryId,
 ) -> DerivedMemoryDraft {
     draft.id.get_or_insert(id);
-    if draft.derived_from_episode_ids.is_empty() && draft.derived_from_observation_ids.is_empty() {
+    if !draft.given_by_application
+        && draft.derived_from_episode_ids.is_empty()
+        && draft.derived_from_observation_ids.is_empty()
+    {
         draft.derived_from_episode_ids.push(episode_id);
         draft.derived_from_observation_ids.push(observation_id);
     }
@@ -461,8 +463,8 @@ pub(crate) fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {
     uuid::Uuid::new_v5(&WRITE_PLAN_NAMESPACE, &label)
 }
 
-/// Derives the supersession index from the only authored source: the memory list.
-pub(crate) fn supersession_links(memory: &crate::domain::DerivedMemory) -> Vec<MemoryLink> {
+/// Derives traversal and currency links from the authored memory lists.
+pub(crate) fn derived_memory_links(memory: &crate::domain::DerivedMemory) -> Vec<MemoryLink> {
     let mut links = memory
         .supersedes
         .iter()
@@ -483,6 +485,24 @@ pub(crate) fn supersession_links(memory: &crate::domain::DerivedMemory) -> Vec<M
             schema_version: memory.schema_version.clone(),
         })
         .collect::<Vec<_>>();
+    if memory.given_by_application || !memory.assertions.is_empty() {
+        links.extend(memory.entity_ids.iter().map(|subject| MemoryLink {
+            id: deterministic_uuid(&[
+                b"character_memory.belief.about_link",
+                memory.id.as_bytes(),
+                subject.as_bytes(),
+            ]),
+            object_type: ObjectType::MemoryLink,
+            from_id: memory.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: *subject,
+            to_type: ObjectType::Entity,
+            relation: RelationType::About,
+            rationale: None,
+            created_at: memory.created_at,
+            schema_version: memory.schema_version.clone(),
+        }));
+    }
     links.sort_by_key(|link| link.id);
     links.dedup_by_key(|link| link.id);
     links
@@ -491,7 +511,7 @@ pub(crate) fn supersession_links(memory: &crate::domain::DerivedMemory) -> Vec<M
 #[cfg(test)]
 mod construction_tests {
     use super::*;
-    use crate::domain::{DerivedType, EntityType};
+    use crate::domain::DerivedType;
 
     fn timestamp(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value)
@@ -517,7 +537,7 @@ mod construction_tests {
                 DerivedType::Reflection,
                 "Caller-provided reflection text.",
             ))
-            .with_entity(EntityDraft::new(EntityType::Person, "Caller Named Entity"));
+            .with_entity(EntityDraft::new());
 
         let first = input.prepare_write_plan(&defaults);
         let second = input.prepare_write_plan(&defaults);
@@ -771,6 +791,11 @@ impl PlanValidationContext {
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
             MemoryCandidate::DerivedMemory(candidate) => {
+                if candidate.draft.given_by_application || !candidate.draft.assertions.is_empty() {
+                    for entity_id in &candidate.draft.entity_ids {
+                        self.add_ref_to_check(MemoryObjectRef::new(ObjectType::Entity, *entity_id));
+                    }
+                }
                 for predecessor_id in &candidate.draft.supersedes {
                     self.add_ref_to_check(MemoryObjectRef::from_id_type(
                         *predecessor_id,
@@ -886,10 +911,9 @@ impl PlanValidationContext {
                     candidate.draft.id,
                     candidate.draft.schema_version.as_deref(),
                 ));
-                errors.extend(validate_required_created_and_updated_at(
+                errors.extend(validate_required_created_at(
                     "entity candidate",
                     candidate.draft.created_at,
-                    candidate.draft.updated_at,
                 ));
                 match candidate
                     .draft
@@ -1061,6 +1085,14 @@ impl PlanValidationContext {
         object: &crate::domain::DerivedMemory,
     ) -> Vec<CandidateValidationIssue> {
         let mut errors = Vec::new();
+        if object.given_by_application || !object.assertions.is_empty() {
+            for entity_id in &object.entity_ids {
+                errors.extend(self.validate_graph_authoritative_ref(
+                    MemoryObjectRef::new(ObjectType::Entity, *entity_id),
+                    CandidateReferenceRole::BeliefSubject,
+                ));
+            }
+        }
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
                 MemoryObjectRef::from_id_type(*episode_id, ObjectType::Episode),
@@ -1160,7 +1192,7 @@ impl WritePlanCommitValues {
                         .into_domain_with_defaults(&mut defaults)?,
                 )),
                 MemoryCandidate::Entity(candidate) => objects.push(MemoryObject::Entity(
-                    require_created_and_updated_at(candidate.draft)
+                    require_created_at(candidate.draft)
                         .map_err(timestamp_error)?
                         .into_domain_with_defaults(&mut defaults)?,
                 )),
@@ -1192,7 +1224,7 @@ impl WritePlanCommitValues {
 
         for object in &objects {
             if let MemoryObject::DerivedMemory(memory) = object {
-                links.extend(supersession_links(memory));
+                links.extend(derived_memory_links(memory));
             }
         }
 
@@ -1221,12 +1253,6 @@ impl CandidateCreatedAt for crate::api::types::ObservationDraft {
 impl CandidateCreatedAt for crate::api::types::EntityDraft {
     fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.created_at
-    }
-}
-
-impl CandidateUpdatedAt for crate::api::types::EntityDraft {
-    fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.updated_at
     }
 }
 
@@ -1437,6 +1463,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }
+        DomainValidationError::InvalidBelief(reason) => {
+            CandidateValidationIssue::InvalidBelief { reason }
+        }
         DomainValidationError::MissingDerivedSource => {
             CandidateValidationIssue::MissingDerivedSource
         }
@@ -1512,7 +1541,7 @@ mod tests {
         StatsUpdateCandidate, StatsUpdateStatus, VectorIndexCandidate,
     };
     use crate::domain::{
-        DerivedType, EntityType, MemoryCandidateKind, MemoryObject, RelationType, RetentionState,
+        DerivedType, MemoryCandidateKind, MemoryObject, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
     use crate::test_support::{
@@ -2148,7 +2177,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_missing_candidate_timestamps() {
         let graph = in_memory_graph_store();
-        let mut draft = EntityDraft::new(crate::domain::EntityType::Project, "no timestamps");
+        let mut draft = EntityDraft::new();
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445055"));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let plan = valid_plan().with_candidate(MemoryCandidate::Entity(
@@ -2167,12 +2196,6 @@ mod tests {
             &verdict,
             CandidateValidationIssue::MissingTimestamp {
                 field: CandidateTimestampField::CreatedAt,
-            },
-        );
-        assert_rejected_with(
-            &verdict,
-            CandidateValidationIssue::MissingTimestamp {
-                field: CandidateTimestampField::UpdatedAt,
             },
         );
     }
@@ -2308,10 +2331,9 @@ mod tests {
         let episode_id = id("550e8400-e29b-41d4-a716-446655613302");
         let derived_id = id("550e8400-e29b-41d4-a716-446655613303");
         let link_id = id("550e8400-e29b-41d4-a716-446655613305");
-        let mut entity = EntityDraft::new(EntityType::Project, "generated-style entity");
+        let mut entity = EntityDraft::new();
         entity.id = Some(entity_id);
         entity.created_at = Some(timestamp());
-        entity.updated_at = Some(timestamp());
         entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let mut episode = complete_episode(EpisodeDraft::new("generated-style source episode"));
         episode.id = Some(episode_id);

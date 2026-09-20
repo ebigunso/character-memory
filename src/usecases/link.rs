@@ -549,6 +549,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn query_notions_known_as(
+            &self,
+            _name: &str,
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            unreachable!("this test never queries names")
+        }
+
         async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
             Ok(())
         }

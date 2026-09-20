@@ -104,6 +104,14 @@ impl OxigraphGraphAuthorityStore {
 
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
+    async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
+        SparqlGraphSelectors::new(&self.store)
+            .select_notions_known_as(name)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })
+    }
+
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
         let mut replacements = Vec::new();
         for object in objects {

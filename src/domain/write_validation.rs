@@ -74,8 +74,12 @@ pub enum CandidateValidationIssue {
     EmptyEpisodeSummary,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
-    #[error("derived memory must reference at least one source episode or observation")]
+    #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]
     MissingDerivedSource,
+    #[error(transparent)]
+    InvalidBelief {
+        reason: super::BeliefValidationError,
+    },
     #[error("candidate score {field:?} must be finite and in 0.0..=1.0, got {actual}")]
     InvalidScore {
         field: CandidateScoreField,
@@ -167,6 +171,7 @@ pub enum CandidateSourceSpanIssue {
 #[serde(rename_all = "snake_case")]
 pub enum CandidateReferenceRole {
     DerivedSourceEpisode,
+    BeliefSubject,
     DerivedSourceObservation,
     SupersededMemory,
     MemoryLinkFrom,

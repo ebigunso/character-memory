@@ -1,9 +1,9 @@
 use character_memory::{
-    CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EntityDraft, EntityType, EpisodeDraft, ForgetMemoryDraft, GraphFailureMode, LifecycleTargetRef,
-    MemoryId, MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberOptions,
-    ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
-    RetrievalGraphLimits, SourceProvenanceReference,
+    BeliefAssertion, BeliefPredicate, CorrectMemoryDraft, CorrectionTarget, CustomError,
+    DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft,
+    GraphFailureMode, LifecycleTargetRef, MemoryId, MemoryLinkDraft, ObjectType, RelationType,
+    RememberInput, RememberOptions, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits,
+    RetrievalContext, RetrievalGraphLimits, SourceProvenanceReference,
 };
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub mod test_support;
 
 #[tokio::test]
-async fn stats_persist_across_facade_reopen() {
+async fn name_belief_and_derived_about_link_survive_facade_reopen() {
     let root = TempDir::new().expect("store root should be created");
     let collection_name = test_support::unique_collection_name();
     let entity_id = id("550e8400-e29b-41d4-a716-446655461001");
@@ -28,26 +28,17 @@ async fn stats_persist_across_facade_reopen() {
         let remember_outcome = memory
             .remember(
                 RememberInput::new("A neutral field note records archival calibration.")
-                    .with_entity(entity(entity_id, EntityType::Person, "Aster Archive"))
+                    .with_entity(entity(entity_id))
                     .with_episode(episode(
                         episode_id,
                         "A neutral field note records archival calibration.",
                         &[entity_id],
                     ))
-                    .with_derived_memory(derived(
+                    .with_derived_memory(named_belief(
                         memory_id,
-                        DerivedType::Claim,
-                        "Archival calibration should prefer bounded recall over broad expansion.",
-                        episode_id,
-                        &[entity_id],
-                    ))
-                    .with_memory_link(link(
-                        id("550e8400-e29b-41d4-a716-446655461004"),
-                        ObjectType::Entity,
                         entity_id,
-                        RelationType::About,
-                        ObjectType::DerivedMemory,
-                        memory_id,
+                        "Aster Archive",
+                        episode_id,
                     ))
                     .with_memory_link(link(
                         id("550e8400-e29b-41d4-a716-446655461005"),
@@ -60,7 +51,9 @@ async fn stats_persist_across_facade_reopen() {
                 RememberOptions::default(),
             )
             .await
-            .map_err(|error| format!("initial remember should populate graph/vector/stats stores: {error}"))?;
+            .map_err(|error| {
+                format!("initial remember should populate graph/vector/stats stores: {error}")
+            })?;
         ensure_no_vector_indexing_failure(
             &remember_outcome,
             "initial stats persistence remember should index vectors",
@@ -73,32 +66,55 @@ async fn stats_persist_across_facade_reopen() {
 
         let reopened = setup(&collection_name, &root, None)
             .await
-            .map_err(|error| format!("reopened facade should use same persistent stores: {error}"))?;
+            .map_err(|error| {
+                format!("reopened facade should use same persistent stores: {error}")
+            })?;
         let retrieved = reopened
-            .retrieve(entity_root_context("Aster Archive"))
+            .retrieve(belief_root_context("Aster Archive"))
             .await
             .map_err(|error| format!("retrieve after reopen should succeed: {error}"))?;
 
         ensure(
-            retrieved.rationale.telemetry.selectivity.decision_count > 0,
-            "selectivity telemetry should be populated after reopen",
+            returned_derived_ids(&retrieved).contains(&memory_id),
+            "name belief should survive reopen",
         )?;
-        let about_trace = retrieved
-            .trace
-            .as_ref()
-            .and_then(|trace| {
-                trace.selectivity_decisions.iter().find(|decision| {
-                    decision.root.id == entity_id
-                        && decision.relation == RelationType::About
-                        && decision.object_type == ObjectType::DerivedMemory
-                })
-            })
-            .ok_or_else(|| "retrieve trace should include About->DerivedMemory selectivity for reopened entity root".to_owned())?;
+        let name_belief = &retrieved
+            .pack
+            .derived_memories
+            .iter()
+            .find(|entry| entry.memory.id == memory_id)
+            .unwrap()
+            .memory;
+        assert_eq!(
+            name_belief.assertions,
+            vec![BeliefAssertion {
+                subject: entity_id,
+                predicate: BeliefPredicate::KnownAs {
+                    name: "Aster Archive".to_owned()
+                },
+            }]
+        );
+        assert!(!name_belief.given_by_application);
+        let trace = retrieved.trace.as_ref().unwrap();
         ensure(
-            about_trace.entity_count.is_some_and(|count| count >= 1)
-                && about_trace.global_count.is_some_and(|count| count >= 1)
-                && !about_trace.fallback,
-            "selectivity counters should survive SQLite stats reopen",
+            trace
+                .vector_candidates
+                .iter()
+                .all(|candidate| candidate.object.object_type != ObjectType::Entity),
+            "notions have no vector candidates",
+        )?;
+        ensure(
+            trace.selectivity_decisions.is_empty(),
+            "content roots do not use entity selectivity",
+        )?;
+        ensure(
+            trace.fanout_utilization.iter().any(|entry| {
+                entry.root.id == memory_id
+                    && entry.relation == RelationType::About
+                    && entry.object_type == ObjectType::Entity
+                    && entry.retained_count == 1
+            }),
+            "content belief should reach its notion through the persisted About link",
         )?;
 
         Ok::<_, String>(reopened)
@@ -127,7 +143,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
         let remember_outcome = memory
             .remember(
                 RememberInput::new("Ledger Meridian captured a restart-safe correction fixture.")
-                    .with_entity(entity(entity_id, EntityType::Project, "Ledger Meridian"))
+                    .with_entity(entity(entity_id))
                     .with_episode(episode(
                         episode_id,
                         "Ledger Meridian captured a restart-safe correction fixture.",
@@ -243,83 +259,83 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
 }
 
 #[tokio::test]
-async fn selectivity_telemetry_and_fanout_override_bound_entity_root_expansion() {
-    let root = TempDir::new().expect("store root should be created");
+async fn belief_content_reaches_notion_and_static_caps_bound_expansion() {
+    let root = TempDir::new().unwrap();
     let collection_name = test_support::unique_collection_name();
     let ids = HighDegreeIds::new();
-
-    let memory = setup(&collection_name, &root, None)
+    let memory = setup(&collection_name, &root, None).await.unwrap();
+    let written = memory
+        .remember(high_degree_fixture(&ids), RememberOptions::default())
         .await
-        .expect("unexpected selectivity setup failure");
-
-    let test_result = async {
-        let remember_outcome = memory
-            .remember(high_degree_fixture(&ids), RememberOptions::default())
-            .await
-            .map_err(|error| format!("high-degree fixture remember should succeed: {error}"))?;
-        ensure_no_vector_indexing_failure(
-            &remember_outcome,
-            "high-degree fixture remember should index vectors",
-        )?;
-
-        let default = memory
-            .retrieve(entity_root_context("Vector Orchard"))
-            .await
-            .map_err(|error| format!("default selectivity retrieve should succeed: {error}"))?;
-        let default_trace = about_trace(&default, ids.hub_entity)
-            .ok_or_else(|| "default retrieve should trace hub About->DerivedMemory selectivity".to_owned())?;
-        let default_derived_count = returned_derived_ids(&default)
-            .into_iter()
-            .filter(|memory_id| ids.hub_derived_ids.contains(memory_id))
-            .count();
-
-        ensure(
-            default.rationale.telemetry.selectivity.decision_count > 0
-                && default_trace.entity_count.is_some_and(|count| count >= 8)
-                && default_trace.global_count.is_some_and(|count| count > default_trace.entity_count.unwrap_or_default()),
-            "default retrieve should expose non-fallback selectivity telemetry for a high-degree entity",
-        )?;
-        ensure(
-            default_derived_count > 2,
-            "default fanout should include more hub derived memories than the small override",
-        )?;
-
-        memory
-            .close()
-            .await
-            .map_err(|error| format!("facade should close before reopen: {error}"))?;
-
-        let constrained = setup(&collection_name, &root, Some((0, 2)))
-            .await
-            .map_err(|error| format!("constrained facade should reopen with fanout override: {error}"))?;
-        let constrained_result = constrained
-            .retrieve(entity_root_context("Vector Orchard"))
-            .await
-            .map_err(|error| format!("constrained selectivity retrieve should succeed: {error}"))?;
-        let constrained_trace = about_trace(&constrained_result, ids.hub_entity)
-            .ok_or_else(|| "constrained retrieve should trace hub About->DerivedMemory selectivity".to_owned())?;
-        let constrained_derived_count = returned_derived_ids(&constrained_result)
-            .into_iter()
-            .filter(|memory_id| ids.hub_derived_ids.contains(memory_id))
-            .count();
-
-        ensure(
-            constrained_trace.max_fanout == 2
-                && constrained_trace.chosen_fanout <= 2
-                && constrained_trace.chosen_fanout < default_trace.chosen_fanout,
-            "configured fanout override should reduce traced About->DerivedMemory budget",
-        )?;
-        ensure(
-            constrained_derived_count <= 2 && constrained_derived_count < default_derived_count,
-            "configured fanout override should observably constrain returned hub expansion",
-        )?;
-
-        Ok::<_, String>(constrained)
-    }
-    .await;
-
-    let constrained = test_result.expect("selectivity fanout test should pass");
-    test_support::close_and_remove_root(constrained, root).await;
+        .unwrap();
+    assert!(written.vector_indexing_failure.is_none());
+    let broad = memory
+        .retrieve(belief_root_context("Vector Orchard"))
+        .await
+        .unwrap();
+    let trace = broad.trace.as_ref().unwrap();
+    assert_eq!(trace.vector_candidates[0].object.id, ids.name_belief);
+    assert!(trace
+        .vector_candidates
+        .iter()
+        .all(|candidate| candidate.object.object_type != ObjectType::Entity));
+    assert!(trace.selectivity_decisions.is_empty());
+    assert_eq!(broad.rationale.telemetry.selectivity.decision_count, 0);
+    assert!(trace
+        .fanout_utilization
+        .iter()
+        .any(|entry| entry.root.id == ids.hub_entity
+            && entry.relation == RelationType::About
+            && entry.retained_count > 2));
+    let broad_count = returned_derived_ids(&broad)
+        .iter()
+        .filter(|id| ids.hub_derived_ids.contains(id))
+        .count();
+    assert!(broad_count > 2);
+    // Candidate scope and graph scope are independent: a belief-only vector search
+    // can still cross a notion, while excluding notions from traversal blocks that hop.
+    let mut belief_candidates = belief_root_context("Vector Orchard");
+    belief_candidates.object_type_defaults = vec![ObjectType::DerivedMemory];
+    let belief_only = memory.retrieve(belief_candidates).await.unwrap();
+    assert_eq!(
+        returned_derived_ids(&belief_only),
+        returned_derived_ids(&broad)
+    );
+    assert!(belief_only
+        .trace
+        .as_ref()
+        .unwrap()
+        .vector_candidates
+        .iter()
+        .all(|candidate| candidate.object.object_type == ObjectType::DerivedMemory));
+    let mut belief_graph = belief_root_context("Vector Orchard");
+    belief_graph.graph_limits.allowed_object_types = vec![ObjectType::DerivedMemory];
+    let no_notion_hop = memory.retrieve(belief_graph).await.unwrap();
+    assert_eq!(returned_derived_ids(&no_notion_hop), vec![ids.name_belief]);
+    assert_eq!(
+        no_notion_hop.trace.as_ref().unwrap().vector_candidates,
+        trace.vector_candidates
+    );
+    let mut limited = belief_root_context("Vector Orchard");
+    limited.graph_limits.max_fanout_per_node = 2;
+    let bounded = memory.retrieve(limited).await.unwrap();
+    let count = returned_derived_ids(&bounded)
+        .iter()
+        .filter(|id| ids.hub_derived_ids.contains(id))
+        .count();
+    assert!(count <= 2 && count < broad_count);
+    assert!(bounded
+        .trace
+        .as_ref()
+        .unwrap()
+        .fanout_utilization
+        .iter()
+        .any(|entry| entry.root.id == ids.hub_entity
+            && entry.relation == RelationType::About
+            && entry.selected_cap == 2
+            && entry.retained_count <= 2
+            && entry.omitted_by_fanout_count > 0));
+    test_support::close_and_remove_root(memory, root).await;
 }
 
 async fn setup(
@@ -335,33 +351,29 @@ async fn setup(
     .await
 }
 
-fn entity_root_context(query: &str) -> RetrievalContext {
+fn belief_root_context(query: &str) -> RetrievalContext {
     let mut context = RetrievalContext::new(query).with_trace();
     context.candidate_limits = RetrievalCandidateLimits {
         max_vector_candidates: 32,
         max_graph_roots: 1,
     };
     context.graph_limits = RetrievalGraphLimits {
-        max_depth: 1,
+        max_depth: 2,
         max_nodes: 64,
         max_fanout_per_node: 32,
         max_hub_edges: 64,
         timeout_ms: Some(500),
         failure_mode: GraphFailureMode::AllowPartialResults,
         allowed_relation_types: Vec::new(),
+        ..RetrievalGraphLimits::default()
     };
     context
 }
 
-fn entity(id: MemoryId, entity_type: EntityType, name: &str) -> EntityDraft {
-    let mut draft = EntityDraft::new(entity_type, name);
+fn entity(id: MemoryId) -> EntityDraft {
+    let mut draft = EntityDraft::new();
     draft.id = Some(id);
-    draft.canonical_key = Some(format!(
-        "test:{}",
-        name.to_ascii_lowercase().replace(' ', "-")
-    ));
     draft.created_at = Some(timestamp());
-    draft.updated_at = Some(timestamp());
     draft
 }
 
@@ -406,6 +418,7 @@ fn link(
 }
 
 struct HighDegreeIds {
+    name_belief: MemoryId,
     hub_entity: MemoryId,
     other_entities: [MemoryId; 4],
     hub_derived_ids: Vec<MemoryId>,
@@ -415,6 +428,7 @@ struct HighDegreeIds {
 impl HighDegreeIds {
     fn new() -> Self {
         Self {
+            name_belief: MemoryId::from_u128(6501),
             hub_entity: id("550e8400-e29b-41d4-a716-446655463001"),
             other_entities: [
                 id("550e8400-e29b-41d4-a716-446655463002"),
@@ -436,18 +450,9 @@ fn high_degree_fixture(ids: &HighDegreeIds) -> RememberInput {
     let mut input = RememberInput::new(
         "A high-degree project fixture records neutral retrieval expansion pressure.",
     )
-    .with_entity(entity(
-        ids.hub_entity,
-        EntityType::Project,
-        "Vector Orchard",
-    ));
-    for (entity_id, entity_type, name) in [
-        (ids.other_entities[0], EntityType::Person, "Mara Quill"),
-        (ids.other_entities[1], EntityType::Place, "North Atrium"),
-        (ids.other_entities[2], EntityType::Concept, "Signal Weaving"),
-        (ids.other_entities[3], EntityType::Tool, "Copper Loom"),
-    ] {
-        input = input.with_entity(entity(entity_id, entity_type, name));
+    .with_entity(entity(ids.hub_entity));
+    for entity_id in ids.other_entities {
+        input = input.with_entity(entity(entity_id));
     }
 
     let hub_episode_id = id("550e8400-e29b-41d4-a716-446655463010");
@@ -455,6 +460,12 @@ fn high_degree_fixture(ids: &HighDegreeIds) -> RememberInput {
         hub_episode_id,
         "A high-degree project fixture records neutral retrieval expansion pressure.",
         &[ids.hub_entity],
+    ));
+    input = input.with_derived_memory(named_belief(
+        ids.name_belief,
+        ids.hub_entity,
+        "Vector Orchard",
+        hub_episode_id,
     ));
     for (index, memory_id) in ids.hub_derived_ids.iter().copied().enumerate() {
         input = input.with_derived_memory(derived(
@@ -515,22 +526,6 @@ fn returned_derived_ids(outcome: &character_memory::RetrieveOutcome) -> Vec<Memo
         .collect()
 }
 
-fn about_trace(
-    outcome: &character_memory::RetrieveOutcome,
-    entity_id: MemoryId,
-) -> Option<&character_memory::SelectivityTrace> {
-    outcome
-        .trace
-        .as_ref()?
-        .selectivity_decisions
-        .iter()
-        .find(|decision| {
-            decision.root.id == entity_id
-                && decision.relation == RelationType::About
-                && decision.object_type == ObjectType::DerivedMemory
-        })
-}
-
 fn timestamp() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-06-12T10:00:00Z")
         .unwrap()
@@ -564,4 +559,20 @@ fn ensure_no_vector_indexing_failure(
     }
 
     Ok(())
+}
+
+fn named_belief(
+    id: MemoryId,
+    subject: MemoryId,
+    name: &str,
+    source: MemoryId,
+) -> DerivedMemoryDraft {
+    let mut draft = derived(id, DerivedType::Claim, name, source, &[subject]);
+    draft.assertions.push(BeliefAssertion {
+        subject,
+        predicate: BeliefPredicate::KnownAs {
+            name: name.to_owned(),
+        },
+    });
+    draft
 }

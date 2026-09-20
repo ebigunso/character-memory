@@ -10,7 +10,6 @@ use crate::errors::RetrievalStatsStoreError;
 use crate::errors::{
     ConfigValidationError, ConfigValidationReason, CustomError, RetrievalStatsHealthCause,
 };
-use crate::models::vector::VectorCandidateMatch;
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 use crate::ports::graph_authority::TraceMode;
 use crate::ports::retrieval_stats::{
@@ -177,8 +176,14 @@ impl SelectivityStatsContext {
     }
 }
 
-pub(crate) async fn selectivity_plan_for_candidate(
-    candidate: &VectorCandidateMatch,
+// Entity roots return with the scene slice; content recall no longer indexes notions.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "identity and cue support are independent inputs to the entity policy"
+)]
+pub(crate) async fn selectivity_plan_for_entity(
+    entity_id: crate::domain::MemoryId,
+    cue_score: f32,
     static_max_fanout: usize,
     stats_store: &dyn RetrievalStatsStore,
     policy: RetrievalSelectivityPolicy,
@@ -186,18 +191,14 @@ pub(crate) async fn selectivity_plan_for_candidate(
     lifecycle_policy: RetrievalLifecyclePolicy,
     trace_mode: TraceMode,
 ) -> Result<SelectivityPlan, CustomError> {
-    if candidate.object_type != ObjectType::Entity {
-        return Ok(SelectivityPlan::default());
-    }
-
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
-    let support_factor = semantic_support_factor(candidate.score);
+    let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
         let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
             let key = RetrievalStatsCounterKey {
-                entity_id: candidate.object_id,
+                entity_id,
                 relation_kind: spec.relation,
                 object_type: spec.object_type,
             };
@@ -257,7 +258,7 @@ pub(crate) async fn selectivity_plan_for_candidate(
         });
         if trace_mode.is_enabled() {
             plan.traces.push(SelectivityTrace {
-                root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                root: MemoryObjectRef::new(ObjectType::Entity, entity_id),
                 relation: spec.relation,
                 object_type: spec.object_type,
                 count_scope,
@@ -465,7 +466,6 @@ const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
 mod tests {
     use super::*;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-    use crate::models::vector::VectorSurface;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use async_trait::async_trait;
     use std::sync::Mutex;
@@ -507,15 +507,14 @@ mod tests {
     async fn selectivity_plan_builds_traces_only_when_requested() {
         let stats = InMemoryRetrievalStatsStore::new();
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462001").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.75,
         );
 
-        let without_trace = selectivity_plan_for_candidate(
-            &candidate,
+        let without_trace = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             10,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -525,8 +524,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let with_trace = selectivity_plan_for_candidate(
-            &candidate,
+        let with_trace = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             10,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -546,15 +546,14 @@ mod tests {
     async fn selectivity_plan_uses_conservative_fanout_when_stats_are_missing() {
         let stats = InMemoryRetrievalStatsStore::new();
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462002").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.95,
         );
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -604,11 +603,11 @@ mod tests {
             [(RelationType::About, ObjectType::DerivedMemory, 4, 4)],
         )
         .unwrap();
-        let candidate =
-            VectorCandidateMatch::new(entity_id, ObjectType::Entity, VectorSurface::Name, 0.95);
+        let candidate = (entity_id, 0.95);
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             policy,
@@ -647,15 +646,14 @@ mod tests {
     async fn selectivity_plan_uses_conservative_fanout_when_stats_reads_fail() {
         let stats = FailingRetrievalStatsStore;
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462021").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.95,
         );
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -678,15 +676,14 @@ mod tests {
     async fn selectivity_plan_uses_conservative_fanout_after_partial_stats_read_failure() {
         let stats = PartiallyFailingRetrievalStatsStore::default();
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462022").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.95,
         );
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -715,15 +712,14 @@ mod tests {
         )
         .await
         .unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462023").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.95,
         );
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -753,15 +749,14 @@ mod tests {
         )
         .await
         .unwrap();
-        let candidate = VectorCandidateMatch::new(
+        let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462024").unwrap(),
-            ObjectType::Entity,
-            VectorSurface::Name,
             0.95,
         );
 
-        let plan = selectivity_plan_for_candidate(
-            &candidate,
+        let plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -823,11 +818,11 @@ mod tests {
             .await
             .unwrap();
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate =
-            VectorCandidateMatch::new(entity_id, ObjectType::Entity, VectorSurface::Name, 0.75);
+        let candidate = (entity_id, 0.75);
 
-        let active_plan = selectivity_plan_for_candidate(
-            &candidate,
+        let active_plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -840,8 +835,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let current_plan = selectivity_plan_for_candidate(
-            &candidate,
+        let current_plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
@@ -851,8 +847,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let total_plan = selectivity_plan_for_candidate(
-            &candidate,
+        let total_plan = selectivity_plan_for_entity(
+            candidate.0,
+            candidate.1,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),

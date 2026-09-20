@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 use crate::domain::{
-    DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode, MemoryId,
+    BeliefAssertion, DerivedMemory, DerivedType, DomainValidationError, Entity, Episode, MemoryId,
     MemoryLink, MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
     RelationType, RetentionState, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
@@ -59,33 +59,17 @@ impl Default for DraftDefaults {
     }
 }
 
-/// Caller-supplied draft for a canonical entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Caller-supplied identity for a notion the character holds.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct EntityDraft {
     pub id: Option<MemoryId>,
-    pub entity_type: EntityType,
-    pub name: String,
-    pub aliases: Vec<String>,
-    pub canonical_key: Option<String>,
-    pub summary: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
     pub schema_version: Option<String>,
 }
 
 impl EntityDraft {
-    pub fn new(entity_type: EntityType, name: impl Into<String>) -> Self {
-        Self {
-            id: None,
-            entity_type,
-            name: name.into(),
-            aliases: Vec::new(),
-            canonical_key: None,
-            summary: None,
-            created_at: None,
-            updated_at: None,
-            schema_version: None,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn into_domain(self) -> Result<Entity, DomainValidationError> {
@@ -101,13 +85,7 @@ impl EntityDraft {
         let entity = Entity {
             id: defaults.id(self.id),
             object_type: ObjectType::Entity,
-            entity_type: self.entity_type,
-            name: self.name,
-            aliases: self.aliases,
-            canonical_key: self.canonical_key,
-            summary: self.summary,
             created_at,
-            updated_at: self.updated_at.unwrap_or(created_at),
             schema_version: defaults.schema_version(self.schema_version),
         };
         entity.validate()?;
@@ -358,6 +336,10 @@ pub struct DerivedMemoryDraft {
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
+    /// The character's commitments about subjects in `entity_ids`.
+    pub assertions: Vec<BeliefAssertion>,
+    /// Source-free grounding given by the application; requires at least one notion subject.
+    pub given_by_application: bool,
     pub salience_score: f32,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
@@ -376,6 +358,8 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
+            assertions: Vec::new(),
+            given_by_application: false,
             salience_score: 0.5,
             supersedes: Vec::new(),
             retention_state: RetentionState::Active,
@@ -414,6 +398,8 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: self.derived_from_observation_ids,
             thread_ids: self.thread_ids,
             entity_ids: self.entity_ids,
+            assertions: self.assertions,
+            given_by_application: self.given_by_application,
             salience_score: self.salience_score,
             supersedes: self.supersedes,
             retention_state: self.retention_state,
@@ -624,13 +610,12 @@ mod tests {
         let id = memory_id("550e8400-e29b-41d4-a716-446655441001");
         let mut defaults = DraftDefaults::with_id_sequence(now, [id]);
 
-        let entity = EntityDraft::new(EntityType::User, "Kohta")
+        let entity = EntityDraft::new()
             .into_domain_with_defaults(&mut defaults)
             .unwrap();
 
         assert_eq!(entity.id, id);
         assert_eq!(entity.created_at, now);
-        assert_eq!(entity.updated_at, now);
         assert_eq!(entity.schema_version, DEFAULT_SCHEMA_VERSION);
         assert_eq!(entity.object_type, ObjectType::Entity);
     }

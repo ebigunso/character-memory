@@ -10,6 +10,9 @@ use crate::usecases::{
     CorrectionForgetPipeline, LinkPipeline, RememberPipeline, RetrievePipeline, WritePlanValidator,
 };
 
+#[cfg(test)]
+mod notion_tests;
+
 /// CharacterMemory provides a high-level API for memory operations.
 ///
 /// # Description
@@ -177,7 +180,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
-    use crate::domain::{EntityType, ObjectType, RelationType};
+    use crate::domain::{ObjectType, RelationType};
     use crate::models::vector::{
         CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
     };
@@ -191,7 +194,7 @@ mod tests {
     async fn injected_facade_remembers_through_the_write_plan_path() {
         let memory = injected_memory().await;
         let entity_id = id("550e8400-e29b-41d4-a716-446655445001");
-        let mut entity = EntityDraft::new(EntityType::User, "Kohta");
+        let mut entity = EntityDraft::new();
         entity.id = Some(entity_id);
 
         let outcome = memory
@@ -204,7 +207,7 @@ mod tests {
 
         assert!(outcome.persisted_object_ids.contains(&entity_id));
         assert_eq!(outcome.persisted_link_ids, Vec::<MemoryId>::new());
-        assert!(outcome.vector_indexed_object_ids.contains(&entity_id));
+        assert!(!outcome.vector_indexed_object_ids.contains(&entity_id));
         assert_eq!(outcome.vector_indexing_failure, None);
     }
 

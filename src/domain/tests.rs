@@ -127,6 +127,8 @@ fn valid_observation() -> Observation {
 
 fn valid_derived_memory() -> DerivedMemory {
     DerivedMemory {
+        assertions: Vec::new(),
+        given_by_application: false,
         id: memory_id("550e8400-e29b-41d4-a716-446655440030"),
         object_type: ObjectType::DerivedMemory,
         derived_type: DerivedType::ProjectNote,
@@ -167,8 +169,6 @@ fn domain_enums_serialize_as_snake_case() {
         serialized_value(ObjectType::DerivedMemory),
         serialized_value(ObjectType::MemoryLink),
         serialized_value(Modality::VoiceTranscript),
-        serialized_value(EntityType::Assistant),
-        serialized_value(EntityType::Organization),
         serialized_value(DerivedType::AssistantPreference),
         serialized_value(DerivedType::RelationshipNote),
         serialized_value(RelationType::HasObservation),
@@ -186,8 +186,6 @@ fn domain_enums_serialize_as_snake_case() {
             "derived_memory",
             "memory_link",
             "voice_transcript",
-            "assistant",
-            "organization",
             "assistant_preference",
             "relationship_note",
             "has_observation",

@@ -16,6 +16,7 @@ pub struct RetrievalContext {
     pub section_limits: ContinuitySectionLimits,
     pub lifecycle_policy: RetrievalLifecyclePolicy,
     pub include_trace: bool,
+    /// Object types admitted by vector candidate recall. Graph traversal has its own limits.
     pub object_type_defaults: Vec<ObjectType>,
 }
 
@@ -73,7 +74,6 @@ pub fn default_retrieval_object_types() -> Vec<ObjectType> {
         ObjectType::Observation,
         ObjectType::DerivedMemory,
         ObjectType::MemoryThread,
-        ObjectType::Entity,
     ]
 }
 
@@ -101,6 +101,9 @@ pub struct RetrievalGraphLimits {
     pub timeout_ms: Option<u64>,
     pub failure_mode: GraphFailureMode,
     pub allowed_relation_types: Vec<RelationType>,
+    /// Types allowed during graph traversal; independent of vector candidate scope.
+    /// An empty list imposes no object-type restriction.
+    pub allowed_object_types: Vec<ObjectType>,
 }
 
 impl Default for RetrievalGraphLimits {
@@ -113,6 +116,13 @@ impl Default for RetrievalGraphLimits {
             timeout_ms: Some(250),
             failure_mode: GraphFailureMode::AllowPartialResults,
             allowed_relation_types: Vec::new(),
+            allowed_object_types: vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::DerivedMemory,
+                ObjectType::MemoryThread,
+                ObjectType::Entity,
+            ],
         }
     }
 }
@@ -644,6 +654,8 @@ mod tests {
 
     fn derived_memory(id: MemoryId, source_episode_id: MemoryId) -> DerivedMemory {
         DerivedMemory {
+            assertions: Vec::new(),
+            given_by_application: false,
             id,
             object_type: ObjectType::DerivedMemory,
             derived_type: DerivedType::UserPreference,
@@ -672,7 +684,6 @@ mod tests {
                 ObjectType::Observation,
                 ObjectType::DerivedMemory,
                 ObjectType::MemoryThread,
-                ObjectType::Entity,
             ]
         );
     }

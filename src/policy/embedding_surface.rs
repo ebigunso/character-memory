@@ -1,8 +1,7 @@
 // Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
 use crate::domain::{
-    DerivedMemory, Entity, Episode, MemoryObject, MemoryThread, ObjectType, Observation,
-    VectorSurface,
+    DerivedMemory, Episode, MemoryObject, MemoryThread, ObjectType, Observation, VectorSurface,
 };
 
 use crate::models::vector::VectorRecord;
@@ -11,10 +10,9 @@ pub const fn max_embedding_surfaces(object_type: ObjectType) -> usize {
     match object_type {
         ObjectType::Episode
         | ObjectType::Observation
-        | ObjectType::Entity
         | ObjectType::MemoryThread
         | ObjectType::DerivedMemory => 1,
-        ObjectType::MemoryLink => 0,
+        ObjectType::Entity | ObjectType::MemoryLink => 0,
     }
 }
 
@@ -60,32 +58,13 @@ pub(crate) fn memory_thread_vector_record(thread: &MemoryThread) -> VectorRecord
     )
 }
 
-pub(crate) fn entity_vector_record(entity: &Entity) -> VectorRecord {
-    let alias_text = if entity.aliases.is_empty() {
-        String::new()
-    } else {
-        format!("Aliases: {}", entity.aliases.join(", "))
-    };
-    let summary = entity.summary.as_deref().unwrap_or_default();
-    let surface_text = join_clean([entity.name.as_str(), alias_text.as_str(), summary]);
-
-    VectorRecord::new(
-        entity.id,
-        ObjectType::Entity,
-        VectorSurface::Name,
-        entity.schema_version.clone(),
-        prefixed_text("Entity", &surface_text),
-    )
-}
-
 pub(crate) fn memory_object_vector_record(object: &MemoryObject) -> Option<VectorRecord> {
     match object {
         MemoryObject::Episode(object) => Some(episode_vector_record(object)),
         MemoryObject::Observation(object) => Some(observation_vector_record(object)),
-        MemoryObject::Entity(object) => Some(entity_vector_record(object)),
         MemoryObject::MemoryThread(object) => Some(memory_thread_vector_record(object)),
         MemoryObject::DerivedMemory(object) => Some(derived_memory_vector_record(object)),
-        MemoryObject::MemoryLink(_) => None,
+        MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
     }
 }
 
@@ -130,7 +109,7 @@ fn clean_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::domain::{
-        DerivedType, EntityType, MemoryLink, Modality, RelationType, RetentionState, ThreadStatus,
+        DerivedType, Entity, MemoryLink, Modality, RelationType, RetentionState, ThreadStatus,
         DEFAULT_SCHEMA_VERSION,
     };
     use chrono::{TimeZone, Utc};
@@ -173,12 +152,10 @@ mod tests {
     }
 
     #[test]
-    fn thread_and_entity_builders_use_names_summaries_and_exclude_state_metadata() {
+    fn thread_builder_uses_title_summary_and_excludes_state_metadata() {
         let thread = thread_fixture();
-        let entity = entity_fixture();
 
         let thread_record = memory_thread_vector_record(&thread);
-        let entity_record = entity_vector_record(&entity);
 
         assert_eq!(thread_record.surface, VectorSurface::Summary);
         assert_eq!(
@@ -186,13 +163,6 @@ mod tests {
             "Thread summary: Useful thread Thread summary."
         );
         assert_embedding_text_excludes_metadata(&thread_record);
-
-        assert_eq!(entity_record.surface, VectorSurface::Name);
-        assert_eq!(
-            entity_record.embedding_text,
-            "Entity: Kohta Aliases: K. User summary."
-        );
-        assert_embedding_text_excludes_metadata(&entity_record);
     }
 
     #[test]
@@ -215,7 +185,8 @@ mod tests {
         assert_eq!(records[1].object_type, ObjectType::Observation);
         assert_eq!(records[2].object_type, ObjectType::DerivedMemory);
         assert_eq!(records[3].object_type, ObjectType::MemoryThread);
-        assert_eq!(records[4].object_type, ObjectType::Entity);
+        assert_eq!(records.len(), 4);
+        assert!(memory_object_vector_record(&MemoryObject::Entity(entity_fixture())).is_none());
     }
 
     #[test]
@@ -284,6 +255,8 @@ mod tests {
 
     fn derived_memory_fixture() -> DerivedMemory {
         DerivedMemory {
+            assertions: Vec::new(),
+            given_by_application: false,
             id: id(40),
             object_type: ObjectType::DerivedMemory,
             derived_type: DerivedType::Reflection,
@@ -321,13 +294,7 @@ mod tests {
         Entity {
             id: id(1),
             object_type: ObjectType::Entity,
-            entity_type: EntityType::User,
-            name: "Kohta".to_owned(),
-            aliases: vec!["K.".to_owned()],
-            canonical_key: Some("person:kohta".to_owned()),
-            summary: Some("User summary.".to_owned()),
             created_at: timestamp(),
-            updated_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         }
     }

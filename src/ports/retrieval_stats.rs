@@ -686,6 +686,8 @@ mod tests {
                 schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
             }),
             MemoryObject::DerivedMemory(DerivedMemory {
+                assertions: Vec::new(),
+                given_by_application: false,
                 id: memory_id,
                 object_type: ObjectType::DerivedMemory,
                 derived_type: DerivedType::Reflection,
@@ -724,6 +726,8 @@ mod tests {
         let memory_id = id("550e8400-e29b-41d4-a716-446655460032");
         let link_id = id("550e8400-e29b-41d4-a716-446655460033");
         let objects = vec![MemoryObject::DerivedMemory(DerivedMemory {
+            assertions: Vec::new(),
+            given_by_application: false,
             id: memory_id,
             object_type: ObjectType::DerivedMemory,
             derived_type: DerivedType::Reflection,
@@ -792,6 +796,8 @@ mod tests {
         let memory_id = id("550e8400-e29b-41d4-a716-446655460042");
         let link_id = id("550e8400-e29b-41d4-a716-446655460043");
         let memory = MemoryObject::DerivedMemory(DerivedMemory {
+            assertions: Vec::new(),
+            given_by_application: false,
             id: memory_id,
             object_type: ObjectType::DerivedMemory,
             derived_type: DerivedType::Reflection,

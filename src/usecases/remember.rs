@@ -332,8 +332,8 @@ mod tests {
         MemoryLinkCandidate, MemoryLinkDraft, MemoryThreadDraft, ObservationDraft, RememberInput,
     };
     use crate::domain::{
-        CandidateValidationIssue, DerivedType, EntityType, MemoryCandidateKind, MemoryId,
-        ObjectType, RelationType, DEFAULT_SCHEMA_VERSION,
+        CandidateValidationIssue, DerivedType, MemoryCandidateKind, MemoryId, ObjectType,
+        RelationType, DEFAULT_SCHEMA_VERSION,
     };
     use crate::errors::{
         RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
@@ -454,7 +454,7 @@ mod tests {
         assert!(retry.vector_indexing_failure.is_none());
         assert_eq!(
             retry.vector_indexed_object_ids,
-            expected_object_ids(&fixed_ids())
+            expected_vector_ids(&fixed_ids())
         );
     }
 
@@ -479,10 +479,7 @@ mod tests {
             outcome.persisted_link_ids,
             vec![ids.inline_link, ids.extra_link]
         );
-        assert_eq!(
-            outcome.vector_indexed_object_ids,
-            outcome.persisted_object_ids
-        );
+        assert_eq!(outcome.vector_indexed_object_ids, expected_vector_ids(&ids));
         assert_eq!(outcome.vector_indexing_failure, None);
         let calls = graph.calls();
         let last_graph_write = calls
@@ -638,7 +635,7 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("vector failure should be explicit");
-        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
+        assert_eq!(failure.unindexed_object_ids(), expected_vector_ids(&ids));
         assert!(matches!(
             failure.cause,
             VectorIndexingCause::VectorDatabase(VectorDatabaseError {
@@ -654,7 +651,7 @@ mod tests {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
         let vector = RecordingVectorStore::default();
-        let embedder = RecordingEmbedder::default().with_embedding_count(4);
+        let embedder = RecordingEmbedder::default().with_embedding_count(3);
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
@@ -666,12 +663,12 @@ mod tests {
         let failure = outcome
             .vector_indexing_failure
             .expect("embedding mismatch should be explicit");
-        assert_eq!(failure.unindexed_object_ids(), outcome.persisted_object_ids);
+        assert_eq!(failure.unindexed_object_ids(), expected_vector_ids(&ids));
         assert_eq!(
             failure.cause,
             VectorIndexingCause::CardinalityMismatch {
-                expected: 5,
-                actual: 4,
+                expected: 4,
+                actual: 3,
             }
         );
         assert!(vector.calls().is_empty());
@@ -920,6 +917,10 @@ mod tests {
         )
     }
 
+    fn expected_vector_ids(ids: &FixedIds) -> Vec<MemoryId> {
+        vec![ids.episode, ids.observation, ids.thread, ids.derived]
+    }
+
     fn expected_object_ids(ids: &FixedIds) -> Vec<MemoryId> {
         vec![
             ids.episode,
@@ -943,7 +944,7 @@ mod tests {
     }
 
     fn entity_draft(id: MemoryId) -> EntityDraft {
-        let mut draft = EntityDraft::new(EntityType::User, "Kohta");
+        let mut draft = EntityDraft::new();
         draft.id = Some(id);
         draft
     }
@@ -1124,6 +1125,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_notions_known_as(
+            &self,
+            name: &str,
+        ) -> Result<Vec<MemoryId>, crate::errors::GraphQueryError> {
+            self.store.query_notions_known_as(name).await
+        }
+
         async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
                 objects.iter().map(MemoryObject::id).collect(),
