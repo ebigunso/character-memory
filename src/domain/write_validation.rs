@@ -72,8 +72,6 @@ pub enum CandidateValidationIssue {
     },
     #[error("episode summary must not be empty")]
     EmptyEpisodeSummary,
-    #[error("a scene participant must have a key or nonblank name or description")]
-    EmptySceneParticipant,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
     #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]

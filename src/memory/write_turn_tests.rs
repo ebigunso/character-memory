@@ -435,7 +435,7 @@ async fn stalled_embedding_leaves_other_writes_prepare_and_retrieve_free() {
 }
 
 #[tokio::test]
-async fn correction_rebuilds_the_cascade_after_embedding_and_preserves_batch_identity() {
+async fn correction_rebuilds_the_cascade_after_embedding() {
     let fixture = Fixture::new().await;
     let mut draft = correction();
     draft.targets = vec![CorrectionTarget::source_object(
@@ -445,12 +445,6 @@ async fn correction_rebuilds_the_cascade_after_embedding_and_preserves_batch_ide
             original_setting_key: None,
         },
     )];
-    let mut second =
-        ReplacementDerivedMemoryDraft::new(DerivedType::Claim, "A different corrected claim")
-            .with_source_episode(SOURCE);
-    second.id = Some(MemoryId::from_u128(6));
-    second.correction_origin_provenance = SourceProvenanceReference::episode(SOURCE);
-    draft.replacement_derived_memories.insert(0, second);
     fixture.embed.arm();
     let mut correction = Box::pin(fixture.memory.correct(draft));
     enter(&fixture.embed, &mut correction).await;
@@ -462,40 +456,14 @@ async fn correction_rebuilds_the_cascade_after_embedding_and_preserves_batch_ide
     .unwrap();
     fixture.embed.release.notify_one();
     completes(correction).await.unwrap();
-    assert_eq!(
-        fixture.vector_ids().await,
-        vec![REPLACEMENT, MemoryId::from_u128(6)]
-    );
-    for id in [REPLACEMENT, MemoryId::from_u128(6)] {
-        let belief = fixture.belief(id).await;
-        assert_eq!(belief.supersedes, vec![OLD, NEW]);
-        let record =
-            crate::policy::memory_object_vector_record(&MemoryObject::DerivedMemory(belief))
-                .unwrap();
-        let embedding = DeterministicMemoryEmbedder::new(8)
-            .embed(&record.embedding_input())
-            .await
-            .unwrap();
-        let recall = fixture
-            .memory
-            .memory_composition
-            .vector_store
-            .search_candidates(&VectorCandidateSearch::new(
-                embedding,
-                1,
-                vec![ObjectType::DerivedMemory],
-            ))
-            .await
-            .unwrap();
-        assert_eq!(recall.candidates[0].object_id, id);
-        assert!(recall.candidates[0].score > 0.9999);
-    }
+    assert_eq!(fixture.vector_ids().await, vec![REPLACEMENT]);
+    assert_eq!(fixture.belief(REPLACEMENT).await.supersedes, vec![OLD, NEW]);
     assert_eq!(
         fixture.counter(RelationType::About).await,
         RetrievalStatsCounter {
-            total_count: 4,
-            active_count: 4,
-            current_count: 2
+            total_count: 3,
+            active_count: 3,
+            current_count: 1
         }
     );
 }

@@ -28,6 +28,17 @@ impl Scene {
         Self::at(Utc::now())
     }
 
+    pub(crate) fn without_blank_participants(mut self) -> Self {
+        self.participants.retain(|participant| {
+            participant.key.is_some()
+                || [&participant.name, &participant.description]
+                    .into_iter()
+                    .flatten()
+                    .any(|words| !words.trim().is_empty())
+        });
+        self
+    }
+
     pub(crate) fn participant_keys(&self) -> impl Iterator<Item = MemoryId> + '_ {
         self.participants
             .iter()
@@ -35,7 +46,7 @@ impl Scene {
     }
 }
 
-/// Perceived words and a known identity can coexist; writes require a key or nonblank words.
+/// Perceived words and a known identity can coexist; blank entries are omitted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SceneParticipant {
     pub key: Option<MemoryId>,

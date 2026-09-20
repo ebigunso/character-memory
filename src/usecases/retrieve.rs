@@ -84,8 +84,9 @@ where
 
     pub(crate) async fn retrieve(
         &self,
-        context: RetrievalContext,
+        mut context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
+        context.scene = context.scene.without_blank_participants();
         context.validate()?;
         let cues = self.recall_cues(&context).await?;
         let vector_candidates = cues.candidates;

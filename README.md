@@ -48,7 +48,7 @@ Retrieval is graph-authoritative and hybrid:
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
-`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions, while participant descriptions and setting words search memory content. The setting key and custom values cue nothing yet. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Missing or forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
+`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions, while participant descriptions and setting words search memory content. The setting key and custom values cue nothing yet. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
 
 ## What this is not
 
@@ -163,7 +163,7 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 
 For callers that want the standard write lifecycle in one call, `remember(RememberInput, RememberOptions)` composes `prepare`, `validate_plan`, and `commit` over the same graph-authoritative machinery.
 
-An episode stores one `Scene` with its time, participants, setting and custom values as supplied. Scene words join its single summary embedding; keys and custom values do not. If the input and episode draft omit the scene, `prepare` fixes the current time once; a caller-built episode must supply its scene. Writes reject participants with neither a key nor nonblank words, and keys that identify no existing or same-plan notion.
+An episode stores one `Scene` with its time, participants, setting and custom values. Scene words join its single summary embedding; keys and custom values do not. If the input and episode draft omit the scene, `prepare` fixes the current time once; a caller-built episode must supply its scene. Participant keys must identify existing or same-plan notions.
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 

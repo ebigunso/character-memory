@@ -232,6 +232,56 @@ fn keyed(key: u128) -> SceneParticipant {
 }
 
 #[tokio::test]
+async fn authored_episode_without_links_is_recalled_by_its_participant() {
+    let (memory, queries) = scene_memory().await;
+    create_notion(&memory, 100, Some("Mira")).await;
+    create_notion(&memory, 200, None).await;
+    let mut elsewhere = scene();
+    elsewhere.participants.push(keyed(200));
+    write_episode(&memory, 6000, elsewhere).await;
+    let mut past = scene();
+    past.participants = vec![keyed(100), keyed(100)];
+    let episode_id = MemoryId::from_u128(5000);
+    let mut episode = EpisodeDraft::new("An authored experience.");
+    episode.id = Some(episode_id);
+    episode.created_at = Some(past.time);
+    episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    episode.scene = Some(past.clone());
+    let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
+        EpisodeCandidate::new(episode, CandidateProvenance::caller("experience")),
+    ));
+    let first = memory
+        .commit(plan.clone(), CommitOptions::default())
+        .await
+        .unwrap();
+    let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+    assert_eq!(first.persisted_link_ids.len(), 1);
+    assert_eq!(first.persisted_link_ids, replay.persisted_link_ids);
+    queries.lock().unwrap().clear();
+    let mut present = scene();
+    present.participants.push(keyed(100));
+    let result = memory
+        .retrieve(RetrievalContext::default().with_scene(present).with_trace())
+        .await
+        .unwrap();
+    assert!(queries.lock().unwrap().is_empty());
+    assert_eq!(result.pack.relevant_episodes.len(), 1);
+    assert_eq!(result.pack.relevant_episodes[0].id, episode_id);
+    assert_eq!(
+        recorded(&result, ObjectType::Episode, episode_id),
+        [SourceScene::Recorded {
+            episode_id,
+            scene: past
+        }]
+    );
+    assert!(result.trace.unwrap().graph_relations.iter().any(|link| {
+        link.from.id == episode_id
+            && link.to.id == MemoryId::from_u128(100)
+            && link.relation == RelationType::Involves
+    }));
+}
+
+#[tokio::test]
 async fn participant_references_resolve_and_expand_without_a_topic_under_root_budget() {
     let (memory, queries) = scene_memory().await;
     create_notion(&memory, 100, Some("Mira")).await;
@@ -425,13 +475,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     assert!(description_only
         .scene_references
         .iter()
-        .all(|reference| reference.resolution
-            == SceneReferenceResolution::ContentCue {
-                matches: vec![MemoryObjectRef::new(
-                    ObjectType::DerivedMemory,
-                    MemoryId::from_u128(1100)
-                )]
-            }));
+        .all(|reference| reference.resolution == SceneReferenceResolution::ContentCue));
     context.topic = Some("astronomer".to_owned());
     queries.lock().unwrap().clear();
     let merged = memory.retrieve(context.clone()).await.unwrap();
@@ -458,7 +502,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         &place_result.scene_references[0],
         SceneReferenceResult {
             reference: SceneReference::SettingWords,
-            resolution: SceneReferenceResolution::ContentCue { .. }
+            resolution: SceneReferenceResolution::ContentCue
         }
     ));
 }
@@ -485,18 +529,9 @@ async fn time_only_scene_is_echoed_without_embedding_or_completeness_claim() {
     let mut blank = RetrievalContext::new(" \n ");
     blank.scene.participants.push(SceneParticipant::default());
     blank.scene.setting.words = Some("\t".to_owned());
-    memory.retrieve(blank).await.unwrap();
+    let result = memory.retrieve(blank).await.unwrap();
+    assert!(result.scene.participants.is_empty());
     assert!(queries.lock().unwrap().is_empty());
-    let mut words = RetrievalContext::default();
-    words.scene.setting.words = Some("nowhere".to_owned());
-    let unmatched = memory.retrieve(words).await.unwrap();
-    assert!(unmatched.trace.is_none());
-    assert_eq!(
-        unmatched.scene_references[0].resolution,
-        SceneReferenceResolution::ContentCue {
-            matches: Vec::new()
-        }
-    );
 }
 
 async fn write_belief(
@@ -707,52 +742,4 @@ async fn forgotten_source_scenes_follow_the_existing_suppression_switch() {
             );
         }
     }
-}
-
-#[tokio::test]
-async fn missing_source_objects_are_unavailable_not_source_free() {
-    // Seed a dangling store reference: recall must report it honestly, including
-    // when an external store edit or a non-snapshot read made the source unavailable.
-    let belief = representative_fixtures().derived_reflection;
-    let object = MemoryObject::DerivedMemory(belief.clone());
-    let graph = in_memory_graph_store();
-    graph
-        .upsert_objects(std::slice::from_ref(&object))
-        .await
-        .unwrap();
-    let vector = TemporaryVectorCandidateStore::open(8).await;
-    let record = memory_object_vector_record(&object).unwrap();
-    let embedding = DeterministicMemoryEmbedder::new(8)
-        .embed(&record.embedding_input())
-        .await
-        .unwrap();
-    vector
-        .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &embedding)])
-        .await
-        .unwrap();
-    let memory = CharacterMemory::from_parts(
-        Box::new(graph),
-        Box::new(vector),
-        Box::new(DeterministicMemoryEmbedder::new(8)),
-    );
-    let result = memory.retrieve(beliefs_context()).await.unwrap();
-    assert_eq!(
-        recorded(&result, ObjectType::DerivedMemory, belief.id),
-        [
-            SourceScene::Unavailable {
-                source: MemoryObjectRef::new(
-                    ObjectType::Episode,
-                    belief.derived_from_episode_ids[0]
-                ),
-                reason: SourceSceneUnavailableReason::Missing
-            },
-            SourceScene::Unavailable {
-                source: MemoryObjectRef::new(
-                    ObjectType::Observation,
-                    belief.derived_from_observation_ids[0]
-                ),
-                reason: SourceSceneUnavailableReason::Missing
-            },
-        ]
-    );
 }

@@ -115,8 +115,17 @@ fn assert_issue(error: CustomError, expected: CandidateValidationIssue) {
 async fn scene_words_round_trip_through_remember_and_authored_plan_without_inference() {
     for direct in [false, true] {
         let (memory, inputs) = memory().await;
-        let scene = words_scene();
-        let draft = episode_draft(8101, Some(scene.clone()));
+        let mut scene = words_scene();
+        scene.participants[0].description = Some(" \t ".to_owned());
+        scene.participants[1].name = Some(String::new());
+        let mut supplied = scene.clone();
+        supplied.participants.insert(0, SceneParticipant::default());
+        supplied.participants.push(SceneParticipant {
+            name: Some(" \n ".to_owned()),
+            description: Some("\t".to_owned()),
+            key: None,
+        });
+        let draft = episode_draft(8101, Some(supplied.clone()));
         let outcome = if direct {
             let plan = episode_plan(draft).with_candidate(MemoryCandidate::VectorIndex(
                 VectorIndexCandidate::new(
@@ -137,7 +146,7 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
             memory
                 .remember(
                     RememberInput::new("An experience")
-                        .with_scene(scene.clone())
+                        .with_scene(supplied.clone())
                         .with_episode(episode_draft(8101, None)),
                     RememberOptions::default(),
                 )
@@ -171,6 +180,11 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
                 }
             );
         }
+        let result = memory
+            .retrieve(RetrievalContext::default().with_scene(supplied))
+            .await
+            .unwrap();
+        assert_eq!(result.scene, scene);
         memory.close().await.unwrap();
     }
 }
@@ -200,12 +214,17 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
         memory
             .remember(
                 RememberInput::new("  An\n experience  ")
-                    .with_scene(scene)
+                    .with_scene(scene.clone())
                     .with_entity(entity),
                 RememberOptions::default(),
             )
             .await
             .unwrap();
+        let saved = objects(&memory, vec![ObjectType::Episode]).await;
+        let [MemoryObject::Episode(episode)] = saved.as_slice() else {
+            panic!("one episode expected")
+        };
+        assert_eq!(episode.scene, scene);
         let recorded = inputs.lock().unwrap().clone();
         assert_eq!(recorded.len(), 2);
         assert_eq!(
@@ -226,6 +245,71 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
         );
         memory.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
+    struct TextEmbedder;
+    #[async_trait]
+    impl MemoryEmbedder for TextEmbedder {
+        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![
+                f32::from(input.text.contains("volcano")),
+                f32::from(input.text.contains("harbor")),
+            ])
+        }
+
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            let mut embeddings = Vec::new();
+            for input in inputs {
+                embeddings.push(self.embed(input).await?);
+            }
+            Ok(embeddings)
+        }
+    }
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(2).await),
+        Box::new(TextEmbedder),
+    );
+    let id = MemoryId::from_u128(8801);
+    let mut episode = episode_draft(id.as_u128(), Some(Scene::at(time())));
+    episode.summary = "A volcano erupted".to_owned();
+    let mut observation = ObservationDraft::new(id, "Ships arrived at the harbor");
+    observation.id = Some(id);
+    let outcome = memory
+        .remember(
+            RememberInput::new("A volcano erupted")
+                .with_episode(episode)
+                .with_observation(observation),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert!(outcome.vector_indexing_failure.is_none());
+    for (topic, object_type, surface) in [
+        ("volcano", ObjectType::Episode, VectorSurface::Summary),
+        ("harbor", ObjectType::Observation, VectorSurface::Text),
+    ] {
+        let mut context = RetrievalContext::new(topic).with_trace();
+        context.object_type_defaults = vec![object_type];
+        context.graph_limits.max_depth = 0;
+        let result = memory.retrieve(context).await.unwrap();
+        let trace = result.trace.unwrap();
+        let [candidate] = trace.vector_candidates.as_slice() else {
+            panic!(
+                "one {object_type:?} vector expected: {:?}",
+                trace.vector_candidates
+            );
+        };
+        assert_eq!(candidate.object, MemoryObjectRef::new(object_type, id));
+        assert_eq!(candidate.surface, surface);
+        assert!(candidate.score > 0.9999, "{topic}: {candidate:?}");
+    }
+    memory.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -461,7 +545,7 @@ async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_creat
 }
 
 #[tokio::test]
-async fn writes_reject_missing_scene_empty_participants_and_unknown_keys() {
+async fn writes_reject_missing_scene_and_unknown_keys() {
     let (memory, inputs) = memory().await;
     assert_eq!(
         episode_draft(8401, None).into_domain(),
@@ -480,45 +564,6 @@ async fn writes_reject_missing_scene_empty_participants_and_unknown_keys() {
             field: CandidateTimestampField::SceneTime,
         },
     );
-    for participant in [
-        SceneParticipant::default(),
-        SceneParticipant {
-            name: Some(" \n ".to_owned()),
-            ..Default::default()
-        },
-        SceneParticipant {
-            description: Some("\t".to_owned()),
-            ..Default::default()
-        },
-        SceneParticipant {
-            name: Some(String::new()),
-            description: Some(" \t ".to_owned()),
-            key: None,
-        },
-    ] {
-        let mut empty_participant = Scene::at(time());
-        empty_participant.participants.push(participant);
-        assert_eq!(
-            episode_draft(8401, Some(empty_participant.clone())).into_domain(),
-            Err(DomainValidationError::EmptySceneParticipant)
-        );
-        let error = memory
-            .remember(
-                RememberInput::new("An experience").with_scene(empty_participant.clone()),
-                RememberOptions::default(),
-            )
-            .await
-            .unwrap_err();
-        assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
-        let error = memory
-            .commit(
-                episode_plan(episode_draft(8401, Some(empty_participant))),
-                CommitOptions::default(),
-            )
-            .await
-            .unwrap_err();
-        assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
-    }
     let unknown = MemoryId::from_u128(8499);
     let mut scene = Scene::at(time());
     scene.participants.push(SceneParticipant {
