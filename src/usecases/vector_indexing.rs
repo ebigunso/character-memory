@@ -1,8 +1,9 @@
 use crate::api::types::VectorIndexingFailure;
-use crate::domain::MemoryObjectRef;
+use crate::domain::{MemoryObjectRef, ObjectType};
 use crate::errors::{CustomError, VectorIndexingCause};
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
 use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,10 +33,39 @@ where
         }
     }
 
-    pub(crate) async fn index(
+    pub(crate) async fn index<G: GraphAuthorityStore + ?Sized>(
         &self,
-        records: Vec<VectorRecord>,
+        graph_store: &G,
+        mut records: Vec<VectorRecord>,
     ) -> Result<VectorIndexingOutcome, CustomError> {
+        let derived_ids = records
+            .iter()
+            .filter(|record| record.object_type == ObjectType::DerivedMemory)
+            .map(|record| record.object_id)
+            .collect::<Vec<_>>();
+        if !derived_ids.is_empty() {
+            let superseded = match graph_store
+                .query_superseded_derived_memory_ids(&derived_ids)
+                .await
+            {
+                Ok(ids) => ids,
+                Err(error) => {
+                    return Ok(failed(
+                        records
+                            .iter()
+                            .map(|record| {
+                                MemoryObjectRef::new(record.object_type, record.object_id)
+                            })
+                            .collect(),
+                        VectorIndexingCause::GraphQuery(error),
+                    ))
+                }
+            };
+            records.retain(|record| {
+                record.object_type != ObjectType::DerivedMemory
+                    || !superseded.contains(&record.object_id)
+            });
+        }
         if records.is_empty() {
             return Ok(VectorIndexingOutcome {
                 indexed_objects: Vec::new(),
@@ -98,6 +128,27 @@ where
             }
             Err(error) => Err(error),
         }
+    }
+}
+
+pub(crate) async fn delete_vectors<V: VectorCandidateStore + ?Sized>(
+    vector_store: &V,
+    objects: &[MemoryObjectRef],
+) -> Result<Option<crate::api::types::VectorMaintenanceFailureItem>, CustomError> {
+    if objects.is_empty() {
+        return Ok(None);
+    }
+    let ids = objects.iter().map(|object| object.id).collect::<Vec<_>>();
+    match vector_store.delete_candidates(&ids).await {
+        Ok(()) => Ok(None),
+        Err(CustomError::VectorDatabaseError(error)) => {
+            Ok(Some(crate::api::types::VectorMaintenanceFailureItem {
+                operation: crate::api::types::VectorMaintenanceOperation::Delete,
+                objects: objects.to_vec(),
+                cause: VectorIndexingCause::VectorDatabase(error),
+            }))
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -174,7 +225,10 @@ mod tests {
         let embedder = FixedEmbedder(embedding);
         let service = VectorIndexingService::new(&store, &embedder);
 
-        let outcome = service.index(vec![record]).await.expect("typed outcome");
+        let outcome = service
+            .index(&crate::test_support::in_memory_graph_store(), vec![record])
+            .await
+            .expect("typed outcome");
 
         assert!(outcome.indexed_objects.is_empty());
         assert_eq!(

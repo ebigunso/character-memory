@@ -359,7 +359,6 @@ pub struct DerivedMemoryDraft {
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
     pub salience_score: f32,
-    pub is_current: bool,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
     pub created_at: Option<DateTime<Utc>>,
@@ -378,7 +377,6 @@ impl DerivedMemoryDraft {
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
             salience_score: 0.5,
-            is_current: true,
             supersedes: Vec::new(),
             retention_state: RetentionState::Active,
             created_at: None,
@@ -417,7 +415,6 @@ impl DerivedMemoryDraft {
             thread_ids: self.thread_ids,
             entity_ids: self.entity_ids,
             salience_score: self.salience_score,
-            is_current: self.is_current,
             supersedes: self.supersedes,
             retention_state: self.retention_state,
             created_at,
@@ -485,6 +482,9 @@ impl MemoryLinkDraft {
         self,
         defaults: &mut DraftDefaults,
     ) -> Result<MemoryLink, DomainValidationError> {
+        if self.relation == RelationType::Supersedes {
+            return Err(DomainValidationError::AuthoredSupersedesLink);
+        }
         let link = MemoryLink {
             id: defaults.id(self.id),
             object_type: ObjectType::MemoryLink,

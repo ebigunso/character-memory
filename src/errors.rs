@@ -209,6 +209,8 @@ pub enum EmbeddingTransportErrorKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "cause", content = "detail", rename_all = "snake_case")]
 pub enum VectorIndexingCause {
+    #[error("graph currency lookup failed: {0}")]
+    GraphQuery(#[source] GraphQueryError),
     #[error("embedding failed: {0}")]
     Embedding(#[source] EmbeddingError),
     #[error("embedding cardinality mismatch: expected {expected}, got {actual}")]

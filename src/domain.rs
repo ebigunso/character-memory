@@ -253,6 +253,9 @@ pub enum DomainValidationError {
     #[error("{field} must be in 0.0..=1.0 and finite, got {value}")]
     InvalidScore { field: &'static str, value: f32 },
 
+    #[error("Supersedes links are derived from a memory supersedes list and cannot be authored")]
+    AuthoredSupersedesLink,
+
     #[error("memory links cannot point at MemoryLink endpoints via {field}")]
     UnsupportedMemoryLinkEndpoint { field: &'static str },
 
@@ -401,7 +404,6 @@ pub struct DerivedMemory {
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
     pub salience_score: f32,
-    pub is_current: bool,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
     pub created_at: DateTime<Utc>,
@@ -419,6 +421,12 @@ impl DerivedMemory {
         if self.derived_from_episode_ids.is_empty() && self.derived_from_observation_ids.is_empty()
         {
             return Err(DomainValidationError::MissingDerivedSource);
+        }
+        if self.supersedes.contains(&self.id) {
+            return Err(DomainValidationError::SelfLink {
+                object_type: ObjectType::DerivedMemory,
+                id: self.id,
+            });
         }
         validate_score("DerivedMemory.salience_score", self.salience_score)
     }

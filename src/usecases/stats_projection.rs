@@ -122,8 +122,27 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Vec<StatsUpdateCause> {
-        let states = retrieval_stats_object_states(objects);
-        let edges = retrieval_stats_edges(objects, links);
+        let derived_ids = objects
+            .iter()
+            .filter_map(|object| match object {
+                MemoryObject::DerivedMemory(memory) => Some(memory.id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let superseded = if derived_ids.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            match self
+                .graph_store
+                .query_superseded_derived_memory_ids(&derived_ids)
+                .await
+            {
+                Ok(ids) => ids.into_iter().collect(),
+                Err(error) => return vec![StatsUpdateCause::EndpointHydration { error }],
+            }
+        };
+        let states = retrieval_stats_object_states(objects, &superseded);
+        let edges = retrieval_stats_edges(objects, links, &superseded);
         let mut causes = Vec::new();
         if let Err(error) = self.stats_store.record_edges(&edges).await {
             causes.push(StatsUpdateCause::EdgeWrite { error });

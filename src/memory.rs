@@ -69,6 +69,8 @@ impl CharacterMemory {
 
     /// Commits a remember write plan after revalidating it against current graph state.
     ///
+    /// Objects and links derived from memory supersedes lists are written in one graph batch.
+    ///
     /// Graph-authoritative writes are critical and fail the operation. Vector indexing and
     /// retrieval-stats updates are repairable and are reported in the returned outcome.
     pub async fn commit(
@@ -98,6 +100,7 @@ impl CharacterMemory {
     }
 
     /// Persists a canonical typed relationship and reports its repairable stats projection.
+    /// Existing IDs accept identical content only; an omitted creation time retains the stored time.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let parts = self.memory_composition();
         LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
@@ -122,7 +125,7 @@ impl CharacterMemory {
         .await
     }
 
-    /// Applies a non-destructive lifecycle correction through injected graph/vector parts.
+    /// Appends replacement memories and their derived Supersedes links without rewriting predecessors.
     pub async fn correct(
         &self,
         draft: CorrectMemoryDraft,
@@ -388,6 +391,395 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn supersession_plan_rejects_cycles_before_writing() {
+        for cycle_len in [2, 3] {
+            let memory = injected_memory().await;
+            let episode_id = MemoryId::from_u128(1100);
+            let cycle_ids = (1..=cycle_len)
+                .map(|offset| MemoryId::from_u128(1100 + offset))
+                .collect::<Vec<_>>();
+            let root_id = MemoryId::from_u128(1104);
+            let leaf_id = MemoryId::from_u128(1105);
+            let mut episode = EpisodeDraft::new("Supersession source.");
+            episode.id = Some(episode_id);
+            let mut input = RememberInput::new("Supersession source.").with_episode(episode);
+            for memory_id in [root_id]
+                .into_iter()
+                .chain(cycle_ids.iter().copied())
+                .chain([leaf_id])
+            {
+                let mut draft = DerivedMemoryDraft::new(
+                    DerivedType::UserPreference,
+                    format!("Preference {memory_id}."),
+                )
+                .with_source_episode(episode_id);
+                draft.id = Some(memory_id);
+                if memory_id == root_id {
+                    draft.supersedes = vec![cycle_ids[0], leaf_id];
+                } else if let Some(index) = cycle_ids.iter().position(|id| *id == memory_id) {
+                    draft.supersedes = vec![leaf_id];
+                    if let Some(next) = cycle_ids.get(index + 1) {
+                        draft.supersedes.push(*next);
+                    }
+                }
+                input = input.with_derived_memory(draft);
+            }
+            let acyclic_plan = memory
+                .prepare(input, PrepareOptions::default())
+                .await
+                .unwrap();
+            assert!(memory
+                .validate_plan(&acyclic_plan)
+                .await
+                .unwrap()
+                .iter()
+                .all(|validation| validation.status == CandidateValidationStatus::Valid));
+            let mut cyclic_plan = acyclic_plan.clone();
+            for candidate in &mut cyclic_plan.candidates {
+                if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+                    if candidate.draft.id == cycle_ids.last().copied() {
+                        candidate.draft.supersedes.push(cycle_ids[0]);
+                    }
+                }
+            }
+            let validations = memory.validate_plan(&cyclic_plan).await.unwrap();
+            for validation in &validations {
+                let is_cycle_member = matches!(
+                    &cyclic_plan.candidates[validation.candidate_index],
+                    MemoryCandidate::DerivedMemory(candidate)
+                        if candidate.draft.id.is_some_and(|id| cycle_ids.contains(&id))
+                );
+                if is_cycle_member {
+                    assert_eq!(validation.status, CandidateValidationStatus::Invalid);
+                    assert_eq!(
+                        validation.errors,
+                        vec![CandidateValidationIssue::SupersessionCycle {
+                            memory_ids: cycle_ids.clone(),
+                        }]
+                    );
+                } else {
+                    assert_eq!(validation.status, CandidateValidationStatus::Valid);
+                }
+            }
+            assert!(matches!(
+                memory.commit(cyclic_plan, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations: rejected })
+                    if rejected == validations
+            ));
+            let graph = memory.memory_composition.graph_store.as_ref();
+            assert!(graph
+                .query_objects(&GraphObjectQuery::by_types(
+                    vec![ObjectType::Episode, ObjectType::DerivedMemory],
+                    None,
+                ))
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(graph
+                .query_superseded_derived_memory_ids(&cycle_ids)
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(memory
+                .memory_composition
+                .vector_store
+                .search_candidates(&VectorCandidateSearch::new(
+                    vec![1.0; 8],
+                    100,
+                    vec![ObjectType::Episode, ObjectType::DerivedMemory]
+                ))
+                .await
+                .unwrap()
+                .candidates
+                .is_empty());
+            memory
+                .commit(acyclic_plan, CommitOptions::default())
+                .await
+                .unwrap();
+            memory.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn supersession_plan_cannot_close_a_cycle_across_committed_plans() {
+        let memory = injected_memory().await;
+        let episode_id = MemoryId::from_u128(1200);
+        let memory_ids = [1201, 1202, 1203].map(MemoryId::from_u128);
+        let mut episode = EpisodeDraft::new("Sequential supersession source.");
+        episode.id = Some(episode_id);
+        let mut first =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Original preference.")
+                .with_source_episode(episode_id);
+        first.id = Some(memory_ids[0]);
+        let mut original_plan = memory
+            .prepare(
+                RememberInput::new("Sequential supersession source.")
+                    .with_episode(episode)
+                    .with_derived_memory(first),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .commit(original_plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        for index in 1..memory_ids.len() {
+            let mut successor =
+                DerivedMemoryDraft::new(DerivedType::UserPreference, format!("Revision {index}."))
+                    .with_source_episode(episode_id);
+            successor.id = Some(memory_ids[index]);
+            successor.supersedes = vec![memory_ids[index - 1]];
+            memory
+                .remember(
+                    RememberInput::new(format!("Revision {index} source."))
+                        .with_derived_memory(successor),
+                    RememberOptions::default(),
+                )
+                .await
+                .unwrap();
+        }
+        let query = GraphObjectQuery::by_refs(
+            memory_ids
+                .iter()
+                .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                .collect(),
+        );
+        let graph = memory.memory_composition.graph_store.as_ref();
+        let before = graph.query_objects(&query).await.unwrap();
+        for candidate in &mut original_plan.candidates {
+            if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+                candidate.draft.supersedes = vec![memory_ids[2]];
+            }
+        }
+        assert!(matches!(
+            memory.commit(original_plan, CommitOptions::default()).await,
+            Err(CustomError::DeterministicIdCollision { object })
+                if object == MemoryObjectRef::new(ObjectType::DerivedMemory, memory_ids[0])
+        ));
+        assert_eq!(graph.query_objects(&query).await.unwrap(), before);
+        assert_eq!(
+            graph
+                .query_superseded_derived_memory_ids(&memory_ids)
+                .await
+                .unwrap(),
+            memory_ids[..2]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_older_plan_replay_keeps_predecessor_out_of_vector_index() {
+        let memory = injected_memory().await;
+        let episode_id = MemoryId::from_u128(1000);
+        let predecessor_id = MemoryId::from_u128(1001);
+        let successor_id = MemoryId::from_u128(1002);
+        let mut episode = EpisodeDraft::new("Preference source.");
+        episode.id = Some(episode_id);
+        let mut predecessor =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Original preference.")
+                .with_source_episode(episode_id);
+        predecessor.id = Some(predecessor_id);
+        let old_plan = memory
+            .prepare(
+                RememberInput::new("Preference source.")
+                    .with_episode(episode)
+                    .with_derived_memory(predecessor),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .commit(old_plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        let mut successor =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Updated preference.")
+                .with_source_episode(episode_id);
+        successor.id = Some(successor_id);
+        successor.supersedes = vec![predecessor_id];
+        memory
+            .remember(
+                RememberInput::new("Preference update.").with_derived_memory(successor),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        let replay = memory
+            .commit(old_plan, CommitOptions::default())
+            .await
+            .expect("older identical plan is accepted");
+        assert!(!replay.vector_indexed_object_ids.contains(&predecessor_id));
+        assert!(replay.vector_indexing_failure.is_none());
+        let recall = memory
+            .memory_composition
+            .vector_store
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0; 8],
+                100,
+                vec![ObjectType::DerivedMemory],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            recall
+                .candidates
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![successor_id]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_older_correction_replay_keeps_superseded_replacement_out_of_index() {
+        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
+        let old_correction =
+            derived_correction_draft(&fixtures, replacement_id, fixtures.user_preference.id);
+        memory.correct(old_correction.clone()).await.unwrap();
+        let newest_id = MemoryId::from_u128(1003);
+        memory
+            .correct(derived_correction_draft(
+                &fixtures,
+                newest_id,
+                replacement_id,
+            ))
+            .await
+            .unwrap();
+        let replay = memory
+            .correct(old_correction)
+            .await
+            .expect("older identical correction is accepted");
+        assert!(replay.graph_mutated_object_ids.is_empty());
+        assert!(replay.graph_mutated_link_ids.is_empty());
+        assert!(!replay
+            .vector_maintained_object_ids
+            .contains(&MemoryObjectRef::new(
+                ObjectType::DerivedMemory,
+                replacement_id
+            )));
+        assert!(replay.vector_maintenance_failure.is_none());
+        let recall = memory
+            .memory_composition
+            .vector_store
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0; 4],
+                100,
+                vec![ObjectType::DerivedMemory],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            recall
+                .candidates
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![newest_id]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_link_cannot_overwrite_generated_supersession() {
+        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
+        let correction = memory
+            .correct(derived_correction_draft(
+                &fixtures,
+                replacement_id,
+                fixtures.user_preference.id,
+            ))
+            .await
+            .unwrap();
+        let link_id = correction.graph_mutated_link_ids[0];
+        let graph = memory.memory_composition.graph_store.as_ref();
+        let original = graph.query_links_by_ids(&[link_id]).await.unwrap();
+        let mut replacement = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            replacement_id,
+            RelationType::About,
+            ObjectType::DerivedMemory,
+            fixtures.user_preference.id,
+        );
+        replacement.id = Some(link_id);
+        replacement.created_at = Some(original[0].created_at);
+        let error = memory
+            .link(replacement)
+            .await
+            .expect_err("generated supersession is immutable");
+        assert!(
+            matches!(error, CustomError::DeterministicIdCollision { object }
+            if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id))
+        );
+        assert_eq!(
+            graph.query_links_by_ids(&[link_id]).await.unwrap(),
+            original
+        );
+        assert_eq!(
+            graph
+                .query_superseded_derived_memory_ids(&[fixtures.user_preference.id])
+                .await
+                .unwrap(),
+            vec![fixtures.user_preference.id]
+        );
+        let retrieved = memory
+            .retrieve(RetrievalContext::new("corrected preference"))
+            .await
+            .unwrap();
+        assert!(!pack_contains_derived_memory(
+            &retrieved.pack,
+            fixtures.user_preference.id
+        ));
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_link_replay_accepts_equal_content_and_rejects_divergence() {
+        let memory = injected_memory().await;
+        let link_id = MemoryId::from_u128(1010);
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::Episode,
+            MemoryId::from_u128(1011),
+            RelationType::Mentions,
+            ObjectType::Entity,
+            MemoryId::from_u128(1012),
+        );
+        draft.id = Some(link_id);
+        let first = memory.link(draft.clone()).await.unwrap();
+        let replay = memory
+            .link(draft.clone())
+            .await
+            .expect("identical link replay is accepted");
+        assert_eq!(replay.link, first.link);
+        draft.created_at = Some(first.link.created_at);
+        assert_eq!(memory.link(draft.clone()).await.unwrap().link, first.link);
+        let mut changed_timestamp = draft.clone();
+        changed_timestamp.created_at = Some(first.link.created_at + chrono::Duration::seconds(1));
+        assert!(matches!(memory.link(changed_timestamp).await.unwrap_err(),
+            CustomError::DeterministicIdCollision { object } if object.id == link_id));
+        draft.rationale = Some("different content".to_owned());
+        let error = memory
+            .link(draft)
+            .await
+            .expect_err("a plain link also rejects divergent content");
+        assert!(
+            matches!(error, CustomError::DeterministicIdCollision { object }
+            if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id))
+        );
+        assert_eq!(
+            memory
+                .memory_composition
+                .graph_store
+                .query_links_by_ids(&[link_id])
+                .await
+                .unwrap(),
+            vec![first.link]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
         let memory = CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
@@ -512,7 +904,7 @@ mod tests {
             .await
             .expect("correct facade should use injected lifecycle pipeline");
 
-        assert!(outcome
+        assert!(!outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,
@@ -557,8 +949,6 @@ mod tests {
 
         let mut historical =
             RetrievalContext::new("corrected deterministic preference").with_trace();
-        historical.lifecycle_policy.include_suppressed = true;
-        historical.lifecycle_policy.include_non_current = true;
         historical.lifecycle_policy.include_superseded = true;
         let historical = memory
             .retrieve(historical)
@@ -599,7 +989,7 @@ mod tests {
             .await
             .expect("episode correction should supersede affected derived memories");
 
-        assert!(episode_outcome
+        assert!(!episode_outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,
@@ -639,7 +1029,7 @@ mod tests {
             .await
             .expect("observation correction should supersede affected derived memories");
 
-        assert!(observation_outcome
+        assert!(!observation_outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,

@@ -373,7 +373,6 @@ pub(super) fn memory_object_from_rdf(
                 values.resource_values(super::vocabulary::ABOUT_ENTITY),
             )?,
             salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
-            is_current: bool_literal(subject, values, super::vocabulary::IS_CURRENT)?,
             supersedes: memory_ids_from_resources(
                 values.resource_values(super::vocabulary::SUPERSEDES),
             )?,
@@ -455,17 +454,6 @@ pub(super) fn f32_literal(
     values: &RdfSubjectValues,
     predicate: &'static str,
 ) -> Result<f32, CustomError> {
-    values
-        .literal(subject, predicate)?
-        .parse()
-        .map_err(|error| rdf_parse_error(subject, predicate, error))
-}
-
-pub(super) fn bool_literal(
-    subject: &str,
-    values: &RdfSubjectValues,
-    predicate: &'static str,
-) -> Result<bool, CustomError> {
     values
         .literal(subject, predicate)?
         .parse()

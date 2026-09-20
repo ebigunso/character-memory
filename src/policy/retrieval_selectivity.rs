@@ -391,8 +391,11 @@ fn selectivity_decision(
 impl From<RetrievalLifecyclePolicy> for SelectivityCountScope {
     fn from(policy: RetrievalLifecyclePolicy) -> Self {
         if policy.include_suppressed {
+            // ponytail: excluding superseded memories still uses totals that include their edges,
+            // so fanout can skew either way; expansion separately enforces lifecycle eligibility.
+            // Add a non-superseded-across-retention counter if a consumer sees fanout loss.
             Self::Total
-        } else if policy.include_non_current || policy.include_superseded {
+        } else if policy.include_superseded {
             Self::Active
         } else {
             Self::Current
@@ -469,6 +472,19 @@ mod tests {
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use async_trait::async_trait;
     use std::sync::Mutex;
+
+    #[test]
+    fn including_suppressed_without_superseded_uses_total_counts() {
+        let policy = RetrievalLifecyclePolicy {
+            include_suppressed: true,
+            include_superseded: false,
+        };
+
+        assert_eq!(
+            SelectivityCountScope::from(policy),
+            SelectivityCountScope::Total
+        );
+    }
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -833,7 +849,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy {
-                include_non_current: true,
+                include_superseded: true,
                 ..RetrievalLifecyclePolicy::default()
             },
             TraceMode::Enabled,

@@ -393,13 +393,11 @@ impl RetrieveAssembly {
 
         let mut root_filtered = false;
         for filtered in expansion.filtered_nodes {
-            let superseded_by = self
-                .superseded_by
-                .get(&filtered.object_ref.id)
-                .cloned()
-                .unwrap_or_default();
-            let decision =
-                filtered_lifecycle_decision(filtered.object_ref, filtered.reason, &superseded_by);
+            let decision = filtered_lifecycle_decision(
+                filtered.object_ref,
+                filtered.reason,
+                &filtered.superseded_by,
+            );
             if filtered.object_ref == candidate_ref {
                 root_filtered = true;
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
@@ -434,7 +432,6 @@ impl RetrieveAssembly {
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
-            is_current: None,
             superseded_by: Vec::new(),
             action: LifecycleFilterAction::Omitted,
             reason: LifecycleFilterReason::GraphExpansionBounded,
@@ -453,7 +450,6 @@ impl RetrieveAssembly {
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
             retention_state: None,
-            is_current: None,
             superseded_by: Vec::new(),
             action: LifecycleFilterAction::Omitted,
             reason: LifecycleFilterReason::GraphObjectMissing,
@@ -1057,7 +1053,6 @@ fn graph_query_for_candidate(
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
     .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
         include_suppressed: context.lifecycle_policy.include_suppressed,
-        include_non_current: context.lifecycle_policy.include_non_current,
         include_superseded: context.lifecycle_policy.include_superseded,
     })
     .with_failure_policy(GraphExpansionFailurePolicy {
@@ -1170,12 +1165,10 @@ fn filtered_lifecycle_decision(
     LifecycleFilterDecision {
         object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
         retention_state: None,
-        is_current: None,
         superseded_by: superseded_by.to_vec(),
         action: LifecycleFilterAction::Omitted,
         reason: match reason {
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
-            GraphExpansionFilteredReason::NonCurrent => LifecycleFilterReason::NonCurrentOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
         },
     }
@@ -1184,7 +1177,6 @@ fn filtered_lifecycle_decision(
 fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCandidateReason {
     match reason {
         GraphExpansionFilteredReason::Suppressed => StaleCandidateReason::LifecycleMismatch,
-        GraphExpansionFilteredReason::NonCurrent => StaleCandidateReason::CurrentnessMismatch,
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
     }
 }
@@ -1192,9 +1184,9 @@ fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCand
 fn rationale_categories_for_stale_reason(reason: StaleCandidateReason) -> Vec<RationaleCategory> {
     match reason {
         StaleCandidateReason::GraphObjectMissing => vec![RationaleCategory::Semantic],
-        StaleCandidateReason::LifecycleMismatch
-        | StaleCandidateReason::CurrentnessMismatch
-        | StaleCandidateReason::Superseded => vec![RationaleCategory::Lifecycle],
+        StaleCandidateReason::LifecycleMismatch | StaleCandidateReason::Superseded => {
+            vec![RationaleCategory::Lifecycle]
+        }
         StaleCandidateReason::SectionLimit => vec![RationaleCategory::Scope],
         StaleCandidateReason::GraphExpansionBounded => vec![RationaleCategory::GraphBound],
     }
@@ -1293,10 +1285,8 @@ fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
         LifecycleFilterReason::Active => 0,
         LifecycleFilterReason::SuppressedIncludedByPolicy => 2,
-        LifecycleFilterReason::NonCurrentIncludedByPolicy => 4,
         LifecycleFilterReason::SupersededIncludedByPolicy => 5,
         LifecycleFilterReason::SuppressedOmitted => 7,
-        LifecycleFilterReason::NonCurrentOmitted => 9,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
         LifecycleFilterReason::GraphExpansionBounded => 12,
@@ -1307,7 +1297,6 @@ fn stale_reason_rank(reason: StaleCandidateReason) -> u8 {
     match reason {
         StaleCandidateReason::GraphObjectMissing => 0,
         StaleCandidateReason::LifecycleMismatch => 1,
-        StaleCandidateReason::CurrentnessMismatch => 2,
         StaleCandidateReason::Superseded => 3,
         StaleCandidateReason::SectionLimit => 4,
         StaleCandidateReason::GraphExpansionBounded => 5,
@@ -2439,50 +2428,6 @@ mod tests {
             ));
     }
 
-    #[test]
-    fn filtered_superseded_decision_uses_relation_evidence_without_links() {
-        let fixtures = representative_fixtures();
-        let candidate = candidate(fixtures.suppressed_seed.id, ObjectType::DerivedMemory, 0.99);
-        let mut expansion = GraphExpansion::new(Vec::new(), Vec::new());
-        expansion
-            .relations
-            .push(crate::ports::graph_authority::GraphExpansionRelation {
-                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
-                from: MemoryObjectRef::from_id_type(
-                    fixtures.correction.id,
-                    ObjectType::DerivedMemory,
-                ),
-                to: MemoryObjectRef::from_id_type(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                ),
-                relation: RelationType::Supersedes,
-                proximity: 1,
-            });
-        expansion
-            .filtered_nodes
-            .push(crate::ports::graph_authority::GraphExpansionFilteredNode {
-                object_ref: MemoryObjectRef::from_id_type(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                ),
-                reason: GraphExpansionFilteredReason::Superseded,
-            });
-        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
-
-        assembly.absorb_expansion(&candidate, expansion);
-
-        assert!(assembly.lifecycle_decisions.iter().any(|decision| {
-            decision.object.id == fixtures.suppressed_seed.id
-                && decision.reason == LifecycleFilterReason::SupersededOmitted
-                && decision.superseded_by == vec![fixtures.correction.id]
-        }));
-        assert!(assembly.stale_omissions.iter().any(|omission| {
-            omission.candidate.id == fixtures.suppressed_seed.id
-                && omission.reason == StaleCandidateReason::Superseded
-        }));
-    }
-
     #[tokio::test]
     async fn bounded_expansion_failure_errors_when_degraded_results_are_disabled() {
         let fixtures = representative_fixtures();
@@ -2919,13 +2864,10 @@ mod tests {
         let fixtures = representative_fixtures();
         let mut superseded_memory = fixtures.user_preference.clone();
         let mut suppressed_memory = fixtures.suppressed_seed.clone();
-        let mut non_current_memory = fixtures.open_loop.clone();
         let mut replacement = fixtures.correction.clone();
         let mut dormant_thread = fixtures.soft_thread.clone();
         superseded_memory.retention_state = RetentionState::Active;
-        superseded_memory.is_current = true;
         suppressed_memory.retention_state = RetentionState::Suppressed;
-        non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         dormant_thread.status = ThreadStatus::Dormant;
         let supersedes_link = crate::domain::MemoryLink {
@@ -2947,7 +2889,6 @@ mod tests {
                 MemoryObject::MemoryThread(dormant_thread.clone()),
                 MemoryObject::DerivedMemory(superseded_memory.clone()),
                 MemoryObject::DerivedMemory(suppressed_memory.clone()),
-                MemoryObject::DerivedMemory(non_current_memory.clone()),
                 MemoryObject::DerivedMemory(replacement.clone()),
             ])
             .await
@@ -2978,18 +2919,33 @@ mod tests {
         .await;
         seed(
             &vector,
-            MemoryObject::DerivedMemory(non_current_memory.clone()),
-            0.3,
-        )
-        .await;
-        seed(
-            &vector,
             MemoryObject::MemoryThread(dormant_thread.clone()),
             0.4,
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut root_only = RetrievalContext::new("lifecycle graph truth").with_trace();
+        root_only.graph_limits.max_depth = 0;
+        let root_only = pipeline.retrieve(root_only).await.unwrap();
+        let decision = root_only
+            .trace
+            .as_ref()
+            .unwrap()
+            .lifecycle_filter_decisions
+            .iter()
+            .find(|decision| decision.object.id == superseded_memory.id)
+            .unwrap();
+        assert_eq!(decision.reason, LifecycleFilterReason::SupersededOmitted);
+        assert_eq!(decision.superseded_by, vec![replacement.id]);
+        assert!(root_only
+            .trace
+            .as_ref()
+            .unwrap()
+            .stale_candidate_omissions
+            .iter()
+            .any(|omission| omission.candidate.id == superseded_memory.id
+                && omission.reason == StaleCandidateReason::Superseded));
         let outcome = pipeline
             .retrieve(RetrievalContext::new("lifecycle graph truth").with_trace())
             .await
@@ -3011,11 +2967,7 @@ mod tests {
             .preferences
             .iter()
             .any(|included| included.memory.id == suppressed_memory.id));
-        assert!(!outcome
-            .pack
-            .open_loops
-            .iter()
-            .any(|included| included.memory.id == non_current_memory.id));
+
         assert!(outcome.pack.active_threads.is_empty());
         assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
             decision.object.id == superseded_memory.id
@@ -3025,10 +2977,32 @@ mod tests {
             decision.object.id == suppressed_memory.id
                 && decision.reason == LifecycleFilterReason::SuppressedOmitted
         }));
-        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
-            decision.object.id == non_current_memory.id
-                && decision.reason == LifecycleFilterReason::NonCurrentOmitted
-        }));
+        let mut history = RetrievalContext::new("lifecycle graph truth");
+        history.lifecycle_policy.include_superseded = true;
+        let historical = pipeline.retrieve(history).await.unwrap();
+        assert!(historical
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == superseded_memory.id));
+        assert!(!historical
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == suppressed_memory.id));
+        let mut suppressed = RetrievalContext::new("lifecycle graph truth");
+        suppressed.lifecycle_policy.include_suppressed = true;
+        let suppressed = pipeline.retrieve(suppressed).await.unwrap();
+        assert!(suppressed
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == suppressed_memory.id));
+        assert!(!suppressed
+            .pack
+            .preferences
+            .iter()
+            .any(|included| included.memory.id == superseded_memory.id));
     }
 
     #[tokio::test]
@@ -3357,6 +3331,13 @@ mod tests {
             &self,
             _query: &crate::ports::graph_authority::GraphObjectQuery,
         ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+            Ok(Vec::new())
+        }
+
+        async fn query_superseded_derived_memory_ids(
+            &self,
+            _memory_ids: &[crate::domain::MemoryId],
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
             Ok(Vec::new())
         }
 

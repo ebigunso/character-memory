@@ -461,6 +461,33 @@ pub(crate) fn deterministic_uuid(parts: &[&[u8]]) -> MemoryId {
     uuid::Uuid::new_v5(&WRITE_PLAN_NAMESPACE, &label)
 }
 
+/// Derives the supersession index from the only authored source: the memory list.
+pub(crate) fn supersession_links(memory: &crate::domain::DerivedMemory) -> Vec<MemoryLink> {
+    let mut links = memory
+        .supersedes
+        .iter()
+        .map(|predecessor| MemoryLink {
+            id: deterministic_uuid(&[
+                b"character_memory.lifecycle.supersedes_link",
+                memory.id.as_bytes(),
+                predecessor.as_bytes(),
+            ]),
+            object_type: ObjectType::MemoryLink,
+            from_id: memory.id,
+            from_type: ObjectType::DerivedMemory,
+            to_id: *predecessor,
+            to_type: ObjectType::DerivedMemory,
+            relation: RelationType::Supersedes,
+            rationale: None,
+            created_at: memory.created_at,
+            schema_version: memory.schema_version.clone(),
+        })
+        .collect::<Vec<_>>();
+    links.sort_by_key(|link| link.id);
+    links.dedup_by_key(|link| link.id);
+    links
+}
+
 #[cfg(test)]
 mod construction_tests {
     use super::*;
@@ -586,7 +613,7 @@ use crate::domain::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
     CandidateValidationIssue, CandidateValidationStatus, DomainValidationError, MemoryLink,
-    MemoryLinkEndpoint, MemoryObject, RetentionState,
+    MemoryLinkEndpoint, MemoryObject,
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
@@ -651,11 +678,31 @@ where
             }
         }
 
+        let cycle = supersession_cycle(plan);
         let validations = plan
             .candidates
             .iter()
             .enumerate()
-            .map(|(index, candidate)| context.validate_candidate(index, candidate))
+            .map(|(index, candidate)| {
+                let mut validation = context.validate_candidate(index, candidate);
+                if let (Some(memory_ids), MemoryCandidate::DerivedMemory(candidate)) =
+                    (&cycle, candidate)
+                {
+                    if candidate
+                        .draft
+                        .id
+                        .is_some_and(|id| memory_ids.contains(&id))
+                    {
+                        validation.status = CandidateValidationStatus::Invalid;
+                        validation
+                            .errors
+                            .push(CandidateValidationIssue::SupersessionCycle {
+                                memory_ids: memory_ids.clone(),
+                            });
+                    }
+                }
+                validation
+            })
             .collect::<Vec<_>>();
         let decision = if validations
             .iter()
@@ -671,6 +718,56 @@ where
             decision,
         })
     }
+}
+
+fn supersession_cycle(plan: &RememberWritePlan) -> Option<Vec<MemoryId>> {
+    // Sequential commits cannot change existing predecessor lists; new cycles must be in-plan.
+    let mut predecessors = HashMap::<MemoryId, Vec<MemoryId>>::new();
+    let mut roots = Vec::new();
+    for candidate in &plan.candidates {
+        if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+            if let Some(id) = candidate.draft.id {
+                roots.push(id);
+                // Single-object self links already receive the domain SelfLink error.
+                predecessors.entry(id).or_default().extend(
+                    candidate
+                        .draft
+                        .supersedes
+                        .iter()
+                        .copied()
+                        .filter(|predecessor| *predecessor != id),
+                );
+            }
+        }
+    }
+    let mut visited = HashSet::new();
+    let mut active = HashMap::new();
+    for root in roots {
+        if !visited.insert(root) {
+            continue;
+        }
+        let mut stack = vec![(root, predecessors[&root].iter())];
+        active.insert(root, 0);
+        while let Some((id, pending)) = stack.last_mut() {
+            let Some(predecessor) = pending.next().copied() else {
+                active.remove(id);
+                stack.pop();
+                continue;
+            };
+            if let Some(&start) = active.get(&predecessor) {
+                let mut memory_ids = stack[start..].iter().map(|(id, _)| *id).collect::<Vec<_>>();
+                memory_ids.sort_unstable();
+                return Some(memory_ids);
+            }
+            if let Some(next) = predecessors.get(&predecessor) {
+                if visited.insert(predecessor) {
+                    active.insert(predecessor, stack.len());
+                    stack.push((predecessor, next.iter()));
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug)]
@@ -744,6 +841,12 @@ impl PlanValidationContext {
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
             MemoryCandidate::DerivedMemory(candidate) => {
+                for predecessor_id in &candidate.draft.supersedes {
+                    self.add_ref_to_check(MemoryObjectRef::from_id_type(
+                        *predecessor_id,
+                        ObjectType::DerivedMemory,
+                    ));
+                }
                 for episode_id in &candidate.draft.derived_from_episode_ids {
                     self.add_ref_to_check(MemoryObjectRef::from_id_type(
                         *episode_id,
@@ -907,7 +1010,6 @@ impl PlanValidationContext {
                         errors.extend(validate_object(&MemoryObject::DerivedMemory(
                             object.clone(),
                         )));
-                        errors.extend(validate_derived_memory_lifecycle(&object));
                         errors.extend(self.validate_derived_sources(&object));
                     }
                     Err(error) => errors.push(candidate_issue_from_domain_error(error)),
@@ -1041,6 +1143,12 @@ impl PlanValidationContext {
                 CandidateReferenceRole::DerivedSourceObservation,
             ));
         }
+        for predecessor_id in &object.supersedes {
+            errors.extend(self.validate_graph_authoritative_ref(
+                MemoryObjectRef::from_id_type(*predecessor_id, ObjectType::DerivedMemory),
+                CandidateReferenceRole::SupersededMemory,
+            ));
+        }
         errors
     }
 
@@ -1149,6 +1257,12 @@ impl WritePlanCommitValues {
                 }
                 MemoryCandidate::VectorIndex(candidate) => vector_targets.push(candidate.target),
                 MemoryCandidate::StatsUpdate(_) => {}
+            }
+        }
+
+        for object in &objects {
+            if let MemoryObject::DerivedMemory(memory) = object {
+                links.extend(supersession_links(memory));
             }
         }
 
@@ -1341,19 +1455,6 @@ fn validate_link(link: &MemoryLink) -> Vec<CandidateValidationIssue> {
     errors
 }
 
-fn validate_derived_memory_lifecycle(
-    object: &crate::domain::DerivedMemory,
-) -> Vec<CandidateValidationIssue> {
-    let mut errors = Vec::new();
-    if object.retention_state == RetentionState::Suppressed && object.is_current {
-        errors.push(CandidateValidationIssue::SuppressedMemoryMarkedCurrent);
-    }
-    if !object.supersedes.is_empty() && object.is_current {
-        errors.push(CandidateValidationIssue::SupersedingMemoryMarkedCurrent);
-    }
-    errors
-}
-
 fn validate_provenance(
     provenance: &crate::api::types::CandidateProvenance,
 ) -> Vec<CandidateValidationIssue> {
@@ -1399,6 +1500,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         DomainValidationError::ObjectTypeMismatch {
             expected, actual, ..
         } => CandidateValidationIssue::ObjectTypeMismatch { expected, actual },
+        DomainValidationError::AuthoredSupersedesLink => {
+            CandidateValidationIssue::AuthoredSupersedesLink
+        }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
@@ -1478,7 +1582,7 @@ mod tests {
         StatsUpdateCandidate, StatsUpdateStatus, VectorIndexCandidate,
     };
     use crate::domain::{
-        DerivedType, EntityType, MemoryCandidateKind, MemoryObject, RelationType,
+        DerivedType, EntityType, MemoryCandidateKind, MemoryObject, RelationType, RetentionState,
         DEFAULT_SCHEMA_VERSION,
     };
     use crate::test_support::{
@@ -1917,13 +2021,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_suppressed_current_derived_memory() {
+    async fn supersession_requires_derived_predecessors_and_rejects_authored_links() {
+        let graph = graph_with_fixtures().await;
+        let fixtures = representative_fixtures();
+        for predecessor in [MemoryId::from_u128(991), fixtures.episode.id] {
+            let mut draft = complete_derived(
+                DerivedMemoryDraft::new(DerivedType::Correction, "corrected belief")
+                    .with_source_episode(fixtures.episode.id),
+            );
+            draft.supersedes = vec![predecessor];
+            let plan = valid_plan().with_candidate(MemoryCandidate::DerivedMemory(
+                crate::api::types::DerivedMemoryCandidate::new(
+                    draft,
+                    CandidateProvenance::caller("correction"),
+                ),
+            ));
+            let verdict = WritePlanValidator::new(&graph)
+                .validate(&plan)
+                .await
+                .unwrap();
+            assert_rejected_with(
+                &verdict,
+                CandidateValidationIssue::UnknownObjectRef {
+                    role: CandidateReferenceRole::SupersededMemory,
+                    referenced: MemoryObjectRef::new(ObjectType::DerivedMemory, predecessor),
+                },
+            );
+        }
+        let mut self_replacing = complete_derived(
+            DerivedMemoryDraft::new(DerivedType::Correction, "self replacement")
+                .with_source_episode(fixtures.episode.id),
+        );
+        let self_id = self_replacing.id.unwrap();
+        self_replacing.supersedes = vec![self_id];
+        let plan = valid_plan().with_candidate(MemoryCandidate::DerivedMemory(
+            crate::api::types::DerivedMemoryCandidate::new(
+                self_replacing,
+                CandidateProvenance::caller("invalid self replacement"),
+            ),
+        ));
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+        assert_rejected_with(
+            &verdict,
+            CandidateValidationIssue::SelfLink {
+                referenced: MemoryObjectRef::new(ObjectType::DerivedMemory, self_id),
+            },
+        );
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            fixtures.correction.id,
+            RelationType::Supersedes,
+            ObjectType::DerivedMemory,
+            fixtures.user_preference.id,
+        );
+        draft.id = Some(MemoryId::from_u128(992));
+        draft.created_at = Some(timestamp());
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let plan = valid_plan().with_candidate(MemoryCandidate::MemoryLink(
+            crate::api::types::MemoryLinkCandidate::new(
+                draft,
+                CandidateProvenance::caller("authored link"),
+            ),
+        ));
+        let verdict = WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap();
+        assert_rejected_with(&verdict, CandidateValidationIssue::AuthoredSupersedesLink);
+    }
+
+    #[tokio::test]
+    async fn accepts_suppressed_derived_memory() {
         let graph = graph_with_fixtures().await;
         let fixtures = representative_fixtures();
         let mut derived = DerivedMemoryDraft::new(DerivedType::Reflection, "suppressed current")
             .with_source_episode(fixtures.episode.id);
         derived.retention_state = RetentionState::Suppressed;
-        derived.is_current = true;
         let plan = valid_plan().with_candidate(MemoryCandidate::DerivedMemory(
             crate::api::types::DerivedMemoryCandidate::new(
                 complete_derived(derived),
@@ -1936,20 +2112,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(
-            &verdict,
-            CandidateValidationIssue::SuppressedMemoryMarkedCurrent,
-        );
+        assert!(verdict.is_valid());
     }
 
     #[tokio::test]
-    async fn rejects_current_superseding_derived_memory_unless_historical() {
+    async fn accepts_active_successor_with_existing_predecessor() {
         let graph = graph_with_fixtures().await;
         let fixtures = representative_fixtures();
         let mut derived = DerivedMemoryDraft::new(DerivedType::Correction, "new correction")
             .with_source_episode(fixtures.episode.id);
         derived.supersedes.push(fixtures.user_preference.id);
-        derived.is_current = true;
         derived.retention_state = RetentionState::Active;
         let plan = valid_plan().with_candidate(MemoryCandidate::DerivedMemory(
             crate::api::types::DerivedMemoryCandidate::new(
@@ -1963,10 +2135,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_rejected_with(
-            &verdict,
-            CandidateValidationIssue::SupersedingMemoryMarkedCurrent,
-        );
+        assert!(verdict.is_valid());
     }
 
     #[tokio::test]

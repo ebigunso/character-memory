@@ -241,7 +241,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![user_entity.id, project_entity.id],
-        true,
         Vec::new(),
         RetentionState::Active,
     );
@@ -253,7 +252,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![user_entity.id],
-        true,
         Vec::new(),
         RetentionState::Active,
     );
@@ -265,7 +263,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![project_entity.id],
-        true,
         Vec::new(),
         RetentionState::Active,
     );
@@ -277,7 +274,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![assistant_entity.id, project_entity.id],
-        true,
         Vec::new(),
         RetentionState::Active,
     );
@@ -289,7 +285,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![user_entity.id],
-        true,
         vec![fixture_id(35)],
         RetentionState::Active,
     );
@@ -301,7 +296,6 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
         salient_observation.id,
         vec![soft_thread.id],
         vec![user_entity.id],
-        false,
         Vec::new(),
         RetentionState::Suppressed,
     );
@@ -386,7 +380,6 @@ pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
                 observation.id,
                 Vec::new(),
                 vec![hub_entity.id],
-                true,
                 Vec::new(),
                 RetentionState::Active,
             )
@@ -519,7 +512,6 @@ fn derived_memory(
     observation_id: MemoryId,
     thread_ids: Vec<MemoryId>,
     entity_ids: Vec<MemoryId>,
-    is_current: bool,
     supersedes: Vec<MemoryId>,
     retention_state: RetentionState,
 ) -> DerivedMemory {
@@ -533,7 +525,6 @@ fn derived_memory(
         thread_ids,
         entity_ids,
         salience_score: 0.75,
-        is_current,
         supersedes,
         retention_state,
         created_at: timestamp("2026-04-27T10:11:05Z"),

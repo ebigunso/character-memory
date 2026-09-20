@@ -267,21 +267,6 @@ impl ReplacementDerivedMemoryDraft {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CorrectionLifecyclePolicy {
-    pub supersede_replaced_derived_memories: bool,
-    pub suppress_superseded_derived_memories: bool,
-}
-
-impl Default for CorrectionLifecyclePolicy {
-    fn default() -> Self {
-        Self {
-            supersede_replaced_derived_memories: true,
-            suppress_superseded_derived_memories: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CorrectionCascadePolicy {
     pub apply_to_provenanced_derived_memories: bool,
 }
@@ -301,7 +286,6 @@ pub struct CorrectMemoryDraft {
     pub superseded_derived_memory_ids: Vec<MemoryId>,
     pub correction_origin: SourceProvenanceReference,
     pub rationale: String,
-    pub lifecycle_policy: CorrectionLifecyclePolicy,
     pub cascade_policy: CorrectionCascadePolicy,
     pub include_trace: bool,
 }
@@ -318,7 +302,6 @@ impl CorrectMemoryDraft {
                 external_refs: Vec::new(),
             },
             rationale: rationale.into(),
-            lifecycle_policy: CorrectionLifecyclePolicy::default(),
             cascade_policy: CorrectionCascadePolicy::default(),
             include_trace: false,
         }
@@ -586,11 +569,6 @@ mod tests {
             "Suppress stale memory.",
         );
 
-        assert!(
-            correction
-                .lifecycle_policy
-                .supersede_replaced_derived_memories
-        );
         assert!(!correction.include_trace);
         assert!(!forget.include_trace);
     }
@@ -695,7 +673,6 @@ mod tests {
 
         assert_eq!(replacement.supersedes, vec![old_memory_id()]);
         assert_eq!(draft.superseded_derived_memory_ids, vec![old_memory_id()]);
-        assert!(draft.lifecycle_policy.suppress_superseded_derived_memories);
         assert_eq!(draft.validate(), Ok(()));
     }
 

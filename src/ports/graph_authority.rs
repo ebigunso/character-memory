@@ -136,7 +136,6 @@ impl TraceMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct GraphExpansionLifecyclePolicy {
     pub(crate) include_suppressed: bool,
-    pub(crate) include_non_current: bool,
     pub(crate) include_superseded: bool,
 }
 
@@ -239,14 +238,14 @@ impl GraphExpansionQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GraphExpansionFilteredReason {
     Suppressed,
-    NonCurrent,
     Superseded,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFilteredNode {
     pub(crate) object_ref: MemoryObjectRef,
     pub(crate) reason: GraphExpansionFilteredReason,
+    pub(crate) superseded_by: Vec<MemoryId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,6 +344,13 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, GraphQueryError>;
 
+    /// Returns requested predecessors with an incoming interpreted-memory Supersedes link,
+    /// including links from suppressed successors.
+    async fn query_superseded_derived_memory_ids(
+        &self,
+        memory_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryId>, GraphQueryError>;
+
     async fn query_links_by_ids(
         &self,
         link_ids: &[MemoryId],
@@ -389,6 +395,15 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, GraphQueryError> {
         (**self).query_objects(query).await
+    }
+
+    async fn query_superseded_derived_memory_ids(
+        &self,
+        memory_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryId>, GraphQueryError> {
+        (**self)
+            .query_superseded_derived_memory_ids(memory_ids)
+            .await
     }
 
     async fn query_links_by_ids(

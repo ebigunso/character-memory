@@ -1,7 +1,7 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, LinkOutcome, MemoryLinkDraft};
-use crate::domain::{MemoryLink, RelationType};
+use crate::domain::{MemoryLink, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::retrieval_stats::RetrievalStatsStore;
@@ -70,14 +70,24 @@ where
         defaults: &mut DraftDefaults,
         evidence: LinkAdmissionEvidence,
     ) -> Result<LinkOutcome, CustomError> {
-        let link = draft.into_domain_with_defaults(defaults)?;
+        let default_created_at = draft.created_at.is_none();
+        let mut link = draft.into_domain_with_defaults(defaults)?;
         if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         {
             return Err(CustomError::LowInformationCoOccurrence { link_id: link.id });
         }
-        self.graph_store
-            .upsert_links(std::slice::from_ref(&link))
-            .await?;
+        let existing = self.graph_store.query_links_by_ids(&[link.id]).await?;
+        if default_created_at {
+            if let Some(previous) = existing.first() {
+                link.created_at = previous.created_at;
+            }
+        }
+        reject_divergent_links(std::slice::from_ref(&link), &existing)?;
+        if existing.is_empty() {
+            self.graph_store
+                .upsert_links(std::slice::from_ref(&link))
+                .await?;
+        }
         let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&[], std::slice::from_ref(&link))
             .await;
@@ -86,6 +96,22 @@ where
             stats_update_status: projection.into_status(),
         })
     }
+}
+
+pub(crate) fn reject_divergent_links(
+    planned: &[MemoryLink],
+    existing: &[MemoryLink],
+) -> Result<(), CustomError> {
+    for existing in existing {
+        if let Some(planned) = planned.iter().find(|link| link.id == existing.id) {
+            if planned != existing {
+                return Err(CustomError::DeterministicIdCollision {
+                    object: MemoryObjectRef::new(ObjectType::MemoryLink, planned.id),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn admit_link(
@@ -127,6 +153,41 @@ mod tests {
         RetrievalStatsObjectState, RetrievalStatsStore,
     };
     use crate::test_support::{in_memory_graph_store, representative_fixtures};
+
+    #[tokio::test]
+    async fn rejects_authored_supersedes_before_graph_or_stats_writes() {
+        let graph = in_memory_graph_store();
+        let fixtures = representative_fixtures();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            fixtures.correction.id,
+            RelationType::Supersedes,
+            ObjectType::DerivedMemory,
+            fixtures.user_preference.id,
+        );
+        let link_id = MemoryId::from_u128(998);
+        draft.id = Some(link_id);
+        let error = LinkPipeline::new_with_stats(&graph, &stats)
+            .link(draft)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CustomError::DomainValidation(DomainValidationError::AuthoredSupersedesLink)
+        ));
+        assert!(graph
+            .query_links_by_ids(&[link_id])
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(stats
+            .global_counter(RelationType::Supersedes, ObjectType::DerivedMemory)
+            .await
+            .unwrap()
+            .is_none());
+    }
 
     #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
@@ -512,6 +573,13 @@ mod tests {
             Err(crate::errors::GraphQueryError::Selection {
                 detail: "endpoint lifecycle lookup failed".to_owned(),
             })
+        }
+
+        async fn query_superseded_derived_memory_ids(
+            &self,
+            _memory_ids: &[crate::domain::MemoryId],
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            Ok(Vec::new())
         }
 
         async fn query_links_by_ids(

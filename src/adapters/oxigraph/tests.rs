@@ -962,6 +962,7 @@ mod tests {
             filtered.object_ref
                 == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
+                && filtered.superseded_by == vec![replacement.id]
         }));
 
         let depth_one_neighbor = store
@@ -982,6 +983,7 @@ mod tests {
             filtered.object_ref
                 == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
+                && filtered.superseded_by == vec![replacement.id]
         }));
 
         let historical_neighbor = store
@@ -1059,7 +1061,6 @@ mod tests {
                     .with_allowed_relation_types(vec![RelationType::Supersedes])
                     .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
                         include_suppressed: true,
-                        include_non_current: true,
                         include_superseded: true,
                     }),
             )
@@ -1083,10 +1084,8 @@ mod tests {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let superseded_memory = fixtures.user_preference.clone();
-        let mut non_current_memory = fixtures.open_loop.clone();
         let mut replacement = fixtures.correction.clone();
         let mut dormant_thread = fixtures.soft_thread.clone();
-        non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
         dormant_thread.status = ThreadStatus::Dormant;
         let mut link_only = fixtures.derived_reflection.clone();
@@ -1125,7 +1124,6 @@ mod tests {
                 MemoryObject::MemoryThread(dormant_thread.clone()),
                 MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
                 MemoryObject::DerivedMemory(superseded_memory.clone()),
-                MemoryObject::DerivedMemory(non_current_memory.clone()),
                 MemoryObject::DerivedMemory(replacement.clone()),
                 MemoryObject::DerivedMemory(link_only.clone()),
             ])
@@ -1157,9 +1155,6 @@ mod tests {
         assert!(!default_matches
             .iter()
             .any(|memory| memory.id == superseded_memory.id));
-        assert!(!default_matches
-            .iter()
-            .any(|memory| memory.id == non_current_memory.id));
 
         let historical_matches = store
             .query_derived_memories_by_provenance(
@@ -1168,7 +1163,6 @@ mod tests {
                     vec![fixtures.salient_observation.id],
                 )
                 .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-                    include_non_current: true,
                     include_superseded: true,
                     ..GraphExpansionLifecyclePolicy::default()
                 }),
@@ -1178,9 +1172,6 @@ mod tests {
         assert!(historical_matches
             .iter()
             .any(|memory| memory.id == superseded_memory.id));
-        assert!(historical_matches
-            .iter()
-            .any(|memory| memory.id == non_current_memory.id));
 
         let default_expansion = store
             .expand_bounded(
@@ -1245,9 +1236,6 @@ mod tests {
         assert!(!default_thread_matches
             .iter()
             .any(|memory| memory.id == superseded_memory.id));
-        assert!(!default_thread_matches
-            .iter()
-            .any(|memory| memory.id == non_current_memory.id));
     }
 
     #[tokio::test]
