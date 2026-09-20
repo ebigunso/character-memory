@@ -3,14 +3,15 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{
     DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
     GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
-    RelationType, RetentionState, ThreadStatus, VectorSurface,
+    RelationType, RetentionState, Scene, ThreadStatus, VectorSurface,
 };
 use crate::errors::{ConfigValidationError, ConfigValidationReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
-    pub query_text: String,
-    pub current_context: Option<String>,
+    #[serde(default = "Scene::now")]
+    pub scene: Scene,
+    pub topic: Option<String>,
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
@@ -21,15 +22,15 @@ pub struct RetrievalContext {
 }
 
 impl RetrievalContext {
-    pub fn new(query_text: impl Into<String>) -> Self {
+    pub fn new(topic: impl Into<String>) -> Self {
         Self {
-            query_text: query_text.into(),
+            topic: Some(topic.into()),
             ..Self::default()
         }
     }
 
-    pub fn with_current_context(mut self, current_context: impl Into<String>) -> Self {
-        self.current_context = Some(current_context.into());
+    pub fn with_scene(mut self, scene: Scene) -> Self {
+        self.scene = scene;
         self
     }
 
@@ -56,8 +57,8 @@ impl RetrievalContext {
 impl Default for RetrievalContext {
     fn default() -> Self {
         Self {
-            query_text: String::new(),
-            current_context: None,
+            scene: Scene::now(),
+            topic: None,
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
@@ -175,9 +176,84 @@ impl RetrievalLifecyclePolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrieveOutcome {
+    pub scene: Scene,
+    /// Absence records what was not supplied, never whether the situation is complete.
+    pub scene_parts_not_given: Vec<ScenePart>,
+    pub memory_scenes: Vec<MemoryScenes>,
     pub pack: ContinuityContextPack,
     pub rationale: RetrievalRationale,
     pub trace: Option<RetrievalTrace>,
+}
+
+/// A missing part of the scene as supplied. Participant indices preserve authored order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScenePart {
+    Participants,
+    ParticipantKey { index: usize },
+    ParticipantName { index: usize },
+    ParticipantDescription { index: usize },
+    SettingKey,
+    SettingWords,
+    CustomValues,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryScenes {
+    pub memory: MemoryObjectRef,
+    /// Empty means no recorded experience; unavailable sources are explicit entries.
+    pub sources: Vec<SourceScene>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SourceScene {
+    Recorded {
+        episode_id: MemoryId,
+        scene: Scene,
+    },
+    Unavailable {
+        source: MemoryObjectRef,
+        reason: SourceSceneUnavailableReason,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceSceneUnavailableReason {
+    Missing,
+    Forgotten,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SceneReference {
+    ParticipantKey { index: usize },
+    ParticipantName { index: usize },
+    ParticipantDescription { index: usize },
+    SettingWords,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SceneReferenceTrace {
+    pub reference: SceneReference,
+    pub resolution: SceneReferenceResolution,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SceneReferenceResolution {
+    Resolved { notion_id: MemoryId },
+    Ambiguous { notion_ids: Vec<MemoryId> },
+    Unknown,
+    ContentCue { matches: Vec<MemoryObjectRef> },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphRootSource {
+    Vector,
+    Participant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -267,9 +343,13 @@ pub struct RetrievalTelemetry {
     pub configured_section_limits: ContinuitySectionLimits,
     pub configured_object_types: Vec<ObjectType>,
     pub configured_lifecycle_policy: RetrievalLifecyclePolicy,
+    /// The store-compatible dimension of content queries, or zero if none was embedded.
     pub query_embedding_dimension: usize,
+    /// Unique objects after merging content searches at their best score and applying the candidate limit.
     pub returned_vector_candidate_count: usize,
+    /// Weakest search completeness; scanned/fetched work is summed across distinct queries.
     pub vector_recall_completeness: VectorRecallCompleteness,
+    /// Distinct participant roots plus merged content roots, before the root limit.
     pub unique_graph_root_candidate_count: usize,
     pub selected_graph_root_count: usize,
     pub graph_root_omission_count: usize,
@@ -278,7 +358,9 @@ pub struct RetrievalTelemetry {
     pub section_pressure: Vec<SectionPressureSummary>,
 }
 
-/// Completeness of the vector candidate set reported for a retrieval.
+/// Completeness of vector search. A retrieval with several distinct content queries
+/// reports the weakest contributing verdict, summing its scanned/fetched work counters.
+/// These counters count query work, not unique objects in the merged candidate list.
 ///
 /// `NotRequested` means no vector search ran. `Exhaustive` means every record in
 /// the requested scope was scored through a path the adapter knows to be exhaustive,
@@ -366,6 +448,7 @@ pub struct LifecycleOmissionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 pub struct RetrievalTrace {
+    pub scene_references: Vec<SceneReferenceTrace>,
     pub vector_candidates: Vec<VectorCandidateTrace>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
@@ -379,6 +462,7 @@ pub struct RetrievalTrace {
 impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
+            scene_references: Vec::new(),
             vector_candidates: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
@@ -416,6 +500,7 @@ pub struct GraphRelationTrace {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphExpansionTrace {
+    pub source: GraphRootSource,
     pub root: MemoryObjectRef,
     pub object_count: usize,
     pub relation_count: usize,
@@ -476,6 +561,7 @@ pub enum SelectivityDecision {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphExpansionOutcome {
+    RootLimit,
     Expanded,
     MissingRoot,
     Bounded,
@@ -557,15 +643,16 @@ pub enum SectionAssignmentReason {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct SectionScoreComponents {
     pub final_score: f32,
-    pub vector_score: Option<f32>,
-    pub vector_score_source: Option<SectionVectorScoreSource>,
+    pub cue_score: Option<f32>,
+    pub cue_score_source: Option<SectionCueScoreSource>,
     pub graph_score: Option<f32>,
     pub salience_score: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SectionVectorScoreSource {
+pub enum SectionCueScoreSource {
+    Participant { root: MemoryId },
     DirectMatch,
     DerivedFromRoot { root_score: f32 },
 }
@@ -717,8 +804,8 @@ mod tests {
             reason: SectionAssignmentReason::Selected {
                 scores: SectionScoreComponents {
                     final_score: 0.75,
-                    vector_score: Some(0.8),
-                    vector_score_source: Some(SectionVectorScoreSource::DirectMatch),
+                    cue_score: Some(0.8),
+                    cue_score_source: Some(SectionCueScoreSource::DirectMatch),
                     graph_score: Some(0.5),
                     salience_score: None,
                 },
@@ -733,7 +820,7 @@ mod tests {
         assert_eq!(encoded["reason"]["kind"], "selected");
         assert_eq!(encoded["reason"]["scores"]["final_score"], 0.75);
         assert_eq!(
-            encoded["reason"]["scores"]["vector_score_source"]["kind"],
+            encoded["reason"]["scores"]["cue_score_source"]["kind"],
             "direct_match"
         );
         assert_eq!(encoded["rationale_categories"][0], "scope");

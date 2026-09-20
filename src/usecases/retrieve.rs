@@ -1,15 +1,18 @@
+mod scene;
+
 // Continuity retrieval pipeline used by the public facade and internal tests.
 // Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{
     ContextPackSection, ContinuityContextPack, FanoutUtilizationTrace, GraphExpansionOutcome,
-    GraphExpansionTelemetry, GraphExpansionTrace, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RationaleCategory,
-    RetrievalContext, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
-    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
-    SectionVectorScoreSource, SelectivityTelemetry, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    GraphExpansionTelemetry, GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory,
+    LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
+    LifecycleOmissionSummary, RationaleCategory, RetrievalContext, RetrievalRationale,
+    RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SectionAssignmentReason, SectionCueScoreSource, SectionPressureSummary, SectionScoreComponents,
+    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
@@ -29,7 +32,9 @@ use crate::ports::graph_authority::{
     GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
-use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
+#[cfg(test)]
+use crate::ports::vector_candidate::VectorCandidateRecall;
+use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
 where
@@ -82,21 +87,16 @@ where
         context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
         context.validate()?;
-        let query_embedding = self.embed_query(&context).await?;
-        let query_embedding_dimension = query_embedding.len();
-        let vector_search = VectorCandidateSearch::new(
-            query_embedding,
-            context.candidate_limits.max_vector_candidates,
-            context.object_type_defaults.clone(),
-        );
-        let VectorCandidateRecall {
-            candidates: vector_candidates,
-            completeness: vector_recall_completeness,
-        } = self.vector_store.search_candidates(&vector_search).await?;
+        let cues = self.recall_cues(&context).await?;
+        let vector_candidates = cues.candidates;
+        let query_embedding_dimension = cues.dimension;
+        let vector_recall_completeness = cues.completeness;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
-
-        let root_selection =
-            select_candidate_roots(&vector_candidates, context.candidate_limits.max_graph_roots);
+        let root_selection = select_candidate_roots(
+            &vector_candidates,
+            &cues.participants,
+            context.candidate_limits.max_graph_roots,
+        );
         let candidate_roots = root_selection.roots;
         let mut assembly = RetrieveAssembly::new(trace_mode);
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
@@ -175,6 +175,20 @@ where
             }
         }
 
+        if let Some(traces) = &mut graph_expansion_traces {
+            traces.extend(
+                root_selection
+                    .omitted
+                    .iter()
+                    .map(|root| {
+                        let mut trace = missing_root_expansion_trace(root);
+                        trace.outcome = GraphExpansionOutcome::RootLimit;
+                        trace
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+
         let ranked_objects = assembly.ranked_objects();
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
@@ -225,12 +239,13 @@ where
             vector_recall_completeness,
             unique_graph_root_candidate_count: root_selection.unique_count,
             selected_graph_root_count: candidate_roots.len(),
-            graph_root_omission_count: root_selection.omitted_count,
+            graph_root_omission_count: root_selection.omitted.len(),
             graph_expansion: graph_expansion_telemetry,
             selectivity: selectivity_telemetry,
             section_pressure,
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
+            scene_references: cues.references,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -250,22 +265,17 @@ where
             section_assignments: details.section_assignments,
         });
 
+        let memory_scenes = self
+            .memory_scenes(&pack, context.lifecycle_policy.include_suppressed)
+            .await?;
         Ok(RetrieveOutcome {
+            scene_parts_not_given: scene::parts_not_given(&context.scene),
+            scene: context.scene,
+            memory_scenes,
             pack,
             rationale,
             trace,
         })
-    }
-
-    async fn embed_query(&self, context: &RetrievalContext) -> Result<Vec<f32>, CustomError> {
-        let text = match context.current_context.as_deref() {
-            Some(current_context) if !current_context.trim().is_empty() => {
-                format!("{}\n{}", context.query_text.trim(), current_context.trim())
-            }
-            _ => context.query_text.trim().to_owned(),
-        };
-        let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
-        self.embedder.embed(&input).await
     }
 }
 
@@ -293,7 +303,7 @@ impl RetrieveAssembly {
         }
     }
 
-    fn absorb_expansion(&mut self, candidate: &VectorCandidateMatch, expansion: GraphExpansion) {
+    fn absorb_expansion(&mut self, candidate: &CandidateRoot, expansion: GraphExpansion) {
         let bounded_failure = expansion.bounded_failure;
         let candidate_ref =
             MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
@@ -350,16 +360,22 @@ impl RetrieveAssembly {
                 .copied()
                 .map(graph_component)
                 .unwrap_or(0.0);
-            let inherited_vector = if object_ref == candidate_ref {
+            let inherited_cue = if object_ref == candidate_ref {
                 candidate.score
             } else {
                 candidate.score * 0.75
             };
-            let candidate_score = (object_ref == candidate_ref).then_some(candidate.score);
-            let vector_score_source = if candidate_score.is_some() {
-                SectionVectorScoreSource::DirectMatch
+            let candidate_score = (object_ref == candidate_ref
+                && candidate.source == GraphRootSource::Vector)
+                .then_some(candidate.score);
+            let cue_score_source = if candidate.source == GraphRootSource::Participant {
+                SectionCueScoreSource::Participant {
+                    root: candidate.object_id,
+                }
+            } else if candidate_score.is_some() {
+                SectionCueScoreSource::DirectMatch
             } else {
-                SectionVectorScoreSource::DerivedFromRoot {
+                SectionCueScoreSource::DerivedFromRoot {
                     root_score: candidate.score,
                 }
             };
@@ -371,7 +387,7 @@ impl RetrieveAssembly {
             self.objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
-                    ranked.merge_vector_component(inherited_vector, vector_score_source);
+                    ranked.merge_cue_component(inherited_cue, cue_score_source);
                     ranked.graph_component = ranked.graph_component.max(graph_component);
                     ranked.graph_rationale.merge(graph_rationale);
                     if let Some(candidate_score) = candidate_score {
@@ -386,8 +402,8 @@ impl RetrieveAssembly {
                 .or_insert_with(|| {
                     RankedObject::new(
                         object,
-                        inherited_vector,
-                        Some(vector_score_source),
+                        inherited_cue,
+                        Some(cue_score_source),
                         graph_component,
                         candidate_score,
                         graph_rationale,
@@ -407,7 +423,8 @@ impl RetrieveAssembly {
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
                     candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-                    vector_score: Some(candidate.score),
+                    vector_score: (candidate.source == GraphRootSource::Vector)
+                        .then_some(candidate.score),
                     reason: stale_reason,
                     rationale_categories: rationale_categories_for_stale_reason(stale_reason),
                 });
@@ -424,10 +441,10 @@ impl RetrieveAssembly {
         }
     }
 
-    fn omit_bounded_candidate(&mut self, candidate: &VectorCandidateMatch) {
+    fn omit_bounded_candidate(&mut self, candidate: &CandidateRoot) {
         self.stale_omissions.push(StaleCandidateOmission {
             candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            vector_score: Some(candidate.score),
+            vector_score: (candidate.source == GraphRootSource::Vector).then_some(candidate.score),
             reason: StaleCandidateReason::GraphExpansionBounded,
             rationale_categories: rationale_categories_for_stale_reason(
                 StaleCandidateReason::GraphExpansionBounded,
@@ -442,10 +459,10 @@ impl RetrieveAssembly {
         });
     }
 
-    fn omit_missing_candidate(&mut self, candidate: &VectorCandidateMatch) {
+    fn omit_missing_candidate(&mut self, candidate: &CandidateRoot) {
         self.stale_omissions.push(StaleCandidateOmission {
             candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            vector_score: Some(candidate.score),
+            vector_score: (candidate.source == GraphRootSource::Vector).then_some(candidate.score),
             reason: StaleCandidateReason::GraphObjectMissing,
             rationale_categories: rationale_categories_for_stale_reason(
                 StaleCandidateReason::GraphObjectMissing,
@@ -494,8 +511,8 @@ impl RetrieveAssembly {
 #[derive(Debug, Clone)]
 struct RankedObject {
     object: MemoryObject,
-    vector_component: f32,
-    vector_score_source: Option<SectionVectorScoreSource>,
+    cue_component: f32,
+    cue_score_source: Option<SectionCueScoreSource>,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     graph_rationale: GraphRationaleSignals,
@@ -505,8 +522,8 @@ struct RankedObject {
 impl RankedObject {
     fn new(
         object: MemoryObject,
-        vector_component: f32,
-        vector_score_source: Option<SectionVectorScoreSource>,
+        cue_component: f32,
+        cue_score_source: Option<SectionCueScoreSource>,
         graph_component: f32,
         vector_candidate_score: Option<f32>,
         graph_rationale: GraphRationaleSignals,
@@ -514,8 +531,8 @@ impl RankedObject {
         let salience_component = salience_component(&object);
         Self {
             object,
-            vector_component,
-            vector_score_source,
+            cue_component,
+            cue_score_source,
             vector_candidate_score,
             graph_component,
             graph_rationale,
@@ -524,22 +541,22 @@ impl RankedObject {
     }
 
     fn final_score(&self) -> f32 {
-        (self.vector_component * 0.65)
+        (self.cue_component * 0.65)
             + (self.graph_component * 0.25)
             + (self.salience_component * 0.10)
     }
 
-    fn merge_vector_component(&mut self, value: f32, source: SectionVectorScoreSource) {
-        let replace = value > self.vector_component
-            || (value == self.vector_component
-                && matches!(source, SectionVectorScoreSource::DirectMatch)
+    fn merge_cue_component(&mut self, value: f32, source: SectionCueScoreSource) {
+        let replace = value > self.cue_component
+            || (value == self.cue_component
+                && matches!(source, SectionCueScoreSource::DirectMatch)
                 && !matches!(
-                    self.vector_score_source,
-                    Some(SectionVectorScoreSource::DirectMatch)
+                    self.cue_score_source,
+                    Some(SectionCueScoreSource::DirectMatch)
                 ));
         if replace {
-            self.vector_component = value;
-            self.vector_score_source = Some(source);
+            self.cue_component = value;
+            self.cue_score_source = Some(source);
         }
     }
 
@@ -556,8 +573,8 @@ impl RankedObject {
     fn section_score_components(&self) -> SectionScoreComponents {
         SectionScoreComponents {
             final_score: self.final_score(),
-            vector_score: self.vector_score_source.map(|_| self.vector_component),
-            vector_score_source: self.vector_score_source,
+            cue_score: self.cue_score_source.map(|_| self.cue_component),
+            cue_score_source: self.cue_score_source,
             graph_score: (self.graph_component > 0.0).then_some(self.graph_component),
             salience_score: (self.salience_component > 0.0).then_some(self.salience_component),
         }
@@ -994,32 +1011,40 @@ impl SectionCounts {
     }
 }
 
+#[derive(Debug, Clone)]
+struct CandidateRoot {
+    object_id: MemoryId,
+    object_type: ObjectType,
+    score: f32,
+    source: GraphRootSource,
+}
+
 #[derive(Debug)]
 struct CandidateRootSelection {
-    roots: Vec<VectorCandidateMatch>,
+    roots: Vec<CandidateRoot>,
     unique_count: usize,
-    omitted_count: usize,
+    omitted: Vec<CandidateRoot>,
 }
 
 fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
+    participants: &[MemoryId],
     max_graph_roots: usize,
 ) -> CandidateRootSelection {
-    let mut by_ref: HashMap<MemoryObjectRef, VectorCandidateMatch> = HashMap::new();
+    let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
         let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
         by_ref
             .entry(object_ref)
             .and_modify(|existing| {
                 if candidate.score.total_cmp(&existing.score).is_gt() {
-                    *existing = candidate.clone();
+                    *existing = candidate;
                 }
             })
-            .or_insert_with(|| candidate.clone());
+            .or_insert(candidate);
     }
-
-    let mut roots = by_ref.into_values().collect::<Vec<_>>();
-    roots.sort_by(|left, right| {
+    let mut content = by_ref.into_values().collect::<Vec<_>>();
+    content.sort_by(|left, right| {
         right
             .score
             .total_cmp(&left.score)
@@ -1030,17 +1055,34 @@ fn select_candidate_roots(
             })
             .then_with(|| left.object_id.cmp(&right.object_id))
     });
+    let mut roots = participants
+        .iter()
+        .map(|id| CandidateRoot {
+            object_id: *id,
+            object_type: ObjectType::Entity,
+            score: 1.0,
+            source: GraphRootSource::Participant,
+        })
+        .chain(content.into_iter().map(|candidate| CandidateRoot {
+            object_id: candidate.object_id,
+            object_type: candidate.object_type,
+            score: candidate.score,
+            source: GraphRootSource::Vector,
+        }))
+        .collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    roots.retain(|root| seen.insert(MemoryObjectRef::new(root.object_type, root.object_id)));
     let unique_count = roots.len();
-    roots.truncate(max_graph_roots);
+    let omitted = roots.split_off(max_graph_roots.min(roots.len()));
     CandidateRootSelection {
-        omitted_count: unique_count.saturating_sub(roots.len()),
         roots,
         unique_count,
+        omitted,
     }
 }
 
 fn graph_query_for_candidate(
-    candidate: &VectorCandidateMatch,
+    candidate: &CandidateRoot,
     context: &RetrievalContext,
     fanout_overrides: Vec<crate::ports::graph_authority::GraphExpansionFanoutOverride>,
 ) -> GraphExpansionQuery {
@@ -1103,10 +1145,11 @@ fn increment_bounded_failure_reason(
 }
 
 fn graph_expansion_trace(
-    candidate: &VectorCandidateMatch,
+    candidate: &CandidateRoot,
     expansion: &GraphExpansion,
 ) -> GraphExpansionTrace {
     GraphExpansionTrace {
+        source: candidate.source,
         root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: expansion.objects.len(),
         relation_count: expansion.relations.len(),
@@ -1140,8 +1183,9 @@ fn fanout_utilization_traces_for_expansion(
         .collect()
 }
 
-fn missing_root_expansion_trace(candidate: &VectorCandidateMatch) -> GraphExpansionTrace {
+fn missing_root_expansion_trace(candidate: &CandidateRoot) -> GraphExpansionTrace {
     GraphExpansionTrace {
+        source: candidate.source,
         root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
         object_count: 0,
         relation_count: 0,
@@ -1314,7 +1358,7 @@ fn rationale_summary(
     lifecycle_omission_count: usize,
 ) -> String {
     format!(
-        "Embedded the retrieval query, evaluated {vector_candidate_count} vector candidates, included {graph_verified_count} final context-pack objects, omitted {stale_candidate_omission_count} stale or unresolved candidates, and recorded {lifecycle_omission_count} lifecycle omission decisions with deterministic vector, graph proximity, and salience scoring."
+        "Evaluated {vector_candidate_count} vector candidates, included {graph_verified_count} final context-pack objects, omitted {stale_candidate_omission_count} stale or unresolved candidates, and recorded {lifecycle_omission_count} lifecycle omission decisions with deterministic cue, graph proximity, and salience scoring."
     )
 }
 
@@ -1401,13 +1445,23 @@ mod tests {
 
     #[test]
     fn graph_root_truncation_keeps_highest_scoring_roots() {
-        let low = candidate(MemoryId::from_u128(1), ObjectType::Episode, 0.1);
-        let middle = candidate(MemoryId::from_u128(2), ObjectType::Episode, 0.6);
-        let high = candidate(MemoryId::from_u128(3), ObjectType::Episode, 0.9);
+        let low = vector_candidate(MemoryId::from_u128(1), ObjectType::Episode, 0.1);
+        let middle = vector_candidate(MemoryId::from_u128(2), ObjectType::Episode, 0.6);
+        let high = vector_candidate(MemoryId::from_u128(3), ObjectType::Episode, 0.9);
 
-        let selected = select_candidate_roots(&[middle.clone(), low, high.clone()], 2);
+        let selected = select_candidate_roots(&[middle.clone(), low, high.clone()], &[], 2);
 
-        assert_eq!(selected.roots, vec![high, middle]);
+        assert_eq!(
+            selected
+                .roots
+                .iter()
+                .map(|root| (root.object_id, root.score))
+                .collect::<Vec<_>>(),
+            vec![
+                (high.object_id, high.score),
+                (middle.object_id, middle.score)
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1576,14 +1630,12 @@ mod tests {
             .all(|pair| pair[0].final_score >= pair[1].final_score));
         let direct = components
             .iter()
-            .find(|scores| {
-                scores.vector_score_source == Some(SectionVectorScoreSource::DirectMatch)
-            })
+            .find(|scores| scores.cue_score_source == Some(SectionCueScoreSource::DirectMatch))
             .unwrap();
         let weaker = components
             .iter()
             .find(|scores| {
-                scores.vector_score < direct.vector_score
+                scores.cue_score < direct.cue_score
                     && scores.graph_score <= direct.graph_score
                     && scores.salience_score <= direct.salience_score
             })
@@ -1599,20 +1651,23 @@ mod tests {
                 SectionAssignmentReason::OmittedNonActiveThread { .. }
                 | SectionAssignmentReason::OmittedNoPromptSection { .. } => continue,
             };
-            match scores.vector_score_source {
-                Some(SectionVectorScoreSource::DirectMatch) => {
+            match scores.cue_score_source {
+                Some(SectionCueScoreSource::DirectMatch) => {
                     saw_direct = true;
-                    assert_eq!(scores.vector_score, Some(root_score));
+                    assert_eq!(scores.cue_score, Some(root_score));
                 }
-                Some(SectionVectorScoreSource::DerivedFromRoot {
+                Some(SectionCueScoreSource::DerivedFromRoot {
                     root_score: source_root_score,
                 }) => {
                     saw_derived = true;
                     assert_eq!(source_root_score, root_score);
-                    let derived_score = scores.vector_score.unwrap();
+                    let derived_score = scores.cue_score.unwrap();
                     assert!(derived_score > 0.0 && derived_score < source_root_score);
                 }
-                None => panic!("ranked row must publish its vector-score provenance"),
+                Some(SectionCueScoreSource::Participant { .. }) => {
+                    panic!("topic-only retrieval cannot have a participant cue")
+                }
+                None => panic!("ranked row must publish its cue-score provenance"),
             }
         }
 
@@ -1623,7 +1678,7 @@ mod tests {
     #[test]
     fn vector_score_provenance_tracks_the_winning_component() {
         let fixtures = representative_fixtures();
-        let derived_source = SectionVectorScoreSource::DerivedFromRoot { root_score: 1.0 };
+        let derived_source = SectionCueScoreSource::DerivedFromRoot { root_score: 1.0 };
         let mut ranked = RankedObject::new(
             MemoryObject::DerivedMemory(fixtures.user_preference),
             0.75,
@@ -1633,13 +1688,13 @@ mod tests {
             GraphRationaleSignals::default(),
         );
 
-        ranked.merge_vector_component(0.70, SectionVectorScoreSource::DirectMatch);
-        assert_eq!(ranked.vector_score_source, Some(derived_source));
+        ranked.merge_cue_component(0.70, SectionCueScoreSource::DirectMatch);
+        assert_eq!(ranked.cue_score_source, Some(derived_source));
 
-        ranked.merge_vector_component(0.75, SectionVectorScoreSource::DirectMatch);
+        ranked.merge_cue_component(0.75, SectionCueScoreSource::DirectMatch);
         assert_eq!(
-            ranked.vector_score_source,
-            Some(SectionVectorScoreSource::DirectMatch)
+            ranked.cue_score_source,
+            Some(SectionCueScoreSource::DirectMatch)
         );
     }
 
@@ -2528,7 +2583,7 @@ mod tests {
         let vector = VectorRecallOverride {
             inner: TemporaryVectorCandidateStore::open(2).await,
             completeness: None,
-            candidate: Some(candidate(object_id, ObjectType::MemoryLink, 0.99)),
+            candidate: Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99)),
         };
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
@@ -3227,7 +3282,20 @@ mod tests {
             .with_timezone(&Utc)
     }
 
-    fn candidate(object_id: MemoryId, object_type: ObjectType, score: f32) -> VectorCandidateMatch {
+    fn candidate(object_id: MemoryId, object_type: ObjectType, score: f32) -> CandidateRoot {
+        CandidateRoot {
+            object_id,
+            object_type,
+            score,
+            source: GraphRootSource::Vector,
+        }
+    }
+
+    fn vector_candidate(
+        object_id: MemoryId,
+        object_type: ObjectType,
+        score: f32,
+    ) -> VectorCandidateMatch {
         VectorCandidateMatch::new(object_id, object_type, VectorSurface::Summary, score)
     }
 
