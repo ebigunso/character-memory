@@ -65,7 +65,7 @@ The rulings of 2026-09-21 cover this slice; plan approval is waived for plans in
   One serialized turn per write operation (commit and remember, correct, forget, link) within a process, among calls sharing one facade, held across the operation's graph, vector and stats work, including a correction retry that only repairs vectors or stats. Embedding happens before the turn. Recall and prepare take no part. Show with tests that the interleavings the census named cannot occur between two writers: the collision preflight race, a late vector write or delete landing after a newer turn, a late stats state overwriting a newer one (objects visible without their links is already closed by the single graph batch). The README gains one sentence: writes through one memory value apply one at a time, so use one value per store.
 - acceptance:
   - Concurrent writers through one facade produce the same stores as some serial order of them, shown for at least: two commits with one id, a commit racing a forget of the same memory, a correction racing a link.
-  - No writer or reader waits on an embedding call made by another operation, shown with a stalled provider.
+  - The library makes no writer or reader wait on an embedding call made by another operation, shown with a stalled provider; what a consumer-supplied provider serializes inside itself is its own.
   - Concurrent writes all complete; none deadlocks, `remember` included.
 - validation:
   - kind: command
