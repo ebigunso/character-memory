@@ -78,7 +78,7 @@ Remember and correction derive two link families from interpreted-memory lists:
 
 Generated link IDs are deterministic for their endpoints and relation family. Objects and derived links are written in one graph batch. The [derived-link builder](../../../src/usecases/write_planning.rs#L467) preserves this relationship between object lists and graph traversal.
 
-Authored `Supersedes` links are rejected. Authored `About` links between interpreted memories and notions are rejected in either orientation; the memory's subject list owns those links. Other admitted link kinds remain caller-authored. Whole-plan validation also rejects duplicate link IDs, including collisions with generated links. Supersession predecessors must already exist in the graph; creating a predecessor in the same plan does not satisfy the reference.
+Authored `Supersedes` links are rejected. Authored `About` links between interpreted memories and notions are rejected in either orientation; the memory's subject list owns those links. Other admitted link kinds remain caller-authored. Commit rejects duplicate link IDs, including collisions with generated links. Supersession predecessors must already exist in the graph; creating a predecessor in the same plan does not satisfy the reference.
 
 ## Suppression And Supersession
 

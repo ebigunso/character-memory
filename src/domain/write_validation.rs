@@ -99,10 +99,6 @@ pub enum CandidateValidationIssue {
     AuthoredSupersedesLink,
     #[error("About links between interpreted memories and entities must be derived from the memory subject list")]
     AuthoredBeliefAboutLink,
-    #[error(
-        "link id {link_id} occurs more than once in the write plan, including generated links"
-    )]
-    DuplicateLinkId { link_id: MemoryId },
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]

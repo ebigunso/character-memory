@@ -696,13 +696,12 @@ where
             }
         }
 
-        let mut validations = plan
+        let validations = plan
             .candidates
             .iter()
             .enumerate()
             .map(|(index, candidate)| context.validate_candidate(index, candidate))
             .collect::<Vec<_>>();
-        validate_plan_link_ids(plan, &mut validations);
         let decision = if validations
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid)
@@ -716,40 +715,6 @@ where
             validations,
             decision,
         })
-    }
-}
-
-// Validate the whole batch, including generated links, before any store mutation.
-fn validate_plan_link_ids(plan: &RememberWritePlan, validations: &mut [CandidateValidation]) {
-    let mut owners = HashMap::new();
-    for (index, candidate) in plan.candidates.iter().enumerate() {
-        let ids = match candidate {
-            MemoryCandidate::MemoryLink(candidate) => candidate.draft.id.into_iter().collect(),
-            MemoryCandidate::DerivedMemory(candidate) if candidate.draft.id.is_some() => candidate
-                .draft
-                .clone()
-                .into_domain()
-                .map(|memory| {
-                    derived_memory_links(&memory)
-                        .into_iter()
-                        .map(|link| link.id)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
-        for link_id in ids {
-            if let Some(first) = owners.insert(link_id, index) {
-                for owner in [first, index] {
-                    let validation = &mut validations[owner];
-                    let issue = CandidateValidationIssue::DuplicateLinkId { link_id };
-                    if !validation.errors.contains(&issue) {
-                        validation.errors.push(issue);
-                    }
-                    validation.status = CandidateValidationStatus::Invalid;
-                }
-            }
-        }
     }
 }
 

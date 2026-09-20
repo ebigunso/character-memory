@@ -854,35 +854,49 @@ async fn authored_belief_about_links_are_rejected_in_both_directions() {
 }
 
 #[tokio::test]
-async fn replay_rejects_authored_link_reusing_a_returned_generated_id() {
-    let memory = memory().await;
-    let subject = MemoryId::from_u128(1991);
-    let belief_id = MemoryId::from_u128(1992);
-    let belief = given_belief(belief_id, subject, "Alice");
-    let plan = plan_with_belief(belief.clone(), true);
-    let outcome = memory
-        .commit(plan.clone(), CommitOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(outcome.persisted_link_ids.len(), 1);
-    let link_id = outcome.persisted_link_ids[0];
-    let mut authored = MemoryLinkDraft::new(
-        ObjectType::Entity,
-        subject,
-        RelationType::AssociatedWith,
-        ObjectType::DerivedMemory,
-        belief_id,
-    );
-    authored.id = Some(link_id);
-    authored.created_at = belief.created_at;
-    authored.schema_version = belief.schema_version;
-    let plan = plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
-        authored,
-        CandidateProvenance::caller("authored collision"),
-    )));
-    let result = memory.commit(plan, CommitOptions::default()).await;
-    assert!(
-        matches!(result, Err(CustomError::WritePlanValidationRejected { validations }) if validations.iter().any(|v| v.errors.contains(&CandidateValidationIssue::DuplicateLinkId { link_id })))
-    );
-    memory.close().await.unwrap();
+async fn commit_rejects_authored_link_ids_colliding_with_generated_or_authored_links() {
+    for reuse_generated_id in [true, false] {
+        let memory = memory().await;
+        let subject = MemoryId::from_u128(1991);
+        let belief_id = MemoryId::from_u128(1992);
+        let belief = given_belief(belief_id, subject, "Alice");
+        let plan = plan_with_belief(belief.clone(), true);
+        let outcome = memory
+            .commit(plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(outcome.persisted_link_ids.len(), 1);
+        let link_id = if reuse_generated_id {
+            outcome.persisted_link_ids[0]
+        } else {
+            MemoryId::from_u128(1993)
+        };
+        let mut authored = MemoryLinkDraft::new(
+            ObjectType::Entity,
+            subject,
+            RelationType::AssociatedWith,
+            ObjectType::DerivedMemory,
+            belief_id,
+        );
+        authored.id = Some(link_id);
+        authored.created_at = belief.created_at;
+        authored.schema_version = belief.schema_version;
+        let authored = MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+            authored,
+            CandidateProvenance::caller("authored collision"),
+        ));
+        let plan = if reuse_generated_id {
+            plan.with_candidate(authored)
+        } else {
+            RememberWritePlan::new()
+                .with_candidate(authored.clone())
+                .with_candidate(authored)
+        };
+        assert!(
+            matches!(memory.commit(plan, CommitOptions::default()).await,
+            Err(CustomError::DeterministicIdCollision { object })
+                if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id))
+        );
+        memory.close().await.unwrap();
+    }
 }
