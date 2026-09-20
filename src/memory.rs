@@ -139,7 +139,9 @@ impl CharacterMemory {
         .await
     }
 
-    /// Applies suppression/archive lifecycle mutation through injected graph/vector parts.
+    /// Applies suppression with an optional thread-member cascade.
+    ///
+    /// Forgetting a thread preserves its status and vector.
     pub async fn forget(
         &self,
         draft: ForgetMemoryDraft,
