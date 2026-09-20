@@ -392,7 +392,7 @@ impl From<RetrievalLifecyclePolicy> for SelectivityCountScope {
     fn from(policy: RetrievalLifecyclePolicy) -> Self {
         if policy.include_suppressed {
             Self::Total
-        } else if policy.include_non_current || policy.include_superseded {
+        } else if policy.include_superseded {
             Self::Active
         } else {
             Self::Current
@@ -833,7 +833,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy {
-                include_non_current: true,
+                include_superseded: true,
                 ..RetrievalLifecyclePolicy::default()
             },
             TraceMode::Enabled,

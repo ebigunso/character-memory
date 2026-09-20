@@ -149,7 +149,6 @@ impl Default for ContinuitySectionLimits {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RetrievalLifecyclePolicy {
     pub include_suppressed: bool,
-    pub include_non_current: bool,
     /// Applies to graph-verified supersession evidence reported as `superseded_by`.
     /// A derived memory's local `supersedes` list points to older memories it replaces.
     pub include_superseded: bool,
@@ -161,11 +160,6 @@ impl RetrievalLifecyclePolicy {
             RetentionState::Active => true,
             RetentionState::Suppressed => self.include_suppressed,
         }
-    }
-
-    pub fn allows_derived_memory(self, derived_memory: &DerivedMemory) -> bool {
-        self.allows_retention_state(derived_memory.retention_state)
-            && (derived_memory.is_current || self.include_non_current)
     }
 }
 
@@ -481,7 +475,6 @@ pub enum GraphExpansionOutcome {
 pub struct LifecycleFilterDecision {
     pub object: MemoryObjectRef,
     pub retention_state: Option<RetentionState>,
-    pub is_current: Option<bool>,
     pub superseded_by: Vec<MemoryId>,
     pub action: LifecycleFilterAction,
     pub reason: LifecycleFilterReason,
@@ -499,10 +492,8 @@ pub enum LifecycleFilterAction {
 pub enum LifecycleFilterReason {
     Active,
     SuppressedIncludedByPolicy,
-    NonCurrentIncludedByPolicy,
     SupersededIncludedByPolicy,
     SuppressedOmitted,
-    NonCurrentOmitted,
     SupersededOmitted,
     GraphObjectMissing,
     GraphExpansionBounded,
@@ -521,7 +512,6 @@ pub struct StaleCandidateOmission {
 pub enum StaleCandidateReason {
     GraphObjectMissing,
     LifecycleMismatch,
-    CurrentnessMismatch,
     Superseded,
     SectionLimit,
     GraphExpansionBounded,
@@ -663,7 +653,6 @@ mod tests {
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
             salience_score: 0.7,
-            is_current: true,
             supersedes: Vec::new(),
             retention_state: RetentionState::Active,
             created_at: timestamp("2026-04-29T10:07:00Z"),
@@ -689,58 +678,15 @@ mod tests {
     }
 
     #[test]
-    fn default_policy_excludes_non_active_and_stale_derived_memories() {
+    fn suppressed_retention_requires_explicit_inclusion() {
         let policy = RetrievalLifecyclePolicy::default();
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442000");
-        let mut memory = derived_memory(
-            memory_id("550e8400-e29b-41d4-a716-446655442001"),
-            episode_id,
-        );
-
         assert!(policy.allows_retention_state(RetentionState::Active));
         assert!(!policy.allows_retention_state(RetentionState::Suppressed));
-        assert!(policy.allows_derived_memory(&memory));
-
-        memory.is_current = false;
-        assert!(!policy.allows_derived_memory(&memory));
-
-        let policy = RetrievalLifecyclePolicy {
-            include_non_current: true,
-            ..RetrievalLifecyclePolicy::default()
-        };
-        assert!(policy.allows_derived_memory(&memory));
-    }
-
-    #[test]
-    fn default_policy_allows_current_derived_memory_that_supersedes_older_memory() {
-        let policy = RetrievalLifecyclePolicy::default();
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442050");
-        let mut memory = derived_memory(
-            memory_id("550e8400-e29b-41d4-a716-446655442051"),
-            episode_id,
-        );
-        memory.supersedes = vec![memory_id("550e8400-e29b-41d4-a716-446655442052")];
-
-        assert!(policy.allows_derived_memory(&memory));
-    }
-
-    #[test]
-    fn derived_memory_currentness_policy_is_independent_of_local_supersedes_list() {
-        let episode_id = memory_id("550e8400-e29b-41d4-a716-446655442060");
-        let mut memory = derived_memory(
-            memory_id("550e8400-e29b-41d4-a716-446655442061"),
-            episode_id,
-        );
-        memory.is_current = false;
-        memory.supersedes = vec![memory_id("550e8400-e29b-41d4-a716-446655442062")];
-
-        assert!(!RetrievalLifecyclePolicy::default().allows_derived_memory(&memory));
-
-        let policy = RetrievalLifecyclePolicy {
-            include_non_current: true,
-            ..RetrievalLifecyclePolicy::default()
-        };
-        assert!(policy.allows_derived_memory(&memory));
+        assert!(RetrievalLifecyclePolicy {
+            include_suppressed: true,
+            ..policy
+        }
+        .allows_retention_state(RetentionState::Suppressed));
     }
 
     #[test]

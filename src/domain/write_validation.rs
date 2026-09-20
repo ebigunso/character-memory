@@ -89,10 +89,8 @@ pub enum CandidateValidationIssue {
     MissingObjectSchemaVersion,
     #[error("memory link was rejected by the link admission policy")]
     MemoryLinkRejectedByAdmissionPolicy,
-    #[error("suppressed memory cannot be current")]
-    SuppressedMemoryMarkedCurrent,
-    #[error("superseding memory cannot be current unless explicitly historical")]
-    SupersedingMemoryMarkedCurrent,
+    #[error("Supersedes links must be derived from a memory supersedes list")]
+    AuthoredSupersedesLink,
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]
@@ -170,6 +168,7 @@ pub enum CandidateSourceSpanIssue {
 pub enum CandidateReferenceRole {
     DerivedSourceEpisode,
     DerivedSourceObservation,
+    SupersededMemory,
     MemoryLinkFrom,
     MemoryLinkTo,
     VectorIndexTarget,

@@ -181,6 +181,33 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         })
     }
 
+    async fn query_superseded_derived_memory_ids(
+        &self,
+        memory_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryId>, GraphQueryError> {
+        let refs = memory_ids
+            .iter()
+            .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+            .collect::<Vec<_>>();
+        let mut ids = SparqlGraphSelectors::new(&self.store)
+            .select_links_touching(&refs)
+            .map_err(|error| GraphQueryError::Selection {
+                detail: error.to_string(),
+            })?
+            .into_iter()
+            .filter(|link| {
+                link.relation == crate::domain::RelationType::Supersedes
+                    && link.from.object_type == ObjectType::DerivedMemory
+                    && link.to.object_type == ObjectType::DerivedMemory
+                    && memory_ids.contains(&link.to.id)
+            })
+            .map(|link| link.to.id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
     async fn query_links_by_ids(
         &self,
         link_ids: &[MemoryId],

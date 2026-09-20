@@ -103,8 +103,9 @@ impl Default for RetrievalStatsHealth {
 pub(crate) fn retrieval_stats_edges(
     objects: &[MemoryObject],
     links: &[MemoryLink],
+    superseded: &std::collections::HashSet<MemoryId>,
 ) -> Vec<RetrievalStatsEdge> {
-    let states = retrieval_stats_object_states(objects);
+    let states = retrieval_stats_object_states(objects, superseded);
     retrieval_stats_edges_with_states(objects, links, &states)
 }
 
@@ -116,7 +117,7 @@ fn retrieval_stats_edges_with_states(
     let object_state_lookup = object_state_lookup(object_states);
     let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
-        append_intrinsic_edges(&mut edges, object);
+        append_intrinsic_edges(&mut edges, object, &object_state_lookup);
     }
     for link in links {
         append_link_edges(&mut edges, link, &object_state_lookup);
@@ -138,8 +139,12 @@ fn object_state_lookup(
 
 pub(crate) fn retrieval_stats_object_states(
     objects: &[MemoryObject],
+    superseded: &std::collections::HashSet<MemoryId>,
 ) -> Vec<RetrievalStatsObjectState> {
-    objects.iter().filter_map(object_state).collect()
+    objects
+        .iter()
+        .filter_map(|object| object_state(object, superseded))
+        .collect()
 }
 
 pub(crate) fn relation_type_key(relation: RelationType) -> &'static str {
@@ -179,7 +184,11 @@ pub(crate) fn retention_state_key(retention_state: RetentionState) -> &'static s
     }
 }
 
-fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, object: &MemoryObject) {
+fn append_intrinsic_edges(
+    edges: &mut HashMap<String, RetrievalStatsEdge>,
+    object: &MemoryObject,
+    object_states: &HashMap<(MemoryId, ObjectType), RetrievalStatsObjectState>,
+) {
     match object {
         MemoryObject::Episode(episode) => {
             for entity_id in &episode.participant_entity_ids {
@@ -208,7 +217,7 @@ fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, objec
                         memory.id,
                         ObjectType::DerivedMemory,
                         memory.retention_state,
-                        memory.is_current,
+                        edge_lifecycle(memory.id, ObjectType::DerivedMemory, object_states).1,
                         memory.created_at,
                     ),
                 );
@@ -321,7 +330,10 @@ fn edge(
     }
 }
 
-fn object_state(object: &MemoryObject) -> Option<RetrievalStatsObjectState> {
+fn object_state(
+    object: &MemoryObject,
+    superseded: &std::collections::HashSet<MemoryId>,
+) -> Option<RetrievalStatsObjectState> {
     match object {
         MemoryObject::Episode(object) => Some(RetrievalStatsObjectState {
             object_id: object.id,
@@ -341,7 +353,8 @@ fn object_state(object: &MemoryObject) -> Option<RetrievalStatsObjectState> {
             object_id: object.id,
             object_type: ObjectType::DerivedMemory,
             retention_state: object.retention_state,
-            is_current: object.is_current,
+            is_current: object.retention_state == RetentionState::Active
+                && !superseded.contains(&object.id),
             observed_at: object.updated_at,
         }),
         MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
@@ -398,6 +411,7 @@ mod tests {
     use super::*;
     use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
     use crate::domain::{DerivedMemory, DerivedType, Episode, Modality, DEFAULT_SCHEMA_VERSION};
+    use std::collections::HashSet;
 
     struct StoreFixture {
         store: Box<dyn RetrievalStatsStore>,
@@ -681,7 +695,6 @@ mod tests {
                 thread_ids: Vec::new(),
                 entity_ids: vec![entity_id],
                 salience_score: 0.7,
-                is_current: true,
                 supersedes: Vec::new(),
                 retention_state: RetentionState::Active,
                 created_at: timestamp(),
@@ -690,7 +703,7 @@ mod tests {
             }),
         ];
 
-        let edges = retrieval_stats_edges(&objects, &[]);
+        let edges = retrieval_stats_edges(&objects, &[], &HashSet::new());
 
         assert_eq!(edges.len(), 2);
         assert!(edges.iter().any(|edge| {
@@ -720,7 +733,6 @@ mod tests {
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
             salience_score: 0.7,
-            is_current: false,
             supersedes: Vec::new(),
             retention_state: RetentionState::Suppressed,
             created_at: timestamp(),
@@ -740,7 +752,7 @@ mod tests {
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         };
 
-        let edges = retrieval_stats_edges(&objects, &[link]);
+        let edges = retrieval_stats_edges(&objects, &[link], &HashSet::new());
 
         let edge = edges
             .iter()
@@ -769,7 +781,7 @@ mod tests {
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         })];
 
-        let edges = retrieval_stats_edges(&objects, &[]);
+        let edges = retrieval_stats_edges(&objects, &[], &HashSet::new());
 
         assert!(edges.is_empty());
     }
@@ -789,7 +801,6 @@ mod tests {
             thread_ids: Vec::new(),
             entity_ids: vec![entity_id],
             salience_score: 0.7,
-            is_current: false,
             supersedes: Vec::new(),
             retention_state: RetentionState::Suppressed,
             created_at: timestamp(),
@@ -809,7 +820,7 @@ mod tests {
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         };
 
-        let edges = retrieval_stats_edges(&[memory], &[link]);
+        let edges = retrieval_stats_edges(&[memory], &[link], &HashSet::new());
 
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].retention_state, RetentionState::Suppressed);

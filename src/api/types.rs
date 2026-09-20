@@ -9,13 +9,13 @@ pub use draft::{
     MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberOutcome, VectorIndexingFailure,
 };
 pub use lifecycle::{
-    CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy, CorrectionTarget,
-    ExternalSourceReference, ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
-    LifecycleMutationDiagnostics, LifecycleMutationOutcome, LifecycleMutationTrace,
-    LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleTargetRef,
-    ReplacementDerivedMemoryDraft, SourceObjectCorrectionTarget, SourceProvenanceReference,
-    SupersededByEvidence, SuppressionPolicy, VectorMaintenanceFailure,
-    VectorMaintenanceFailureItem, VectorMaintenanceOperation,
+    CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionTarget, ExternalSourceReference,
+    ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft, LifecycleMutationDiagnostics,
+    LifecycleMutationOutcome, LifecycleMutationTrace, LifecycleMutationWarning,
+    LifecycleMutationWarningReason, LifecycleTargetRef, ReplacementDerivedMemoryDraft,
+    SourceObjectCorrectionTarget, SourceProvenanceReference, SupersededByEvidence,
+    SuppressionPolicy, VectorMaintenanceFailure, VectorMaintenanceFailureItem,
+    VectorMaintenanceOperation,
 };
 pub use retrieval::{
     default_retrieval_object_types, ContextPackSection, ContinuityContextPack,

@@ -293,7 +293,6 @@ mod tests {
             thread_ids: vec![id(30)],
             entity_ids: vec![id(1)],
             salience_score: 0.42,
-            is_current: false,
             supersedes: vec![id(99)],
             retention_state: RetentionState::Active,
             created_at: timestamp(),

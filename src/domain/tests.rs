@@ -136,7 +136,6 @@ fn valid_derived_memory() -> DerivedMemory {
         thread_ids: vec![],
         entity_ids: vec![],
         salience_score: 0.85,
-        is_current: true,
         supersedes: vec![],
         retention_state: RetentionState::Active,
         created_at: timestamp("2026-04-27T10:08:00Z"),

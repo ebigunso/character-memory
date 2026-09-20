@@ -129,6 +129,41 @@ mod tests {
     use crate::test_support::{in_memory_graph_store, representative_fixtures};
 
     #[tokio::test]
+    async fn rejects_authored_supersedes_before_graph_or_stats_writes() {
+        let graph = in_memory_graph_store();
+        let fixtures = representative_fixtures();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            fixtures.correction.id,
+            RelationType::Supersedes,
+            ObjectType::DerivedMemory,
+            fixtures.user_preference.id,
+        );
+        let link_id = MemoryId::from_u128(998);
+        draft.id = Some(link_id);
+        let error = LinkPipeline::new_with_stats(&graph, &stats)
+            .link(draft)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CustomError::DomainValidation(DomainValidationError::AuthoredSupersedesLink)
+        ));
+        assert!(graph
+            .query_links_by_ids(&[link_id])
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(stats
+            .global_counter(RelationType::Supersedes, ObjectType::DerivedMemory)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn persists_caller_supplied_link_as_graph_authoritative_record() {
         let graph = in_memory_graph_store();
         let fixtures = representative_fixtures();
@@ -512,6 +547,13 @@ mod tests {
             Err(crate::errors::GraphQueryError::Selection {
                 detail: "endpoint lifecycle lookup failed".to_owned(),
             })
+        }
+
+        async fn query_superseded_derived_memory_ids(
+            &self,
+            _memory_ids: &[crate::domain::MemoryId],
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            Ok(Vec::new())
         }
 
         async fn query_links_by_ids(

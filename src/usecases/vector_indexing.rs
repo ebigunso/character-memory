@@ -101,6 +101,27 @@ where
     }
 }
 
+pub(crate) async fn delete_vectors<V: VectorCandidateStore + ?Sized>(
+    vector_store: &V,
+    objects: &[MemoryObjectRef],
+) -> Result<Option<crate::api::types::VectorMaintenanceFailureItem>, CustomError> {
+    if objects.is_empty() {
+        return Ok(None);
+    }
+    let ids = objects.iter().map(|object| object.id).collect::<Vec<_>>();
+    match vector_store.delete_candidates(&ids).await {
+        Ok(()) => Ok(None),
+        Err(CustomError::VectorDatabaseError(error)) => {
+            Ok(Some(crate::api::types::VectorMaintenanceFailureItem {
+                operation: crate::api::types::VectorMaintenanceOperation::Delete,
+                objects: objects.to_vec(),
+                cause: VectorIndexingCause::VectorDatabase(error),
+            }))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIndexingOutcome {
     VectorIndexingOutcome {
         indexed_objects: Vec::new(),

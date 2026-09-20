@@ -116,15 +116,41 @@ where
         vector_intent: VectorWriteIntent,
         options: CommitOptions,
     ) -> Result<RememberOutcome, CustomError> {
-        self.graph_store.upsert_objects(&objects).await?;
-        self.graph_store.upsert_links(&links).await?;
+        self.graph_store
+            .upsert_objects_and_links(&objects, &links)
+            .await?;
 
         let mut outcome = graph_persisted_outcome(&objects, &links);
         if options.update_vectors {
+            let mut predecessors = links
+                .iter()
+                .filter(|link| link.relation == crate::domain::RelationType::Supersedes)
+                .map(|link| {
+                    MemoryObjectRef::new(crate::domain::ObjectType::DerivedMemory, link.to_id)
+                })
+                .collect::<Vec<_>>();
+            predecessors.sort_by_key(|object| object.stable_order_key());
+            predecessors.dedup();
+            if let Some(failure) =
+                crate::usecases::vector_indexing::delete_vectors(self.vector_store, &predecessors)
+                    .await?
+            {
+                let marker = RepairMarker::VectorMaintenance {
+                    failure: crate::api::types::VectorMaintenanceFailure {
+                        failures: vec![failure],
+                    },
+                };
+                outcome.repair_needed.push(marker.clone());
+                outcome.diagnostics.repair_needed.push(marker);
+            }
             let vector_records = match vector_intent {
-                VectorWriteIntent::PlanTargets(targets) => {
-                    vector_records_for_targets(&objects, &targets)
-                }
+                VectorWriteIntent::PlanTargets(targets) => vector_records_for_targets(
+                    &objects,
+                    &targets
+                        .into_iter()
+                        .filter(|target| !predecessors.contains(target))
+                        .collect::<Vec<_>>(),
+                ),
                 VectorWriteIntent::None => Vec::new(),
             };
             self.record_vector_outcome(&mut outcome, &vector_records)
@@ -340,6 +366,92 @@ mod tests {
     use crate::usecases::write_planning::RememberPlanDefaults;
 
     #[tokio::test]
+    async fn prepared_successor_validates_and_commits_derived_links_without_predecessor_write() {
+        let fixtures = representative_fixtures();
+        let graph = in_memory_graph_store();
+        graph.upsert_objects(&fixtures.objects()).await.unwrap();
+        let successor_id = MemoryId::from_u128(901);
+        let mut draft = DerivedMemoryDraft::new(DerivedType::Correction, "A corrected preference.")
+            .with_source_episode(fixtures.episode.id);
+        draft.id = Some(successor_id);
+        draft.supersedes = vec![fixtures.user_preference.id];
+        let plan =
+            prepare_test_plan(RememberInput::new("Correction source.").with_derived_memory(draft));
+        assert!(WritePlanValidator::new(&graph)
+            .validate(&plan)
+            .await
+            .unwrap()
+            .is_valid());
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let outcome = RememberPipeline::new(&graph, &vector, &embedder)
+            .commit(plan, CommitOptions::default())
+            .await
+            .unwrap();
+        assert!(!outcome
+            .persisted_object_ids
+            .contains(&fixtures.user_preference.id));
+        assert_eq!(
+            graph
+                .query_objects(&GraphObjectQuery::by_ids(vec![fixtures.user_preference.id]))
+                .await
+                .unwrap(),
+            vec![MemoryObject::DerivedMemory(
+                fixtures.user_preference.clone()
+            )]
+        );
+        assert_eq!(
+            graph
+                .query_superseded_derived_memory_ids(&[fixtures.user_preference.id, successor_id])
+                .await
+                .unwrap(),
+            vec![fixtures.user_preference.id]
+        );
+        let links = graph
+            .query_links_by_ids(&outcome.persisted_link_ids)
+            .await
+            .unwrap();
+        assert!(links.iter().any(|link| link.from_id == successor_id
+            && link.to_id == fixtures.user_preference.id
+            && link.relation == RelationType::Supersedes));
+    }
+
+    #[tokio::test]
+    async fn failed_currency_lookup_reports_repair_without_writing_guessed_stats() {
+        let graph = RecordingGraphStore {
+            fail_currency_query: true,
+            ..RecordingGraphStore::default()
+        };
+        let vector = RecordingVectorStore::default();
+        let embedder = RecordingEmbedder::default();
+        let stats = InMemoryRetrievalStatsStore::new();
+        let outcome = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
+            .commit(representative_plan(&fixed_ids()), CommitOptions::default())
+            .await
+            .unwrap();
+        assert!(matches!(
+            outcome
+                .stats_update_status
+                .failure
+                .unwrap()
+                .causes
+                .as_slice(),
+            [StatsUpdateCause::EndpointHydration {
+                error: crate::errors::GraphQueryError::Selection { .. }
+            }]
+        ));
+        assert!(outcome
+            .repair_needed
+            .iter()
+            .any(|marker| matches!(marker, RepairMarker::StatsUpdate { .. })));
+        assert!(stats
+            .global_counter(RelationType::About, ObjectType::DerivedMemory)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
@@ -457,6 +569,11 @@ mod tests {
         assert!(matches!(error, CustomError::DatabaseError(_)));
         assert!(embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
+        assert!(graph
+            .query_objects(&GraphObjectQuery::by_ids(expected_object_ids(&ids)))
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -902,6 +1019,7 @@ mod tests {
         fail_objects: bool,
         fail_links: bool,
         fail_id_queries: bool,
+        fail_currency_query: bool,
     }
 
     impl Default for RecordingGraphStore {
@@ -912,6 +1030,7 @@ mod tests {
                 fail_objects: false,
                 fail_links: false,
                 fail_id_queries: false,
+                fail_currency_query: false,
             }
         }
     }
@@ -1049,6 +1168,20 @@ mod tests {
             }
 
             self.store.query_objects(query).await
+        }
+
+        async fn query_superseded_derived_memory_ids(
+            &self,
+            memory_ids: &[crate::domain::MemoryId],
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            if self.fail_currency_query {
+                return Err(crate::errors::GraphQueryError::Selection {
+                    detail: "currency lookup failed".to_owned(),
+                });
+            }
+            self.store
+                .query_superseded_derived_memory_ids(memory_ids)
+                .await
         }
 
         async fn query_links_by_ids(

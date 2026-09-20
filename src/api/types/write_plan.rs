@@ -690,6 +690,9 @@ pub enum DiagnosticSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RepairMarker {
+    VectorMaintenance {
+        failure: super::lifecycle::VectorMaintenanceFailure,
+    },
     VectorIndex {
         unindexed_objects: Vec<MemoryObjectRef>,
         cause: VectorIndexingCause,

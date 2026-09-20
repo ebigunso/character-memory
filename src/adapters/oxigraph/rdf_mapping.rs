@@ -313,7 +313,6 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
             vocab::SALIENCE_SCORE,
             score(memory.salience_score),
         ),
-        RdfTriple::literal(&subject, vocab::IS_CURRENT, memory.is_current.to_string()),
         RdfTriple::literal(
             &subject,
             vocab::RETENTION_STATE,

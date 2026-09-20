@@ -69,6 +69,8 @@ impl CharacterMemory {
 
     /// Commits a remember write plan after revalidating it against current graph state.
     ///
+    /// Objects and links derived from memory supersedes lists are written in one graph batch.
+    ///
     /// Graph-authoritative writes are critical and fail the operation. Vector indexing and
     /// retrieval-stats updates are repairable and are reported in the returned outcome.
     pub async fn commit(
@@ -122,7 +124,7 @@ impl CharacterMemory {
         .await
     }
 
-    /// Applies a non-destructive lifecycle correction through injected graph/vector parts.
+    /// Appends replacement memories and their derived Supersedes links without rewriting predecessors.
     pub async fn correct(
         &self,
         draft: CorrectMemoryDraft,
@@ -512,7 +514,7 @@ mod tests {
             .await
             .expect("correct facade should use injected lifecycle pipeline");
 
-        assert!(outcome
+        assert!(!outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,
@@ -557,8 +559,6 @@ mod tests {
 
         let mut historical =
             RetrievalContext::new("corrected deterministic preference").with_trace();
-        historical.lifecycle_policy.include_suppressed = true;
-        historical.lifecycle_policy.include_non_current = true;
         historical.lifecycle_policy.include_superseded = true;
         let historical = memory
             .retrieve(historical)
@@ -599,7 +599,7 @@ mod tests {
             .await
             .expect("episode correction should supersede affected derived memories");
 
-        assert!(episode_outcome
+        assert!(!episode_outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,
@@ -639,7 +639,7 @@ mod tests {
             .await
             .expect("observation correction should supersede affected derived memories");
 
-        assert!(observation_outcome
+        assert!(!observation_outcome
             .graph_mutated_object_ids
             .contains(&MemoryObjectRef::new(
                 ObjectType::DerivedMemory,

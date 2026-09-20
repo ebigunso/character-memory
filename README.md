@@ -64,7 +64,11 @@ It is a memory layer for persistent AI assistants and companions.
 
 ## Memory permanence and data erasure
 
-Character Memory treats the memory record as append-only. Forgetting works through suppression and supersession, and it removes influence, not history. Nothing fades on its own, and what is over leaves current views through a change of currency while staying fully recallable. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
+Character Memory treats the memory record as append-only. Forgetting suppresses a memory; correction supersedes it. Both remove influence while preserving history. Nothing fades on its own, and what is over leaves current views through a change of currency while staying fully recallable. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
+
+An interpreted memory is current while Active and without an incoming Supersedes link. Author its `supersedes` list; commit derives the links and writes them with the objects in one graph batch. Caller-authored Supersedes links are rejected. Correction uses the same derivation and leaves each predecessor unchanged, Active and superseded. Even a suppressed successor still supersedes its predecessor, so forgetting a correction never restores the older belief.
+
+Superseded memories leave the content index and remain reachable from successors through graph expansion with `include_superseded`. Independently suppressed memories require `include_suppressed`. Default retrieval reports a superseded predecessor as superseded; when it is also suppressed, suppression takes precedence. Vector-delete failures are reported through a `RepairMarker::VectorMaintenance` containing the failed `Delete` operation; replaying the same commit repairs the delete while graph filtering excludes stale candidates. Retrieval-stat current counters cache currency derived from graph links and retention.
 
 Forgetting a thread leaves its status and vector unchanged, so it remains reachable. Set `apply_to_thread_members` to suppress its interpreted members and remove their vectors from candidate recall. Source objects and opaque raw references remain preserved.
 

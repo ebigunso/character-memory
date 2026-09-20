@@ -750,19 +750,13 @@ fn derived_memory_lifecycle_filter_reason(
     superseded: &HashSet<MemoryId>,
     policy: GraphExpansionLifecyclePolicy,
 ) -> Option<GraphExpansionFilteredReason> {
-    retention_filter_reason(object.retention_state, policy)
-        .or(if !object.is_current && !policy.include_non_current {
-            Some(GraphExpansionFilteredReason::NonCurrent)
+    retention_filter_reason(object.retention_state, policy).or(
+        if superseded.contains(&object.id) && !policy.include_superseded {
+            Some(GraphExpansionFilteredReason::Superseded)
         } else {
             None
-        })
-        .or(
-            if superseded.contains(&object.id) && !policy.include_superseded {
-                Some(GraphExpansionFilteredReason::Superseded)
-            } else {
-                None
-            },
-        )
+        },
+    )
 }
 
 fn retention_filter_reason(
