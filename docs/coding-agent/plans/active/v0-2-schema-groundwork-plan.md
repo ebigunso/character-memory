@@ -1,6 +1,6 @@
 # Plan: v0.2 schema groundwork
 
-- status: approved
+- status: in_progress
 - generated: 2026-09-20
 - last_updated: 2026-09-20
 - work_type: code
@@ -146,7 +146,10 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-21 Waves 1 to 3 implemented, reviewed and pushed: [Task_1, Task_2, Task_3]
+  - Summary: Task_1 deletions (PR 113); Task_2 currency read from the chain, a correction is a supersession and nothing else (PR 115); Task_3 the entity as a notion with a known-as assertion, the given marker and derived About links for every subject (PR 116). Stack: 112, 113, 115, 116.
+  - Validation evidence: each task's four gates passed for the worker and independently for the Tier D reviewer (Task_3: 368 reported, 364 exercised, 4 opt-in service cases left to CI). Tier D found and the worker fixed at the root: a stale rustdoc (Task_1); a generated Supersedes link retargetable through `link`, and a replay that reindexed a superseded memory (Task_2); a same-plan link-id collision between an authored and a derived link (Task_3). Tier A reviewed the Task_3 public shape, README and both proposed records.
+  - Notes: open for the decider: ADR-D-0035 and ADR-D-0036 (proposed). Not done until: the decider's acceptance of the records, CI on each PR including the service-parity job, and the merges. After PR 116 merges, its commit goes to the companion repository's Task_4.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
