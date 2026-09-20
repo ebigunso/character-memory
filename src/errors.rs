@@ -252,6 +252,8 @@ pub enum GraphQueryError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RetrievalStatsStoreError {
+    #[error("retrieval stats retention key is unknown: {key}")]
+    UnknownRetentionKey { key: String },
     #[error("retrieval stats counter was negative: {value}")]
     NegativeCounter { value: i64 },
     #[error("retrieval stats sqlite operation failed: {detail}")]
