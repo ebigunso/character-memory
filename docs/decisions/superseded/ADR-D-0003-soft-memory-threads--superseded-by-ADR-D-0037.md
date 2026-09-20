@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: null
+superseded_by: ../design/ADR-D-0037-memory-threads-are-soft-continuity-overlays.md
 supersession_scope: null
 ---
 
 # ADR-D-0003: Treat memory threads as soft continuity overlays
+
+Retired on 2026-09-21. Replaced by ADR-D-0037.
 
 ## Context and Problem Statement
 

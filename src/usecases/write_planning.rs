@@ -696,11 +696,31 @@ where
             }
         }
 
+        let cycle = supersession_cycle(plan);
         let mut validations = plan
             .candidates
             .iter()
             .enumerate()
-            .map(|(index, candidate)| context.validate_candidate(index, candidate))
+            .map(|(index, candidate)| {
+                let mut validation = context.validate_candidate(index, candidate);
+                if let (Some(memory_ids), MemoryCandidate::DerivedMemory(candidate)) =
+                    (&cycle, candidate)
+                {
+                    if candidate
+                        .draft
+                        .id
+                        .is_some_and(|id| memory_ids.contains(&id))
+                    {
+                        validation.status = CandidateValidationStatus::Invalid;
+                        validation
+                            .errors
+                            .push(CandidateValidationIssue::SupersessionCycle {
+                                memory_ids: memory_ids.clone(),
+                            });
+                    }
+                }
+                validation
+            })
             .collect::<Vec<_>>();
         validate_plan_link_ids(plan, &mut validations);
         let decision = if validations
@@ -751,6 +771,56 @@ fn validate_plan_link_ids(plan: &RememberWritePlan, validations: &mut [Candidate
             }
         }
     }
+}
+
+fn supersession_cycle(plan: &RememberWritePlan) -> Option<Vec<MemoryId>> {
+    // Sequential commits cannot change existing predecessor lists; new cycles must be in-plan.
+    let mut predecessors = HashMap::<MemoryId, Vec<MemoryId>>::new();
+    let mut roots = Vec::new();
+    for candidate in &plan.candidates {
+        if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+            if let Some(id) = candidate.draft.id {
+                roots.push(id);
+                // Single-object self links already receive the domain SelfLink error.
+                predecessors.entry(id).or_default().extend(
+                    candidate
+                        .draft
+                        .supersedes
+                        .iter()
+                        .copied()
+                        .filter(|predecessor| *predecessor != id),
+                );
+            }
+        }
+    }
+    let mut visited = HashSet::new();
+    let mut active = HashMap::new();
+    for root in roots {
+        if !visited.insert(root) {
+            continue;
+        }
+        let mut stack = vec![(root, predecessors[&root].iter())];
+        active.insert(root, 0);
+        while let Some((id, pending)) = stack.last_mut() {
+            let Some(predecessor) = pending.next().copied() else {
+                active.remove(id);
+                stack.pop();
+                continue;
+            };
+            if let Some(&start) = active.get(&predecessor) {
+                let mut memory_ids = stack[start..].iter().map(|(id, _)| *id).collect::<Vec<_>>();
+                memory_ids.sort_unstable();
+                return Some(memory_ids);
+            }
+            if let Some(next) = predecessors.get(&predecessor) {
+                if visited.insert(predecessor) {
+                    active.insert(predecessor, stack.len());
+                    stack.push((predecessor, next.iter()));
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug)]

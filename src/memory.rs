@@ -394,6 +394,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn supersession_plan_rejects_cycles_before_writing() {
+        for cycle_len in [2, 3] {
+            let memory = injected_memory().await;
+            let episode_id = MemoryId::from_u128(1100);
+            let cycle_ids = (1..=cycle_len)
+                .map(|offset| MemoryId::from_u128(1100 + offset))
+                .collect::<Vec<_>>();
+            let root_id = MemoryId::from_u128(1104);
+            let leaf_id = MemoryId::from_u128(1105);
+            let mut episode = EpisodeDraft::new("Supersession source.");
+            episode.id = Some(episode_id);
+            let mut input = RememberInput::new("Supersession source.").with_episode(episode);
+            for memory_id in [root_id]
+                .into_iter()
+                .chain(cycle_ids.iter().copied())
+                .chain([leaf_id])
+            {
+                let mut draft = DerivedMemoryDraft::new(
+                    DerivedType::UserPreference,
+                    format!("Preference {memory_id}."),
+                )
+                .with_source_episode(episode_id);
+                draft.id = Some(memory_id);
+                if memory_id == root_id {
+                    draft.supersedes = vec![cycle_ids[0], leaf_id];
+                } else if let Some(index) = cycle_ids.iter().position(|id| *id == memory_id) {
+                    draft.supersedes = vec![leaf_id];
+                    if let Some(next) = cycle_ids.get(index + 1) {
+                        draft.supersedes.push(*next);
+                    }
+                }
+                input = input.with_derived_memory(draft);
+            }
+            let acyclic_plan = memory
+                .prepare(input, PrepareOptions::default())
+                .await
+                .unwrap();
+            assert!(memory
+                .validate_plan(&acyclic_plan)
+                .await
+                .unwrap()
+                .iter()
+                .all(|validation| validation.status == CandidateValidationStatus::Valid));
+            let mut cyclic_plan = acyclic_plan.clone();
+            for candidate in &mut cyclic_plan.candidates {
+                if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+                    if candidate.draft.id == cycle_ids.last().copied() {
+                        candidate.draft.supersedes.push(cycle_ids[0]);
+                    }
+                }
+            }
+            let validations = memory.validate_plan(&cyclic_plan).await.unwrap();
+            for validation in &validations {
+                let is_cycle_member = matches!(
+                    &cyclic_plan.candidates[validation.candidate_index],
+                    MemoryCandidate::DerivedMemory(candidate)
+                        if candidate.draft.id.is_some_and(|id| cycle_ids.contains(&id))
+                );
+                if is_cycle_member {
+                    assert_eq!(validation.status, CandidateValidationStatus::Invalid);
+                    assert_eq!(
+                        validation.errors,
+                        vec![CandidateValidationIssue::SupersessionCycle {
+                            memory_ids: cycle_ids.clone(),
+                        }]
+                    );
+                } else {
+                    assert_eq!(validation.status, CandidateValidationStatus::Valid);
+                }
+            }
+            assert!(matches!(
+                memory.commit(cyclic_plan, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations: rejected })
+                    if rejected == validations
+            ));
+            let graph = memory.memory_composition.graph_store.as_ref();
+            assert!(graph
+                .query_objects(&GraphObjectQuery::by_types(
+                    vec![ObjectType::Episode, ObjectType::DerivedMemory],
+                    None,
+                ))
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(graph
+                .query_superseded_derived_memory_ids(&cycle_ids)
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(memory
+                .memory_composition
+                .vector_store
+                .search_candidates(&VectorCandidateSearch::new(
+                    vec![1.0; 8],
+                    100,
+                    vec![ObjectType::Episode, ObjectType::DerivedMemory]
+                ))
+                .await
+                .unwrap()
+                .candidates
+                .is_empty());
+            memory
+                .commit(acyclic_plan, CommitOptions::default())
+                .await
+                .unwrap();
+            memory.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn supersession_plan_cannot_close_a_cycle_across_committed_plans() {
+        let memory = injected_memory().await;
+        let episode_id = MemoryId::from_u128(1200);
+        let memory_ids = [1201, 1202, 1203].map(MemoryId::from_u128);
+        let mut episode = EpisodeDraft::new("Sequential supersession source.");
+        episode.id = Some(episode_id);
+        let mut first =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Original preference.")
+                .with_source_episode(episode_id);
+        first.id = Some(memory_ids[0]);
+        let mut original_plan = memory
+            .prepare(
+                RememberInput::new("Sequential supersession source.")
+                    .with_episode(episode)
+                    .with_derived_memory(first),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .commit(original_plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        for index in 1..memory_ids.len() {
+            let mut successor =
+                DerivedMemoryDraft::new(DerivedType::UserPreference, format!("Revision {index}."))
+                    .with_source_episode(episode_id);
+            successor.id = Some(memory_ids[index]);
+            successor.supersedes = vec![memory_ids[index - 1]];
+            memory
+                .remember(
+                    RememberInput::new(format!("Revision {index} source."))
+                        .with_derived_memory(successor),
+                    RememberOptions::default(),
+                )
+                .await
+                .unwrap();
+        }
+        let query = GraphObjectQuery::by_refs(
+            memory_ids
+                .iter()
+                .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                .collect(),
+        );
+        let graph = memory.memory_composition.graph_store.as_ref();
+        let before = graph.query_objects(&query).await.unwrap();
+        for candidate in &mut original_plan.candidates {
+            if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+                candidate.draft.supersedes = vec![memory_ids[2]];
+            }
+        }
+        assert!(matches!(
+            memory.commit(original_plan, CommitOptions::default()).await,
+            Err(CustomError::DeterministicIdCollision { object })
+                if object == MemoryObjectRef::new(ObjectType::DerivedMemory, memory_ids[0])
+        ));
+        assert_eq!(graph.query_objects(&query).await.unwrap(), before);
+        assert_eq!(
+            graph
+                .query_superseded_derived_memory_ids(&memory_ids)
+                .await
+                .unwrap(),
+            memory_ids[..2]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn currency_review_older_plan_replay_keeps_predecessor_out_of_vector_index() {
         let memory = injected_memory().await;
         let episode_id = MemoryId::from_u128(1000);

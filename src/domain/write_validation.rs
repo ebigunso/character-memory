@@ -103,6 +103,8 @@ pub enum CandidateValidationIssue {
         "link id {link_id} occurs more than once in the write plan, including generated links"
     )]
     DuplicateLinkId { link_id: MemoryId },
+    #[error("supersession cycle contains memories: {memory_ids:?}")]
+    SupersessionCycle { memory_ids: Vec<MemoryId> },
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]
