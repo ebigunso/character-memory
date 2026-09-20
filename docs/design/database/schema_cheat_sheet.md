@@ -27,7 +27,7 @@ These are the five emitted payload fields. The service indexes `object_id` and `
 
 | Object type | Surface | Text source | Maximum surfaces |
 |---|---|---|---|
-| `episode` | `summary` | Episode summary | 1 |
+| `episode` | `summary` | Episode summary followed by labelled scene words; keys and custom values excluded | 1 |
 | `observation` | `text` | Observation text | 1 |
 | `memory_thread` | `summary` | Thread title and summary | 1 |
 | `derived_memory` | `derived_text` | Interpreted-memory text | 1 |
@@ -57,7 +57,7 @@ Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
 | `createdAt`, `updatedAt` | Timestamps on the types that declare them |
 | `modality`, `endedAt` | Episode modality and optional interval end |
 | `sceneTime` | Required experience time on the episode |
-| `sceneParticipants` | Lossless JSON array of participant keys, names or descriptions |
+| `sceneParticipants` | Lossless JSON array of participants, each with optional key, name and description; at least one supplied |
 | `settingKey`, `settingWords` | Independently optional context key and words; the key is directly queryable |
 | `sceneCustomValues` | Lossless JSON object of string custom values |
 | `summary` | Episode or thread summary |

@@ -675,7 +675,10 @@ mod tests {
                 object_type: ObjectType::Episode,
                 modality: Modality::Chat,
                 scene: crate::domain::Scene {
-                    participants: vec![crate::domain::SceneParticipant::Key(entity_id)],
+                    participants: vec![crate::domain::SceneParticipant {
+                        key: Some(entity_id),
+                        ..Default::default()
+                    }],
                     ..crate::domain::Scene::at(timestamp())
                 },
                 ended_at: None,

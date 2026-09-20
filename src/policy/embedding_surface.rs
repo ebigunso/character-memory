@@ -17,12 +17,34 @@ pub const fn max_embedding_surfaces(object_type: ObjectType) -> usize {
 }
 
 pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
+    let mut text = prefixed_text("Episode summary", &episode.summary);
+    let setting = episode
+        .scene
+        .setting
+        .words
+        .as_deref()
+        .map(|words| ("Setting", words));
+    let participants = episode.scene.participants.iter().flat_map(|participant| {
+        [
+            participant.name.as_deref(),
+            participant.description.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|words| ("With", words))
+    });
+    for (label, words) in setting.into_iter().chain(participants) {
+        if !words.trim().is_empty() {
+            text.push('\n');
+            text.push_str(&prefixed_text(label, words));
+        }
+    }
     VectorRecord::new(
         episode.id,
         ObjectType::Episode,
         VectorSurface::Summary,
         episode.schema_version.clone(),
-        prefixed_text("Episode summary", &episode.summary),
+        text,
     )
 }
 
@@ -235,7 +257,10 @@ mod tests {
                     key: Some("conversation-1".to_owned()),
                     words: None,
                 },
-                participants: vec![crate::domain::SceneParticipant::Key(id(1))],
+                participants: vec![crate::domain::SceneParticipant {
+                    key: Some(id(1)),
+                    ..Default::default()
+                }],
                 ..crate::domain::Scene::at(timestamp())
             },
             ended_at: Some(timestamp()),

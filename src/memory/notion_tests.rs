@@ -642,7 +642,10 @@ async fn repeated_episode_and_belief_id_sets_commit_and_replay_canonically() {
     let mut scene = crate::Scene::at(belief.created_at.unwrap());
     scene.participants = [subjects[1], subjects[0], subjects[0]]
         .into_iter()
-        .map(crate::SceneParticipant::Key)
+        .map(|key| crate::SceneParticipant {
+            key: Some(key),
+            ..Default::default()
+        })
         .collect();
     episode.scene = Some(scene.clone());
     episode.created_at = belief.created_at;

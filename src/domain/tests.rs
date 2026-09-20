@@ -84,9 +84,10 @@ fn representative_episode() -> Episode {
                 key: Some("conversation-2026-04-27".to_owned()),
                 words: None,
             },
-            participants: vec![crate::domain::SceneParticipant::Key(memory_id(
-                "550e8400-e29b-41d4-a716-446655440001",
-            ))],
+            participants: vec![crate::domain::SceneParticipant {
+                key: Some(memory_id("550e8400-e29b-41d4-a716-446655440001")),
+                ..Default::default()
+            }],
             ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
         },
         ended_at: Some(timestamp("2026-04-27T10:05:00Z")),

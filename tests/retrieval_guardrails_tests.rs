@@ -368,7 +368,10 @@ fn episode(id: MemoryId, summary: &str, participants: &[MemoryId]) -> EpisodeDra
     scene.participants = participants
         .iter()
         .copied()
-        .map(character_memory::SceneParticipant::Key)
+        .map(|key| character_memory::SceneParticipant {
+            key: Some(key),
+            ..Default::default()
+        })
         .collect();
     draft.scene = Some(scene);
     draft.ended_at = Some(timestamp());

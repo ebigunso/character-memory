@@ -113,11 +113,21 @@ mod tests {
         let graph_dir = TempGraphDir::new();
         let mut episode = representative_fixtures().episode;
         episode.scene.setting.key = Some("room/shared".to_owned());
+        episode.scene.participants[0].name = Some("Alice".to_owned());
         episode.scene.setting.words = Some("  a quiet room  ".to_owned());
         episode.scene.participants.extend([
-            SceneParticipant::Name("  Alice\n".to_owned()),
-            SceneParticipant::Description("a visitor".to_owned()),
-            SceneParticipant::Name("  Alice\n".to_owned()),
+            SceneParticipant {
+                name: Some("  Alice\n".to_owned()),
+                ..Default::default()
+            },
+            SceneParticipant {
+                description: Some("a visitor".to_owned()),
+                ..Default::default()
+            },
+            SceneParticipant {
+                name: Some("  Alice\n".to_owned()),
+                ..Default::default()
+            },
         ]);
         episode
             .scene

@@ -34,20 +34,16 @@ impl Scene {
     pub(crate) fn participant_keys(&self) -> impl Iterator<Item = MemoryId> + '_ {
         self.participants
             .iter()
-            .filter_map(|participant| match participant {
-                SceneParticipant::Key(id) => Some(*id),
-                SceneParticipant::Name(_) | SceneParticipant::Description(_) => None,
-            })
+            .filter_map(|participant| participant.key)
     }
 }
 
-/// Names and descriptions on a write are preserved as words, without resolution.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum SceneParticipant {
-    Key(MemoryId),
-    Name(String),
-    Description(String),
+/// Perceived words and a known identity can coexist; writes require at least one field.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SceneParticipant {
+    pub key: Option<MemoryId>,
+    pub name: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

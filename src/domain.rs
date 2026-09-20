@@ -236,6 +236,9 @@ pub enum DomainValidationError {
     #[error("an activity cannot be supplied on a write")]
     SceneActivityOnWrite,
 
+    #[error("a scene participant must have a key, name or description")]
+    EmptySceneParticipant,
+
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
 
@@ -311,6 +314,13 @@ impl Episode {
         }
         if self.scene.activity.is_some() {
             return Err(DomainValidationError::SceneActivityOnWrite);
+        }
+        if self.scene.participants.iter().any(|participant| {
+            participant.key.is_none()
+                && participant.name.is_none()
+                && participant.description.is_none()
+        }) {
+            return Err(DomainValidationError::EmptySceneParticipant);
         }
         validate_score("Episode.salience_score", self.salience_score)
     }

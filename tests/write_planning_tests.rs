@@ -214,10 +214,8 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .expect("caller-supplied episode should be in canonical graph state");
     assert_eq!(episode.summary, "Equivalent graph state observation");
     assert_eq!(
-        episode.scene.participants,
-        vec![character_memory::SceneParticipant::Name(
-            "A visitor".to_owned()
-        )]
+        episode.scene,
+        character_memory::Scene::at(fixed_timestamp())
     );
     let observation = wrapper_retrieval
         .pack
@@ -386,13 +384,7 @@ fn remember_equivalence_input() -> RememberInput {
 
     let mut episode = EpisodeDraft::new("Equivalent graph state observation");
     episode.id = Some(episode_id);
-    let mut scene = character_memory::Scene::at(timestamp);
-    scene
-        .participants
-        .push(character_memory::SceneParticipant::Name(
-            "A visitor".to_owned(),
-        ));
-    episode.scene = Some(scene);
+    episode.scene = Some(character_memory::Scene::at(timestamp));
     episode.created_at = Some(timestamp);
 
     let mut observation =

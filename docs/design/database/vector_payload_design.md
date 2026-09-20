@@ -24,12 +24,14 @@ The [payload writer (`payload.rs:164`)](../../../src/adapters/qdrant/payload.rs#
 
 | Object type | Surface | Embedding text |
 |---|---|---|
-| `episode` | `summary` | `Episode summary: ` followed by the episode summary |
+| `episode` | `summary` | `Episode summary: ` followed by the summary, then labelled scene words when supplied |
 | `observation` | `text` | `Observation excerpt: ` followed by observation text |
 | `memory_thread` | `summary` | `Thread summary: ` followed by title and summary |
 | `derived_memory` | `derived_text` | A category label followed by interpreted-memory text |
 
 Each indexed object has at most one surface. `max_embedding_surfaces` returns zero for `entity` and `memory_link`; neither has an object vector builder. The [embedding builders](../../../src/policy/embedding_surface.rs) define these limits and fold whitespace in the natural-language input. The `query` surface identifies query embeddings rather than stored memory content.
+
+The [episode builder (`embedding_surface.rs:19`)](../../../src/policy/embedding_surface.rs#L19) appends nonblank setting words on a new `Setting:` line, followed by a `With:` line for each participant name and description in authored order, even when the participant also has an identity key. It folds whitespace just as it does for the summary, while Oxigraph retains the original scene values. Keys and custom values are excluded. With no scene words the embedding text is byte-identical to the summary-only form. These words share the episode's existing `summary` surface; there is no second vector or scene surface.
 
 The closed surface tokens are `summary`, `text`, `derived_text` and `query`. The domain enums own their persisted spelling and parsing. Graph object kinds still include notions and links even though those kinds have no emitted embedding surface.
 

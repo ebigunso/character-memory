@@ -415,8 +415,14 @@ pub(crate) fn simple_episode() -> Episode {
                 words: None,
             },
             participants: vec![
-                crate::domain::SceneParticipant::Key(fixture_id(1)),
-                crate::domain::SceneParticipant::Key(fixture_id(2)),
+                crate::domain::SceneParticipant {
+                    key: Some(fixture_id(1)),
+                    ..Default::default()
+                },
+                crate::domain::SceneParticipant {
+                    key: Some(fixture_id(2)),
+                    ..Default::default()
+                },
             ],
             ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
         },

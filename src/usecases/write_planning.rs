@@ -543,11 +543,10 @@ mod construction_tests {
         let defaults =
             RememberPlanDefaults::fixed("fixed-operation", timestamp("2026-07-03T10:00:00Z"));
         let mut scene = Scene::at(defaults.created_at);
-        scene
-            .participants
-            .push(crate::SceneParticipant::Key(memory_id(
-                "550e8400-e29b-41d4-a716-446655443003",
-            )));
+        scene.participants.push(crate::SceneParticipant {
+            key: Some(memory_id("550e8400-e29b-41d4-a716-446655443003")),
+            ..Default::default()
+        });
         let input = RememberInput::new("Caller said they prefer terse planning notes.")
             .with_raw_ref("raw://conversation/7#turn=2")
             .with_source_span(SourceSpan::raw("raw://conversation/7#turn=2").with_turn_range(2, 2))
@@ -1507,6 +1506,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         },
         DomainValidationError::SceneActivityOnWrite => {
             CandidateValidationIssue::SceneActivityOnWrite
+        }
+        DomainValidationError::EmptySceneParticipant => {
+            CandidateValidationIssue::EmptySceneParticipant
         }
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference

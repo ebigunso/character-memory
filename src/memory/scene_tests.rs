@@ -24,9 +24,18 @@ fn words_scene() -> Scene {
     let mut scene = Scene::at(time());
     scene.setting.words = Some("  窓のそば\nquiet café  ".to_owned());
     scene.participants = vec![
-        SceneParticipant::Name("  Alice  ".to_owned()),
-        SceneParticipant::Description("a visitor in blue".to_owned()),
-        SceneParticipant::Name("  Alice  ".to_owned()),
+        SceneParticipant {
+            name: Some("  Alice  ".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            description: Some("a visitor in blue".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            name: Some("  Alice  ".to_owned()),
+            ..Default::default()
+        },
     ];
     scene
         .custom_values
@@ -156,7 +165,7 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
             assert_eq!(
                 input.text,
                 match input.object_type.unwrap() {
-                    ObjectType::Episode => "Episode summary: An experience",
+                    ObjectType::Episode => "Episode summary: An experience\nSetting: 窓のそば quiet café\nWith: Alice\nWith: a visitor in blue\nWith: Alice",
                     ObjectType::Observation => "Observation excerpt: An experience",
                     other => panic!("unexpected embedding: {other:?}"),
                 }
@@ -167,8 +176,123 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
 }
 
 #[tokio::test]
+async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
+    for blank_words in [false, true] {
+        let (memory, inputs) = memory().await;
+        let participant = MemoryId::from_u128(8700);
+        let mut entity = EntityDraft::new();
+        entity.id = Some(participant);
+        let mut scene = Scene::at(time());
+        scene.setting.key = Some("never embed this setting key".to_owned());
+        scene.custom_values.insert(
+            "session".to_owned(),
+            "never embed this custom value".to_owned(),
+        );
+        scene.participants.push(SceneParticipant {
+            key: Some(participant),
+            ..Default::default()
+        });
+        if blank_words {
+            scene.setting.words = Some(" \n ".to_owned());
+            scene.participants[0].name = Some(" \t ".to_owned());
+            scene.participants[0].description = Some(String::new());
+        }
+        memory
+            .remember(
+                RememberInput::new("  An\n experience  ")
+                    .with_scene(scene)
+                    .with_entity(entity),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        let recorded = inputs.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(
+            recorded
+                .iter()
+                .find(|input| input.object_type == Some(ObjectType::Episode))
+                .unwrap()
+                .text,
+            "Episode summary: An experience"
+        );
+        assert_eq!(
+            recorded
+                .iter()
+                .find(|input| input.object_type == Some(ObjectType::Observation))
+                .unwrap()
+                .text,
+            "Observation excerpt: An experience"
+        );
+        memory.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_place() {
+    // A lexical provider makes the recall test depend on words, not hash collisions.
+    struct PlaceEmbedder;
+    #[async_trait]
+    impl MemoryEmbedder for PlaceEmbedder {
+        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![
+                1.0,
+                input
+                    .text
+                    .split_whitespace()
+                    .filter(|word| *word == "observatory")
+                    .count() as f32,
+            ])
+        }
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            let mut embeddings = Vec::new();
+            for input in inputs {
+                embeddings.push(self.embed(input).await?);
+            }
+            Ok(embeddings)
+        }
+    }
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(2).await),
+        Box::new(PlaceEmbedder),
+    );
+    let control = MemoryId::from_u128(8701);
+    let situated = MemoryId::from_u128(8702);
+    for (id, words) in [(control, None), (situated, Some("observatory"))] {
+        let mut scene = Scene::at(time());
+        scene.setting.words = words.map(str::to_owned);
+        let mut episode = episode_draft(id.as_u128(), Some(scene));
+        episode.summary = "We made a decision".to_owned();
+        let outcome = memory
+            .remember(
+                RememberInput::new("We made a decision").with_episode(episode),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome.vector_indexed_object_ids.len(), 2);
+    }
+    let mut query = RetrievalContext::new("observatory");
+    query.object_type_defaults = vec![ObjectType::Episode];
+    query.candidate_limits.max_vector_candidates = 1;
+    query.candidate_limits.max_graph_roots = 1;
+    query.graph_limits.max_depth = 0;
+    let recalled = memory.retrieve(query).await.unwrap();
+    assert_eq!(recalled.pack.relevant_episodes.len(), 1);
+    let episode = &recalled.pack.relevant_episodes[0];
+    assert_eq!(episode.id, situated);
+    assert!(!episode.summary.contains("observatory"));
+    assert_eq!(episode.scene.setting.words.as_deref(), Some("observatory"));
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn scene_override_preserves_participants_involvement_threads_interval_and_observation() {
-    let (memory, _) = memory().await;
+    let (memory, inputs) = memory().await;
     let present = MemoryId::from_u128(8201);
     let involved = MemoryId::from_u128(8202);
     let existing = MemoryId::from_u128(8203);
@@ -188,9 +312,19 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
     let mut scene = words_scene();
     scene.setting.key = Some("room/42".to_owned());
     scene.participants.extend([
-        SceneParticipant::Key(present),
-        SceneParticipant::Key(existing),
-        SceneParticipant::Key(present),
+        SceneParticipant {
+            key: Some(present),
+            name: Some("Mira".to_owned()),
+            description: Some("the host".to_owned()),
+        },
+        SceneParticipant {
+            key: Some(existing),
+            ..Default::default()
+        },
+        SceneParticipant {
+            key: Some(present),
+            ..Default::default()
+        },
     ]);
     let episode = episode_draft(8220, Some(scene.clone()));
     let mut observation = ObservationDraft::new(episode.id.unwrap(), "Explicitly timed statement");
@@ -202,9 +336,10 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
     overridden
         .custom_values
         .insert("input-only".to_owned(), "must not merge".to_owned());
-    overridden
-        .participants
-        .push(SceneParticipant::Key(MemoryId::from_u128(9999)));
+    overridden.participants.push(SceneParticipant {
+        key: Some(MemoryId::from_u128(9999)),
+        ..Default::default()
+    });
     let mut input = RememberInput::new("An experience")
         .with_scene(overridden)
         .with_episode(episode)
@@ -222,6 +357,13 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         .remember(input, RememberOptions::default())
         .await
         .unwrap();
+    assert!(inputs
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|input| input.object_id == Some(MemoryId::from_u128(8220))
+            && input.text.ends_with("\nWith: Mira\nWith: the host")));
+
     let saved = memory
         .memory_composition
         .graph_store
@@ -383,9 +525,36 @@ async fn writes_reject_missing_scene_time_activity_and_unknown_participant_keys(
             .unwrap_err();
         assert_issue(error, CandidateValidationIssue::SceneActivityOnWrite);
     }
+    let mut empty_participant = Scene::at(time());
+    empty_participant
+        .participants
+        .push(SceneParticipant::default());
+    assert_eq!(
+        episode_draft(8401, Some(empty_participant.clone())).into_domain(),
+        Err(DomainValidationError::EmptySceneParticipant)
+    );
+    let error = memory
+        .remember(
+            RememberInput::new("An experience").with_scene(empty_participant.clone()),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
+    let error = memory
+        .commit(
+            episode_plan(episode_draft(8401, Some(empty_participant))),
+            CommitOptions::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
     let unknown = MemoryId::from_u128(8499);
     let mut scene = Scene::at(time());
-    scene.participants.push(SceneParticipant::Key(unknown));
+    scene.participants.push(SceneParticipant {
+        key: Some(unknown),
+        ..Default::default()
+    });
     let error = memory
         .commit(
             episode_plan(episode_draft(8401, Some(scene))),

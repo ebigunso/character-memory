@@ -74,6 +74,8 @@ pub enum CandidateValidationIssue {
     EmptyEpisodeSummary,
     #[error("an activity cannot be supplied on a write")]
     SceneActivityOnWrite,
+    #[error("a scene participant must have a key, name or description")]
+    EmptySceneParticipant,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
     #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]
