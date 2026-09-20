@@ -1,6 +1,6 @@
 # Plan: the scene, on every write and as the retrieval input
 
-- status: draft
+- status: in_progress
 - generated: 2026-09-21
 - last_updated: 2026-09-21
 - work_type: code
