@@ -176,8 +176,6 @@ pub(crate) fn retention_state_key(retention_state: RetentionState) -> &'static s
     match retention_state {
         RetentionState::Active => "active",
         RetentionState::Suppressed => "suppressed",
-        RetentionState::Archived => "archived",
-        RetentionState::Deleted => "deleted",
     }
 }
 
@@ -399,9 +397,7 @@ pub(crate) fn recomputed_global_counters(
 mod tests {
     use super::*;
     use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
-    use crate::domain::{
-        DerivedMemory, DerivedType, Episode, Modality, Stability, DEFAULT_SCHEMA_VERSION,
-    };
+    use crate::domain::{DerivedMemory, DerivedType, Episode, Modality, DEFAULT_SCHEMA_VERSION};
 
     struct StoreFixture {
         store: Box<dyn RetrievalStatsStore>,
@@ -684,9 +680,7 @@ mod tests {
                 derived_from_observation_ids: Vec::new(),
                 thread_ids: Vec::new(),
                 entity_ids: vec![entity_id],
-                confidence: 0.7,
                 salience_score: 0.7,
-                stability: Stability::Medium,
                 is_current: true,
                 supersedes: Vec::new(),
                 retention_state: RetentionState::Active,
@@ -725,9 +719,7 @@ mod tests {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            confidence: 0.7,
             salience_score: 0.7,
-            stability: Stability::Medium,
             is_current: false,
             supersedes: Vec::new(),
             retention_state: RetentionState::Suppressed,
@@ -743,7 +735,6 @@ mod tests {
             to_id: memory_id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::About,
-            confidence: 1.0,
             rationale: None,
             created_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
@@ -797,9 +788,7 @@ mod tests {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: vec![entity_id],
-            confidence: 0.7,
             salience_score: 0.7,
-            stability: Stability::Medium,
             is_current: false,
             supersedes: Vec::new(),
             retention_state: RetentionState::Suppressed,
@@ -815,7 +804,6 @@ mod tests {
             to_id: memory_id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::About,
-            confidence: 1.0,
             rationale: None,
             created_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),

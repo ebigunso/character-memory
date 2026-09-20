@@ -130,8 +130,8 @@ fn clean_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::domain::{
-        DerivedType, EntityType, MemoryLink, Modality, RelationType, RetentionState, Stability,
-        ThreadStatus, DEFAULT_SCHEMA_VERSION,
+        DerivedType, EntityType, MemoryLink, Modality, RelationType, RetentionState, ThreadStatus,
+        DEFAULT_SCHEMA_VERSION,
     };
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
@@ -292,9 +292,7 @@ mod tests {
             derived_from_observation_ids: vec![id(20)],
             thread_ids: vec![id(30)],
             entity_ids: vec![id(1)],
-            confidence: 0.42,
             salience_score: 0.42,
-            stability: Stability::High,
             is_current: false,
             supersedes: vec![id(99)],
             retention_state: RetentionState::Active,
@@ -344,7 +342,6 @@ mod tests {
             to_id: id(10),
             to_type: ObjectType::Episode,
             relation: RelationType::DerivedFrom,
-            confidence: 1.0,
             rationale: Some("Derived from episode".to_owned()),
             created_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),

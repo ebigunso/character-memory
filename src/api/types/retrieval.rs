@@ -148,9 +148,7 @@ impl Default for ContinuitySectionLimits {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RetrievalLifecyclePolicy {
-    pub include_archived: bool,
     pub include_suppressed: bool,
-    pub include_deleted: bool,
     pub include_non_current: bool,
     /// Applies to graph-verified supersession evidence reported as `superseded_by`.
     /// A derived memory's local `supersedes` list points to older memories it replaces.
@@ -161,9 +159,7 @@ impl RetrievalLifecyclePolicy {
     pub fn allows_retention_state(self, retention_state: RetentionState) -> bool {
         match retention_state {
             RetentionState::Active => true,
-            RetentionState::Archived => self.include_archived,
             RetentionState::Suppressed => self.include_suppressed,
-            RetentionState::Deleted => self.include_deleted,
         }
     }
 
@@ -502,14 +498,10 @@ pub enum LifecycleFilterAction {
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleFilterReason {
     Active,
-    ArchivedIncludedByPolicy,
     SuppressedIncludedByPolicy,
-    DeletedIncludedByPolicy,
     NonCurrentIncludedByPolicy,
     SupersededIncludedByPolicy,
-    ArchivedOmitted,
     SuppressedOmitted,
-    DeletedOmitted,
     NonCurrentOmitted,
     SupersededOmitted,
     GraphObjectMissing,
@@ -613,7 +605,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
-    use crate::domain::{DerivedType, Modality, Stability};
+    use crate::domain::{DerivedType, Modality};
 
     fn memory_id(value: &str) -> MemoryId {
         Uuid::parse_str(value).unwrap()
@@ -670,9 +662,7 @@ mod tests {
             derived_from_observation_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655442010")],
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            confidence: 0.9,
             salience_score: 0.7,
-            stability: Stability::High,
             is_current: true,
             supersedes: Vec::new(),
             retention_state: RetentionState::Active,
@@ -708,9 +698,7 @@ mod tests {
         );
 
         assert!(policy.allows_retention_state(RetentionState::Active));
-        assert!(!policy.allows_retention_state(RetentionState::Archived));
         assert!(!policy.allows_retention_state(RetentionState::Suppressed));
-        assert!(!policy.allows_retention_state(RetentionState::Deleted));
         assert!(policy.allows_derived_memory(&memory));
 
         memory.is_current = false;

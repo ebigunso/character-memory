@@ -66,6 +66,8 @@ It is a memory layer for persistent AI assistants and companions.
 
 Character Memory treats the memory record as append-only. Forgetting works through suppression and supersession, and it removes influence, not history. Nothing fades on its own, and what is over leaves current views through a change of currency while staying fully recallable. There is no destructive deletion in the memory operations, because deleting memory rewrites a character's perceived history and breaks continuity.
 
+Forgetting a thread leaves its status and vector unchanged, so it remains reachable. Set `apply_to_thread_members` to suppress its interpreted members and remove their vectors from candidate recall. Source objects and opaque raw references remain preserved.
+
 Applications with personal-data erasure obligations (for example, GDPR/CCPA deletion requests) own that compliance policy themselves. Erasure is an out-of-band operational action against the backing stores, not a memory operation exposed by the API, and no purge tooling ships with the library today. If you implement one, it must cover every store your deployment uses — the graph authority, the vector index, and retrieval statistics — and must tombstone or repair provenance references that would otherwise dangle, or the remaining record becomes inconsistent.
 
 ## Typical usage
@@ -155,7 +157,7 @@ Lifecycle operations (`correct`, `forget`, `link`) address memories by `MemoryId
 
 The public API deliberately provides no lookup by external id, no enumeration, and no query by source reference. Callers that need to reference memories across process or instance restarts own that mapping: either supply deterministic `MemoryId`s in drafts, or durably persist every id the API returns — including replacement ids from corrections — keyed by your own external identifiers. Retrieval verifies that memories survived a restart; it is not an identity-recovery mechanism.
 
-Supplying deterministic ids gives you stable identity across retries: a replayed write reuses the same ids instead of minting new ones. This is identity stability, not full ingest idempotency — a replayed draft still regenerates defaulted timestamps and reapplies derived-store writes; exact retry semantics come from replaying the same prepared plan through the staged write path.
+Supplying deterministic ids gives you stable identity across retries. Replaying the same prepared plan accepts objects and links already stored with equal content and reapplies derived-store writes; reusing an id with different content is rejected. Preparing a draft again regenerates defaulted timestamps, so retain the prepared plan for an exact replay. Corrections also derive deterministic replacement ids when callers omit them.
 
 ## Backends
 

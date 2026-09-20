@@ -504,8 +504,6 @@ fn more_restrictive_retention_key(existing: &str, incoming: RetentionState) -> R
 fn retention_from_key(value: &str) -> RetentionState {
     match value {
         "suppressed" => RetentionState::Suppressed,
-        "archived" => RetentionState::Archived,
-        "deleted" => RetentionState::Deleted,
         _ => RetentionState::Active,
     }
 }

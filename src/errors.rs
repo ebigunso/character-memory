@@ -3,8 +3,7 @@ use thiserror::Error;
 
 use crate::domain::{
     CandidateValidation, DomainValidationError, GraphExpansionBoundedFailureTrace,
-    LifecycleDtoValidationError, LifecyclePolicyKnob, MemoryId, MemoryObjectRef, ObjectType,
-    SourceReferenceKind,
+    LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType, SourceReferenceKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -496,9 +495,6 @@ pub enum CustomError {
 
     #[error(transparent)]
     LifecycleDraftInvalid(#[from] LifecycleDtoValidationError),
-
-    #[error("lifecycle policy knob is unsupported in this release: {knob:?}")]
-    LifecyclePolicyUnsupported { knob: LifecyclePolicyKnob },
 
     #[error("Vector database error: {0}")]
     VectorDatabaseError(#[source] VectorDatabaseError),

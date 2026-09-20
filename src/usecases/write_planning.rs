@@ -69,7 +69,6 @@ impl Default for RememberPlanDefaults {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedCandidateRefs {
-    pub operation_id: MemoryId,
     pub episode_id: MemoryId,
     pub observation_id: MemoryId,
     pub candidate_refs: Vec<MemoryObjectRef>,
@@ -87,8 +86,7 @@ impl RememberInput {
         include_stats_update_candidates: bool,
     ) -> RememberWritePlan {
         let refs = self.prepared_candidate_refs(defaults);
-        let idempotency_key = self.idempotency_key(defaults);
-        let mut plan = RememberWritePlan::new(refs.operation_id, idempotency_key);
+        let mut plan = RememberWritePlan::new();
 
         if let Some(source_input_ref) = self.source_reference() {
             plan = plan.with_source_input_ref(source_input_ref);
@@ -189,7 +187,6 @@ impl RememberInput {
         &self,
         defaults: &RememberPlanDefaults,
     ) -> PreparedCandidateRefs {
-        let operation_id = defaults.stable_id("operation");
         let episode_id = self
             .episode_drafts
             .first()
@@ -240,21 +237,10 @@ impl RememberInput {
         }
 
         PreparedCandidateRefs {
-            operation_id,
             episode_id,
             observation_id,
             candidate_refs,
         }
-    }
-
-    pub fn idempotency_key(&self, defaults: &RememberPlanDefaults) -> String {
-        let encoded =
-            serde_json::to_string(&(self, defaults)).expect("remember input is serializable");
-        let id = deterministic_uuid(&[
-            "character_memory.idempotency".as_bytes(),
-            encoded.as_bytes(),
-        ]);
-        format!("remember:{id}")
     }
 
     pub fn source_reference(&self) -> Option<ExternalSourceReference> {
@@ -580,16 +566,12 @@ mod construction_tests {
     }
 
     #[test]
-    fn candidate_ids_and_idempotency_key_change_with_content() {
+    fn candidate_ids_follow_defaults_when_content_changes() {
         let defaults =
             RememberPlanDefaults::fixed("same-defaults", timestamp("2026-07-03T10:15:00Z"));
         let first = RememberInput::new("first content");
         let second = RememberInput::new("second content");
 
-        assert_ne!(
-            first.idempotency_key(&defaults),
-            second.idempotency_key(&defaults)
-        );
         assert_eq!(
             first.prepared_candidate_refs(&defaults).episode_id,
             second.prepared_candidate_refs(&defaults).episode_id
@@ -603,9 +585,8 @@ use crate::api::types::{CandidateRationale, DraftDefaults};
 use crate::domain::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
-    CandidateValidationIssue, CandidateValidationStatus, DomainValidationError,
-    MemoryCandidateKind, MemoryLink, MemoryLinkEndpoint, MemoryObject, PlanIdentityField,
-    RetentionState,
+    CandidateValidationIssue, CandidateValidationStatus, DomainValidationError, MemoryLink,
+    MemoryLinkEndpoint, MemoryObject, RetentionState,
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
@@ -670,23 +651,12 @@ where
             }
         }
 
-        let mut validations = plan
+        let validations = plan
             .candidates
             .iter()
             .enumerate()
             .map(|(index, candidate)| context.validate_candidate(index, candidate))
             .collect::<Vec<_>>();
-        if validations.is_empty() && !context.plan_errors.is_empty() {
-            let mut validation = CandidateValidation::invalid(
-                0,
-                MemoryCandidateKind::Episode,
-                context.plan_errors[0].clone(),
-            );
-            validation
-                .errors
-                .extend(context.plan_errors.iter().skip(1).cloned());
-            validations.push(validation);
-        }
         let decision = if validations
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid)
@@ -709,7 +679,6 @@ struct PlanValidationContext {
     refs_requiring_graph: HashSet<MemoryObjectRef>,
     existing_refs: HashSet<MemoryObjectRef>,
     episode_content_by_id: HashMap<MemoryId, String>,
-    plan_errors: Vec<CandidateValidationIssue>,
 }
 
 impl PlanValidationContext {
@@ -719,7 +688,6 @@ impl PlanValidationContext {
             refs_requiring_graph: HashSet::new(),
             existing_refs: HashSet::new(),
             episode_content_by_id: HashMap::new(),
-            plan_errors: validate_plan_identity(plan),
         };
 
         for candidate in &plan.candidates {
@@ -837,7 +805,7 @@ impl PlanValidationContext {
     }
 
     fn validate_candidate(&self, index: usize, candidate: &MemoryCandidate) -> CandidateValidation {
-        let mut errors = self.plan_errors.clone();
+        let mut errors = Vec::new();
         match candidate {
             MemoryCandidate::Episode(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
@@ -1120,22 +1088,6 @@ impl PlanValidationContext {
     }
 }
 
-fn validate_plan_identity(plan: &RememberWritePlan) -> Vec<CandidateValidationIssue> {
-    let mut errors = Vec::new();
-    if plan.operation_id.is_nil() {
-        errors.push(CandidateValidationIssue::MissingPlanIdentity {
-            field: PlanIdentityField::OperationId,
-        });
-    }
-    if plan.idempotency_key.trim().is_empty() {
-        errors.push(CandidateValidationIssue::MissingPlanIdentity {
-            field: PlanIdentityField::IdempotencyKey,
-        });
-    }
-
-    errors
-}
-
 pub(crate) struct WritePlanCommitValues {
     pub(crate) objects: Vec<MemoryObject>,
     pub(crate) links: Vec<MemoryLink>,
@@ -1396,10 +1348,7 @@ fn validate_derived_memory_lifecycle(
     if object.retention_state == RetentionState::Suppressed && object.is_current {
         errors.push(CandidateValidationIssue::SuppressedMemoryMarkedCurrent);
     }
-    if !object.supersedes.is_empty()
-        && object.is_current
-        && object.retention_state != RetentionState::Archived
-    {
+    if !object.supersedes.is_empty() && object.is_current {
         errors.push(CandidateValidationIssue::SupersedingMemoryMarkedCurrent);
     }
     errors
@@ -1483,9 +1432,7 @@ fn candidate_score_field(field: &'static str) -> CandidateScoreField {
         "Episode.salience_score" => CandidateScoreField::EpisodeSalience,
         "Observation.salience_score" => CandidateScoreField::ObservationSalience,
         "MemoryThread.salience_score" => CandidateScoreField::MemoryThreadSalience,
-        "DerivedMemory.confidence" => CandidateScoreField::DerivedMemoryConfidence,
         "DerivedMemory.salience_score" => CandidateScoreField::DerivedMemorySalience,
-        "MemoryLink.confidence" => CandidateScoreField::MemoryLinkConfidence,
         _ => unreachable!("unrecognized candidate score field: {field}"),
     }
 }
@@ -1531,7 +1478,8 @@ mod tests {
         StatsUpdateCandidate, StatsUpdateStatus, VectorIndexCandidate,
     };
     use crate::domain::{
-        DerivedType, EntityType, MemoryObject, RelationType, Stability, DEFAULT_SCHEMA_VERSION,
+        DerivedType, EntityType, MemoryCandidateKind, MemoryObject, RelationType,
+        DEFAULT_SCHEMA_VERSION,
     };
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
@@ -1731,59 +1679,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_missing_idempotency_key() {
-        let graph = in_memory_graph_store();
-        let mut plan = valid_plan();
-        plan.idempotency_key.clear();
-
-        let verdict = WritePlanValidator::new(&graph)
-            .validate(&plan)
-            .await
-            .unwrap();
-
-        assert_rejected_with(
-            &verdict,
-            CandidateValidationIssue::MissingPlanIdentity {
-                field: PlanIdentityField::IdempotencyKey,
-            },
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_plan_with_plan_identity_errors() {
-        let graph = in_memory_graph_store();
-        let mut plan = RememberWritePlan::new(id("00000000-0000-0000-0000-000000000000"), "");
-        plan.idempotency_key.clear();
-
-        let verdict = WritePlanValidator::new(&graph)
-            .validate(&plan)
-            .await
-            .unwrap();
-
-        assert!(!verdict.validations.is_empty());
-        let missing_operation_id = CandidateValidationIssue::MissingPlanIdentity {
-            field: PlanIdentityField::OperationId,
-        };
-        let missing_idempotency_key = CandidateValidationIssue::MissingPlanIdentity {
-            field: PlanIdentityField::IdempotencyKey,
-        };
-        assert_rejected_with(&verdict, missing_operation_id.clone());
-        assert_rejected_with(&verdict, missing_idempotency_key.clone());
-        let error = verdict
-            .into_result()
-            .expect_err("invalid plan should return structured rejection rows");
-        let CustomError::WritePlanValidationRejected { validations } = error else {
-            panic!("expected structured write-plan validation rejection, got {error:?}");
-        };
-        assert!(validations.iter().any(|validation| {
-            validation.candidate_kind == MemoryCandidateKind::Episode
-                && validation.status == CandidateValidationStatus::Invalid
-                && validation.errors.contains(&missing_operation_id)
-                && validation.errors.contains(&missing_idempotency_key)
-        }));
-    }
-
-    #[tokio::test]
     async fn rejects_missing_schema_version() {
         let graph = in_memory_graph_store();
         let mut draft = EpisodeDraft::new("episode without schema");
@@ -1861,11 +1756,7 @@ mod tests {
     async fn missing_derived_source_is_rejected_at_validate_and_commit() {
         let graph = in_memory_graph_store();
         let derived = DerivedMemoryDraft::new(DerivedType::UserPreference, "ungrounded preference");
-        let plan = RememberWritePlan::new(
-            id("550e8400-e29b-41d4-a716-446655444102"),
-            "missing-derived-source",
-        )
-        .with_candidate(MemoryCandidate::DerivedMemory(
+        let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::DerivedMemory(
             crate::api::types::DerivedMemoryCandidate::new(
                 complete_derived(derived),
                 CandidateProvenance::caller("caller omitted source provenance"),
@@ -2192,11 +2083,7 @@ mod tests {
         let mut draft = EpisodeDraft::new("missing timestamp defense");
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655445056"));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-        let plan = RememberWritePlan::new(
-            id("550e8400-e29b-41d4-a716-446655445057"),
-            "missing-timestamp-defense",
-        )
-        .with_candidate(MemoryCandidate::Episode(
+        let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
             crate::api::types::EpisodeCandidate::new(
                 draft,
                 CandidateProvenance::caller("caller supplied episode"),
@@ -2344,25 +2231,22 @@ mod tests {
                 rationale,
             )
         };
-        let plan = RememberWritePlan::new(
-            id("550e8400-e29b-41d4-a716-446655613304"),
-            "generated-style-plan",
-        )
-        .with_candidate(MemoryCandidate::Entity(
-            crate::api::types::EntityCandidate::new(entity, processor("generated entity")),
-        ))
-        .with_candidate(MemoryCandidate::Episode(
-            crate::api::types::EpisodeCandidate::new(episode, processor("generated episode")),
-        ))
-        .with_candidate(MemoryCandidate::DerivedMemory(
-            crate::api::types::DerivedMemoryCandidate::new(
-                derived,
-                processor("generated derived memory").with_source_episode(episode_id),
-            ),
-        ))
-        .with_candidate(MemoryCandidate::MemoryLink(
-            crate::api::types::MemoryLinkCandidate::new(link, processor("generated link")),
-        ));
+        let plan = RememberWritePlan::new()
+            .with_candidate(MemoryCandidate::Entity(
+                crate::api::types::EntityCandidate::new(entity, processor("generated entity")),
+            ))
+            .with_candidate(MemoryCandidate::Episode(
+                crate::api::types::EpisodeCandidate::new(episode, processor("generated episode")),
+            ))
+            .with_candidate(MemoryCandidate::DerivedMemory(
+                crate::api::types::DerivedMemoryCandidate::new(
+                    derived,
+                    processor("generated derived memory").with_source_episode(episode_id),
+                ),
+            ))
+            .with_candidate(MemoryCandidate::MemoryLink(
+                crate::api::types::MemoryLinkCandidate::new(link, processor("generated link")),
+            ));
 
         let verdict = WritePlanValidator::new(&graph)
             .validate(&plan)
@@ -2539,7 +2423,6 @@ mod tests {
         draft
             .schema_version
             .get_or_insert_with(|| DEFAULT_SCHEMA_VERSION.to_owned());
-        draft.stability = Stability::Medium;
         draft
     }
 

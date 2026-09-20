@@ -69,13 +69,8 @@ fn canonical_identity_and_order_ranks_are_stable() {
     for ranks in [object_ranks.as_slice(), relation_ranks.as_slice()] {
         assert!(ranks.windows(2).all(|pair| pair[0] < pair[1]));
     }
-    let retention_ranks = [
-        RetentionState::Active,
-        RetentionState::Archived,
-        RetentionState::Suppressed,
-        RetentionState::Deleted,
-    ]
-    .map(RetentionState::restrictiveness_rank);
+    let retention_ranks = [RetentionState::Active, RetentionState::Suppressed]
+        .map(RetentionState::restrictiveness_rank);
     assert!(retention_ranks.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
@@ -140,9 +135,7 @@ fn valid_derived_memory() -> DerivedMemory {
         derived_from_observation_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655440010")],
         thread_ids: vec![],
         entity_ids: vec![],
-        confidence: 0.9,
         salience_score: 0.85,
-        stability: Stability::Medium,
         is_current: true,
         supersedes: vec![],
         retention_state: RetentionState::Active,
@@ -161,7 +154,6 @@ fn valid_memory_link() -> MemoryLink {
         to_id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
         to_type: ObjectType::Episode,
         relation: RelationType::DerivedFrom,
-        confidence: 0.95,
         rationale: Some("Derived memory cites its source episode.".to_owned()),
         created_at: timestamp("2026-04-27T10:09:00Z"),
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
@@ -184,7 +176,6 @@ fn domain_enums_serialize_as_snake_case() {
         serialized_value(RelationType::CreatesOpenLoop),
         serialized_value(RelationType::FulfillsCommitment),
         serialized_value(RetentionState::Suppressed),
-        serialized_value(Stability::Medium),
         serialized_value(ThreadStatus::Dormant),
     ];
 
@@ -204,7 +195,6 @@ fn domain_enums_serialize_as_snake_case() {
             "creates_open_loop",
             "fulfills_commitment",
             "suppressed",
-            "medium",
             "dormant",
         ]
     );
@@ -227,13 +217,6 @@ fn graph_uri_maps_object_types_to_stable_urns() {
     for (object_type, prefix) in cases {
         assert_eq!(graph_uri(object_type, memory_id), format!("{prefix}:{id}"));
     }
-}
-
-#[test]
-fn schema_version_constants_are_pinned_to_the_initial_episodic_memory_schema() {
-    assert_eq!(EPISODIC_MEMORY_SCHEMA_VERSION, "episodic_memory_initial");
-    assert_eq!(CURRENT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
-    assert_eq!(DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
 }
 
 #[test]
@@ -309,21 +292,11 @@ fn score_validation_rejects_out_of_range_and_nan_values() {
     ));
 
     let mut derived = valid_derived_memory();
-    derived.confidence = f32::NAN;
+    derived.salience_score = f32::NAN;
     assert!(matches!(
         derived.validate(),
         Err(DomainValidationError::InvalidScore {
-            field: "DerivedMemory.confidence",
-            ..
-        })
-    ));
-
-    let mut link = valid_memory_link();
-    link.confidence = f32::INFINITY;
-    assert!(matches!(
-        link.validate(),
-        Err(DomainValidationError::InvalidScore {
-            field: "MemoryLink.confidence",
+            field: "DerivedMemory.salience_score",
             ..
         })
     ));

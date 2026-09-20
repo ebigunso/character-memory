@@ -1056,9 +1056,7 @@ fn graph_query_for_candidate(
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
     .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-        include_archived: context.lifecycle_policy.include_archived,
         include_suppressed: context.lifecycle_policy.include_suppressed,
-        include_deleted: context.lifecycle_policy.include_deleted,
         include_non_current: context.lifecycle_policy.include_non_current,
         include_superseded: context.lifecycle_policy.include_superseded,
     })
@@ -1176,9 +1174,7 @@ fn filtered_lifecycle_decision(
         superseded_by: superseded_by.to_vec(),
         action: LifecycleFilterAction::Omitted,
         reason: match reason {
-            GraphExpansionFilteredReason::Archived => LifecycleFilterReason::ArchivedOmitted,
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
-            GraphExpansionFilteredReason::Deleted => LifecycleFilterReason::DeletedOmitted,
             GraphExpansionFilteredReason::NonCurrent => LifecycleFilterReason::NonCurrentOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
         },
@@ -1187,9 +1183,7 @@ fn filtered_lifecycle_decision(
 
 fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCandidateReason {
     match reason {
-        GraphExpansionFilteredReason::Archived
-        | GraphExpansionFilteredReason::Suppressed
-        | GraphExpansionFilteredReason::Deleted => StaleCandidateReason::LifecycleMismatch,
+        GraphExpansionFilteredReason::Suppressed => StaleCandidateReason::LifecycleMismatch,
         GraphExpansionFilteredReason::NonCurrent => StaleCandidateReason::CurrentnessMismatch,
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
     }
@@ -1298,14 +1292,10 @@ fn salience_component(object: &MemoryObject) -> f32 {
 fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
         LifecycleFilterReason::Active => 0,
-        LifecycleFilterReason::ArchivedIncludedByPolicy => 1,
         LifecycleFilterReason::SuppressedIncludedByPolicy => 2,
-        LifecycleFilterReason::DeletedIncludedByPolicy => 3,
         LifecycleFilterReason::NonCurrentIncludedByPolicy => 4,
         LifecycleFilterReason::SupersededIncludedByPolicy => 5,
-        LifecycleFilterReason::ArchivedOmitted => 6,
         LifecycleFilterReason::SuppressedOmitted => 7,
-        LifecycleFilterReason::DeletedOmitted => 8,
         LifecycleFilterReason::NonCurrentOmitted => 9,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
@@ -2889,37 +2879,36 @@ mod tests {
     #[tokio::test]
     async fn non_active_thread_omission_reason_names_thread_status() {
         let fixtures = representative_fixtures();
-        let mut archived_thread = fixtures.soft_thread.clone();
-        archived_thread.status = ThreadStatus::Archived;
+        let mut dormant_thread = fixtures.soft_thread.clone();
+        dormant_thread.status = ThreadStatus::Dormant;
         let mut objects = fixtures.objects();
         objects.retain(|object| match object {
-            MemoryObject::MemoryThread(thread) => thread.id != archived_thread.id,
+            MemoryObject::MemoryThread(thread) => thread.id != dormant_thread.id,
             _ => true,
         });
-        objects.push(MemoryObject::MemoryThread(archived_thread.clone()));
+        objects.push(MemoryObject::MemoryThread(dormant_thread.clone()));
         let graph = graph_with(&objects, &fixtures.links()).await;
         let vector = TemporaryVectorCandidateStore::open(2).await;
         seed(
             &vector,
-            MemoryObject::MemoryThread(archived_thread.clone()),
+            MemoryObject::MemoryThread(dormant_thread.clone()),
             0.0,
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
-        let mut context = RetrievalContext::new("archived thread").with_trace();
-        context.lifecycle_policy.include_archived = true;
+        let context = RetrievalContext::new("dormant thread").with_trace();
 
         let outcome = pipeline.retrieve(context).await.unwrap();
         let trace = outcome.trace.as_ref().unwrap();
 
         assert!(outcome.pack.active_threads.is_empty());
         assert!(trace.section_assignments.iter().any(|assignment| {
-            assignment.object.id == archived_thread.id
+            assignment.object.id == dormant_thread.id
                 && assignment.section == ContextPackSection::Omitted
                 && assignment.reason
                     == SectionAssignmentReason::OmittedNonActiveThread {
-                        thread_status: ThreadStatus::Archived,
+                        thread_status: ThreadStatus::Dormant,
                     }
         }));
     }
@@ -2932,13 +2921,13 @@ mod tests {
         let mut suppressed_memory = fixtures.suppressed_seed.clone();
         let mut non_current_memory = fixtures.open_loop.clone();
         let mut replacement = fixtures.correction.clone();
-        let mut archived_thread = fixtures.soft_thread.clone();
+        let mut dormant_thread = fixtures.soft_thread.clone();
         superseded_memory.retention_state = RetentionState::Active;
         superseded_memory.is_current = true;
         suppressed_memory.retention_state = RetentionState::Suppressed;
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
-        archived_thread.status = ThreadStatus::Archived;
+        dormant_thread.status = ThreadStatus::Dormant;
         let supersedes_link = crate::domain::MemoryLink {
             id: MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5600_0002),
             object_type: ObjectType::MemoryLink,
@@ -2947,7 +2936,6 @@ mod tests {
             to_id: superseded_memory.id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::Supersedes,
-            confidence: 1.0,
             rationale: Some("Replacement supersedes stale retrieval candidate.".to_owned()),
             created_at: replacement.created_at,
             schema_version: replacement.schema_version.clone(),
@@ -2956,7 +2944,7 @@ mod tests {
             .upsert_objects(&[
                 MemoryObject::Episode(fixtures.episode.clone()),
                 MemoryObject::Observation(fixtures.salient_observation.clone()),
-                MemoryObject::MemoryThread(archived_thread.clone()),
+                MemoryObject::MemoryThread(dormant_thread.clone()),
                 MemoryObject::DerivedMemory(superseded_memory.clone()),
                 MemoryObject::DerivedMemory(suppressed_memory.clone()),
                 MemoryObject::DerivedMemory(non_current_memory.clone()),
@@ -2996,7 +2984,7 @@ mod tests {
         .await;
         seed(
             &vector,
-            MemoryObject::MemoryThread(archived_thread.clone()),
+            MemoryObject::MemoryThread(dormant_thread.clone()),
             0.4,
         )
         .await;
@@ -3040,10 +3028,6 @@ mod tests {
         assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
             decision.object.id == non_current_memory.id
                 && decision.reason == LifecycleFilterReason::NonCurrentOmitted
-        }));
-        assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
-            decision.object.id == archived_thread.id
-                && decision.reason == LifecycleFilterReason::ArchivedOmitted
         }));
     }
 

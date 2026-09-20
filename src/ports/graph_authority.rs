@@ -135,9 +135,7 @@ impl TraceMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct GraphExpansionLifecyclePolicy {
-    pub(crate) include_archived: bool,
     pub(crate) include_suppressed: bool,
-    pub(crate) include_deleted: bool,
     pub(crate) include_non_current: bool,
     pub(crate) include_superseded: bool,
 }
@@ -240,9 +238,7 @@ impl GraphExpansionQuery {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GraphExpansionFilteredReason {
-    Archived,
     Suppressed,
-    Deleted,
     NonCurrent,
     Superseded,
 }

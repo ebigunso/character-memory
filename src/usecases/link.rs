@@ -143,7 +143,6 @@ mod tests {
             fixtures.episode.id,
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655444001"));
-        draft.confidence = 0.42;
         draft.rationale = Some("Task_4 typed link pipeline test.".to_owned());
 
         let persisted = pipeline
@@ -159,7 +158,6 @@ mod tests {
         assert_eq!(persisted.to_id, fixtures.episode.id);
         assert_eq!(persisted.to_type, ObjectType::Episode);
         assert_eq!(persisted.relation, RelationType::Involves);
-        assert_eq!(persisted.confidence, 0.42);
         assert_eq!(persisted.created_at, timestamp());
         assert_eq!(persisted.schema_version, DEFAULT_SCHEMA_VERSION);
 
@@ -178,57 +176,6 @@ mod tests {
                 MemoryObject::Episode(fixtures.episode),
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn confidence_bounds_are_inclusive_and_outside_values_do_not_persist() {
-        for (confidence, accepted) in [
-            (0.0, true),
-            (1.0, true),
-            (-f32::EPSILON, false),
-            (1.0 + f32::EPSILON, false),
-        ] {
-            let graph = in_memory_graph_store();
-            let mut draft = valid_link_draft();
-            draft.confidence = confidence;
-            let link_id = draft.id.unwrap();
-
-            let result = LinkPipeline::new(&graph).link(draft).await;
-            let persisted = graph.query_links_by_ids(&[link_id]).await.unwrap();
-
-            if accepted {
-                let outcome = result.unwrap();
-                assert_eq!(outcome.link.confidence, confidence);
-                assert_eq!(persisted, vec![outcome.link]);
-            } else {
-                assert!(matches!(
-                    result.unwrap_err(),
-                    CustomError::DomainValidation(DomainValidationError::InvalidScore {
-                        field: "MemoryLink.confidence",
-                        value,
-                    }) if value == confidence
-                ));
-                assert!(persisted.is_empty());
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn rejects_invalid_confidence_before_graph_write() {
-        let graph = in_memory_graph_store();
-        let pipeline = LinkPipeline::new(&graph);
-        let mut draft = valid_link_draft();
-        draft.confidence = 1.1;
-
-        let error = pipeline.link(draft).await.unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::DomainValidation(DomainValidationError::InvalidScore {
-                field: "MemoryLink.confidence",
-                value: 1.1,
-            })
-        ));
     }
 
     #[tokio::test]
