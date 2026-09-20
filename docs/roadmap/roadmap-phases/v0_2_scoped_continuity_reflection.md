@@ -14,7 +14,7 @@ The phase is judged by what a builder observes, not by structural completeness. 
 
 - Admission gating and ranking credit for graph-only evidence. The 2026-09-16 re-baseline in the public companion `CharacterMemoryEvals` evaluation repository (a development aid, not core library functionality) is the planning input: derived memories ingested from dataset summaries took pack slots evidence turns held. Under this draft the item takes a definite shape: the state and time routes have admission floors beside the content route, so derived state and evidence turns are admitted on their own cues rather than competing for vector-scored slots. Pack-admission changes invalidate the pollution and context-size baselines of ADR-I-0022 and re-measure them once.
 - Selectivity widening beyond entity roots, which needs retrieval statistics keyed by something other than entities. This phase designs that signal or declines it with recorded evidence.
-- Scoped and person-keyed evaluation scenarios (catalog B1 to B3) before any implementation. Under ADR-D-0019 their meaning changed: B1 and B2 measure that the scene is present and correct on recall and, at the behavioral tier, that the character does not disclose across it. They never measure that a memory failed to surface.
+- Scoped and person-keyed evaluation scenarios (catalog B1 to B3) before any implementation. Under ADR-D-0038 their meaning changed: B1 and B2 measure that the scene is present and correct on recall and, at the behavioral tier, that the character does not disclose across it. They never measure that a memory failed to surface.
 - The concurrency question. With no background derivation inside the library, the reflection-scheduling form dissolves; what remains is the concurrent-facade-call question the library already has, and the census answers it.
 
 The planning-time value audit ran on 2026-09-20 and the decider ruled on it the same day. The phase opens with schema groundwork before any route work, because four accepted decisions change stored shapes the routes would otherwise be built on and rebuilt: the archived and deleted retention states, the archive machinery, the lifecycle options whose only legal value is their default, the unread stability measure, the unread scope hint, and the operation id and idempotency key go (an idempotency ledger is declined; retry safety is deterministic ids plus content equality); the confidence score leaves interpreted memory (ADR-D-0030) and, by this ruling, links and thread membership with it, which that record had left open; the stored current flag goes and currency is read from the supersession chain; the entity becomes a notion (ADR-D-0034).
@@ -39,15 +39,15 @@ custom    optional scene metadata for domains that already have their own scope 
 
 Only the time is required, and the application never resolves, normalizes, or looks anything up (ADR-D-0029). An identity key cues its one entity, a setting key, a conversation, channel, zone, or project code, cues the memories whose scope it belongs to and never an entity, and an exact name cues every entity that bears it, which may be several; a description is a content cue over the entities and scenes memory holds, so an ambiguous reference activates each thing it could mean and an unknown one activates nothing, and the trace reports which. Recall reads entities through what the character currently believes about them (ADR-D-0034). A belief about a notion is an ordinary interpreted memory about it, so anything the character holds, a kind, a doubt, a relation nobody anticipated, is representable as it is; a belief may also carry a machine-readable assertion where recall reads through it mechanically. This phase builds one, known as, which is what lets an exact name cue every notion that bears it, and a notion known by two names is reached by either, since both beliefs are current. Reaching the kitchen from the house, and reaching one person who is held as two separate notions, are read-throughs of containment and sameness; each arrives with its scenario in the slice that needs it, no later than the v0.3 slice that first writes such beliefs, and until then they are held as any other belief. Keeping identity consistent across drifting wording is consolidation's work in v0.3, never the application's.
 
-A partial scene degrades gracefully. No participants means no pair recall and no participant-based partition, while a partition over the setting or a custom scope still applies, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is reflection's work in v0.3 and never an input requirement; where it is unclear whether two references are one, consolidation forms separate notions and holds their sameness as a belief (ADR-D-0034).
+A partial scene degrades gracefully. No participants means no pair recall, and the trace says the scene was partial. Enriching a thin scene from the text itself, resolving named speakers to entities, is reflection's work in v0.3 and never an input requirement; where it is unclear whether two references are one, consolidation forms separate notions and holds their sameness as a belief (ADR-D-0034).
 
 There is no purpose field. What the character is trying to do surfaces from memory as an open loop, a commitment, a thread, or a signal (ADR-D-0023). A dispatched task's purpose arrives in the interaction as content and as an open loop with its rationale.
 
 Scope keys on derived memories are derived from each memory's scene at write time, including any custom value, and are never a caller-facing ID scheme: the library mints no scope identifiers a caller must discover, which is what the exclusion of a scope hint by ID means. A stored scope object enters only when a consumer needs something a graph query over scope keys cannot answer (ADR-D-0024, which replaces ADR-D-0011's caller-facing scope object with derived scope keys).
 
-## 1.1 Partitions as explicit policy
+## 1.1 The scene is reported, and nothing is withheld by it
 
-Recall is never gated by the scene by default (ADR-D-0019). An application that must enforce a boundary passes a partition as a query-time option over the scene; the trace records it as an applied policy. The B1 and B2 scenarios exercise both the default and the policy.
+Recall is never gated by the scene, by default or by option (ADR-D-0038). A character from whom a confidence is withheld is not discreet, only ignorant, and what it perceives of the room is often partial, so the library reports and never decides: each admitted memory comes with its scene as recorded, and the result states the present scene as given and whether it was partial. The library computes no verdict about who may hear a memory. An application with an obligation discretion cannot carry filters what it passes on, using the reported scene, or keeps what must never mix in separate stores. The B1 and B2 scenarios check that the memory from the other scene is recalled with its scene reported.
 
 ---
 
@@ -92,10 +92,10 @@ Only a signal: a scope has accumulated enough since its last reflection to be wo
 # 3. Retrieval changes
 
 ```text
-RetrievalContext takes a scene (when required; who, where, what, custom optional), a topic, an optional partition policy, and an intent (Continuity, the only variant v0.2 needs, since a scene with no topic replaces a CurrentState variant; the other ADR-I-0016 variants arrive with the phases that need them)
+RetrievalContext takes a scene (when required; who, where, what, custom optional), a topic, and an intent (Continuity, the only variant v0.2 needs, since a scene with no topic replaces a CurrentState variant; the other ADR-I-0016 variants arrive with the phases that need them)
 candidate routes per cue kind with admission floors; the content route is what exists today
 the temporal rationale category is produced; activation records which route admitted each item
-the trace records the scene as given, whether it was partial, the applied partition policy, elapsed time since the pair last met, and every omission on lifecycle or currency grounds with its reason, beside the existing section-limit, partition, and expansion-bound reasons
+the trace records the scene as given, whether it was partial, elapsed time since the pair last met, and every omission on lifecycle or currency grounds with its reason, beside the existing section-limit and expansion-bound reasons
 selectivity applies beyond entity roots with a new statistics key, or the declination is recorded with evidence
 ```
 
@@ -108,7 +108,7 @@ The seven retrieval modes of the earlier draft, the scope hint by ID, the curren
 The plan in the public companion `CharacterMemoryEvals` evaluation repository, whose tooling is a development aid and not core library functionality, comes before the library plan, against the maintained smoke config and the library version pin. Scenarios are named by catalog situation and carry their retrieval-tier property:
 
 ```text
-B1 person-keyed separation: scene present and correct on recall; non-disclosure at the behavioral tier; partition policy omits across the scene and the trace says so
+B1 person-keyed separation: the memory from the other person's scene is recalled with its scene present and correct; non-disclosure at the behavioral tier
 B2 group versus one-on-one scenes: same topic, different scenes, both recalled, disclosure follows the scene
 B3 differential relationship states: scope-keyed relationship notes retrieved per scene, current only
 D1 waking into the day and D8 a deadline arrives: due items admitted with no topic
@@ -151,7 +151,7 @@ No reflect, reinforce, resolve, or current-state methods. Open loops and commitm
 ```text
 With a scene and no topic, retrieval returns what the moment calls for: the people present's current state and last interaction, active loops and commitments in both directions, the activity's thread in order, items due, date matches, and recent high-salience episodes, with elapsed time since the pair last met.
 A stored intention surfaces when its counterpart appears or its topic arises, and a promise surfaces on its due date, whatever the current topic.
-A memory learned in one setting is admitted when retrieved for another, with the scene v0.2 records reported (participants, setting, when); a partition applied as a query option omits across the scene and the trace records the applied policy.
+A memory learned in one setting is admitted when retrieved for another, with the scene v0.2 records reported (participants, setting, when), and the present scene is reported as given, including when it is partial; no retrieval option omits by scene.
 Under a loud topic, the state and time routes still admit their floor, and the ADR-I-0022 baselines are re-measured once.
 Retrieval produces the temporal rationale category, and catalog D1, D4, D5, D7, D8, D9, D11, and D13 pass at the retrieval tier.
 Currency never removes an item: every omission on lifecycle or currency grounds names a resolution, a supersession, or a suppression, and staleness is reported as age.
@@ -197,4 +197,4 @@ Implementation records expected with the plan, each written when its contract is
 
 # 9. Library boundary
 
-Continuity structures are memory state, not agent orchestration. The library takes the scene and reports it, never decides disclosure; the application chooses partitions; purpose comes from memory; the model reconstructs the response. If scope modeling grows past derived keys, the value audit names the consumer before any object is added.
+Continuity structures are memory state, not agent orchestration. The library takes the scene and reports it, never decides disclosure and never withholds by it; purpose comes from memory; the model reconstructs the response. If scope modeling grows past derived keys, the value audit names the consumer before any object is added.
