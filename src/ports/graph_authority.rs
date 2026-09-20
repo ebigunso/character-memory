@@ -241,10 +241,11 @@ pub(crate) enum GraphExpansionFilteredReason {
     Superseded,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GraphExpansionFilteredNode {
     pub(crate) object_ref: MemoryObjectRef,
     pub(crate) reason: GraphExpansionFilteredReason,
+    pub(crate) superseded_by: Vec<MemoryId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
