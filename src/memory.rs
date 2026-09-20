@@ -430,7 +430,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn currency_review_older_plan_replay_keeps_predecessor_out_of_vector_index() {
+    async fn older_plan_replay_keeps_predecessor_out_of_vector_index() {
         let memory = injected_memory().await;
         let episode_id = MemoryId::from_u128(1000);
         let predecessor_id = MemoryId::from_u128(1001);
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn currency_review_older_correction_replay_keeps_superseded_replacement_out_of_index() {
+    async fn older_correction_replay_keeps_superseded_replacement_out_of_index() {
         let (memory, fixtures, replacement_id) = lifecycle_memory().await;
         let old_correction =
             derived_correction_draft(&fixtures, replacement_id, fixtures.user_preference.id);
@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn currency_review_link_cannot_overwrite_generated_supersession() {
+    async fn link_cannot_overwrite_generated_supersession() {
         let (memory, fixtures, replacement_id) = lifecycle_memory().await;
         let correction = memory
             .correct(derived_correction_draft(
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn currency_review_link_replay_accepts_equal_content_and_rejects_divergence() {
+    async fn link_replay_accepts_equal_content_and_rejects_divergence() {
         let memory = injected_memory().await;
         let link_id = MemoryId::from_u128(1010);
         let mut draft = MemoryLinkDraft::new(
