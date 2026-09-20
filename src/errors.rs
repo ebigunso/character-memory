@@ -430,7 +430,9 @@ pub enum CustomError {
     #[error("low-information co-occurrence link rejected: {link_id}")]
     LowInformationCoOccurrence { link_id: MemoryId },
 
-    #[error("source-object correction requires an original raw or source reference: {target:?}")]
+    #[error(
+        "source-object correction requires an original raw reference or setting key: {target:?}"
+    )]
     MissingOriginalSourceReference { target: MemoryObjectRef },
 
     #[error("original {kind:?} reference does not match source object {target:?}")]

@@ -55,8 +55,11 @@ Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
 |---|---|
 | `objectId`, `objectType`, `graphUri`, `schemaVersion` | Common identity and schema literals |
 | `createdAt`, `updatedAt` | Timestamps on the types that declare them |
-| `modality`, `sourceConversationId`, `startedAt`, `endedAt` | Episode source and time metadata |
-| `participantEntity` | Episode participant notion |
+| `modality`, `endedAt` | Episode modality and optional interval end |
+| `sceneTime` | Required experience time on the episode |
+| `sceneParticipants` | Lossless JSON array of participant keys, names or descriptions |
+| `settingKey`, `settingWords` | Independently optional context key and words; the key is directly queryable |
+| `sceneCustomValues` | Lossless JSON object of string custom values |
 | `summary` | Episode or thread summary |
 | `rawRef` | Episode or observation source pointer |
 | `episode`, `speakerEntity`, `observedAt` | Observation source, optional speaker and time |

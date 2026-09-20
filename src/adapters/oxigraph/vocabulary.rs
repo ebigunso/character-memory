@@ -15,10 +15,12 @@ pub(crate) const CREATED_AT: &str = "urn:cmem:vocab:createdAt";
 pub(crate) const UPDATED_AT: &str = "urn:cmem:vocab:updatedAt";
 
 pub(crate) const MODALITY: &str = "urn:cmem:vocab:modality";
-pub(crate) const SOURCE_CONVERSATION_ID: &str = "urn:cmem:vocab:sourceConversationId";
-pub(crate) const STARTED_AT: &str = "urn:cmem:vocab:startedAt";
+pub(crate) const SCENE_TIME: &str = "urn:cmem:vocab:sceneTime";
+pub(crate) const SCENE_PARTICIPANTS: &str = "urn:cmem:vocab:sceneParticipants";
+pub(crate) const SETTING_KEY: &str = "urn:cmem:vocab:settingKey";
+pub(crate) const SETTING_WORDS: &str = "urn:cmem:vocab:settingWords";
+pub(crate) const SCENE_CUSTOM_VALUES: &str = "urn:cmem:vocab:sceneCustomValues";
 pub(crate) const ENDED_AT: &str = "urn:cmem:vocab:endedAt";
-pub(crate) const PARTICIPANT_ENTITY: &str = "urn:cmem:vocab:participantEntity";
 pub(crate) const SUMMARY: &str = "urn:cmem:vocab:summary";
 pub(crate) const RAW_REF: &str = "urn:cmem:vocab:rawRef";
 pub(crate) const SALIENCE_SCORE: &str = "urn:cmem:vocab:salienceScore";

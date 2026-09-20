@@ -1,0 +1,509 @@
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+
+use crate::api::types::*;
+use crate::domain::*;
+use crate::models::vector::EmbeddingInput;
+use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::GraphObjectQuery;
+use crate::ports::retrieval_stats::RetrievalStatsCounterKey;
+use crate::test_support::{
+    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
+};
+use crate::{CharacterMemory, CustomError};
+
+fn time() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-09-20T10:00:00.123456789Z")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
+fn words_scene() -> Scene {
+    let mut scene = Scene::at(time());
+    scene.setting.words = Some("  窓のそば\nquiet café  ".to_owned());
+    scene.participants = vec![
+        SceneParticipant::Name("  Alice  ".to_owned()),
+        SceneParticipant::Description("a visitor in blue".to_owned()),
+        SceneParticipant::Name("  Alice  ".to_owned()),
+    ];
+    scene
+        .custom_values
+        .insert("session".to_owned(), "  session/42  ".to_owned());
+    scene
+        .custom_values
+        .insert("empty".to_owned(), String::new());
+    scene
+}
+
+// Observe provider input while using the same deterministic embedder and real stores.
+struct RecordingEmbedder(Arc<Mutex<Vec<EmbeddingInput>>>);
+
+#[async_trait]
+impl MemoryEmbedder for RecordingEmbedder {
+    async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+        self.0.lock().unwrap().push(input.clone());
+        DeterministicMemoryEmbedder::new(8).embed(input).await
+    }
+    async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
+        self.0.lock().unwrap().extend_from_slice(inputs);
+        DeterministicMemoryEmbedder::new(8)
+            .embed_batch(inputs)
+            .await
+    }
+}
+
+async fn memory() -> (CharacterMemory, Arc<Mutex<Vec<EmbeddingInput>>>) {
+    let inputs = Arc::new(Mutex::new(Vec::new()));
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(8).await),
+        Box::new(RecordingEmbedder(inputs.clone())),
+    );
+    (memory, inputs)
+}
+
+fn episode_draft(id: u128, scene: Option<Scene>) -> EpisodeDraft {
+    let mut draft = EpisodeDraft::new("An experience");
+    draft.id = Some(MemoryId::from_u128(id));
+    draft.created_at = Some(time());
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    draft.scene = scene;
+    draft
+}
+
+fn episode_plan(draft: EpisodeDraft) -> RememberWritePlan {
+    RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+        draft,
+        CandidateProvenance::caller("experience"),
+    )))
+}
+
+async fn objects(memory: &CharacterMemory, types: Vec<ObjectType>) -> Vec<MemoryObject> {
+    memory
+        .memory_composition
+        .graph_store
+        .query_objects(&GraphObjectQuery::by_types(types, None))
+        .await
+        .unwrap()
+}
+
+fn assert_issue(error: CustomError, expected: CandidateValidationIssue) {
+    let CustomError::WritePlanValidationRejected { validations } = error else {
+        panic!("unexpected error: {error:?}")
+    };
+    assert!(
+        validations
+            .iter()
+            .flat_map(|v| &v.errors)
+            .any(|issue| issue == &expected),
+        "missing {expected:?}: {validations:?}"
+    );
+}
+
+#[tokio::test]
+async fn scene_words_round_trip_through_remember_and_authored_plan_without_inference() {
+    for direct in [false, true] {
+        let (memory, inputs) = memory().await;
+        let scene = words_scene();
+        let draft = episode_draft(8101, Some(scene.clone()));
+        let outcome = if direct {
+            let plan = episode_plan(draft).with_candidate(MemoryCandidate::VectorIndex(
+                VectorIndexCandidate::new(
+                    MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(8101)),
+                    CandidateProvenance::caller("summary"),
+                ),
+            ));
+            let plan: RememberWritePlan =
+                serde_json::from_str(&serde_json::to_string(&plan).unwrap()).unwrap();
+            let first = memory
+                .commit(plan.clone(), CommitOptions::default())
+                .await
+                .unwrap();
+            let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+            assert_eq!(first.persisted_object_ids, replay.persisted_object_ids);
+            first
+        } else {
+            memory
+                .remember(
+                    RememberInput::new("An experience")
+                        .with_scene(scene.clone())
+                        .with_episode(episode_draft(8101, None)),
+                    RememberOptions::default(),
+                )
+                .await
+                .unwrap()
+        };
+        let saved = objects(&memory, vec![ObjectType::Episode]).await;
+        let [MemoryObject::Episode(episode)] = saved.as_slice() else {
+            panic!("one episode expected")
+        };
+        assert_eq!(episode.scene, scene);
+        assert!(
+            objects(&memory, vec![ObjectType::Entity, ObjectType::DerivedMemory])
+                .await
+                .is_empty()
+        );
+        assert!(outcome.persisted_link_ids.is_empty());
+        assert_eq!(
+            outcome.vector_indexed_object_ids.len(),
+            if direct { 1 } else { 2 }
+        );
+        let recorded = inputs.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 2);
+        for input in recorded {
+            assert_eq!(
+                input.text,
+                match input.object_type.unwrap() {
+                    ObjectType::Episode => "Episode summary: An experience",
+                    ObjectType::Observation => "Observation excerpt: An experience",
+                    other => panic!("unexpected embedding: {other:?}"),
+                }
+            );
+        }
+        memory.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn scene_override_preserves_participants_involvement_threads_interval_and_observation() {
+    let (memory, _) = memory().await;
+    let present = MemoryId::from_u128(8201);
+    let involved = MemoryId::from_u128(8202);
+    let existing = MemoryId::from_u128(8203);
+    let thread_ids = [MemoryId::from_u128(8211), MemoryId::from_u128(8212)];
+    let entity = |id| {
+        let mut draft = EntityDraft::new();
+        draft.id = Some(id);
+        draft
+    };
+    memory
+        .remember(
+            RememberInput::new("Earlier experience").with_entity(entity(existing)),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    let mut scene = words_scene();
+    scene.setting.key = Some("room/42".to_owned());
+    scene.participants.extend([
+        SceneParticipant::Key(present),
+        SceneParticipant::Key(existing),
+        SceneParticipant::Key(present),
+    ]);
+    let episode = episode_draft(8220, Some(scene.clone()));
+    let mut observation = ObservationDraft::new(episode.id.unwrap(), "Explicitly timed statement");
+    observation.id = Some(MemoryId::from_u128(8221));
+    observation.observed_at = Some(time() + chrono::Duration::seconds(10));
+    observation.speaker_entity_id = Some(involved);
+    let ended_at = time() + chrono::Duration::minutes(5);
+    let mut overridden = Scene::at(time() + chrono::Duration::days(1));
+    overridden
+        .custom_values
+        .insert("input-only".to_owned(), "must not merge".to_owned());
+    overridden
+        .participants
+        .push(SceneParticipant::Key(MemoryId::from_u128(9999)));
+    let mut input = RememberInput::new("An experience")
+        .with_scene(overridden)
+        .with_episode(episode)
+        .with_observation(observation.clone())
+        .with_ended_at(ended_at)
+        .with_entity(entity(present))
+        .with_entity(entity(involved))
+        .with_entity_id(involved);
+    for id in thread_ids {
+        let mut thread = MemoryThreadDraft::new("A thread", "An ongoing topic");
+        thread.id = Some(id);
+        input = input.with_memory_thread(thread).with_thread_id(id);
+    }
+    let outcome = memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    let saved = memory
+        .memory_composition
+        .graph_store
+        .query_objects(&GraphObjectQuery::by_ids(vec![
+            MemoryId::from_u128(8220),
+            MemoryId::from_u128(8221),
+        ]))
+        .await
+        .unwrap();
+    assert_eq!(saved.len(), 2);
+    for object in saved {
+        match object {
+            MemoryObject::Episode(episode) => {
+                assert_eq!(episode.scene, scene);
+                assert_eq!(episode.ended_at, Some(ended_at));
+            }
+            MemoryObject::Observation(saved) => {
+                assert_eq!(saved.observed_at, observation.observed_at);
+                assert_eq!(saved.speaker_entity_id, Some(involved));
+            }
+            _ => panic!("unexpected object"),
+        }
+    }
+    let links = memory
+        .memory_composition
+        .graph_store
+        .query_links_by_ids(&outcome.persisted_link_ids)
+        .await
+        .unwrap();
+    let actual = links
+        .iter()
+        .map(|link| (link.from_id, link.relation, link.to_id))
+        .collect::<Vec<_>>();
+    assert_eq!(actual.len(), 5);
+    assert!(actual.contains(&(MemoryId::from_u128(8220), RelationType::Involves, involved)));
+    for participant in [present, existing] {
+        assert!(actual.contains(&(
+            MemoryId::from_u128(8221),
+            RelationType::Mentions,
+            participant
+        )));
+    }
+    for thread in thread_ids {
+        assert!(actual.contains(&(
+            MemoryId::from_u128(8221),
+            RelationType::PartOfThread,
+            thread
+        )));
+    }
+    for participant in [present, existing] {
+        let counter = memory
+            .memory_composition
+            .stats_store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: participant,
+                relation_kind: RelationType::Involves,
+                object_type: ObjectType::Episode,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 1, "repeated keys must not count twice");
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_created_at() {
+    let (memory, _) = memory().await;
+    let before = Utc::now();
+    let plan = memory
+        .prepare(
+            RememberInput::new("An experience").with_episode(episode_draft(8301, None)),
+            PrepareOptions::default(),
+        )
+        .await
+        .unwrap();
+    let after = Utc::now();
+    let scene = plan
+        .candidates
+        .iter()
+        .find_map(|candidate| match candidate {
+            MemoryCandidate::Episode(candidate) => candidate.draft.scene.clone(),
+            _ => None,
+        })
+        .unwrap();
+    assert!(scene.time >= before && scene.time <= after);
+    assert_ne!(scene.time, time());
+    assert_eq!(scene, Scene::at(scene.time));
+    let serialized = serde_json::to_string(&plan).unwrap();
+    for _ in 0..2 {
+        memory
+            .commit(
+                serde_json::from_str(&serialized).unwrap(),
+                CommitOptions::default(),
+            )
+            .await
+            .unwrap();
+    }
+    for object in objects(&memory, vec![ObjectType::Episode, ObjectType::Observation]).await {
+        match object {
+            MemoryObject::Episode(episode) => {
+                assert_eq!(episode.scene, scene);
+                assert_eq!(episode.created_at, time());
+            }
+            MemoryObject::Observation(observation) => {
+                assert_eq!(observation.observed_at, Some(scene.time))
+            }
+            _ => unreachable!(),
+        }
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn writes_reject_missing_scene_time_activity_and_unknown_participant_keys() {
+    let (memory, inputs) = memory().await;
+    assert_eq!(
+        episode_draft(8401, None).into_domain(),
+        Err(DomainValidationError::MissingSceneTime)
+    );
+    let error = memory
+        .commit(
+            episode_plan(episode_draft(8401, None)),
+            CommitOptions::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_issue(
+        error,
+        CandidateValidationIssue::MissingTimestamp {
+            field: CandidateTimestampField::SceneTime,
+        },
+    );
+    for activity in [
+        SceneActivity::Thread(MemoryId::from_u128(8411)),
+        SceneActivity::OpenLoop(MemoryId::from_u128(8412)),
+    ] {
+        let mut scene = Scene::at(time());
+        scene.activity = Some(activity);
+        assert_eq!(
+            episode_draft(8401, Some(scene.clone())).into_domain(),
+            Err(DomainValidationError::SceneActivityOnWrite)
+        );
+        let error = memory
+            .remember(
+                RememberInput::new("An experience").with_scene(scene.clone()),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert_issue(error, CandidateValidationIssue::SceneActivityOnWrite);
+        let error = memory
+            .commit(
+                episode_plan(episode_draft(8401, Some(scene))),
+                CommitOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert_issue(error, CandidateValidationIssue::SceneActivityOnWrite);
+    }
+    let unknown = MemoryId::from_u128(8499);
+    let mut scene = Scene::at(time());
+    scene.participants.push(SceneParticipant::Key(unknown));
+    let error = memory
+        .commit(
+            episode_plan(episode_draft(8401, Some(scene))),
+            CommitOptions::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_issue(
+        error,
+        CandidateValidationIssue::UnknownObjectRef {
+            role: CandidateReferenceRole::SceneParticipant,
+            referenced: MemoryObjectRef::new(ObjectType::Entity, unknown),
+        },
+    );
+    assert!(inputs.lock().unwrap().is_empty());
+    assert!(objects(
+        &memory,
+        vec![
+            ObjectType::Episode,
+            ObjectType::Observation,
+            ObjectType::Entity
+        ]
+    )
+    .await
+    .is_empty());
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn source_correction_uses_setting_key_and_preserves_every_source_scene() {
+    for observation_target in [false, true] {
+        let (memory, _) = memory().await;
+        let mut original_scene = words_scene();
+        original_scene.setting.key = Some("channel/original".to_owned());
+        let correction_scene = Scene::at(time() + chrono::Duration::days(1));
+        let original = MemoryId::from_u128(8501);
+        let observation = MemoryId::from_u128(8502);
+        let correction = MemoryId::from_u128(8503);
+        let old = MemoryId::from_u128(8504);
+        let new = MemoryId::from_u128(8505);
+        let mut source_observation = ObservationDraft::new(original, "Original statement");
+        source_observation.id = Some(observation);
+        let mut belief = DerivedMemoryDraft::new(DerivedType::Claim, "Original interpretation")
+            .with_source_episode(original)
+            .with_source_observation(observation);
+        belief.id = Some(old);
+        memory
+            .remember(
+                RememberInput::new("An experience")
+                    .with_episode(episode_draft(8501, Some(original_scene.clone())))
+                    .with_observation(source_observation)
+                    .with_derived_memory(belief),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .remember(
+                RememberInput::new("Correction experience")
+                    .with_episode(episode_draft(8503, Some(correction_scene))),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        let sources_before =
+            objects(&memory, vec![ObjectType::Episode, ObjectType::Observation]).await;
+        let target = |key| {
+            if observation_target {
+                SourceObjectCorrectionTarget::Observation {
+                    id: observation,
+                    original_raw_ref: None,
+                    original_setting_key: Some(key),
+                }
+            } else {
+                SourceObjectCorrectionTarget::Episode {
+                    id: original,
+                    original_raw_ref: None,
+                    original_setting_key: Some(key),
+                }
+            }
+        };
+        let mut replacement =
+            ReplacementDerivedMemoryDraft::new(DerivedType::Correction, "Revised interpretation")
+                .with_source_episode(original)
+                .with_source_episode(correction)
+                .with_source_observation(observation);
+        replacement.id = Some(new);
+        replacement.original_source_provenance = SourceProvenanceReference::episode(original);
+        replacement.correction_origin_provenance = SourceProvenanceReference::episode(correction);
+        let mut draft = CorrectMemoryDraft::new(
+            CorrectionTarget::source_object(target(original_scene.setting.words.clone().unwrap())),
+            "Correct the interpretation",
+        )
+        .with_replacement(replacement);
+        draft.correction_origin = SourceProvenanceReference::episode(correction);
+        let error = memory.correct(draft.clone()).await.unwrap_err();
+        assert!(
+            matches!(error, CustomError::OriginalSourceReferenceMismatch { kind: SourceReferenceKind::SettingKey, provided, stored, .. } if Some(provided.as_str()) == original_scene.setting.words.as_deref() && stored == original_scene.setting.key)
+        );
+        draft.targets = vec![CorrectionTarget::source_object(target(
+            original_scene.setting.key.clone().unwrap(),
+        ))];
+        memory.correct(draft).await.unwrap();
+        assert_eq!(
+            objects(&memory, vec![ObjectType::Episode, ObjectType::Observation]).await,
+            sources_before
+        );
+        let beliefs = objects(&memory, vec![ObjectType::DerivedMemory]).await;
+        let updated = beliefs
+            .iter()
+            .find_map(|object| match object {
+                MemoryObject::DerivedMemory(memory) if memory.id == new => Some(memory),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(updated.derived_from_episode_ids, vec![original, correction]);
+        assert_eq!(updated.derived_from_observation_ids, vec![observation]);
+        assert!(updated.supersedes.contains(&old));
+        memory.close().await.unwrap();
+    }
+}

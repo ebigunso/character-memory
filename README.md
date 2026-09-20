@@ -141,7 +141,12 @@ This is useful when you want to:
 Character Memory separates planning from persistence. Use `prepare` to build an inspectable `RememberWritePlan`, `validate_plan` to check it against the current graph, and `commit` to persist it. `prepare` and `validate_plan` do not write graph objects, vector entries, retrieval statistics, or raw source data.
 
 ```rust
-let input = RememberInput::new("caller-provided note or transcript reference");
+use character_memory::{Scene, SceneParticipant};
+
+let mut scene = Scene::now();
+scene.participants.push(SceneParticipant::Description("a visitor".to_owned()));
+scene.setting.words = Some("a quiet room".to_owned());
+let input = RememberInput::new("caller-provided note or transcript reference").with_scene(scene);
 
 let plan = memory.prepare(input, PrepareOptions::default()).await?;
 let validation = memory.validate_plan(&plan).await?;
@@ -154,6 +159,8 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 `commit` revalidates the plan before writing. Graph-authoritative objects, links, provenance, lifecycle, and currentness are critical writes; vector indexing and retrieval-stat updates are repairable and are reported in `RememberOutcome`.
 
 For callers that want the standard write lifecycle in one call, `remember(RememberInput, RememberOptions)` composes `prepare`, `validate_plan`, and `commit` over the same graph-authoritative machinery.
+
+The episode stores one `Scene`: the experience time, optional keyed or word-described participants, a setting key and/or words, and flat string custom values. Unspecified details stay unspecified. Words are preserved as supplied; they create no notions, links or embeddings. Participant keys must identify existing notions or notions in the same plan. A supplied `EpisodeDraft.scene` overrides the input scene as a whole. Without a scene, `prepare` records the current time once, meaning the experience is happening now; historical writes must provide their time. An authored episode candidate must include a scene, and writes reject `Scene.activity`. Observation time defaults to scene time; an explicit observation time, speaker, episode end time, involved notions and multiple thread memberships remain independent. Corrections preserve source scenes and may guard the original context with `original_setting_key`.
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 

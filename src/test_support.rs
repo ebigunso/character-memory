@@ -409,10 +409,18 @@ pub(crate) fn simple_episode() -> Episode {
         id: fixture_id(10),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
-        source_conversation_id: Some("conversation:contract-fixture".to_owned()),
-        started_at: Some(timestamp("2026-04-27T10:00:00Z")),
+        scene: crate::domain::Scene {
+            setting: crate::domain::SceneSetting {
+                key: Some("conversation:contract-fixture".to_owned()),
+                words: None,
+            },
+            participants: vec![
+                crate::domain::SceneParticipant::Key(fixture_id(1)),
+                crate::domain::SceneParticipant::Key(fixture_id(2)),
+            ],
+            ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
+        },
         ended_at: Some(timestamp("2026-04-27T10:10:00Z")),
-        participant_entity_ids: vec![fixture_id(1), fixture_id(2)],
         summary: "Discussed deterministic store contract fixtures.".to_owned(),
         raw_ref: Some("file:fixtures/raw/simple-episode.txt".to_owned()),
         salience_score: 0.8,

@@ -361,11 +361,16 @@ fn entity(id: MemoryId) -> EntityDraft {
     draft
 }
 
-fn episode(id: MemoryId, summary: &str, participant_entity_ids: &[MemoryId]) -> EpisodeDraft {
+fn episode(id: MemoryId, summary: &str, participants: &[MemoryId]) -> EpisodeDraft {
     let mut draft = EpisodeDraft::new(summary);
     draft.id = Some(id);
-    draft.participant_entity_ids = participant_entity_ids.to_vec();
-    draft.started_at = Some(timestamp());
+    let mut scene = character_memory::Scene::at(timestamp());
+    scene.participants = participants
+        .iter()
+        .copied()
+        .map(character_memory::SceneParticipant::Key)
+        .collect();
+    draft.scene = Some(scene);
     draft.ended_at = Some(timestamp());
     draft.created_at = Some(timestamp());
     draft.raw_ref = Some(format!("raw://integration/v0-1-2/{id}"));

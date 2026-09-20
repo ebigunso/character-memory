@@ -230,10 +230,15 @@ mod tests {
             id: id(10),
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
-            source_conversation_id: Some("conversation-1".to_owned()),
-            started_at: Some(timestamp()),
+            scene: crate::domain::Scene {
+                setting: crate::domain::SceneSetting {
+                    key: Some("conversation-1".to_owned()),
+                    words: None,
+                },
+                participants: vec![crate::domain::SceneParticipant::Key(id(1))],
+                ..crate::domain::Scene::at(timestamp())
+            },
             ended_at: Some(timestamp()),
-            participant_entity_ids: vec![id(1)],
             summary: " Short   summary. ".to_owned(),
             raw_ref: Some("raw://episode".to_owned()),
             salience_score: 0.42,

@@ -23,7 +23,11 @@ Hydration reconstructs domain objects and links from the selected RDF named grap
 
 ## Experiences, Notions And Threads
 
-Episodes record interaction spans with `summary`, `modality`, optional source and time metadata, `participantEntity` references, salience and retention. Observations record `text` tied to an `episode`, with observation time, an optional `speakerEntity` and an optional raw reference. Dedicated source references keep experience-based provenance queryable.
+Episodes record interaction spans with `summary`, `modality`, one `Scene`, optional `endedAt` and `rawRef`, salience and retention. The scene holds the required experience time, participants as notion keys or supplied names/descriptions, a setting key and/or words, and flat string custom values. Missing scene parts stay unspecified. Observations record `text` tied to an `episode`, with an optional `speakerEntity` and raw reference. Preparation defaults observation time to scene time while preserving an explicit observation time. Involved notions, participants, speakers, thread memberships and the episode end time remain independent.
+
+The episode owns the scene. `sceneTime` stores its timestamp losslessly; `sceneParticipants` and `sceneCustomValues` store JSON literals, preserving participant order, duplicates, spelling and custom string values. `settingKey` is a directly queryable literal, separate from `settingWords`. Keys identify application contexts, not notions; sessions may be recorded in custom values. Participant keys must identify existing or same-plan notions. Names, descriptions, setting words and custom values only round-trip on writes: they create no notions, links, recall cues or embeddings. Writes reject an activity.
+
+An explicit draft scene replaces the input scene as a whole. If both are absent, preparation fixes the current experience time in the plan; commit never substitutes the episode creation time or a later clock reading. Caller-authored episode candidates require a scene. A derived memory cites its source experiences without copying their scenes, and correction leaves those source scenes intact. The source-object correction guard compares `original_setting_key` with the source episode setting key, including when the target is an observation; it never compares setting words.
 
 A notion stores only its identity, `createdAt` and schema metadata. Its names and descriptions are carried by interpreted memories about it. Multiple notions may share a name, and one notion may have multiple naming beliefs.
 
@@ -43,7 +47,7 @@ A `DerivedMemory` stores `derivedType`, `text`, `salienceScore`, `retentionState
 
 An interpreted memory either cites at least one episode or observation, or declares `given_by_application=true`. The latter is persisted as `givenByApplication`, requires at least one notion subject, and excludes experience source references. Application-given beliefs carry application-supplied grounding without inventing an experience. Corrections of such beliefs require an explicit replacement with its grounding declared.
 
-The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
+The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts. Scene participants retain authored order and repeated values; generated participant links and retrieval-stat edges count each keyed participant once.
 
 ### Assertions And Name Lookup
 

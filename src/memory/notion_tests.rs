@@ -639,7 +639,12 @@ async fn repeated_episode_and_belief_id_sets_commit_and_replay_canonically() {
         .unwrap();
     let mut episode = EpisodeDraft::new("An experience with two notions.");
     episode.id = Some(episode_id);
-    episode.participant_entity_ids = vec![subjects[1], subjects[0], subjects[0]];
+    let mut scene = crate::Scene::at(belief.created_at.unwrap());
+    scene.participants = [subjects[1], subjects[0], subjects[0]]
+        .into_iter()
+        .map(crate::SceneParticipant::Key)
+        .collect();
+    episode.scene = Some(scene.clone());
     episode.created_at = belief.created_at;
     episode.schema_version = belief.schema_version.clone();
     plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
@@ -662,7 +667,7 @@ async fn repeated_episode_and_belief_id_sets_commit_and_replay_canonically() {
     assert_eq!(objects.len(), 2);
     for object in objects {
         match object {
-            MemoryObject::Episode(episode) => assert_eq!(episode.participant_entity_ids, subjects),
+            MemoryObject::Episode(episode) => assert_eq!(episode.scene, scene),
             MemoryObject::DerivedMemory(memory) => {
                 assert_eq!(memory.entity_ids, subjects);
                 assert_eq!(memory.supersedes, predecessors);

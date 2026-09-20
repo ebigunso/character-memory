@@ -622,10 +622,15 @@ mod tests {
             id,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
-            source_conversation_id: Some("conversation-42".to_owned()),
-            started_at: Some(timestamp("2026-04-29T10:00:00Z")),
+            scene: crate::domain::Scene {
+                setting: crate::domain::SceneSetting {
+                    key: Some("conversation-42".to_owned()),
+                    words: None,
+                },
+
+                ..crate::domain::Scene::at(timestamp("2026-04-29T10:00:00Z"))
+            },
             ended_at: Some(timestamp("2026-04-29T10:05:00Z")),
-            participant_entity_ids: Vec::new(),
             summary: "Discussed context packs.".to_owned(),
             raw_ref: Some("raw://conversation/42#episode".to_owned()),
             salience_score: 0.8,

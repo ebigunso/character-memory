@@ -13,6 +13,8 @@ use crate::usecases::{
 #[cfg(test)]
 mod notion_tests;
 #[cfg(test)]
+mod scene_tests;
+#[cfg(test)]
 mod write_turn_tests;
 
 /// CharacterMemory provides a high-level API for memory operations.
@@ -872,7 +874,7 @@ mod tests {
                 SourceObjectCorrectionTarget::Episode {
                     id: fixtures.episode.id,
                     original_raw_ref: fixtures.episode.raw_ref.clone(),
-                    original_source_ref: fixtures.episode.source_conversation_id.clone(),
+                    original_setting_key: fixtures.episode.scene.setting.key.clone(),
                 },
                 episode_replacement_id,
             ))
@@ -912,7 +914,7 @@ mod tests {
                 SourceObjectCorrectionTarget::Observation {
                     id: fixtures.salient_observation.id,
                     original_raw_ref: fixtures.salient_observation.raw_ref.clone(),
-                    original_source_ref: fixtures.episode.source_conversation_id.clone(),
+                    original_setting_key: fixtures.episode.scene.setting.key.clone(),
                 },
                 observation_replacement_id,
             ))

@@ -442,7 +442,7 @@ async fn correction_rebuilds_the_cascade_after_embedding_and_preserves_batch_ide
         SourceObjectCorrectionTarget::Episode {
             id: SOURCE,
             original_raw_ref: Some("raw://write-turn/source".to_owned()),
-            original_source_ref: None,
+            original_setting_key: None,
         },
     )];
     let mut second =
