@@ -1,6 +1,6 @@
 # Plan: v0.2 schema groundwork
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-20
 - last_updated: 2026-09-20
 - work_type: code
@@ -150,6 +150,8 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Summary: Task_1 deletions (PR 113); Task_2 currency read from the chain, a correction is a supersession and nothing else (PR 115); Task_3 the entity as a notion with a known-as assertion, the given marker and derived About links for every subject (PR 116). Stack: 112, 113, 115, 116.
   - Validation evidence: each task's four gates passed for the worker and independently for the Tier D reviewer (Task_3: 368 reported, 364 exercised, 4 opt-in service cases left to CI). Tier D found and the worker fixed at the root: a stale rustdoc (Task_1); a generated Supersedes link retargetable through `link`, and a replay that reindexed a superseded memory (Task_2); a same-plan link-id collision between an authored and a derived link (Task_3). Tier A reviewed the Task_3 public shape, README and both proposed records.
   - Notes: ADR-D-0035 and ADR-D-0036 were accepted by the decider on 2026-09-21 and marked accepted on the Task_3 branch. Task_3 stays pending until PR 116 rejects an authored About link between an interpreted memory and an entity at both entry points (in progress after external review), and Task_1 until the PR 113 review fixes land. Not done until: those, CI on each PR including the service-parity job, and the merges. After PR 116 merges, its commit goes to the companion repository's Task_4.
+
+- 2026-09-21 Plan complete: external review findings answered on every PR of the stack, the completion value audit applied (net about 620 lines removed) and approved at Tier D at 2856d23 (371 tests reported, 367 exercised, 4 opt-in service cases left to CI). All task acceptance criteria met; ADR-D-0035, ADR-D-0036, ADR-D-0037 and ADR-D-0038 accepted by the decider.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
