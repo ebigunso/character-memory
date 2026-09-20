@@ -12,6 +12,8 @@ use crate::usecases::{
 
 #[cfg(test)]
 mod notion_tests;
+#[cfg(test)]
+mod write_turn_tests;
 
 /// CharacterMemory provides a high-level API for memory operations.
 ///
@@ -23,6 +25,8 @@ mod notion_tests;
 /// applying lifecycle corrections or suppression.
 pub struct CharacterMemory {
     pub(crate) memory_composition: MemoryComposition,
+    // ponytail: one turn per memory value; revisit only if write throughput requires it.
+    pub(crate) write_turn: tokio::sync::Mutex<()>,
 }
 
 impl CharacterMemory {
@@ -88,7 +92,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
         );
-        pipeline.commit(plan, options).await
+        pipeline.commit(plan, options, &self.write_turn).await
     }
 
     /// Prepares, validates, and commits a remember input through the canonical write-plan path.
@@ -98,13 +102,13 @@ impl CharacterMemory {
         options: RememberOptions,
     ) -> Result<RememberOutcome, CustomError> {
         let plan = self.prepare(input, options.prepare).await?;
-        self.validate_plan(&plan).await?;
         self.commit(plan, options.commit).await
     }
 
     /// Persists a canonical typed relationship and reports its repairable stats projection.
     /// Existing IDs accept identical content only; an omitted creation time retains the stored time.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
+        let _turn = self.write_turn.lock().await;
         let parts = self.memory_composition();
         LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
             .link(draft)
@@ -141,7 +145,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
         )
-        .correct(draft)
+        .correct(draft, &self.write_turn)
         .await
     }
 
@@ -160,7 +164,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
         )
-        .forget(draft)
+        .forget(draft, &self.write_turn)
         .await
     }
 

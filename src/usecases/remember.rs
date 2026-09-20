@@ -62,7 +62,30 @@ where
         &self,
         plan: RememberWritePlan,
         options: CommitOptions,
+        write_turn: &tokio::sync::Mutex<()>,
     ) -> Result<RememberOutcome, CustomError> {
+        // Only request-owned values are prepared before the turn. Validation and all
+        // graph-dependent decisions below see the preceding writer's completed state.
+        let values = WritePlanCommitValues::from_plan(plan.clone());
+        let vector_records = match &values {
+            Ok(values) if options.update_vectors => {
+                vector_records_for_targets(&values.objects, &values.vector_targets)
+            }
+            _ => Vec::new(),
+        };
+        let embeddings = if vector_records.is_empty() {
+            Ok(Vec::new())
+        } else {
+            self.embedder
+                .embed_batch(
+                    &vector_records
+                        .iter()
+                        .map(VectorRecord::embedding_input)
+                        .collect::<Vec<_>>(),
+                )
+                .await
+        };
+        let _turn = write_turn.lock().await;
         let validation = WritePlanValidator::new(self.graph_store)
             .validate(&plan)
             .await?
@@ -74,12 +97,7 @@ where
                     validation.status == CandidateValidationStatus::Invalid
                         || !validation.warnings.is_empty()
                 }));
-        let values = WritePlanCommitValues::from_plan(plan)?;
-        let vector_targets = if options.update_vectors {
-            VectorWriteIntent::PlanTargets(values.vector_targets)
-        } else {
-            VectorWriteIntent::None
-        };
+        let values = values?;
 
         self.reject_divergent_existing_writes(&values.objects, &values.links)
             .await?;
@@ -87,7 +105,8 @@ where
         self.persist_graph_then_repairable_parts(
             values.objects,
             values.links,
-            vector_targets,
+            vector_records,
+            embeddings,
             options,
         )
         .await
@@ -113,7 +132,8 @@ where
         &self,
         objects: Vec<MemoryObject>,
         links: Vec<MemoryLink>,
-        vector_intent: VectorWriteIntent,
+        vector_records: Vec<VectorRecord>,
+        embeddings: Result<Vec<Vec<f32>>, CustomError>,
         options: CommitOptions,
     ) -> Result<RememberOutcome, CustomError> {
         self.graph_store
@@ -143,13 +163,7 @@ where
                 outcome.repair_needed.push(marker.clone());
                 outcome.diagnostics.repair_needed.push(marker);
             }
-            let vector_records = match vector_intent {
-                VectorWriteIntent::PlanTargets(targets) => {
-                    vector_records_for_targets(&objects, &targets)
-                }
-                VectorWriteIntent::None => Vec::new(),
-            };
-            self.record_vector_outcome(&mut outcome, &vector_records)
+            self.record_vector_outcome(&mut outcome, vector_records, embeddings)
                 .await?;
         }
 
@@ -164,14 +178,15 @@ where
     async fn record_vector_outcome(
         &self,
         outcome: &mut RememberOutcome,
-        vector_records: &[VectorRecord],
+        vector_records: Vec<VectorRecord>,
+        embeddings: Result<Vec<Vec<f32>>, CustomError>,
     ) -> Result<(), CustomError> {
         if vector_records.is_empty() {
             return Ok(());
         }
 
-        let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
-            .index(self.graph_store, vector_records.to_vec())
+        let indexing = VectorIndexingService::new(self.vector_store)
+            .index(self.graph_store, vector_records, embeddings)
             .await?;
         outcome.vector_indexed_object_ids = indexing
             .indexed_objects
@@ -249,8 +264,7 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> Result<(), CustomError> {
-        // These bounded reads still leave a TOCTOU window before the graph upsert. An atomic
-        // conditional upsert or persisted operation ledger belongs in a future write-path design.
+        // The facade's turn covers both these reads and the following graph upsert.
         let refs = objects
             .iter()
             .map(MemoryObject::object_ref)
@@ -282,11 +296,6 @@ where
 
         Ok(())
     }
-}
-
-enum VectorWriteIntent {
-    PlanTargets(Vec<MemoryObjectRef>),
-    None,
 }
 
 fn vector_records_for_targets(
@@ -371,7 +380,7 @@ mod tests {
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
-            .commit(plan, CommitOptions::default())
+            .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
             .unwrap();
         assert!(!outcome
@@ -412,7 +421,11 @@ mod tests {
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let outcome = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
-            .commit(representative_plan(&fixed_ids()), CommitOptions::default())
+            .commit(
+                representative_plan(&fixed_ids()),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
         assert!(matches!(
@@ -444,11 +457,15 @@ mod tests {
             outcome.persisted_object_ids,
             expected_object_ids(&fixed_ids())
         );
-        assert!(embedder.calls().is_empty());
+        assert!(!embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
         graph.fail_currency_query = false;
         let retry = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
-            .commit(representative_plan(&fixed_ids()), CommitOptions::default())
+            .commit(
+                representative_plan(&fixed_ids()),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
         assert!(retry.vector_indexing_failure.is_none());
@@ -470,7 +487,11 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .commit(representative_plan(&ids), CommitOptions::default())
+            .commit(
+                representative_plan(&ids),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("remember draft should persist");
 
@@ -540,7 +561,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graph_object_failure_prevents_link_embedding_and_vector_writes() {
+    async fn graph_object_failure_prevents_link_and_vector_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default().fail_objects();
         let vector = RecordingVectorStore::default();
@@ -548,17 +569,21 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let error = pipeline
-            .commit(representative_plan(&ids), CommitOptions::default())
+            .commit(
+                representative_plan(&ids),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap_err();
 
         assert!(matches!(error, CustomError::DatabaseError(_)));
-        assert!(embedder.calls().is_empty());
+        assert!(!embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
     }
 
     #[tokio::test]
-    async fn graph_link_failure_prevents_embedding_and_vector_writes() {
+    async fn graph_link_failure_prevents_vector_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default().fail_links();
         let vector = RecordingVectorStore::default();
@@ -566,12 +591,16 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let error = pipeline
-            .commit(representative_plan(&ids), CommitOptions::default())
+            .commit(
+                representative_plan(&ids),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap_err();
 
         assert!(matches!(error, CustomError::DatabaseError(_)));
-        assert!(embedder.calls().is_empty());
+        assert!(!embedder.calls().is_empty());
         assert!(vector.calls().is_empty());
         assert!(graph
             .query_objects(&GraphObjectQuery::by_ids(expected_object_ids(&ids)))
@@ -592,7 +621,7 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let error = pipeline
-            .commit(plan, CommitOptions::default())
+            .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
             .unwrap_err();
 
@@ -622,7 +651,11 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .commit(representative_plan(&ids), CommitOptions::default())
+            .commit(
+                representative_plan(&ids),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("graph success with vector failure should return partial outcome");
 
@@ -655,7 +688,11 @@ mod tests {
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .commit(representative_plan(&ids), CommitOptions::default())
+            .commit(
+                representative_plan(&ids),
+                CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("graph success with embedding mismatch should return partial outcome");
 
@@ -699,6 +736,7 @@ mod tests {
                         )),
                 ),
                 CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
             )
             .await
             .expect("stats should not change remember outcome");
@@ -742,6 +780,7 @@ mod tests {
                         )),
                 ),
                 CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
             )
             .await
             .unwrap();
@@ -785,6 +824,7 @@ mod tests {
                     ),
                 ),
                 CommitOptions::default(),
+                &tokio::sync::Mutex::new(()),
             )
             .await
             .expect("link-only remember should persist and record stats");
@@ -848,7 +888,7 @@ mod tests {
         ));
 
         let outcome = pipeline
-            .commit(plan, CommitOptions::default())
+            .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
             .expect("stats hydration failure should remain a repairable graph success");
         let expected_ids = vec![episode_id, observation_id];

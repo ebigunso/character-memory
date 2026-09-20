@@ -1947,7 +1947,7 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let error = RememberPipeline::new(&graph, &vector, &embedder)
-            .commit(plan, CommitOptions::default())
+            .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
             .expect_err("commit must reject an ungrounded preference");
         let CustomError::WritePlanValidationRejected { validations } = error else {
@@ -2493,7 +2493,11 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
-            .commit(plan, graph_only_commit_options())
+            .commit(
+                plan,
+                graph_only_commit_options(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2582,7 +2586,11 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(8).await;
         let embedder = DeterministicMemoryEmbedder::new(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
-            .commit(plan, graph_only_commit_options())
+            .commit(
+                plan,
+                graph_only_commit_options(),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
         assert_eq!(

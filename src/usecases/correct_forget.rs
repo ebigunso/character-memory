@@ -20,6 +20,7 @@ use crate::domain::{
     DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::{CustomError, ReplacementIdentityConflict, ReplacementIdentityConflictError};
+use crate::models::vector::EmbeddingInput;
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
@@ -76,8 +77,12 @@ where
     pub(crate) async fn correct(
         &self,
         draft: CorrectMemoryDraft,
+        write_turn: &tokio::sync::Mutex<()>,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         draft.validate()?;
+        let inputs = correction_embedding_inputs(&draft)?;
+        let embeddings = self.embedder.embed_batch(&inputs).await;
+        let _turn = write_turn.lock().await;
         let plan = self.correction_plan(draft).await?;
         let idempotent_ids = self.idempotent_replacement_ids(&plan).await?;
         let graph_objects = plan
@@ -114,7 +119,7 @@ where
                 .retain(|evidence| !idempotent_ids.contains(&evidence.superseded_by_memory_id));
         }
         let vector_result = self
-            .maintain_vectors(&plan.vector_delete_refs, &plan.graph_objects)
+            .maintain_vectors(&plan.vector_delete_refs, &plan.graph_objects, embeddings)
             .await?;
         apply_vector_result(&mut outcome, vector_result);
         if !plan.graph_objects.is_empty() || !plan.graph_links.is_empty() {
@@ -129,14 +134,18 @@ where
     pub(crate) async fn forget(
         &self,
         draft: ForgetMemoryDraft,
+        write_turn: &tokio::sync::Mutex<()>,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         draft.validate()?;
+        let _turn = write_turn.lock().await;
         let plan = self.forget_plan(draft).await?;
 
         self.graph_store.upsert_objects(&plan.graph_objects).await?;
 
         let mut outcome = plan.outcome_after_graph_success();
-        let vector_result = self.maintain_vectors(&plan.vector_delete_refs, &[]).await?;
+        let vector_result = self
+            .maintain_vectors(&plan.vector_delete_refs, &[], Ok(Vec::new()))
+            .await?;
         apply_vector_result(&mut outcome, vector_result);
         let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&plan.graph_objects, &plan.graph_links)
@@ -660,6 +669,7 @@ where
         &self,
         delete_refs: &[MemoryObjectRef],
         upsert_objects: &[MemoryObject],
+        embeddings: Result<Vec<Vec<f32>>, CustomError>,
     ) -> Result<VectorMaintenanceResult, CustomError> {
         let mut maintained = Vec::new();
         let mut failures = Vec::new();
@@ -676,8 +686,8 @@ where
             .filter_map(memory_object_vector_record)
             .collect::<Vec<_>>();
         if !vector_records.is_empty() {
-            let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
-                .index(self.graph_store, vector_records)
+            let indexing = VectorIndexingService::new(self.vector_store)
+                .index(self.graph_store, vector_records, embeddings)
                 .await?;
             maintained.extend(indexing.indexed_objects);
             if let Some(failure) = indexing.failure {
@@ -751,6 +761,45 @@ impl MutationPlan {
 struct VectorMaintenanceResult {
     maintained: Vec<MemoryObjectRef>,
     failure: Option<VectorMaintenanceFailure>,
+}
+
+fn correction_embedding_inputs(
+    draft: &CorrectMemoryDraft,
+) -> Result<Vec<EmbeddingInput>, CustomError> {
+    let seed = correction_seed(draft)?;
+    let input = |id, derived_type, text: &str| {
+        EmbeddingInput::new(
+            Some(id),
+            Some(ObjectType::DerivedMemory),
+            crate::domain::VectorSurface::DerivedText,
+            crate::policy::embedding_surface::derived_embedding_text(derived_type, text),
+        )
+    };
+    let mut inputs = if draft.replacement_derived_memories.is_empty() {
+        vec![input(
+            replacement_memory_id(seed, 0),
+            DerivedType::Correction,
+            &draft.rationale,
+        )]
+    } else {
+        draft
+            .replacement_derived_memories
+            .iter()
+            .enumerate()
+            .map(|(index, replacement)| {
+                input(
+                    replacement
+                        .id
+                        .unwrap_or_else(|| replacement_memory_id(seed, index)),
+                    replacement.derived_type,
+                    &replacement.text,
+                )
+            })
+            .collect()
+    };
+    // MutationPlan sorts replacement objects by identity; preserve that batch order.
+    inputs.sort_by_key(|input| input.object_id);
+    Ok(inputs)
 }
 
 fn replacement_drafts_or_default(
@@ -1219,7 +1268,11 @@ mod tests {
             };
             let predecessor_plan = plan_for(predecessor_id, fixtures.user_entity.id, vec![]);
             let first = pipeline
-                .commit(predecessor_plan.clone(), CommitOptions::default())
+                .commit(
+                    predecessor_plan.clone(),
+                    CommitOptions::default(),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             assert!(first.repair_needed.is_empty());
@@ -1261,7 +1314,11 @@ mod tests {
                 vec![predecessor_id],
             );
             let outcome = pipeline
-                .commit(successor_plan.clone(), CommitOptions::default())
+                .commit(
+                    successor_plan.clone(),
+                    CommitOptions::default(),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             assert_eq!(outcome.persisted_object_ids, vec![successor_id]);
@@ -1324,14 +1381,22 @@ mod tests {
                     && decision.reason == LifecycleFilterReason::SupersededOmitted));
 
             let retry = pipeline
-                .commit(successor_plan.clone(), CommitOptions::default())
+                .commit(
+                    successor_plan.clone(),
+                    CommitOptions::default(),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             assert!(retry.repair_needed.is_empty());
             let mut combined_plan = predecessor_plan;
             combined_plan.candidates.extend(successor_plan.candidates);
             let combined = pipeline
-                .commit(combined_plan, CommitOptions::default())
+                .commit(
+                    combined_plan,
+                    CommitOptions::default(),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             assert_eq!(combined.vector_indexed_object_ids, vec![successor_id]);
@@ -1367,10 +1432,13 @@ mod tests {
                 stats.as_ref(),
             );
             lifecycle
-                .forget(ForgetMemoryDraft::suppress(
-                    LifecycleTargetRef::DerivedMemory(successor_id),
-                    "Forget correction.",
-                ))
+                .forget(
+                    ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::DerivedMemory(successor_id),
+                        "Forget correction.",
+                    ),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -1424,10 +1492,13 @@ mod tests {
                     && node.reason == GraphExpansionFilteredReason::Superseded));
 
             lifecycle
-                .forget(ForgetMemoryDraft::suppress(
-                    LifecycleTargetRef::DerivedMemory(predecessor_id),
-                    "Also suppress history.",
-                ))
+                .forget(
+                    ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::DerivedMemory(predecessor_id),
+                        "Also suppress history.",
+                    ),
+                    &tokio::sync::Mutex::new(()),
+                )
                 .await
                 .unwrap();
             let expansion = graph
@@ -1456,7 +1527,10 @@ mod tests {
         let stats = RecordingStatsStore::default();
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
-        let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
+        let error = pipeline
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -1494,7 +1568,7 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .correct(correction_draft(&ids))
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
             .await
             .expect("correction should succeed");
 
@@ -1593,11 +1667,17 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let first = pipeline
-            .correct(stateful_correction_draft(&ids, "First corrected payload."))
+            .correct(
+                stateful_correction_draft(&ids, "First corrected payload."),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("first correction should succeed");
         let second = pipeline
-            .correct(stateful_correction_draft(&ids, "Second corrected payload."))
+            .correct(
+                stateful_correction_draft(&ids, "Second corrected payload."),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("distinct correction should append a replacement");
         let first_link = graph
@@ -1640,11 +1720,11 @@ mod tests {
         let replacement_id = replacement_memory_id(correction_seed(&draft).unwrap(), 0);
 
         let first = pipeline
-            .correct(draft.clone())
+            .correct(draft.clone(), &tokio::sync::Mutex::new(()))
             .await
             .expect("first correction should succeed");
         let second = pipeline
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect("identical retry should converge");
 
@@ -1672,7 +1752,7 @@ mod tests {
         draft.replacement_derived_memories[0].id = None;
 
         let first = pipeline
-            .correct(draft.clone())
+            .correct(draft.clone(), &tokio::sync::Mutex::new(()))
             .await
             .expect("first direct-target correction should succeed");
         let replacement_id = graph
@@ -1694,7 +1774,7 @@ mod tests {
             .unwrap();
 
         let second = pipeline
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect("identical direct-target retry should converge");
 
@@ -1741,7 +1821,7 @@ mod tests {
         let replacement_id = replacement_memory_id(correction_seed(&draft).unwrap(), 0);
 
         let first = pipeline
-            .correct(draft.clone())
+            .correct(draft.clone(), &tokio::sync::Mutex::new(()))
             .await
             .expect("first correction should preserve vector failure in its outcome");
         assert!(first.vector_maintenance_failure.is_some());
@@ -1760,7 +1840,7 @@ mod tests {
             .any(|candidate| candidate.object_id == ids.old));
 
         let retry = pipeline
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect("identical retry should repair vector state");
 
@@ -1814,7 +1894,7 @@ mod tests {
         draft.replacement_derived_memories[0].id = None;
 
         let first = pipeline
-            .correct(draft.clone())
+            .correct(draft.clone(), &tokio::sync::Mutex::new(()))
             .await
             .expect("first correction should preserve stats failure in its outcome");
         assert!(first.stats_update_status.failure.is_some());
@@ -1827,7 +1907,7 @@ mod tests {
         let graph_writes_after_first = graph_write_count(&graph.calls());
 
         let retry = pipeline
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect("identical retry should repair stats state");
 
@@ -1893,7 +1973,7 @@ mod tests {
         ];
 
         pipeline
-            .correct(draft.clone())
+            .correct(draft.clone(), &tokio::sync::Mutex::new(()))
             .await
             .expect("first multi-replacement correction should succeed");
         let stored_after_first = graph
@@ -1919,7 +1999,7 @@ mod tests {
         );
 
         let retry = pipeline
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect("multi-replacement retry should converge independently");
 
@@ -1975,7 +2055,7 @@ mod tests {
         let embedder = RecordingEmbedder::default();
 
         let error = CorrectionForgetPipeline::new(&graph, &vector, &embedder)
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect_err("divergent content under a deterministic replacement ID must reject");
 
@@ -2017,7 +2097,7 @@ mod tests {
         let links_before = graph.query_links_by_ids(&[link_id]).await.unwrap();
 
         let error = CorrectionForgetPipeline::new(graph, &vector, &embedder)
-            .correct(draft)
+            .correct(draft, &tokio::sync::Mutex::new(()))
             .await
             .expect_err("duplicate replacement IDs must reject before writes");
 
@@ -2118,7 +2198,7 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         let outcome = pipeline
-            .correct(correction_draft(&ids))
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
             .await
             .expect("stats failure should not change lifecycle outcome");
 
@@ -2169,10 +2249,13 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::DerivedMemory(ids.old),
-                "Suppress stale derived memory.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::DerivedMemory(ids.old),
+                    "Suppress stale derived memory.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("forget should record stats after vector maintenance");
 
@@ -2219,10 +2302,13 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
 
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::DerivedMemory(ids.old),
-                "Suppress stale derived memory.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::DerivedMemory(ids.old),
+                    "Suppress stale derived memory.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .expect("stats degradation should remain a repairable lifecycle outcome");
 
@@ -2259,7 +2345,10 @@ mod tests {
         let mut draft = correction_draft(&ids);
         draft.rationale = " ".to_owned();
 
-        let error = pipeline.correct(draft).await.unwrap_err();
+        let error = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -2281,7 +2370,10 @@ mod tests {
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
-        let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
+        let error = pipeline
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(error, CustomError::DatabaseError(_)));
         assert!(vector.calls().is_empty());
@@ -2297,7 +2389,10 @@ mod tests {
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
-        let error = pipeline.correct(correction_draft(&ids)).await.unwrap_err();
+        let error = pipeline
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(matches!(error, CustomError::DatabaseError(_)));
         assert_eq!(
@@ -2324,7 +2419,7 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .correct(correction_draft(&ids))
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
             .await
             .expect("graph success should return partial vector failure");
 
@@ -2398,7 +2493,10 @@ mod tests {
         draft.correction_origin =
             SourceProvenanceReference::observation(fixtures.salient_observation.id);
 
-        let outcome = pipeline.correct(draft).await.unwrap();
+        let outcome = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert!(outcome
             .graph_mutated_object_ids
@@ -2491,7 +2589,10 @@ mod tests {
         draft.correction_origin =
             SourceProvenanceReference::observation(fixtures.salient_observation.id);
 
-        let outcome = pipeline.correct(draft).await.unwrap();
+        let outcome = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert!(!outcome
             .graph_mutated_object_ids
@@ -2544,7 +2645,10 @@ mod tests {
         );
         draft.correction_origin = SourceProvenanceReference::episode(ids.episode);
 
-        let error = pipeline.correct(draft).await.unwrap_err();
+        let error = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(error, CustomError::MissingOriginalSourceReference { target }
@@ -2572,7 +2676,10 @@ mod tests {
         );
         draft.correction_origin = SourceProvenanceReference::episode(ids.episode);
 
-        let error = pipeline.correct(draft).await.unwrap_err();
+        let error = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(error, CustomError::OriginalSourceReferenceMismatch {
@@ -2605,7 +2712,10 @@ mod tests {
         );
         draft.correction_origin = SourceProvenanceReference::observation(ids.observation);
 
-        let error = pipeline.correct(draft).await.unwrap_err();
+        let error = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(error, CustomError::OriginalSourceReferenceMismatch {
@@ -2656,7 +2766,10 @@ mod tests {
         draft.correction_origin =
             SourceProvenanceReference::observation(fixtures.salient_observation.id);
 
-        let outcome = pipeline.correct(draft).await.unwrap();
+        let outcome = pipeline
+            .correct(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert!(outcome.diagnostics.warnings.is_empty());
         assert!(!outcome
@@ -2691,10 +2804,13 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::Episode(fixtures.episode.id),
-                "Forget the source with its current replacement.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::Episode(fixtures.episode.id),
+                    "Forget the source with its current replacement.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
 
@@ -2752,10 +2868,13 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::Observation(fixtures.salient_observation.id),
-                "Forget source observation.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::Observation(fixtures.salient_observation.id),
+                    "Forget source observation.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
 
@@ -2817,10 +2936,13 @@ mod tests {
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::Episode(fixtures.episode.id),
-                "Forget source episode.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::Episode(fixtures.episode.id),
+                    "Forget source episode.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
 
@@ -2860,7 +2982,10 @@ mod tests {
             .suppression
             .suppress_derived_from_target = false;
 
-        let outcome = pipeline.forget(draft).await.unwrap();
+        let outcome = pipeline
+            .forget(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert_eq!(
             outcome.graph_mutated_object_ids,
@@ -2912,7 +3037,10 @@ mod tests {
             .suppression
             .suppress_derived_from_target = false;
 
-        let outcome = pipeline.forget(draft).await.unwrap();
+        let outcome = pipeline
+            .forget(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert!(outcome.graph_mutated_object_ids.is_empty());
         assert!(outcome.vector_maintained_object_ids.is_empty());
@@ -2969,7 +3097,10 @@ mod tests {
             );
             draft.cascade_policy.apply_to_thread_members = cascade;
 
-            let outcome = pipeline.forget(draft).await.unwrap();
+            let outcome = pipeline
+                .forget(draft, &tokio::sync::Mutex::new(()))
+                .await
+                .unwrap();
 
             assert!(!outcome
                 .graph_mutated_object_ids
@@ -3025,7 +3156,10 @@ mod tests {
         );
         draft.cascade_policy.apply_to_thread_members = true;
 
-        let outcome = pipeline.forget(draft).await.unwrap();
+        let outcome = pipeline
+            .forget(draft, &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
 
         assert_eq!(
             outcome.diagnostics.warnings,
@@ -3074,7 +3208,10 @@ mod tests {
             .unwrap();
         let embedder = DeterministicMemoryEmbedder::new(4);
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
-        let outcome = pipeline.correct(correction_draft(&ids)).await.unwrap();
+        let outcome = pipeline
+            .correct(correction_draft(&ids), &tokio::sync::Mutex::new(()))
+            .await
+            .unwrap();
         assert!(outcome.vector_maintenance_failure.is_some());
 
         let retrieval = RetrievePipeline::new(&graph, &vector, &embedder)
@@ -3114,10 +3251,13 @@ mod tests {
         }
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let outcome = pipeline
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::Episode(fixtures.episode.id),
-                "Forget source episode.",
-            ))
+            .forget(
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::Episode(fixtures.episode.id),
+                    "Forget source episode.",
+                ),
+                &tokio::sync::Mutex::new(()),
+            )
             .await
             .unwrap();
         assert!(outcome.vector_maintenance_failure.is_some());
