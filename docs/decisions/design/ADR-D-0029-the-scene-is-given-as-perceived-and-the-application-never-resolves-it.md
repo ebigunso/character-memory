@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0019-discretion-is-disclosure-not-recall.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md, ADR-D-0025-experience-enters-durable-memory-by-one-path.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md]
+depends_on: [../superseded/ADR-D-0019-discretion-is-disclosure-not-recall--superseded-by-ADR-D-0038.md, ADR-D-0022-recall-is-activation-by-scene-cues.md, ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md, ADR-D-0025-experience-enters-durable-memory-by-one-path.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md, ../implementation/ADR-I-0020-restart-identity-via-caller-supplied-ids-not-a-lookup-surface.md]
 ---
 
 # ADR-D-0029: The scene is given as it is perceived, in descriptions with keys where they exist, and the application never resolves it

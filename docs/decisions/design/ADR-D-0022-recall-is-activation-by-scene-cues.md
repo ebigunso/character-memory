@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0004-continuity-context-pack.md, ADR-D-0019-discretion-is-disclosure-not-recall.md, ../implementation/ADR-I-0016-use-retrieval-intent-as-query-time-policy.md]
+depends_on: [ADR-D-0004-continuity-context-pack.md, ../superseded/ADR-D-0019-discretion-is-disclosure-not-recall--superseded-by-ADR-D-0038.md, ../implementation/ADR-I-0016-use-retrieval-intent-as-query-time-policy.md]
 ---
 
 # ADR-D-0022: Recall is activation by the cues of the present scene, with a candidate route and an admission floor per cue kind
