@@ -158,6 +158,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - User approval: yes, 2026-09-20, for the decisions above, and the same day for the plan as reviewed (Tier D approved at a5186cd, Tier A applied), including the consequence that a correction is a supersession and nothing else.
   - Record proposed: up to two in Task_3, one decision each (the form of a belief about a notion; how an application-given belief enters), type chosen by the admission test; the name query and the entity surface are mechanism and stay in this plan. Acceptance pending.
 
+- 2026-09-20 Decision: a superseded memory leaves the content index on both supersession paths.
+  - Trigger / new insight: `correct` deletes its predecessor's vector today, while an ordinary commit that supersedes a memory would leave the predecessor's vector in place, so the two paths would differ once a corrected predecessor stays Active.
+  - Plan delta (what changed): Task_2 makes them equivalent by deleting the predecessor's vector on an ordinary superseding commit too, after the graph batch. History stays in the graph and is reached from the successor through the Supersedes link under the include-superseded policy.
+  - Tradeoffs considered: keeping predecessor vectors on both paths was rejected, because every restatement would leave a near-duplicate competing for the fixed candidate budget and the ADR-I-0022 baselines would shift for no gain. This differs from the thread vector of Task_1: a thread with no vector was unreachable, a superseded memory is reachable from its successor.
+  - User approval: not needed; it keeps today's behavior for corrections and extends it to the new path.
+  - Record proposed: none
+
 ## Notes
 - Risks: Task_1 is wide (public surface, graph vocabulary, stats tables) and mechanical; the census site lists are the checklist. Task_3 changes what the vector index holds, which can move retrieval results for fixtures that matched on an entity's name; that is expected and is measured in the companion repository.
 - Edge cases: forgetting a rename leaves the notion with no current name, and the repair is a new belief, not un-suppression; two beliefs naming one notion at once (a nickname and a given name) are both current, since neither supersedes the other; normalization must not merge names that differ only by script in ways a person would not (keep it to case, whitespace and Unicode normalization).
