@@ -1504,9 +1504,6 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         DomainValidationError::MissingScene => CandidateValidationIssue::MissingTimestamp {
             field: CandidateTimestampField::SceneTime,
         },
-        DomainValidationError::EmptySceneParticipant => {
-            CandidateValidationIssue::EmptySceneParticipant
-        }
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }

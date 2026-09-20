@@ -479,7 +479,8 @@ async fn time_only_scene_is_echoed_without_embedding_or_completeness_claim() {
     let mut blank = RetrievalContext::new(" \n ");
     blank.scene.participants.push(SceneParticipant::default());
     blank.scene.setting.words = Some("\t".to_owned());
-    memory.retrieve(blank).await.unwrap();
+    let result = memory.retrieve(blank).await.unwrap();
+    assert!(result.scene.participants.is_empty());
     assert!(queries.lock().unwrap().is_empty());
 }
 
