@@ -1,6 +1,6 @@
 # Plan: every cue the scene gives can bring its memories, and no cue drowns another
 
-- status: draft
+- status: in_progress
 - generated: 2026-09-21
 - last_updated: 2026-09-21
 - work_type: code
