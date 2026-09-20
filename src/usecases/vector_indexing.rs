@@ -94,11 +94,23 @@ where
         let embeddings = inputs
             .iter()
             .zip(embeddings)
-            .map(|(input, embedding)| (input.object_id, embedding))
+            .map(|(input, embedding)| {
+                (
+                    (input.object_type, input.object_id, input.surface),
+                    embedding,
+                )
+            })
             .collect::<HashMap<_, _>>();
+        let record_key = |record: &VectorRecord| {
+            (
+                Some(record.object_type),
+                Some(record.object_id),
+                record.surface,
+            )
+        };
         let matched = records
             .iter()
-            .filter(|record| embeddings.contains_key(&Some(record.object_id)))
+            .filter(|record| embeddings.contains_key(&record_key(record)))
             .count();
         if matched != records.len() {
             return Ok(failed(
@@ -110,7 +122,7 @@ where
             ));
         }
         if let Some(record) = records.iter().find(|record| {
-            embeddings[&Some(record.object_id)]
+            embeddings[&record_key(record)]
                 .iter()
                 .all(|value| *value == 0.0)
         }) {
@@ -123,7 +135,7 @@ where
 
         let record_embeddings = records
             .iter()
-            .map(|record| VectorRecordEmbedding::new(record, &embeddings[&Some(record.object_id)]))
+            .map(|record| VectorRecordEmbedding::new(record, &embeddings[&record_key(record)]))
             .collect::<Vec<_>>();
         match self
             .vector_store

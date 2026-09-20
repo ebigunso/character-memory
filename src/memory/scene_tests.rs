@@ -248,6 +248,71 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
 }
 
 #[tokio::test]
+async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
+    struct TextEmbedder;
+    #[async_trait]
+    impl MemoryEmbedder for TextEmbedder {
+        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![
+                f32::from(input.text.contains("volcano")),
+                f32::from(input.text.contains("harbor")),
+            ])
+        }
+
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            let mut embeddings = Vec::new();
+            for input in inputs {
+                embeddings.push(self.embed(input).await?);
+            }
+            Ok(embeddings)
+        }
+    }
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(2).await),
+        Box::new(TextEmbedder),
+    );
+    let id = MemoryId::from_u128(8801);
+    let mut episode = episode_draft(id.as_u128(), Some(Scene::at(time())));
+    episode.summary = "A volcano erupted".to_owned();
+    let mut observation = ObservationDraft::new(id, "Ships arrived at the harbor");
+    observation.id = Some(id);
+    let outcome = memory
+        .remember(
+            RememberInput::new("A volcano erupted")
+                .with_episode(episode)
+                .with_observation(observation),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert!(outcome.vector_indexing_failure.is_none());
+    for (topic, object_type, surface) in [
+        ("volcano", ObjectType::Episode, VectorSurface::Summary),
+        ("harbor", ObjectType::Observation, VectorSurface::Text),
+    ] {
+        let mut context = RetrievalContext::new(topic).with_trace();
+        context.object_type_defaults = vec![object_type];
+        context.graph_limits.max_depth = 0;
+        let result = memory.retrieve(context).await.unwrap();
+        let trace = result.trace.unwrap();
+        let [candidate] = trace.vector_candidates.as_slice() else {
+            panic!(
+                "one {object_type:?} vector expected: {:?}",
+                trace.vector_candidates
+            );
+        };
+        assert_eq!(candidate.object, MemoryObjectRef::new(object_type, id));
+        assert_eq!(candidate.surface, surface);
+        assert!(candidate.score > 0.9999, "{topic}: {candidate:?}");
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_place() {
     // A lexical provider makes the recall test depend on words, not hash collisions.
     struct PlaceEmbedder;
