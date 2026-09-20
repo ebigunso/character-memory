@@ -91,6 +91,8 @@ pub enum CandidateValidationIssue {
     MemoryLinkRejectedByAdmissionPolicy,
     #[error("Supersedes links must be derived from a memory supersedes list")]
     AuthoredSupersedesLink,
+    #[error("supersession cycle contains memories: {memory_ids:?}")]
+    SupersessionCycle { memory_ids: Vec<MemoryId> },
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]
