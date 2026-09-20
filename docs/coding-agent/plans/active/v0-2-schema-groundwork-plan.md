@@ -188,6 +188,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Tradeoffs considered: two redundant constants remain in the public surface.
   - User approval: not needed.
   - Record proposed: none
+- 2026-09-21 Value audit at plan completion, every part, review-driven additions included (the decider's standing condition for merging this stack).
+  - Trigger / new insight: the planned work earned its place; the excess was in additions made during review rounds, which had answered "could this state exist" without asking "can a public caller produce it, and does something already catch it".
+  - Plan delta (what changed): a memory may supersede only a memory that already exists, so no cycle can be built, and the cycle search, its error and tests are gone; a repeated id in a set-backed id list is normalized (sorted, repeats dropped) and no longer rejected; the extra in-plan link-id check and its error are gone because the existing collision check already rejects both a replayed generated id and two authored links sharing one; an unknown stored retention value is reported through the existing SQLite error and still never read as active; two tests that pinned mechanism are deleted and four are renamed after the behavior they show. Net about 620 lines removed.
+  - Tradeoffs considered: keeping the link-id check was first accepted on a worker's public call sequence and then reversed under the decider's rule that anything kept against an audit recommendation must itself pass the existence test; the sequence was real but already covered.
+  - Load-bearing decisions taken without the decider, judged by character behavior: (1) supersession needs an existing predecessor, because a change of mind comes after the belief it replaces and a belief with its replacement in one act of remembering describes nothing a character experiences; (2) a repeated id is not an error, because a clerical repeat should not make the character refuse to remember something true.
+  - User approval: standing authorization of 2026-09-21; decisions to be presented at the end of the phase.
+  - Record proposed: none
 
 ## Notes
 - Risks: Task_1 is wide (public surface, graph vocabulary, stats tables) and mechanical; the census site lists are the checklist. Task_3 changes what the vector index holds, which can move retrieval results for fixtures that matched on an entity's name; that is expected and is measured in the companion repository.
