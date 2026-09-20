@@ -91,7 +91,7 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `assertionName` | Supplied name spelling |
 | `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
 
-Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). ID lists use set semantics: duplicates are rejected before canonicalization. This includes episode participants and ordinary/replacement memory source, thread, subject and predecessor IDs.
+Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). ID lists use set semantics: conversion sorts IDs and removes duplicates. This includes episode participants and ordinary/replacement memory source, thread, subject and predecessor IDs.
 
 Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104).
 
@@ -110,7 +110,7 @@ Name lookup reads active beliefs with no incoming `Supersedes` link. It can reso
 | `entity_ids` | `About` / `about` | Interpreted memory → notion |
 | `supersedes` | `Supersedes` / `supersedes` | Successor → predecessor |
 
-Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and cyclic supersession plans.
+Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and supersession predecessors that do not already exist in the graph.
 
 Currency is determined by incoming interpreted-memory `Supersedes` links. Predecessor content and retention are preserved; a suppressed successor still supplies supersession evidence. Default retrieval excludes suppressed and superseded memories. `include_suppressed` and `include_superseded` independently opt into those histories. Notions and threads remain graph anchors.
 

@@ -66,7 +66,7 @@ A `MemoryThread` is a continuity pattern, not a chat container.
 
 ```text
 Episode may belong to zero, one, or many threads.
-Thread membership has confidence and rationale.
+Thread membership has a rationale and no confidence score.
 Thread assignment can be revised.
 ```
 
@@ -197,7 +197,7 @@ The long-horizon phase implements this through query-time activation first, and 
 
 Manual caller-provided writes and future generated memory candidates should pass through the same validation and commit machinery.
 
-The library should not grow a separate unsafe path where generated memory candidates can bypass provenance, lifecycle, retention, currentness, graph-authority validation, or idempotency checks.
+The library should not grow a separate unsafe path where generated memory candidates can bypass provenance, lifecycle, retention, currentness, graph-authority validation, or identity-collision checks.
 
 ```text
 manual input
@@ -495,7 +495,7 @@ support basic correction, supersession, and suppression
 ```text
 Episodes can be stored and retrieved by ID.
 Derived memories trace back to source episodes/observations.
-Thread membership is optional and confidence-scored.
+Thread membership is optional and carries no confidence score.
 Retrieval returns a ContinuityContextPack with rationale.
 Suppressed memories are not used for generation.
 Corrections can supersede older derived memories.
@@ -969,7 +969,7 @@ v0.1.3 may implement deterministic helpers for:
 
 ```text
 stable object ID generation
-idempotency key generation
+deterministic ids so an identical replay compares equal
 deterministic graph IRI generation
 source reference construction
 source span construction
@@ -996,7 +996,6 @@ It should be able to contain:
 
 ```text
 operation ID
-idempotency key
 source input reference
 episode candidates
 observation candidates
@@ -1076,7 +1075,7 @@ superseded memories are not current unless explicitly historical
 Qdrant vector candidates point to graph objects in the same write plan or existing graph authority
 RetrievalStatsStore updates only reference accepted graph-authoritative relationships
 source spans are structurally valid when provided
-idempotency keys prevent duplicate retry writes
+replaying the same prepared plan is an exact retry; the same id with different content is rejected
 ```
 
 Invalid plans should not commit.
@@ -1121,7 +1120,7 @@ remember() remains available as a convenience wrapper.
 commit() revalidates before writing.
 Invalid behavior-influencing DerivedMemory without provenance is rejected.
 Missing MemoryLink targets are rejected or deferred according to explicit policy.
-Idempotency keys prevent duplicate writes from retry.
+Replaying the same prepared plan is an exact retry; the same id with different content is rejected.
 Deterministic source references and source spans are preserved.
 Manual writes and future generated writes can share the same commit path.
 The write-plan flow works with in-memory and persistent graph modes.
