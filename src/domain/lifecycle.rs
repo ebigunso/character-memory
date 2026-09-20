@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::ObjectType;
@@ -27,14 +26,4 @@ pub enum LifecycleDtoValidationError {
     MissingForgetTarget,
     #[error("unsupported lifecycle target: {0:?}")]
     UnsupportedLifecycleTarget(ObjectType),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LifecyclePolicyKnob {
-    CorrectionRetainOriginalSourceObjects,
-    CorrectionRequireOriginalSourceMatch,
-    CorrectionCascadeToThreads,
-    ForgetPreserveOriginalRawRefs,
-    ForgetArchivePreserveOriginalRawRefs,
 }

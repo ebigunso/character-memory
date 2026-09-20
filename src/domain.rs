@@ -4,7 +4,7 @@ mod retrieval;
 pub(crate) mod schema;
 mod write_validation;
 
-pub use lifecycle::{LifecycleDtoValidationError, LifecyclePolicyKnob, SourceReferenceKind};
+pub use lifecycle::{LifecycleDtoValidationError, SourceReferenceKind};
 pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
@@ -13,7 +13,6 @@ pub use write_validation::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
     CandidateValidationIssue, CandidateValidationStatus, MemoryCandidateKind, MemoryLinkEndpoint,
-    PlanIdentityField,
 };
 
 use chrono::{DateTime, Utc};
@@ -210,27 +209,15 @@ impl RelationType {
 pub enum RetentionState {
     Active,
     Suppressed,
-    Archived,
-    Deleted,
 }
 
 impl RetentionState {
     pub(crate) const fn restrictiveness_rank(self) -> u8 {
         match self {
             Self::Active => 0,
-            Self::Archived => 1,
-            Self::Suppressed => 2,
-            Self::Deleted => 3,
+            Self::Suppressed => 1,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Stability {
-    Low,
-    Medium,
-    High,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -239,7 +226,6 @@ pub enum ThreadStatus {
     Active,
     Dormant,
     Resolved,
-    Archived,
 }
 
 pub fn graph_uri(object_type: ObjectType, id: MemoryId) -> String {
@@ -414,9 +400,7 @@ pub struct DerivedMemory {
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
-    pub confidence: f32,
     pub salience_score: f32,
-    pub stability: Stability,
     pub is_current: bool,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
@@ -436,7 +420,6 @@ impl DerivedMemory {
         {
             return Err(DomainValidationError::MissingDerivedSource);
         }
-        validate_score("DerivedMemory.confidence", self.confidence)?;
         validate_score("DerivedMemory.salience_score", self.salience_score)
     }
 }
@@ -450,7 +433,6 @@ pub struct MemoryLink {
     pub to_id: MemoryId,
     pub to_type: ObjectType,
     pub relation: RelationType,
-    pub confidence: f32,
     pub rationale: Option<String>,
     pub created_at: DateTime<Utc>,
     pub schema_version: String,
@@ -463,7 +445,6 @@ impl MemoryLink {
             self.object_type,
             ObjectType::MemoryLink,
         )?;
-        validate_score("MemoryLink.confidence", self.confidence)?;
         validate_link_endpoint("MemoryLink.from_type", self.from_type)?;
         validate_link_endpoint("MemoryLink.to_type", self.to_type)?;
 

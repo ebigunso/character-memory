@@ -8,8 +8,8 @@ use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
-    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Stability,
-    ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, ThreadStatus,
+    DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
@@ -532,9 +532,7 @@ fn derived_memory(
         derived_from_observation_ids: vec![observation_id],
         thread_ids,
         entity_ids,
-        confidence: 0.85,
         salience_score: 0.75,
-        stability: Stability::Medium,
         is_current,
         supersedes,
         retention_state,
@@ -560,7 +558,6 @@ fn link(
         to_id,
         to_type,
         relation,
-        confidence: 0.9,
         rationale: Some("Representative fixture link.".to_owned()),
         created_at: timestamp("2026-04-27T10:11:07Z"),
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),

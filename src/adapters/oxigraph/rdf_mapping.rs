@@ -99,7 +99,6 @@ pub(crate) fn rdf_triples_for_link(link: &MemoryLink) -> Result<Vec<RdfTriple>, 
         RdfTriple::resource(&subject, vocab::TO, to.clone()),
         RdfTriple::literal(&subject, vocab::TO_TYPE, enum_value(link.to_type)),
         RdfTriple::literal(&subject, vocab::RELATION, relation),
-        RdfTriple::literal(&subject, vocab::CONFIDENCE, score(link.confidence)),
         RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(link.created_at)),
         RdfTriple::resource(from, relation_predicate, to),
     ]);
@@ -309,13 +308,11 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
             enum_value(memory.derived_type),
         ),
         RdfTriple::literal(&subject, vocab::TEXT, memory.text.clone()),
-        RdfTriple::literal(&subject, vocab::CONFIDENCE, score(memory.confidence)),
         RdfTriple::literal(
             &subject,
             vocab::SALIENCE_SCORE,
             score(memory.salience_score),
         ),
-        RdfTriple::literal(&subject, vocab::STABILITY, enum_value(memory.stability)),
         RdfTriple::literal(&subject, vocab::IS_CURRENT, memory.is_current.to_string()),
         RdfTriple::literal(
             &subject,

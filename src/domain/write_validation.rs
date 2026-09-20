@@ -59,8 +59,6 @@ impl CandidateValidation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CandidateValidationIssue {
-    #[error("write plan is missing {field:?}")]
-    MissingPlanIdentity { field: PlanIdentityField },
     #[error("candidate id must be present")]
     MissingCandidateId,
     #[error("candidate schema_version must be present")]
@@ -124,13 +122,6 @@ pub enum CandidateValidationIssue {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PlanIdentityField {
-    OperationId,
-    IdempotencyKey,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum CandidateTimestampField {
     CreatedAt,
     UpdatedAt,
@@ -143,9 +134,7 @@ pub enum CandidateScoreField {
     EpisodeSalience,
     ObservationSalience,
     MemoryThreadSalience,
-    DerivedMemoryConfidence,
     DerivedMemorySalience,
-    MemoryLinkConfidence,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

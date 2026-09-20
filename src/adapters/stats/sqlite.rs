@@ -227,7 +227,7 @@ fn upsert_edge(
         Some((old_retention, old_is_current)) => {
             let old_active = old_retention == "active";
             let merged_retention =
-                more_restrictive_retention_key(&old_retention, edge.retention_state);
+                more_restrictive_retention_key(&old_retention, edge.retention_state)?;
             let merged_is_current = old_is_current && edge.is_current;
             let new_active = merged_retention == RetentionState::Active;
             let active_delta = bool_delta(old_active, new_active);
@@ -319,7 +319,7 @@ fn update_object_state(
     drop(statement);
 
     for (edge_key, entity_id, relation_kind, object_type, old_retention, old_is_current) in rows {
-        let old_active = old_retention == "active";
+        let old_active = retention_from_key(&old_retention)? == RetentionState::Active;
         let new_active = state.retention_state == RetentionState::Active;
         let active_delta = bool_delta(old_active, new_active);
         let current_delta =
@@ -493,25 +493,28 @@ fn bool_delta(old: bool, new: bool) -> i64 {
     }
 }
 
-fn more_restrictive_retention_key(existing: &str, incoming: RetentionState) -> RetentionState {
-    if incoming.restrictiveness_rank() > retention_key_rank(existing) {
-        incoming
-    } else {
-        retention_from_key(existing)
-    }
+fn more_restrictive_retention_key(
+    existing: &str,
+    incoming: RetentionState,
+) -> Result<RetentionState, RetrievalStatsStoreError> {
+    let existing = retention_from_key(existing)?;
+    Ok(
+        if incoming.restrictiveness_rank() > existing.restrictiveness_rank() {
+            incoming
+        } else {
+            existing
+        },
+    )
 }
 
-fn retention_from_key(value: &str) -> RetentionState {
+fn retention_from_key(value: &str) -> Result<RetentionState, RetrievalStatsStoreError> {
     match value {
-        "suppressed" => RetentionState::Suppressed,
-        "archived" => RetentionState::Archived,
-        "deleted" => RetentionState::Deleted,
-        _ => RetentionState::Active,
+        "active" => Ok(RetentionState::Active),
+        "suppressed" => Ok(RetentionState::Suppressed),
+        _ => Err(RetrievalStatsStoreError::UnknownRetentionKey {
+            key: value.to_owned(),
+        }),
     }
-}
-
-fn retention_key_rank(value: &str) -> u8 {
-    retention_from_key(value).restrictiveness_rank()
 }
 
 fn bool_int(value: bool) -> i64 {
@@ -591,6 +594,83 @@ mod tests {
         );
         drop(reopened);
         dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_unknown_retention_keys_reject_writes_without_changing_counters() {
+        for key in ["archived", "deleted", "garbage"] {
+            let dir = tempdir().unwrap();
+            let store = SqliteRetrievalStatsStore::open(dir.path().join("stats.sqlite3")).unwrap();
+            let entity_id = MemoryId::from_u128(9201);
+            let object_id = MemoryId::from_u128(9202);
+            let mut edge = test_edge(entity_id, object_id, RetentionState::Suppressed, true);
+            store
+                .record_edges(std::slice::from_ref(&edge))
+                .await
+                .unwrap();
+            lock(&store.connection)
+                .unwrap()
+                .execute(
+                    "UPDATE entity_edge_index SET retention_state = ?1 WHERE edge_key = ?2",
+                    params![key, edge.edge_key],
+                )
+                .unwrap();
+            let counter_key = RetrievalStatsCounterKey {
+                entity_id,
+                relation_kind: edge.relation_kind,
+                object_type: edge.object_type,
+            };
+            let before = store.counter(&counter_key).await.unwrap().unwrap();
+            assert_eq!(
+                (
+                    before.total_count,
+                    before.active_count,
+                    before.current_count
+                ),
+                (1, 0, 0)
+            );
+            let expected = RetrievalStatsStoreError::UnknownRetentionKey {
+                key: key.to_owned(),
+            };
+            for incoming in [RetentionState::Active, RetentionState::Suppressed] {
+                edge.retention_state = incoming;
+                assert_eq!(
+                    store.record_edges(std::slice::from_ref(&edge)).await,
+                    Err(expected.clone())
+                );
+                assert_eq!(
+                    store
+                        .record_object_states(&[RetrievalStatsObjectState {
+                            object_id,
+                            object_type: edge.object_type,
+                            retention_state: incoming,
+                            is_current: true,
+                            observed_at: timestamp(),
+                        }])
+                        .await,
+                    Err(expected.clone())
+                );
+            }
+            assert_eq!(store.counter(&counter_key).await.unwrap(), Some(before));
+            assert_eq!(
+                store
+                    .global_counter(edge.relation_kind, edge.object_type)
+                    .await
+                    .unwrap(),
+                Some(before)
+            );
+            let stored_key: String = lock(&store.connection)
+                .unwrap()
+                .query_row(
+                    "SELECT retention_state FROM entity_edge_index WHERE edge_key = ?1",
+                    params![edge.edge_key],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored_key, key);
+            drop(store);
+            dir.close().unwrap();
+        }
     }
 
     #[tokio::test]

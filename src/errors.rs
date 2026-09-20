@@ -3,8 +3,7 @@ use thiserror::Error;
 
 use crate::domain::{
     CandidateValidation, DomainValidationError, GraphExpansionBoundedFailureTrace,
-    LifecycleDtoValidationError, LifecyclePolicyKnob, MemoryId, MemoryObjectRef, ObjectType,
-    SourceReferenceKind,
+    LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType, SourceReferenceKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -251,6 +250,8 @@ pub enum GraphQueryError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RetrievalStatsStoreError {
+    #[error("retrieval stats retention key is unknown: {key}")]
+    UnknownRetentionKey { key: String },
     #[error("retrieval stats counter was negative: {value}")]
     NegativeCounter { value: i64 },
     #[error("retrieval stats sqlite operation failed: {detail}")]
@@ -496,9 +497,6 @@ pub enum CustomError {
 
     #[error(transparent)]
     LifecycleDraftInvalid(#[from] LifecycleDtoValidationError),
-
-    #[error("lifecycle policy knob is unsupported in this release: {knob:?}")]
-    LifecyclePolicyUnsupported { knob: LifecyclePolicyKnob },
 
     #[error("Vector database error: {0}")]
     VectorDatabaseError(#[source] VectorDatabaseError),

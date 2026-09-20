@@ -390,14 +390,9 @@ fn selectivity_decision(
 
 impl From<RetrievalLifecyclePolicy> for SelectivityCountScope {
     fn from(policy: RetrievalLifecyclePolicy) -> Self {
-        if policy.include_archived && policy.include_suppressed && policy.include_deleted {
+        if policy.include_suppressed {
             Self::Total
-        } else if policy.include_archived
-            || policy.include_suppressed
-            || policy.include_deleted
-            || policy.include_non_current
-            || policy.include_superseded
-        {
+        } else if policy.include_non_current || policy.include_superseded {
             Self::Active
         } else {
             Self::Current
@@ -813,18 +808,6 @@ mod tests {
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
                 },
                 RetrievalStatsEdge {
-                    edge_key: format!("{entity_id}:about:derived_memory:archived"),
-                    entity_id,
-                    relation_kind: RelationType::About,
-                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462007")
-                        .unwrap(),
-                    object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::domain::RetentionState::Archived,
-                    is_current: false,
-                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
-                },
-                RetrievalStatsEdge {
                     edge_key: format!("{entity_id}:about:derived_memory:suppressed"),
                     entity_id,
                     relation_kind: RelationType::About,
@@ -857,16 +840,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let archived_plan = selectivity_plan_for_candidate(
+        let current_plan = selectivity_plan_for_candidate(
             &candidate,
             20,
             &stats,
             RetrievalSelectivityPolicy::default(),
             &stats_context,
-            RetrievalLifecyclePolicy {
-                include_archived: true,
-                ..RetrievalLifecyclePolicy::default()
-            },
+            RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
         )
         .await
@@ -878,9 +858,7 @@ mod tests {
             RetrievalSelectivityPolicy::default(),
             &stats_context,
             RetrievalLifecyclePolicy {
-                include_archived: true,
                 include_suppressed: true,
-                include_deleted: true,
                 ..RetrievalLifecyclePolicy::default()
             },
             TraceMode::Enabled,
@@ -900,7 +878,7 @@ mod tests {
         assert_eq!(active_about.entity_count, Some(2));
         assert_eq!(active_about.global_count, Some(2));
 
-        let archived_about = archived_plan
+        let current_about = current_plan
             .traces
             .iter()
             .find(|trace| {
@@ -908,9 +886,9 @@ mod tests {
                     && trace.object_type == ObjectType::DerivedMemory
             })
             .unwrap();
-        assert_eq!(archived_about.count_scope, SelectivityCountScope::Active);
-        assert_eq!(archived_about.entity_count, Some(2));
-        assert_eq!(archived_about.global_count, Some(2));
+        assert_eq!(current_about.count_scope, SelectivityCountScope::Current);
+        assert_eq!(current_about.entity_count, Some(1));
+        assert_eq!(current_about.global_count, Some(1));
 
         let total_about = total_plan
             .traces
@@ -921,8 +899,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(total_about.count_scope, SelectivityCountScope::Total);
-        assert_eq!(total_about.entity_count, Some(4));
-        assert_eq!(total_about.global_count, Some(4));
+        assert_eq!(total_about.entity_count, Some(3));
+        assert_eq!(total_about.global_count, Some(3));
     }
 
     #[test]

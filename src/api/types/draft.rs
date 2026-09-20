@@ -7,7 +7,7 @@ use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 use crate::domain::{
     DerivedMemory, DerivedType, DomainValidationError, Entity, EntityType, Episode, MemoryId,
     MemoryLink, MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
-    RelationType, RetentionState, Stability, ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    RelationType, RetentionState, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::VectorIndexingCause;
 
@@ -358,9 +358,7 @@ pub struct DerivedMemoryDraft {
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
-    pub confidence: f32,
     pub salience_score: f32,
-    pub stability: Stability,
     pub is_current: bool,
     pub supersedes: Vec<MemoryId>,
     pub retention_state: RetentionState,
@@ -379,9 +377,7 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            confidence: 1.0,
             salience_score: 0.5,
-            stability: Stability::Medium,
             is_current: true,
             supersedes: Vec::new(),
             retention_state: RetentionState::Active,
@@ -420,9 +416,7 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: self.derived_from_observation_ids,
             thread_ids: self.thread_ids,
             entity_ids: self.entity_ids,
-            confidence: self.confidence,
             salience_score: self.salience_score,
-            stability: self.stability,
             is_current: self.is_current,
             supersedes: self.supersedes,
             retention_state: self.retention_state,
@@ -456,7 +450,6 @@ pub struct MemoryLinkDraft {
     pub to_id: MemoryId,
     pub to_type: ObjectType,
     pub relation: RelationType,
-    pub confidence: f32,
     pub rationale: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub schema_version: Option<String>,
@@ -477,7 +470,6 @@ impl MemoryLinkDraft {
             to_id,
             to_type,
             relation,
-            confidence: 1.0,
             rationale: None,
             created_at: None,
             schema_version: None,
@@ -501,7 +493,6 @@ impl MemoryLinkDraft {
             to_id: self.to_id,
             to_type: self.to_type,
             relation: self.relation,
-            confidence: self.confidence,
             rationale: self.rationale,
             created_at: defaults.timestamp(self.created_at),
             schema_version: defaults.schema_version(self.schema_version),
@@ -685,22 +676,6 @@ mod tests {
             episode.into_domain(),
             Err(DomainValidationError::EmptyEpisodeSummary)
         );
-
-        let mut link = MemoryLinkDraft::new(
-            ObjectType::Episode,
-            memory_id("550e8400-e29b-41d4-a716-446655441040"),
-            RelationType::Mentions,
-            ObjectType::Entity,
-            memory_id("550e8400-e29b-41d4-a716-446655441041"),
-        );
-        link.confidence = f32::NAN;
-        assert!(matches!(
-            link.into_domain(),
-            Err(DomainValidationError::InvalidScore {
-                field: "MemoryLink.confidence",
-                ..
-            })
-        ));
     }
 
     #[test]

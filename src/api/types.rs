@@ -9,8 +9,7 @@ pub use draft::{
     MemoryObjectDraft, MemoryThreadDraft, ObservationDraft, RememberOutcome, VectorIndexingFailure,
 };
 pub use lifecycle::{
-    ArchivePolicy, CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy,
-    CorrectionTarget, DeferredDestructiveLifecyclePolicy, DeferredLifecycleAction,
+    CorrectMemoryDraft, CorrectionCascadePolicy, CorrectionLifecyclePolicy, CorrectionTarget,
     ExternalSourceReference, ForgetCascadePolicy, ForgetLifecyclePolicy, ForgetMemoryDraft,
     LifecycleMutationDiagnostics, LifecycleMutationOutcome, LifecycleMutationTrace,
     LifecycleMutationWarning, LifecycleMutationWarningReason, LifecycleTargetRef,

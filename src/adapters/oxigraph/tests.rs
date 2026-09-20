@@ -918,7 +918,6 @@ mod tests {
             to_id: superseded_memory.id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::About,
-            confidence: 1.0,
             rationale: Some("Hub reaches a superseded memory.".to_owned()),
             created_at: superseded_memory.created_at,
             schema_version: superseded_memory.schema_version.clone(),
@@ -931,7 +930,6 @@ mod tests {
             to_id: superseded_memory.id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::Supersedes,
-            confidence: 1.0,
             rationale: Some("Replacement supersedes candidate memory.".to_owned()),
             created_at: replacement.created_at,
             schema_version: replacement.schema_version.clone(),
@@ -1008,7 +1006,6 @@ mod tests {
         let mut fixtures = representative_fixtures();
         fixtures.episode.retention_state = RetentionState::Suppressed;
         fixtures.salient_observation.retention_state = RetentionState::Suppressed;
-        fixtures.soft_thread.status = ThreadStatus::Archived;
 
         store.upsert_objects(&fixtures.objects()).await.unwrap();
         store.upsert_links(&fixtures.links()).await.unwrap();
@@ -1064,7 +1061,6 @@ mod tests {
                         include_suppressed: true,
                         include_non_current: true,
                         include_superseded: true,
-                        ..GraphExpansionLifecyclePolicy::default()
                     }),
             )
             .await
@@ -1089,10 +1085,10 @@ mod tests {
         let superseded_memory = fixtures.user_preference.clone();
         let mut non_current_memory = fixtures.open_loop.clone();
         let mut replacement = fixtures.correction.clone();
-        let mut archived_thread = fixtures.soft_thread.clone();
+        let mut dormant_thread = fixtures.soft_thread.clone();
         non_current_memory.is_current = false;
         replacement.supersedes = vec![superseded_memory.id];
-        archived_thread.status = ThreadStatus::Archived;
+        dormant_thread.status = ThreadStatus::Dormant;
         let mut link_only = fixtures.derived_reflection.clone();
         link_only.id = MemoryId::from_u128(260);
         link_only.derived_from_episode_ids = vec![MemoryId::from_u128(998)];
@@ -1117,7 +1113,6 @@ mod tests {
             to_id: superseded_memory.id,
             to_type: ObjectType::DerivedMemory,
             relation: RelationType::Supersedes,
-            confidence: 1.0,
             rationale: Some("Replacement supersedes historical derived memory.".to_owned()),
             created_at: replacement.created_at,
             schema_version: replacement.schema_version.clone(),
@@ -1127,7 +1122,7 @@ mod tests {
             .upsert_objects(&[
                 MemoryObject::Episode(fixtures.episode.clone()),
                 MemoryObject::Observation(fixtures.salient_observation.clone()),
-                MemoryObject::MemoryThread(archived_thread.clone()),
+                MemoryObject::MemoryThread(dormant_thread.clone()),
                 MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
                 MemoryObject::DerivedMemory(superseded_memory.clone()),
                 MemoryObject::DerivedMemory(non_current_memory.clone()),
@@ -1236,11 +1231,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(thread_expansion.filtered_nodes.iter().any(|filtered| {
-            filtered.object_ref
-                == MemoryObjectRef::from_id_type(archived_thread.id, ObjectType::MemoryThread)
-                && filtered.reason == GraphExpansionFilteredReason::Archived
-        }));
+        assert!(thread_expansion
+            .objects
+            .contains(&MemoryObject::MemoryThread(dormant_thread.clone())));
 
         let default_thread_matches = store
             .query_derived_memories_by_thread(&GraphDerivedMemoryThreadQuery::by_threads(vec![
@@ -1380,8 +1373,8 @@ mod tests {
     async fn persistent_oxigraph_reopens_and_hydrates_objects_links_and_lifecycle_from_rdf() {
         let graph_dir = TempGraphDir::new();
         let fixtures = representative_fixtures();
-        let mut archived_thread = fixtures.soft_thread.clone();
-        archived_thread.status = ThreadStatus::Archived;
+        let mut dormant_thread = fixtures.soft_thread.clone();
+        dormant_thread.status = ThreadStatus::Dormant;
 
         {
             let store = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
@@ -1390,7 +1383,7 @@ mod tests {
                     MemoryObject::Episode(fixtures.episode.clone()),
                     MemoryObject::Observation(fixtures.salient_observation.clone()),
                     MemoryObject::Entity(fixtures.user_entity.clone()),
-                    MemoryObject::MemoryThread(archived_thread.clone()),
+                    MemoryObject::MemoryThread(dormant_thread.clone()),
                     MemoryObject::DerivedMemory(fixtures.correction.clone()),
                     MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
                 ])
@@ -1409,7 +1402,7 @@ mod tests {
                         ObjectType::Observation,
                     ),
                     MemoryObjectRef::from_id_type(fixtures.user_entity.id, ObjectType::Entity),
-                    MemoryObjectRef::from_id_type(archived_thread.id, ObjectType::MemoryThread),
+                    MemoryObjectRef::from_id_type(dormant_thread.id, ObjectType::MemoryThread),
                     MemoryObjectRef::from_id_type(
                         fixtures.correction.id,
                         ObjectType::DerivedMemory,
@@ -1427,7 +1420,7 @@ mod tests {
                 fixtures.salient_observation.clone()
             )));
             assert!(queried.contains(&MemoryObject::Entity(fixtures.user_entity.clone())));
-            assert!(queried.contains(&MemoryObject::MemoryThread(archived_thread.clone())));
+            assert!(queried.contains(&MemoryObject::MemoryThread(dormant_thread.clone())));
             assert!(queried.contains(&MemoryObject::DerivedMemory(fixtures.correction.clone())));
             assert!(queried.contains(&MemoryObject::DerivedMemory(
                 fixtures.suppressed_seed.clone()

@@ -1,6 +1,5 @@
 use crate::domain::{
     DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType,
-    RetentionState, Stability, ThreadStatus,
 };
 use crate::errors::VectorIndexingCause;
 use serde::{Deserialize, Serialize};
@@ -203,9 +202,7 @@ pub struct ReplacementDerivedMemoryDraft {
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
     pub entity_ids: Vec<MemoryId>,
-    pub confidence: f32,
     pub salience_score: f32,
-    pub stability: Stability,
     pub supersedes: Vec<MemoryId>,
     pub original_source_provenance: SourceProvenanceReference,
     pub correction_origin_provenance: SourceProvenanceReference,
@@ -221,9 +218,7 @@ impl ReplacementDerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            confidence: 1.0,
             salience_score: 0.5,
-            stability: Stability::Medium,
             supersedes: Vec::new(),
             original_source_provenance: SourceProvenanceReference {
                 episode_ids: Vec::new(),
@@ -275,8 +270,6 @@ impl ReplacementDerivedMemoryDraft {
 pub struct CorrectionLifecyclePolicy {
     pub supersede_replaced_derived_memories: bool,
     pub suppress_superseded_derived_memories: bool,
-    pub retain_original_source_objects: bool,
-    pub destructive_actions: DeferredDestructiveLifecyclePolicy,
 }
 
 impl Default for CorrectionLifecyclePolicy {
@@ -284,8 +277,6 @@ impl Default for CorrectionLifecyclePolicy {
         Self {
             supersede_replaced_derived_memories: true,
             suppress_superseded_derived_memories: true,
-            retain_original_source_objects: true,
-            destructive_actions: DeferredDestructiveLifecyclePolicy::default(),
         }
     }
 }
@@ -293,39 +284,14 @@ impl Default for CorrectionLifecyclePolicy {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CorrectionCascadePolicy {
     pub apply_to_provenanced_derived_memories: bool,
-    pub require_original_source_match: bool,
-    pub cascade_to_threads: bool,
 }
 
 impl Default for CorrectionCascadePolicy {
     fn default() -> Self {
         Self {
             apply_to_provenanced_derived_memories: true,
-            require_original_source_match: true,
-            cascade_to_threads: false,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DeferredDestructiveLifecyclePolicy {
-    pub hard_delete: DeferredLifecycleAction,
-    pub redaction: DeferredLifecycleAction,
-}
-
-impl Default for DeferredDestructiveLifecyclePolicy {
-    fn default() -> Self {
-        Self {
-            hard_delete: DeferredLifecycleAction::UnsupportedDeferred,
-            redaction: DeferredLifecycleAction::UnsupportedDeferred,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeferredLifecycleAction {
-    UnsupportedDeferred,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -398,7 +364,6 @@ impl CorrectMemoryDraft {
 pub struct SuppressionPolicy {
     pub suppress_target: bool,
     pub suppress_derived_from_target: bool,
-    pub preserve_original_raw_refs: bool,
 }
 
 impl Default for SuppressionPolicy {
@@ -406,24 +371,6 @@ impl Default for SuppressionPolicy {
         Self {
             suppress_target: true,
             suppress_derived_from_target: true,
-            preserve_original_raw_refs: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ArchivePolicy {
-    pub archive_thread: bool,
-    pub archive_thread_derived_memories: bool,
-    pub preserve_original_raw_refs: bool,
-}
-
-impl Default for ArchivePolicy {
-    fn default() -> Self {
-        Self {
-            archive_thread: true,
-            archive_thread_derived_memories: false,
-            preserve_original_raw_refs: true,
         }
     }
 }
@@ -446,8 +393,6 @@ impl Default for ForgetCascadePolicy {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ForgetLifecyclePolicy {
     pub suppression: SuppressionPolicy,
-    pub archive: ArchivePolicy,
-    pub destructive_actions: DeferredDestructiveLifecyclePolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -456,8 +401,6 @@ pub struct ForgetMemoryDraft {
     pub rationale: String,
     pub lifecycle_policy: ForgetLifecyclePolicy,
     pub cascade_policy: ForgetCascadePolicy,
-    pub target_retention_state: RetentionState,
-    pub target_thread_status: Option<ThreadStatus>,
     pub include_trace: bool,
 }
 
@@ -468,20 +411,6 @@ impl ForgetMemoryDraft {
             rationale: rationale.into(),
             lifecycle_policy: ForgetLifecyclePolicy::default(),
             cascade_policy: ForgetCascadePolicy::default(),
-            target_retention_state: RetentionState::Suppressed,
-            target_thread_status: None,
-            include_trace: false,
-        }
-    }
-
-    pub fn archive_thread(thread_id: MemoryId, rationale: impl Into<String>) -> Self {
-        Self {
-            targets: vec![LifecycleTargetRef::MemoryThread(thread_id)],
-            rationale: rationale.into(),
-            lifecycle_policy: ForgetLifecyclePolicy::default(),
-            cascade_policy: ForgetCascadePolicy::default(),
-            target_retention_state: RetentionState::Archived,
-            target_thread_status: Some(ThreadStatus::Archived),
             include_trace: false,
         }
     }
@@ -662,15 +591,6 @@ mod tests {
                 .lifecycle_policy
                 .supersede_replaced_derived_memories
         );
-        assert!(correction.lifecycle_policy.retain_original_source_objects);
-        assert_eq!(
-            correction.lifecycle_policy.destructive_actions.hard_delete,
-            DeferredLifecycleAction::UnsupportedDeferred
-        );
-        assert_eq!(
-            forget.lifecycle_policy.destructive_actions.redaction,
-            DeferredLifecycleAction::UnsupportedDeferred
-        );
         assert!(!correction.include_trace);
         assert!(!forget.include_trace);
     }
@@ -776,10 +696,6 @@ mod tests {
         assert_eq!(replacement.supersedes, vec![old_memory_id()]);
         assert_eq!(draft.superseded_derived_memory_ids, vec![old_memory_id()]);
         assert!(draft.lifecycle_policy.suppress_superseded_derived_memories);
-        assert_eq!(
-            draft.lifecycle_policy.destructive_actions,
-            DeferredDestructiveLifecyclePolicy::default()
-        );
         assert_eq!(draft.validate(), Ok(()));
     }
 
@@ -795,29 +711,13 @@ mod tests {
         );
 
         assert!(draft.cascade_policy.apply_to_provenanced_derived_memories);
-        assert!(draft.cascade_policy.require_original_source_match);
-        assert!(!draft.cascade_policy.cascade_to_threads);
     }
 
     #[test]
-    fn suppression_and_archive_defaults_match_supported_lifecycle_boundary() {
+    fn suppression_defaults_target_and_dependents() {
         let suppression = SuppressionPolicy::default();
-        let archive = ArchivePolicy::default();
-        let thread_forget =
-            ForgetMemoryDraft::archive_thread(episode_id(), "Archive finished thread.");
 
         assert!(suppression.suppress_target);
         assert!(suppression.suppress_derived_from_target);
-        assert!(suppression.preserve_original_raw_refs);
-        assert!(archive.archive_thread);
-        assert!(!archive.archive_thread_derived_memories);
-        assert_eq!(
-            thread_forget.target_retention_state,
-            RetentionState::Archived
-        );
-        assert_eq!(
-            thread_forget.target_thread_status,
-            Some(ThreadStatus::Archived)
-        );
     }
 }

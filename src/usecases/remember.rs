@@ -410,7 +410,7 @@ mod tests {
             .await
             .unwrap();
         let mut divergent = existing.clone();
-        divergent.confidence = 0.1;
+        divergent.rationale = Some("Changed caller rationale.".to_owned());
 
         let error = RememberPipeline::new(&graph, &vector, &embedder)
             .reject_divergent_existing_writes(&[], &[divergent])
@@ -719,14 +719,12 @@ mod tests {
         );
         link.created_at = Some(timestamp());
         link.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-        let plan = RememberWritePlan::new(
-            id("550e8400-e29b-41d4-a716-446655443011"),
-            "link-only-stats-hydration-failure",
-        )
-        .with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
-            link,
-            CandidateProvenance::caller("exercise link-only stats hydration"),
-        )));
+        let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::MemoryLink(
+            MemoryLinkCandidate::new(
+                link,
+                CandidateProvenance::caller("exercise link-only stats hydration"),
+            ),
+        ));
 
         let outcome = pipeline
             .commit(plan, CommitOptions::default())

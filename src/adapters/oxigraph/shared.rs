@@ -372,9 +372,7 @@ pub(super) fn memory_object_from_rdf(
             entity_ids: memory_ids_from_resources(
                 values.resource_values(super::vocabulary::ABOUT_ENTITY),
             )?,
-            confidence: f32_literal(subject, values, super::vocabulary::CONFIDENCE)?,
             salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,
-            stability: enum_literal(subject, values, super::vocabulary::STABILITY)?,
             is_current: bool_literal(subject, values, super::vocabulary::IS_CURRENT)?,
             supersedes: memory_ids_from_resources(
                 values.resource_values(super::vocabulary::SUPERSEDES),
@@ -402,7 +400,6 @@ pub(super) fn memory_link_from_rdf(
         to_id: memory_id_from_resource(&values.resource(subject, super::vocabulary::TO)?)?,
         to_type: enum_literal(subject, values, super::vocabulary::TO_TYPE)?,
         relation: enum_literal(subject, values, super::vocabulary::RELATION)?,
-        confidence: f32_literal(subject, values, super::vocabulary::CONFIDENCE)?,
         rationale: values.optional_literal(super::vocabulary::RATIONALE),
         created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
         schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,

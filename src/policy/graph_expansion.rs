@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::domain::{
     DerivedMemory, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
     GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
-    RelationType, RetentionState, ThreadStatus,
+    RelationType, RetentionState,
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
@@ -736,17 +736,12 @@ fn lifecycle_filter_reason(
         MemoryObject::Observation(object) => {
             retention_filter_reason(object.retention_state, policy)
         }
-        MemoryObject::MemoryThread(object) => {
-            if object.status == ThreadStatus::Archived && !policy.include_archived {
-                Some(GraphExpansionFilteredReason::Archived)
-            } else {
-                None
-            }
-        }
         MemoryObject::DerivedMemory(object) => {
             derived_memory_lifecycle_filter_reason(object, superseded, policy)
         }
-        MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => None,
+        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
+            None
+        }
     }
 }
 
@@ -776,16 +771,10 @@ fn retention_filter_reason(
 ) -> Option<GraphExpansionFilteredReason> {
     match retention_state {
         RetentionState::Active => None,
-        RetentionState::Archived if !policy.include_archived => {
-            Some(GraphExpansionFilteredReason::Archived)
-        }
         RetentionState::Suppressed if !policy.include_suppressed => {
             Some(GraphExpansionFilteredReason::Suppressed)
         }
-        RetentionState::Deleted if !policy.include_deleted => {
-            Some(GraphExpansionFilteredReason::Deleted)
-        }
-        RetentionState::Archived | RetentionState::Suppressed | RetentionState::Deleted => None,
+        RetentionState::Suppressed => None,
     }
 }
 
@@ -1314,7 +1303,6 @@ mod tests {
             to_id,
             to_type,
             relation,
-            confidence: 1.0,
             rationale: None,
             created_at: Utc::now(),
             schema_version: "test_schema".to_owned(),

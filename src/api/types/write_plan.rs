@@ -17,7 +17,6 @@ pub struct RememberInput {
     pub content: String,
     pub entity_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
-    pub scope_ids: Vec<String>,
     pub participant_entity_ids: Vec<MemoryId>,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -37,7 +36,6 @@ impl RememberInput {
             content: content.into(),
             entity_ids: Vec::new(),
             thread_ids: Vec::new(),
-            scope_ids: Vec::new(),
             participant_entity_ids: Vec::new(),
             started_at: None,
             ended_at: None,
@@ -59,11 +57,6 @@ impl RememberInput {
 
     pub fn with_thread_id(mut self, thread_id: MemoryId) -> Self {
         self.thread_ids.push(thread_id);
-        self
-    }
-
-    pub fn with_scope_id(mut self, scope_id: impl Into<String>) -> Self {
-        self.scope_ids.push(scope_id.into());
         self
     }
 
@@ -264,10 +257,8 @@ impl StatsUpdateCandidate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RememberWritePlan {
-    pub operation_id: MemoryId,
-    pub idempotency_key: String,
     pub source_input_ref: Option<ExternalSourceReference>,
     pub candidates: Vec<MemoryCandidate>,
     pub validations: Vec<CandidateValidation>,
@@ -275,15 +266,8 @@ pub struct RememberWritePlan {
 }
 
 impl RememberWritePlan {
-    pub fn new(operation_id: MemoryId, idempotency_key: impl Into<String>) -> Self {
-        Self {
-            operation_id,
-            idempotency_key: idempotency_key.into(),
-            source_input_ref: None,
-            candidates: Vec::new(),
-            validations: Vec::new(),
-            diagnostics: RememberDiagnostics::default(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn with_source_input_ref(mut self, source_input_ref: ExternalSourceReference) -> Self {
@@ -768,14 +752,6 @@ pub struct StatsUpdateFailure {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PrepareOptions {
-    /// Caller-supplied operation label copied into [`RememberWritePlan::idempotency_key`].
-    ///
-    /// This key is for caller correlation and same-operation retry checks at the plan level. It
-    /// does not seed candidate IDs, object IDs, link IDs, source references, or graph IRIs; those
-    /// are derived deterministically from the remember input and plan defaults. Supplying the same
-    /// key for different content does not make the writes equivalent and will not override
-    /// deterministic content/ID collision checks during commit.
-    pub idempotency_key: Option<String>,
     pub include_vector_index_candidates: bool,
     /// Include stats update candidates for validation and caller inspection.
     /// Commit-time stats recording derives from committed graph writes, not from this candidate list.
@@ -785,7 +761,6 @@ pub struct PrepareOptions {
 impl Default for PrepareOptions {
     fn default() -> Self {
         Self {
-            idempotency_key: None,
             include_vector_index_candidates: true,
             include_stats_update_candidates: true,
         }

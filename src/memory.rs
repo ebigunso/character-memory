@@ -37,24 +37,21 @@ impl CharacterMemory {
 
     /// Prepares a remember write plan without persisting graph, vector, or stats data.
     ///
-    /// The default facade path uses fresh operation defaults, so repeated calls with
-    /// the same input produce distinct plan/object identifiers. Use the lower-level
-    /// write-plan helper APIs with fixed defaults when byte-for-byte deterministic
-    /// planning is required.
+    /// The default facade path uses fresh operation defaults, so identifiers generated
+    /// during preparation differ across calls. Caller-supplied draft identifiers are
+    /// preserved. Use the lower-level write-plan helper APIs with fixed defaults when
+    /// byte-for-byte deterministic planning is required.
     pub async fn prepare(
         &self,
         input: RememberInput,
         options: PrepareOptions,
     ) -> Result<RememberWritePlan, CustomError> {
         let defaults = crate::usecases::write_planning::RememberPlanDefaults::generated();
-        let mut plan = input.prepare_write_plan_with_options(
+        let plan = input.prepare_write_plan_with_options(
             &defaults,
             options.include_vector_index_candidates,
             options.include_stats_update_candidates,
         );
-        if let Some(idempotency_key) = options.idempotency_key {
-            plan.idempotency_key = idempotency_key;
-        }
         Ok(plan)
     }
 
@@ -142,7 +139,9 @@ impl CharacterMemory {
         .await
     }
 
-    /// Applies suppression/archive lifecycle mutation through injected graph/vector parts.
+    /// Applies suppression with an optional thread-member cascade.
+    ///
+    /// Forgetting a thread preserves its status and vector.
     pub async fn forget(
         &self,
         draft: ForgetMemoryDraft,
@@ -256,13 +255,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_honors_idempotency_key_and_generates_fresh_plan_ids() {
+    async fn prepare_generates_fresh_candidate_ids() {
         let memory = injected_memory().await;
-        let input = RememberInput::new("fresh plans with a caller key");
-        let options = PrepareOptions {
-            idempotency_key: Some("caller-operation".to_owned()),
-            ..PrepareOptions::default()
-        };
+        let input = RememberInput::new("fresh candidate ids");
+        let options = PrepareOptions::default();
 
         let first = memory
             .prepare(input.clone(), options.clone())
@@ -271,9 +267,12 @@ mod tests {
         let second = memory.prepare(input, options).await.unwrap();
         memory.close().await.unwrap();
 
-        assert_eq!(first.idempotency_key, "caller-operation");
-        assert_eq!(second.idempotency_key, "caller-operation");
-        assert_ne!(first.operation_id, second.operation_id);
+        assert!(matches!(
+            (&first.candidates[0], &second.candidates[0]),
+            (MemoryCandidate::Episode(first), MemoryCandidate::Episode(second))
+                if first.draft.id.is_some() && second.draft.id.is_some()
+                    && first.draft.id != second.draft.id
+        ));
     }
 
     #[tokio::test]
@@ -736,29 +735,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn injected_facade_archives_memory_thread() {
+    async fn injected_facade_forget_keeps_memory_thread_reachable() {
         let (memory, fixtures, _) = lifecycle_memory().await;
 
         let outcome = memory
             .forget(
-                ForgetMemoryDraft::archive_thread(fixtures.soft_thread.id, "Archive soft thread.")
-                    .with_trace(),
+                ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::MemoryThread(fixtures.soft_thread.id),
+                    "Forget thread without cascading.",
+                )
+                .with_trace(),
             )
             .await
-            .expect("thread forget should archive through injected lifecycle pipeline");
+            .expect("thread forget should complete through injected lifecycle pipeline");
 
-        assert_eq!(
-            outcome.graph_mutated_object_ids,
-            vec![MemoryObjectRef::new(
-                ObjectType::MemoryThread,
-                fixtures.soft_thread.id,
-            )]
-        );
+        assert!(outcome.graph_mutated_object_ids.is_empty());
+        assert!(outcome.vector_maintained_object_ids.is_empty());
         let normal = memory
             .retrieve(RetrievalContext::new("contract test support"))
             .await
             .unwrap();
-        assert!(!normal
+        assert!(normal
             .pack
             .active_threads
             .iter()
