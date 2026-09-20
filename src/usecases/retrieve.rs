@@ -245,7 +245,6 @@ where
             section_pressure,
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
-            scene_references: cues.references,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -269,8 +268,8 @@ where
             .memory_scenes(&pack, context.lifecycle_policy.include_suppressed)
             .await?;
         Ok(RetrieveOutcome {
-            scene_parts_not_given: scene::parts_not_given(&context.scene),
             scene: context.scene,
+            scene_references: cues.references,
             memory_scenes,
             pack,
             rationale,

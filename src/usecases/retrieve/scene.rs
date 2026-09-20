@@ -1,16 +1,16 @@
 use super::*;
 use crate::api::types::{
-    MemoryScenes, ScenePart, SceneReference, SceneReferenceResolution, SceneReferenceTrace,
-    SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
+    MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult, SourceScene,
+    SourceSceneUnavailableReason, VectorRecallCompleteness,
 };
-use crate::domain::{RetentionState, Scene};
+use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
 use crate::ports::graph_authority::GraphObjectQuery;
 
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
     pub participants: Vec<MemoryId>,
-    pub references: Vec<SceneReferenceTrace>,
+    pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
 }
@@ -49,7 +49,7 @@ where
                 } else {
                     SceneReferenceResolution::Unknown
                 };
-                references.push(SceneReferenceTrace {
+                references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantKey { index },
                     resolution,
                 });
@@ -73,7 +73,7 @@ where
                         notion_ids: ids.clone(),
                     },
                 };
-                references.push(SceneReferenceTrace {
+                references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantName { index },
                     resolution,
                 });
@@ -122,7 +122,7 @@ where
                 searches.insert(text.to_owned(), reached);
             }
             if let Some(reference) = reference {
-                references.push(SceneReferenceTrace {
+                references.push(SceneReferenceResult {
                     reference,
                     resolution: SceneReferenceResolution::ContentCue {
                         matches: searches[text].clone(),
@@ -297,34 +297,6 @@ fn source_scene_ref(scene: &SourceScene) -> MemoryObjectRef {
     }
 }
 
-pub(super) fn parts_not_given(scene: &Scene) -> Vec<ScenePart> {
-    let mut missing = Vec::new();
-    if scene.participants.is_empty() {
-        missing.push(ScenePart::Participants);
-    }
-    for (index, participant) in scene.participants.iter().enumerate() {
-        if participant.key.is_none() {
-            missing.push(ScenePart::ParticipantKey { index });
-        }
-        if nonblank(participant.name.as_deref()).is_none() {
-            missing.push(ScenePart::ParticipantName { index });
-        }
-        if nonblank(participant.description.as_deref()).is_none() {
-            missing.push(ScenePart::ParticipantDescription { index });
-        }
-    }
-    if nonblank(scene.setting.key.as_deref()).is_none() {
-        missing.push(ScenePart::SettingKey);
-    }
-    if nonblank(scene.setting.words.as_deref()).is_none() {
-        missing.push(ScenePart::SettingWords);
-    }
-    if scene.custom_values.is_empty() {
-        missing.push(ScenePart::CustomValues);
-    }
-    missing
-}
-
 fn nonblank(text: Option<&str>) -> Option<&str> {
     text.map(str::trim).filter(|text| !text.is_empty())
 }
@@ -336,90 +308,10 @@ fn merge_completeness(
     use VectorRecallCompleteness::*;
     match (left, right) {
         (NotRequested, other) | (other, NotRequested) => other,
-        (Exhaustive { scanned: a }, Exhaustive { scanned: b }) => Exhaustive { scanned: a + b },
-        (
-            BoundaryTieOpen {
-                fetched: a,
-                fetch_bound: x,
-            },
-            BoundaryTieOpen {
-                fetched: b,
-                fetch_bound: y,
-            },
-        ) => BoundaryTieOpen {
-            fetched: a + b,
-            fetch_bound: x + y,
-        },
-        (
-            BoundaryTieOpen {
-                fetched,
-                fetch_bound,
-            },
-            BoundaryTieClosed { fetched: count } | Exhaustive { scanned: count },
-        )
-        | (
-            BoundaryTieClosed { fetched: count } | Exhaustive { scanned: count },
-            BoundaryTieOpen {
-                fetched,
-                fetch_bound,
-            },
-        ) => BoundaryTieOpen {
-            fetched: fetched + count,
-            fetch_bound: fetch_bound + count,
-        },
-        (
-            BoundaryTieClosed { fetched: a },
-            BoundaryTieClosed { fetched: b } | Exhaustive { scanned: b },
-        )
-        | (Exhaustive { scanned: b }, BoundaryTieClosed { fetched: a }) => {
-            BoundaryTieClosed { fetched: a + b }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn combined_search_completeness_keeps_the_weakest_boundary_and_total_work() {
-        use VectorRecallCompleteness::*;
-        for (left, right, expected) in [
-            (
-                Exhaustive { scanned: 5 },
-                Exhaustive { scanned: 5 },
-                Exhaustive { scanned: 10 },
-            ),
-            (
-                Exhaustive { scanned: 5 },
-                BoundaryTieClosed { fetched: 3 },
-                BoundaryTieClosed { fetched: 8 },
-            ),
-            (
-                Exhaustive { scanned: 5 },
-                BoundaryTieOpen {
-                    fetched: 3,
-                    fetch_bound: 3,
-                },
-                BoundaryTieOpen {
-                    fetched: 8,
-                    fetch_bound: 8,
-                },
-            ),
-            (
-                BoundaryTieClosed { fetched: 5 },
-                BoundaryTieOpen {
-                    fetched: 3,
-                    fetch_bound: 3,
-                },
-                BoundaryTieOpen {
-                    fetched: 8,
-                    fetch_bound: 8,
-                },
-            ),
-        ] {
-            assert_eq!(merge_completeness(left, right), expected);
-            assert_eq!(merge_completeness(right, left), expected);
-        }
+        (BoundaryTieOpen { .. }, _) => left,
+        (_, BoundaryTieOpen { .. }) => right,
+        (BoundaryTieClosed { .. }, _) => left,
+        (_, BoundaryTieClosed { .. }) => right,
+        _ => left,
     }
 }

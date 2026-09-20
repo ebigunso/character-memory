@@ -300,11 +300,7 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         },
     ];
     let named = memory
-        .retrieve(
-            RetrievalContext::default()
-                .with_scene(present.clone())
-                .with_trace(),
-        )
+        .retrieve(RetrievalContext::default().with_scene(present.clone()))
         .await
         .unwrap();
     assert!(named
@@ -312,7 +308,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .salient_observations
         .iter()
         .any(|observation| observation.episode_id == episode_id));
-    let references = &named.trace.as_ref().unwrap().scene_references;
+    assert!(named.trace.is_none());
+    let references = &named.scene_references;
     assert_eq!(
         references[0].resolution,
         SceneReferenceResolution::Ambiguous {
@@ -330,15 +327,11 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .await
         .unwrap();
     let resolved_name = memory
-        .retrieve(
-            RetrievalContext::default()
-                .with_scene(present.clone())
-                .with_trace(),
-        )
+        .retrieve(RetrievalContext::default().with_scene(present.clone()))
         .await
         .unwrap();
     assert_eq!(
-        resolved_name.trace.unwrap().scene_references[0].resolution,
+        resolved_name.scene_references[0].resolution,
         SceneReferenceResolution::Resolved {
             notion_id: MemoryId::from_u128(100)
         }
@@ -351,15 +344,12 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
 
     present.participants = vec![keyed(999), keyed(300)];
     let empty = memory
-        .retrieve(
-            RetrievalContext::default()
-                .with_scene(present.clone())
-                .with_trace(),
-        )
+        .retrieve(RetrievalContext::default().with_scene(present.clone()))
         .await
         .unwrap();
     assert!(empty.memory_scenes.is_empty());
-    let references = &empty.trace.unwrap().scene_references;
+    assert!(empty.trace.is_none());
+    let references = &empty.scene_references;
     assert_eq!(references[0].resolution, SceneReferenceResolution::Unknown);
     assert_eq!(
         references[1].resolution,
@@ -432,7 +422,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         .iter()
         .any(|link| link.to.id == MemoryId::from_u128(100)
             || link.from.id == MemoryId::from_u128(100)));
-    assert!(trace
+    assert!(description_only
         .scene_references
         .iter()
         .all(|reference| reference.resolution
@@ -451,10 +441,11 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     context.scene.setting.words = Some("observatory".to_owned());
     let budgeted = memory.retrieve(context).await.unwrap();
     assert_eq!(budgeted.trace.unwrap().vector_candidates.len(), 1);
-    let mut place = RetrievalContext::default().with_trace();
+    let mut place = RetrievalContext::default();
     place.scene.setting.words = Some("observatory".to_owned());
     place.candidate_limits.max_vector_candidates = 1;
     let place_result = memory.retrieve(place).await.unwrap();
+    assert!(place_result.trace.is_none());
     assert_eq!(place_result.pack.relevant_episodes[0].id, episode_id);
     assert_eq!(
         recorded(&place_result, ObjectType::Episode, episode_id),
@@ -464,8 +455,8 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         }]
     );
     assert!(matches!(
-        &place_result.trace.unwrap().scene_references[0],
-        SceneReferenceTrace {
+        &place_result.scene_references[0],
+        SceneReferenceResult {
             reference: SceneReference::SettingWords,
             resolution: SceneReferenceResolution::ContentCue { .. }
         }
@@ -473,7 +464,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
 }
 
 #[tokio::test]
-async fn time_only_scene_reports_absences_without_embedding_or_completeness_claim() {
+async fn time_only_scene_is_echoed_without_embedding_or_completeness_claim() {
     let (memory, queries) = scene_memory().await;
     let before = chrono::Utc::now();
     let context = RetrievalContext::default();
@@ -481,15 +472,7 @@ async fn time_only_scene_reports_absences_without_embedding_or_completeness_clai
     let present = context.scene.clone();
     let outcome = memory.retrieve(context).await.unwrap();
     assert_eq!(outcome.scene, present);
-    assert_eq!(
-        outcome.scene_parts_not_given,
-        [
-            ScenePart::Participants,
-            ScenePart::SettingKey,
-            ScenePart::SettingWords,
-            ScenePart::CustomValues
-        ]
-    );
+    assert!(outcome.scene_references.is_empty());
     assert!(outcome.trace.is_none());
     assert!(outcome.memory_scenes.is_empty());
     assert_eq!(
@@ -504,11 +487,12 @@ async fn time_only_scene_reports_absences_without_embedding_or_completeness_clai
     blank.scene.setting.words = Some("\t".to_owned());
     memory.retrieve(blank).await.unwrap();
     assert!(queries.lock().unwrap().is_empty());
-    let mut words = RetrievalContext::default().with_trace();
+    let mut words = RetrievalContext::default();
     words.scene.setting.words = Some("nowhere".to_owned());
     let unmatched = memory.retrieve(words).await.unwrap();
+    assert!(unmatched.trace.is_none());
     assert_eq!(
-        unmatched.trace.unwrap().scene_references[0].resolution,
+        unmatched.scene_references[0].resolution,
         SceneReferenceResolution::ContentCue {
             matches: Vec::new()
         }

@@ -176,26 +176,14 @@ impl RetrievalLifecyclePolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrieveOutcome {
+    /// An unset or empty part means not given. A scene is never complete: people
+    /// can be present and unperceived.
     pub scene: Scene,
-    /// Absence records what was not supplied, never whether the situation is complete.
-    pub scene_parts_not_given: Vec<ScenePart>,
+    pub scene_references: Vec<SceneReferenceResult>,
     pub memory_scenes: Vec<MemoryScenes>,
     pub pack: ContinuityContextPack,
     pub rationale: RetrievalRationale,
     pub trace: Option<RetrievalTrace>,
-}
-
-/// A missing part of the scene as supplied. Participant indices preserve authored order.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ScenePart {
-    Participants,
-    ParticipantKey { index: usize },
-    ParticipantName { index: usize },
-    ParticipantDescription { index: usize },
-    SettingKey,
-    SettingWords,
-    CustomValues,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,7 +223,7 @@ pub enum SceneReference {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SceneReferenceTrace {
+pub struct SceneReferenceResult {
     pub reference: SceneReference,
     pub resolution: SceneReferenceResolution,
 }
@@ -243,10 +231,18 @@ pub struct SceneReferenceTrace {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SceneReferenceResolution {
-    Resolved { notion_id: MemoryId },
-    Ambiguous { notion_ids: Vec<MemoryId> },
+    Resolved {
+        notion_id: MemoryId,
+    },
+    Ambiguous {
+        notion_ids: Vec<MemoryId>,
+    },
+    /// For a name, no notion is currently known by exactly this name, nothing more.
+    /// For a key, no notion currently exists at that key.
     Unknown,
-    ContentCue { matches: Vec<MemoryObjectRef> },
+    ContentCue {
+        matches: Vec<MemoryObjectRef>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -347,7 +343,7 @@ pub struct RetrievalTelemetry {
     pub query_embedding_dimension: usize,
     /// Unique objects after merging content searches at their best score and applying the candidate limit.
     pub returned_vector_candidate_count: usize,
-    /// Weakest search completeness; scanned/fetched work is summed across distinct queries.
+    /// Weakest contributing search verdict, with that search's own counters.
     pub vector_recall_completeness: VectorRecallCompleteness,
     /// Distinct participant roots plus merged content roots, before the root limit.
     pub unique_graph_root_candidate_count: usize,
@@ -359,8 +355,8 @@ pub struct RetrievalTelemetry {
 }
 
 /// Completeness of vector search. A retrieval with several distinct content queries
-/// reports the weakest contributing verdict, summing its scanned/fetched work counters.
-/// These counters count query work, not unique objects in the merged candidate list.
+/// reports the weakest contributing verdict with that search's own counters.
+/// Equally weak verdicts retain the first search in cue order.
 ///
 /// `NotRequested` means no vector search ran. `Exhaustive` means every record in
 /// the requested scope was scored through a path the adapter knows to be exhaustive,
@@ -448,7 +444,6 @@ pub struct LifecycleOmissionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[non_exhaustive]
 pub struct RetrievalTrace {
-    pub scene_references: Vec<SceneReferenceTrace>,
     pub vector_candidates: Vec<VectorCandidateTrace>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
@@ -462,7 +457,6 @@ pub struct RetrievalTrace {
 impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
-            scene_references: Vec::new(),
             vector_candidates: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),

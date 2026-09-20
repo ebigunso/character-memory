@@ -48,7 +48,7 @@ Retrieval is graph-authoritative and hybrid:
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
-`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions, while participant descriptions and setting words search memory content. The result returns the present scene, its unspecified parts, and each admitted memory's recorded source scenes even without a trace. Missing or forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
+`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions, while participant descriptions and setting words search memory content. The setting key and custom values cue nothing yet. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Missing or forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
 
 ## What this is not
 
