@@ -165,6 +165,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - User approval: not needed; it keeps today's behavior for corrections and extends it to the new path.
   - Record proposed: none
 
+- 2026-09-20 Decision: entity selectivity is kept without a production input until the scene slice.
+  - Trigger / new insight: the selectivity calculation only acts on Entity vector roots, and Task_3 removes the entity's vector surface, so the policy loses its reachable input.
+  - Plan delta (what changed): Task_3 keeps the policy (measured and accepted in ADR-I-0022), gives it a direct entity-id input, and moves its tests to that input; its production reader returns with the scene slice, where participants given by key become entity roots. Until then a name reaches its notion through a belief found by content and the derived About link, bounded by the static fanout caps. Extending selectivity to reached entities is retrieval policy and waits for the scene and route slices, with measurement.
+  - Tradeoffs considered: deleting the policy and rebuilding it one slice later was rejected as churn on a measured mechanism; extending it now was rejected as unmeasured retrieval policy inside a schema task.
+  - User approval: not needed; reported to the decider as a consequence to know about. The companion repository's re-baseline measures the movement.
+  - Record proposed: none
+
 ## Notes
 - Risks: Task_1 is wide (public surface, graph vocabulary, stats tables) and mechanical; the census site lists are the checklist. Task_3 changes what the vector index holds, which can move retrieval results for fixtures that matched on an entity's name; that is expected and is measured in the companion repository.
 - Edge cases: forgetting a rename leaves the notion with no current name, and the repair is a new belief, not un-suppression; two beliefs naming one notion at once (a nickname and a given name) are both current, since neither supersedes the other; normalization must not merge names that differ only by script in ways a person would not (keep it to case, whitespace and Unicode normalization).
