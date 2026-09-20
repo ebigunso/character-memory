@@ -1,6 +1,6 @@
 # Plan: v0.2 schema groundwork
 
-- status: draft
+- status: approved
 - generated: 2026-09-20
 - last_updated: 2026-09-20
 - work_type: code
@@ -155,7 +155,7 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Plan delta (what changed): link confidence goes with memory confidence; no idempotency ledger; a first belief enters with a given-by-the-application marker (a marker, not a free-text source string, since nothing would read the string); un-suppression is a known gap; the preference subtypes wait for the scene slice; a belief is an ordinary interpreted memory with optional assertions, not a typed subtype; only known as is built, sameness and containment wait for their scenario; no fork diagnostic; no `known_as` sugar on the entity draft until the example loop shows the friction.
   - Tradeoffs considered: in the Design section.
   - A consequence the plan review surfaced, for the decider's eye at approval: with no predecessor rewrite, a correction no longer suppresses what it corrects; the corrected version is superseded history, reachable under the include-superseded policy, and the two correction options that said otherwise are deleted.
-  - User approval: yes, 2026-09-20, for the decisions above; the consequence is presented with the plan.
+  - User approval: yes, 2026-09-20, for the decisions above, and the same day for the plan as reviewed (Tier D approved at a5186cd, Tier A applied), including the consequence that a correction is a supersession and nothing else.
   - Record proposed: up to two in Task_3, one decision each (the form of a belief about a notion; how an application-given belief enters), type chosen by the admission test; the name query and the entity surface are mechanism and stay in this plan. Acceptance pending.
 
 ## Notes
