@@ -1,5 +1,6 @@
 use crate::domain::{
-    DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType,
+    BeliefAssertion, DerivedType, LifecycleDtoValidationError, MemoryId, MemoryObjectRef,
+    ObjectType,
 };
 use crate::errors::VectorIndexingCause;
 use serde::{Deserialize, Serialize};
@@ -201,7 +202,12 @@ pub struct ReplacementDerivedMemoryDraft {
     pub derived_from_episode_ids: Vec<MemoryId>,
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
+    /// The notions this interpreted memory is about (its subjects).
     pub entity_ids: Vec<MemoryId>,
+    /// The character's commitments about subjects in `entity_ids`.
+    pub assertions: Vec<BeliefAssertion>,
+    /// Source-free grounding given by the application; requires at least one notion subject.
+    pub given_by_application: bool,
     pub salience_score: f32,
     pub supersedes: Vec<MemoryId>,
     pub original_source_provenance: SourceProvenanceReference,
@@ -218,6 +224,8 @@ impl ReplacementDerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
+            assertions: Vec::new(),
+            given_by_application: false,
             salience_score: 0.5,
             supersedes: Vec::new(),
             original_source_provenance: SourceProvenanceReference {
@@ -253,8 +261,15 @@ impl ReplacementDerivedMemoryDraft {
             return Err(LifecycleDtoValidationError::EmptyReplacementText);
         }
 
-        if self.derived_from_episode_ids.is_empty() && self.derived_from_observation_ids.is_empty()
-        {
+        let has_sources = !self.derived_from_episode_ids.is_empty()
+            || !self.derived_from_observation_ids.is_empty();
+        crate::domain::belief::validate_belief(
+            &self.entity_ids,
+            has_sources,
+            self.given_by_application,
+            &self.assertions,
+        )?;
+        if !has_sources && !self.given_by_application {
             return Err(LifecycleDtoValidationError::MissingReplacementSource);
         }
 

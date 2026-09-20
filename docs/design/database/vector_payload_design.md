@@ -1,83 +1,56 @@
 # Vector Database Payload Design
 
-> Current contract: [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) supersedes the former denormalized payload-hint inventory with the five-field read contract documented here. [ADR-I-0028](../../decisions/implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md) governs any future prefilter re-entry.
+Qdrant stores semantic candidates for memory content. Oxigraph supplies authoritative content, relationships, provenance, suppression and supersession before a candidate can enter a continuity context pack. The embedded Qdrant Edge adapter and Qdrant service adapter share the same record contract.
 
-This document describes the Qdrant record contract for Character Memory. The record contract is shared by the service adapter and the embedded Qdrant Edge adapter (the default vector store); what differs between them, engine placement, the blocking-owner discipline of the embedded engine, and the adapter-specific behaviour those records name, is documented in ADR-I-0023 and ADR-I-0027, not here. Qdrant is the semantic candidate index, while Oxigraph is the authority for memory content, relationships, provenance, lifecycle state, and currentness.
+Notions (`Entity`) are graph identities. Interpreted memories carry their names, descriptions and assertions, so semantic recall indexes belief text and reaches notions through graph relationships.
 
-A Qdrant hit means that an object may be relevant. Retrieval must hydrate and verify that object through graph authority before it can enter a continuity context pack.
+## Record Fields
 
-## Record Contract
-
-Each Qdrant point carries exactly five payload fields:
+Each emitted point has exactly five payload fields:
 
 | Field | Shape | Purpose |
 |---|---|---|
-| object_id | UUID keyword | Stable vector-to-graph join identity |
-| object_type | closed keyword enum | Canonical memory object kind |
-| surface | closed keyword enum | Semantic surface represented by the vector |
-| schema_version | keyword string | Record compatibility marker |
-| embedding_text | text | Exact natural-language input used to create the vector |
+| `object_id` | UUID keyword | Stable vector-to-graph join identity |
+| `object_type` | Closed keyword enum | Canonical memory object kind |
+| `surface` | Closed keyword enum | Semantic surface represented by the vector |
+| `schema_version` | String | Write-side record compatibility marker |
+| `embedding_text` | Text | Exact input used to create the vector |
 
-The service indexes only object_id and object_type. The other three fields are stored provenance, not prefilter columns.
+The service indexes `object_id` and `object_type`. The remaining fields describe the record; they are not prefilter columns. Readable result content, graph URIs, assertion and grounding data, relationships, lifecycle values, timestamps and raw references are hydrated from Oxigraph.
 
-The record intentionally excludes readable result text, graph URIs, relationships, provenance links, lifecycle/currentness values, ranking values, timestamps, and raw references. Retrieval obtains those values from the graph-authoritative object identified by object_id.
+The [payload writer (`payload.rs:164`)](../../../src/adapters/qdrant/payload.rs#L164) enforces the supported schema marker and emits the five fields. The [candidate reader (`payload.rs:115`)](../../../src/adapters/qdrant/payload.rs#L115) reads `object_id`, `object_type` and `surface`, then combines them with the vector score. It does not read `schema_version`, `embedding_text` or extra payload fields to construct a candidate. Unknown type/surface tokens and malformed IDs fail decoding.
 
-## Indexed Object Types And Surfaces
+## Indexed Objects And Surfaces
 
-The vector-indexed object kinds are:
+| Object type | Surface | Embedding text |
+|---|---|---|
+| `episode` | `summary` | `Episode summary: ` followed by the episode summary |
+| `observation` | `text` | `Observation excerpt: ` followed by observation text |
+| `memory_thread` | `summary` | `Thread summary: ` followed by title and summary |
+| `derived_memory` | `derived_text` | A category label followed by interpreted-memory text |
 
-~~~text
-episode
-observation
-entity
-memory_thread
-derived_memory
-~~~
+Each indexed object has at most one surface. `max_embedding_surfaces` returns zero for `entity` and `memory_link`; neither has an object vector builder. The [embedding builders](../../../src/policy/embedding_surface.rs) define these limits and fold whitespace in the natural-language input. The `query` surface identifies query embeddings rather than stored memory content.
 
-memory_link remains graph-authoritative relationship data and has no embedding surface.
+The closed surface tokens are `summary`, `text`, `derived_text` and `query`. The domain enums own their persisted spelling and parsing. Graph object kinds still include notions and links even though those kinds have no emitted embedding surface.
 
-The public maximum-surfaces policy is colocated with the builders. This release emits at most one surface for each vector-indexed object and zero for memory_link. Publishing that limit lets callers bound recall expansion without guessing from implementation details.
+## Belief Content And Graph Authority
 
-## Natural-Language Embedding Text
+A derived-memory vector represents its `text`. Structured assertions, including `KnownAs`, belong to the graph and are not independently embedded or appended to that text. Their normalized names support graph lookup. The interpreted memory's subject list generates `About` links that allow bounded expansion from recalled content to notion identities.
 
-Embedding text should describe the memory in language a model or user might use later. It must not serialize record metadata.
+Embedding text uses natural language, for example `User preference: Prefer deterministic public facade tests.` Metadata such as `object_type=derived_memory; retention_state=active` belongs outside the semantic input. Retained `embedding_text` supports auditing of vector generation; context content comes from graph hydration.
 
-Good:
+## Indexing And Currency
 
-~~~text
-The user prefers deterministic public facade tests.
-~~~
+Indexing consults incoming graph supersession evidence before embedding interpreted memories. Already-superseded memories are excluded, including when an older plan is replayed. A graph-query failure is reported through the typed vector-indexing repair outcome; it does not permit unverified re-indexing. The [indexing service (`vector_indexing.rs:36`)](../../../src/usecases/vector_indexing.rs#L36) owns this admission check.
 
-Bad:
+Record embeddings with zero norm are rejected before the adapter call, and dimensions must match the configured store. Query embeddings must satisfy the same cosine-search constraints. A successor derives `Supersedes` links from its predecessor list and schedules predecessor-vector deletion. If deletion fails, graph supersession still excludes those predecessors from default retrieval and the write outcome reports the maintenance failure.
 
-~~~text
-object_type=derived_memory; retention_state=active; confidence=0.82
-~~~
+Retention has two values, `active` and `suppressed`. Retrieval independently controls inclusion of suppressed and superseded memories through `include_suppressed` and `include_superseded`; vector payloads carry neither decision. Historical graph expansion may reach a superseded memory even when its vector has been removed.
 
-The first supports semantic recall. The second trains similarity on storage vocabulary rather than memory meaning.
+## Failure And Recovery Boundaries
 
-embedding_text is retained so an operator can audit what produced a vector. It is not read-out content. Prompt-ready content is hydrated from graph authority.
+Graph commits remain authoritative when subsequent vector or stats maintenance fails. Typed outcomes identify affected objects and repair causes. A graph-only object has reduced semantic recall until indexing is repaired; a stale or orphaned point must pass graph existence and lifecycle checks before context inclusion.
 
-## Typed Tokens
+The library does not run cross-store reconciliation or provide a stats-rebuild operation. Callers manage repair and recovery. A graph-derived prefilter may be introduced only under the completeness and synchronization requirements in [ADR-I-0028](../../decisions/implementation/ADR-I-0028-vector-prefilters-require-fully-populated-current-columns-and-never-match-unknown.md).
 
-object_type and surface are closed vocabularies. Their persisted spellings are owned by the domain enums through one Display and one FromStr implementation per enum. Adapters must not maintain independent token tables.
-
-Unknown tokens fail candidate decoding. This prevents a new producer variant from being silently accepted or mapped to the wrong meaning.
-
-## Consistency And Migration
-
-Graph writes may succeed while vector maintenance fails. Public outcomes therefore report typed vector-indexing failures, and retrieval always verifies vector candidates against current graph state.
-
-The five-field change does not bump schema_version. Existing points may still contain obsolete extra fields; readers ignore those fields, and new writes emit only the five-field contract. No in-place payload migration is required. A rebuild from graph authority removes old extras naturally.
-
-A future change that alters the meaning or required interpretation of the five fields must use the repository's schema-version policy. A graph-derived prefilter column must be fully populated for every searchable record, including any required backfill before enablement, and must either be immutable or be synchronised by every write path; unknown values never match.
-
-## Indexing Admission
-
-The write-side indexing service rejects a zero-norm record embedding before calling the Qdrant adapter. The failure identifies the affected memory object through the public typed indexing-cause contract. This mirrors the query-side rule that cosine search must not receive a zero-norm query.
-
-## Failure Handling
-
-- Write side: the indexing service rejects a zero-norm embedding before the adapter is called, and a vector write that fails after the graph commit is reported as a typed vector-indexing failure in the public outcome, naming the affected objects and the cause.
-- Read side: a point whose object_id is not a well-formed identifier or whose object_type or surface token is unknown fails candidate decoding; the schema version is enforced when a record is written, not when a point is read. Every decoded candidate is verified through graph authority before it can enter a context pack, which omits points whose object is absent and, under the default lifecycle policy, points whose object is no longer current; the public retrieval policy can opt into non-current objects for historical retrieval.
-- No reconciliation pass exists in the library; obsolete extra payload fields on old points are not read and are not treated as authority.
+See [ADR-I-0025](../../decisions/implementation/ADR-I-0025-vector-record-is-a-read-contract.md) for the vector-record decision, the [graph schema design](graph_schema_design.md) for belief and lifecycle authority, and the [schema cheat sheet](schema_cheat_sheet.md) for a compact field inventory.

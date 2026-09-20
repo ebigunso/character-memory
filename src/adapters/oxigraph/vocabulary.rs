@@ -29,9 +29,6 @@ pub(crate) const SPEAKER_ENTITY: &str = "urn:cmem:vocab:speakerEntity";
 pub(crate) const OBSERVED_AT: &str = "urn:cmem:vocab:observedAt";
 pub(crate) const TEXT: &str = "urn:cmem:vocab:text";
 
-pub(crate) const ENTITY_TYPE: &str = "urn:cmem:vocab:entityType";
-pub(crate) const NAME: &str = "urn:cmem:vocab:name";
-pub(crate) const ALIAS: &str = "urn:cmem:vocab:alias";
 pub(crate) const CANONICAL_KEY: &str = "urn:cmem:vocab:canonicalKey";
 
 pub(crate) const TITLE: &str = "urn:cmem:vocab:title";
@@ -54,3 +51,10 @@ pub(crate) const RATIONALE: &str = "urn:cmem:vocab:rationale";
 pub(crate) fn relation_predicate(name: &str) -> String {
     format!("urn:cmem:relation:{name}")
 }
+
+pub(crate) const ASSERTION: &str = "urn:cmem:vocab:assertion";
+pub(crate) const ASSERTION_SUBJECT: &str = "urn:cmem:vocab:assertionSubject";
+pub(crate) const ASSERTION_PREDICATE: &str = "urn:cmem:vocab:assertionPredicate";
+pub(crate) const ASSERTION_NAME: &str = "urn:cmem:vocab:assertionName";
+pub(crate) const NORMALIZED_NAME: &str = "urn:cmem:vocab:normalizedName";
+pub(crate) const GIVEN_BY_APPLICATION: &str = "urn:cmem:vocab:givenByApplication";

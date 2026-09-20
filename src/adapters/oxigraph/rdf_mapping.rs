@@ -233,27 +233,11 @@ fn entity_triples(entity: &Entity) -> Vec<RdfTriple> {
         vocab::CLASS_ENTITY,
         &entity.schema_version,
     );
-    triples.extend([
-        RdfTriple::literal(&subject, vocab::ENTITY_TYPE, enum_value(entity.entity_type)),
-        RdfTriple::literal(&subject, vocab::NAME, entity.name.clone()),
-        RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(entity.created_at)),
-        RdfTriple::literal(&subject, vocab::UPDATED_AT, timestamp(entity.updated_at)),
-    ]);
-    for alias in &entity.aliases {
-        triples.push(RdfTriple::literal(&subject, vocab::ALIAS, alias.clone()));
-    }
-    push_optional_literal(
-        &mut triples,
+    triples.push(RdfTriple::literal(
         &subject,
-        vocab::CANONICAL_KEY,
-        entity.canonical_key.as_deref(),
-    );
-    push_optional_literal(
-        &mut triples,
-        &subject,
-        vocab::SUMMARY,
-        entity.summary.as_deref(),
-    );
+        vocab::CREATED_AT,
+        timestamp(entity.created_at),
+    ));
     triples
 }
 
@@ -348,6 +332,38 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
             vocab::ABOUT_ENTITY,
             graph_uri(ObjectType::Entity, *id),
         ));
+    }
+    triples.push(RdfTriple::literal(
+        &subject,
+        vocab::GIVEN_BY_APPLICATION,
+        memory.given_by_application.to_string(),
+    ));
+    for (index, assertion) in memory.assertions.iter().enumerate() {
+        // The ordinal preserves authored list order, including repeated assertions, on replay.
+        let assertion_node = format!("{subject}:assertion:{index:020}");
+        triples.push(RdfTriple::resource(
+            &subject,
+            vocab::ASSERTION,
+            &assertion_node,
+        ));
+        triples.push(RdfTriple::resource(
+            &assertion_node,
+            vocab::ASSERTION_SUBJECT,
+            graph_uri(ObjectType::Entity, assertion.subject),
+        ));
+        match &assertion.predicate {
+            crate::domain::BeliefPredicate::KnownAs { name } => {
+                triples.extend([
+                    RdfTriple::literal(&assertion_node, vocab::ASSERTION_PREDICATE, "known_as"),
+                    RdfTriple::literal(&assertion_node, vocab::ASSERTION_NAME, name),
+                    RdfTriple::literal(
+                        &assertion_node,
+                        vocab::NORMALIZED_NAME,
+                        crate::domain::belief::normalize_name(name),
+                    ),
+                ]);
+            }
+        }
     }
     for id in &memory.supersedes {
         triples.push(RdfTriple::resource(

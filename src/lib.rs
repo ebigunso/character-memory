@@ -50,10 +50,10 @@ pub use crate::config::{
     GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
 };
 pub use crate::domain::{
-    graph_uri, CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
-    CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
-    CandidateValidationIssue, CandidateValidationStatus, DerivedMemory, DerivedType,
-    DomainValidationError, Entity, EntityType, Episode, GraphExpansionBoundedFailureTrace,
+    graph_uri, BeliefAssertion, BeliefPredicate, BeliefValidationError, CandidateProvenanceIssue,
+    CandidateReferenceRole, CandidateScoreField, CandidateSourceSpanIssue, CandidateTimestampField,
+    CandidateValidation, CandidateValidationIssue, CandidateValidationStatus, DerivedMemory,
+    DerivedType, DomainValidationError, Entity, Episode, GraphExpansionBoundedFailureTrace,
     GraphExpansionBoundedReason, GraphFailureMode, LifecycleDtoValidationError,
     MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef,
     MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,

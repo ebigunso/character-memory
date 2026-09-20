@@ -97,6 +97,50 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_object_refs(&select_query)
     }
 
+    #[allow(
+        dead_code,
+        reason = "the scene slice will consume exact-name notion cues"
+    )]
+    pub(crate) fn select_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, CustomError> {
+        let normalized = crate::domain::belief::normalize_name(name);
+        if normalized.is_empty() {
+            return Ok(Vec::new());
+        }
+        let name_value = sparql_literal_values("name", [normalized].into_iter());
+        let query = format!(
+            r#"
+            SELECT DISTINCT ?id WHERE {{
+              {name_value}
+              GRAPH ?beliefGraph {{
+                ?belief a <{derived_class}> ; <{retention}> "active" ; <{assertion}> ?assertion .
+                ?assertion <{predicate}> "known_as" ; <{normalized_name}> ?name ; <{subject}> ?notion .
+              }}
+              GRAPH ?notionGraph {{ ?notion a <{entity_class}> ; <{object_id}> ?id . }}
+              FILTER NOT EXISTS {{
+                GRAPH ?linkGraph {{
+                  ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
+                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ; <{to}> ?belief .
+                }}
+              }}
+            }}
+        "#,
+            derived_class = vocab::CLASS_DERIVED_MEMORY,
+            retention = vocab::RETENTION_STATE,
+            assertion = vocab::ASSERTION,
+            predicate = vocab::ASSERTION_PREDICATE,
+            normalized_name = vocab::NORMALIZED_NAME,
+            subject = vocab::ASSERTION_SUBJECT,
+            entity_class = vocab::CLASS_ENTITY,
+            object_id = vocab::OBJECT_ID,
+            link_class = vocab::CLASS_MEMORY_LINK,
+            from_type = vocab::FROM_TYPE,
+            to_type = vocab::TO_TYPE,
+            relation = vocab::RELATION,
+            to = vocab::TO,
+        );
+        self.select_memory_ids(&query, None)
+    }
+
     pub(crate) fn select_derived_memories_by_provenance(
         &self,
         query: &GraphDerivedMemoryProvenanceQuery,

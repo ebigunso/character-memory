@@ -124,10 +124,6 @@ impl RdfSubjectValues {
             .cloned()
     }
 
-    fn literal_values(&self, predicate: &'static str) -> Vec<String> {
-        self.literals.get(predicate).cloned().unwrap_or_default()
-    }
-
     fn resource(&self, subject: &str, predicate: &'static str) -> Result<String, CustomError> {
         self.resources
             .get(predicate)
@@ -157,6 +153,7 @@ pub(super) fn hydrate_objects_by_refs_from_store(
                 &subject,
                 values,
                 object_ref.object_type,
+                &subjects,
             )?);
         }
     }
@@ -286,6 +283,7 @@ pub(super) fn memory_object_from_rdf(
     subject: &str,
     values: &RdfSubjectValues,
     object_type: ObjectType,
+    subjects: &HashMap<String, RdfSubjectValues>,
 ) -> Result<MemoryObject, CustomError> {
     match object_type {
         ObjectType::Episode => Ok(MemoryObject::Episode(Episode {
@@ -329,13 +327,7 @@ pub(super) fn memory_object_from_rdf(
         ObjectType::Entity => Ok(MemoryObject::Entity(Entity {
             id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
             object_type,
-            entity_type: enum_literal(subject, values, super::vocabulary::ENTITY_TYPE)?,
-            name: values.literal(subject, super::vocabulary::NAME)?,
-            aliases: values.literal_values(super::vocabulary::ALIAS),
-            canonical_key: values.optional_literal(super::vocabulary::CANONICAL_KEY),
-            summary: values.optional_literal(super::vocabulary::SUMMARY),
             created_at: timestamp_literal(subject, values, super::vocabulary::CREATED_AT)?,
-            updated_at: timestamp_literal(subject, values, super::vocabulary::UPDATED_AT)?,
             schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
         })),
         ObjectType::MemoryThread => Ok(MemoryObject::MemoryThread(MemoryThread {
@@ -359,6 +351,13 @@ pub(super) fn memory_object_from_rdf(
             id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
             object_type,
             derived_type: enum_literal(subject, values, super::vocabulary::DERIVED_TYPE)?,
+            assertions: belief_assertions_from_rdf(values, subjects)?,
+            given_by_application: values
+                .literal(subject, super::vocabulary::GIVEN_BY_APPLICATION)?
+                .parse::<bool>()
+                .map_err(|error| {
+                    rdf_parse_error(subject, super::vocabulary::GIVEN_BY_APPLICATION, error)
+                })?,
             text: values.literal(subject, super::vocabulary::TEXT)?,
             derived_from_episode_ids: memory_ids_from_resources(
                 values.resource_values(super::vocabulary::DERIVED_FROM_EPISODE),
@@ -385,6 +384,34 @@ pub(super) fn memory_object_from_rdf(
             subject, values,
         )?)),
     }
+}
+
+fn belief_assertions_from_rdf(
+    values: &RdfSubjectValues,
+    subjects: &HashMap<String, RdfSubjectValues>,
+) -> Result<Vec<crate::domain::BeliefAssertion>, CustomError> {
+    use super::vocabulary as vocab;
+    let mut nodes = values.resource_values(vocab::ASSERTION);
+    nodes.sort();
+    nodes
+        .into_iter()
+        .map(|node| {
+            let values = subjects
+                .get(&node)
+                .ok_or_else(|| missing_rdf_value(&node, vocab::ASSERTION))?;
+            let predicate = serde_json::from_value(serde_json::json!({
+                "predicate": values.literal(&node, vocab::ASSERTION_PREDICATE)?,
+                "name": values.literal(&node, vocab::ASSERTION_NAME)?,
+            }))
+            .map_err(|error| rdf_parse_error(&node, vocab::ASSERTION_PREDICATE, error))?;
+            Ok(crate::domain::BeliefAssertion {
+                subject: memory_id_from_resource(
+                    &values.resource(&node, vocab::ASSERTION_SUBJECT)?,
+                )?,
+                predicate,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn memory_link_from_rdf(

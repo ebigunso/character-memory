@@ -28,7 +28,7 @@ use crate::ports::graph_authority::{
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
-use crate::usecases::write_planning::{deterministic_uuid, supersession_links};
+use crate::usecases::write_planning::{derived_memory_links, deterministic_uuid};
 use crate::usecases::{StatsProjectionService, VectorIndexingService};
 
 pub(crate) struct CorrectionForgetPipeline<'a, G, V, E>
@@ -93,6 +93,11 @@ where
             .cloned()
             .collect::<Vec<_>>();
         if !graph_objects.is_empty() || !graph_links.is_empty() {
+            let existing_links = self
+                .graph_store
+                .query_links_by_ids(&graph_links.iter().map(|link| link.id).collect::<Vec<_>>())
+                .await?;
+            crate::usecases::link::reject_divergent_links(&graph_links, &existing_links)?;
             self.graph_store
                 .upsert_objects_and_links(&graph_objects, &graph_links)
                 .await?;
@@ -236,6 +241,13 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        for memory in &replacement_memories {
+            for subject in &memory.entity_ids {
+                self.fetch_one(MemoryObjectRef::new(ObjectType::Entity, *subject))
+                    .await?;
+            }
+        }
+
         let graph_objects = replacement_memories
             .iter()
             .cloned()
@@ -243,10 +255,11 @@ where
             .collect::<Vec<_>>();
         let graph_links = replacement_memories
             .iter()
-            .flat_map(supersession_links)
+            .flat_map(derived_memory_links)
             .collect::<Vec<_>>();
         let mut superseded_ids = graph_links
             .iter()
+            .filter(|link| link.relation == crate::domain::RelationType::Supersedes)
             .map(|link| link.to_id)
             .collect::<Vec<_>>();
         sort_dedup(&mut superseded_ids);
@@ -267,6 +280,7 @@ where
             requested_targets,
             superseded_by: graph_links
                 .iter()
+                .filter(|link| link.relation == crate::domain::RelationType::Supersedes)
                 .map(|link| SupersededByEvidence {
                     superseded_memory_id: link.to_id,
                     superseded_by_memory_id: link.from_id,
@@ -757,6 +771,8 @@ fn replacement_drafts_or_default(
                     .iter()
                     .flat_map(|memory| memory.thread_ids.clone()),
             ),
+            assertions: Vec::new(),
+            given_by_application: false,
             entity_ids: stable_union(
                 superseded
                     .iter()
@@ -795,7 +811,8 @@ fn replacement_drafts_or_default(
             &mut replacement.derived_from_observation_ids,
             &draft.correction_origin,
         );
-        if replacement.derived_from_episode_ids.is_empty()
+        if !replacement.given_by_application
+            && replacement.derived_from_episode_ids.is_empty()
             && replacement.derived_from_observation_ids.is_empty()
         {
             replacement
@@ -819,6 +836,14 @@ fn replacement_drafts_or_default(
         sort_dedup(&mut replacement.thread_ids);
         sort_dedup(&mut replacement.entity_ids);
         sort_dedup(&mut replacement.supersedes);
+        if draft.replacement_derived_memories.is_empty()
+            && !superseded.is_empty()
+            && superseded.iter().all(|memory| memory.given_by_application)
+            && replacement.derived_from_episode_ids.is_empty()
+            && replacement.derived_from_observation_ids.is_empty()
+        {
+            return Err(crate::domain::LifecycleDtoValidationError::MissingGivenReplacement.into());
+        }
         replacement.validate()?;
     }
 
@@ -840,6 +865,8 @@ fn replacement_memory(
         derived_from_observation_ids: draft.derived_from_observation_ids,
         thread_ids: draft.thread_ids,
         entity_ids: draft.entity_ids,
+        assertions: draft.assertions,
+        given_by_application: draft.given_by_application,
         salience_score: draft.salience_score,
         supersedes: draft.supersedes,
         retention_state: RetentionState::Active,
@@ -1157,7 +1184,11 @@ mod tests {
             let fixtures = representative_fixtures();
             let graph = in_memory_graph_store();
             graph
-                .upsert_objects(&[MemoryObject::Episode(fixtures.episode.clone())])
+                .upsert_objects(&[
+                    MemoryObject::Episode(fixtures.episode.clone()),
+                    MemoryObject::Entity(fixtures.user_entity.clone()),
+                    MemoryObject::Entity(fixtures.assistant_entity.clone()),
+                ])
                 .await
                 .unwrap();
             let vector = OneShotDeleteFailingVectorStore::new().await;
@@ -1234,7 +1265,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(outcome.persisted_object_ids, vec![successor_id]);
-            assert_eq!(outcome.persisted_link_ids.len(), 1);
+            assert_eq!(outcome.persisted_link_ids.len(), 2);
             assert!(outcome.vector_indexing_failure.is_none());
             assert!(
                 matches!(outcome.repair_needed.as_slice(), [RepairMarker::VectorMaintenance { failure }]
@@ -1768,7 +1799,13 @@ mod tests {
         let entity_id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8301);
         let mut old = old_memory(&ids);
         old.entity_ids = vec![entity_id];
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old)]).await;
+        let mut notion = representative_fixtures().user_entity;
+        notion.id = entity_id;
+        let graph = RecordingGraphStore::new(vec![
+            MemoryObject::DerivedMemory(old),
+            MemoryObject::Entity(notion),
+        ])
+        .await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let stats = OneShotEdgeFailingStatsStore::new();
@@ -1971,7 +2008,8 @@ mod tests {
             MemoryObjectRef::new(ObjectType::DerivedMemory, ids.replacement),
         ];
         let link_id =
-            supersession_links(&current_replacement_from(&old_memory(ids), ids.replacement))[0].id;
+            derived_memory_links(&current_replacement_from(&old_memory(ids), ids.replacement))[0]
+                .id;
         let objects_before = graph
             .query_objects(&GraphObjectQuery::by_refs(object_refs.clone()))
             .await
@@ -2591,7 +2629,7 @@ mod tests {
         objects.push(MemoryObject::DerivedMemory(current_replacement.clone()));
         graph.upsert_objects(&objects).await.unwrap();
         let mut links = fixtures.links();
-        links.extend(supersession_links(&current_replacement));
+        links.extend(derived_memory_links(&current_replacement));
         graph.upsert_links(&links).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
@@ -2646,7 +2684,7 @@ mod tests {
         objects.push(MemoryObject::DerivedMemory(current_replacement.clone()));
         graph.upsert_objects(&objects).await.unwrap();
         let mut links = fixtures.links();
-        links.extend(supersession_links(&current_replacement));
+        links.extend(derived_memory_links(&current_replacement));
         graph.upsert_links(&links).await.unwrap();
         let vector = TemporaryVectorCandidateStore::open(4).await;
         let embedder = DeterministicMemoryEmbedder::new(4);
@@ -3152,6 +3190,8 @@ mod tests {
 
     fn old_memory(ids: &FixedIds) -> DerivedMemory {
         DerivedMemory {
+            assertions: Vec::new(),
+            given_by_application: false,
             id: ids.old,
             object_type: ObjectType::DerivedMemory,
             derived_type: DerivedType::UserPreference,
@@ -3303,6 +3343,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_notions_known_as(
+            &self,
+            name: &str,
+        ) -> Result<Vec<MemoryId>, crate::errors::GraphQueryError> {
+            self.store.query_notions_known_as(name).await
+        }
+
         async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
             lock(&self.calls).push(StoreCall::GraphObjects(
                 objects.iter().map(MemoryObject::id).collect(),

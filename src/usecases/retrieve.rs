@@ -19,7 +19,7 @@ use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
 use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
-    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
+    selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 use crate::ports::embedder::MemoryEmbedder;
@@ -111,7 +111,7 @@ where
             Some(
                 SelectivityStatsContext::load_with_scope(
                     self.stats_store,
-                    &context.object_type_defaults,
+                    &context.graph_limits.allowed_object_types,
                     &context.graph_limits.allowed_relation_types,
                 )
                 .await?,
@@ -121,9 +121,13 @@ where
         };
 
         for candidate in &candidate_roots {
-            let selectivity_plan = if let Some(stats_context) = &selectivity_stats_context {
-                selectivity_plan_for_candidate(
-                    candidate,
+            let selectivity_plan = if let Some(stats_context) = selectivity_stats_context
+                .as_ref()
+                .filter(|_| candidate.object_type == ObjectType::Entity)
+            {
+                selectivity_plan_for_entity(
+                    candidate.object_id,
+                    candidate.score,
                     context.graph_limits.max_fanout_per_node,
                     self.stats_store,
                     self.selectivity_policy,
@@ -1046,7 +1050,7 @@ fn graph_query_for_candidate(
         context.graph_limits.max_depth,
         context.graph_limits.max_nodes,
     )
-    .with_allowed_object_types(context.object_type_defaults.clone())
+    .with_allowed_object_types(context.graph_limits.allowed_object_types.clone())
     .with_allowed_relation_types(context.graph_limits.allowed_relation_types.clone())
     .with_fanout_overrides(fanout_overrides)
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
@@ -1646,7 +1650,7 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(2).await;
         seed(
             &vector,
-            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
             0.0,
         )
         .await;
@@ -1684,14 +1688,6 @@ mod tests {
     async fn entity_neutral_selectivity_rejects_low_selectivity_concept_entity_about_expansion() {
         let fixture = high_fanout_graph_fixture();
         let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::Entity(fixture.hub_entity.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let stats = InMemoryRetrievalStatsStore::new();
         record_about_edges(
             &stats,
@@ -1703,42 +1699,49 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .await;
-        let pipeline = RetrievePipeline::new_with_stats(
-            &graph,
-            &vector,
-            &embedder,
+
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let plan = selectivity_plan_for_entity(
+            fixture.hub_entity.id,
+            1.0,
+            16,
             &stats,
             RetrievalSelectivityPolicy::default(),
-        );
-
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("broad hub").with_trace())
+            &stats_context,
+            crate::api::types::RetrievalLifecyclePolicy::default(),
+            TraceMode::Enabled,
+        )
+        .await
+        .unwrap();
+        let expansion = graph
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
+                    .with_fanout_overrides(plan.fanout_overrides)
+                    .with_fanout_utilization_recording(TraceMode::Enabled),
+            )
             .await
             .unwrap();
-
-        assert!(outcome.pack.derived_memories.is_empty());
-        assert!(outcome
-            .trace
-            .as_ref()
-            .unwrap()
-            .selectivity_decisions
+        assert!(plan
+            .traces
             .iter()
-            .any(|decision| {
-                decision.relation == RelationType::About
-                    && decision.object_type == ObjectType::DerivedMemory
-                    && decision.chosen_fanout == 0
-                    && decision.decision
-                        == crate::api::types::SelectivityDecision::LowSelectivityRejected
-            }));
-        let fanout_utilization = &outcome.trace.as_ref().unwrap().fanout_utilization;
-        assert!(fanout_utilization.iter().any(|entry| {
-            entry.root.id == fixture.hub_entity.id
+            .any(|decision| decision.relation == RelationType::About
+                && decision.object_type == ObjectType::DerivedMemory
+                && decision.chosen_fanout == 0
+                && decision.decision
+                    == crate::api::types::SelectivityDecision::LowSelectivityRejected));
+        assert!(!expansion
+            .objects
+            .iter()
+            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
+        assert!(expansion
+            .fanout_utilization
+            .iter()
+            .any(|entry| entry.root.id == fixture.hub_entity.id
                 && entry.relation == RelationType::About
                 && entry.object_type == ObjectType::DerivedMemory
                 && entry.selected_cap == 0
                 && entry.retained_count == 0
-                && entry.omitted_by_fanout_count > 0
-        }));
+                && entry.omitted_by_fanout_count > 0));
     }
 
     #[tokio::test]
@@ -1779,14 +1782,6 @@ mod tests {
     async fn selectivity_allows_high_selectivity_entity_about_expansion() {
         let fixture = high_fanout_graph_fixture();
         let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::Entity(fixture.hub_entity.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let stats = InMemoryRetrievalStatsStore::new();
         record_about_edges(
             &stats,
@@ -1795,36 +1790,40 @@ mod tests {
         )
         .await;
         record_other_about_edges(&stats, 80).await;
-        let pipeline = RetrievePipeline::new_with_stats(
-            &graph,
-            &vector,
-            &embedder,
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+        let plan = selectivity_plan_for_entity(
+            fixture.hub_entity.id,
+            1.0,
+            16,
             &stats,
             RetrievalSelectivityPolicy::default(),
-        );
-
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("specific hub").with_trace())
+            &stats_context,
+            crate::api::types::RetrievalLifecyclePolicy::default(),
+            TraceMode::Enabled,
+        )
+        .await
+        .unwrap();
+        let expansion = graph
+            .expand_bounded(
+                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
+                    .with_fanout_overrides(plan.fanout_overrides)
+                    .with_fanout_utilization_recording(TraceMode::Enabled),
+            )
             .await
             .unwrap();
-
-        assert!(!outcome.pack.derived_memories.is_empty());
-        assert!(
-            outcome
-                .rationale
-                .telemetry
-                .selectivity
-                .high_selectivity_count
-                > 0
-        );
-        let trace = outcome.trace.as_ref().unwrap();
-        assert!(trace.fanout_utilization.iter().any(|entry| {
-            entry.root.id == fixture.hub_entity.id
+        assert!(plan.telemetry.high_selectivity_count > 0);
+        assert!(expansion
+            .objects
+            .iter()
+            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
+        assert!(expansion
+            .fanout_utilization
+            .iter()
+            .any(|entry| entry.root.id == fixture.hub_entity.id
                 && entry.relation == RelationType::About
                 && entry.object_type == ObjectType::DerivedMemory
                 && entry.selected_cap <= entry.configured_cap
-                && entry.retained_count > 0
-        }));
+                && entry.retained_count > 0));
     }
 
     #[test]
@@ -2714,7 +2713,7 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(2).await;
         seed(
             &vector,
-            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
             0.0,
         )
         .await;
@@ -2757,7 +2756,7 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(2).await;
         seed(
             &vector,
-            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
             0.0,
         )
         .await;
@@ -3012,7 +3011,7 @@ mod tests {
         let vector = TemporaryVectorCandidateStore::open(2).await;
         seed(
             &vector,
-            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
             0.0,
         )
         .await;
@@ -3043,7 +3042,7 @@ mod tests {
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
         assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
         assert!(trace.graph_expansions.iter().any(|expansion| {
-            expansion.root.id == fixtures.hub_entity.id && expansion.object_count > 0
+            expansion.root.id == fixtures.derived_reflection.id && expansion.object_count > 0
         }));
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.episode.id
@@ -3051,7 +3050,10 @@ mod tests {
                 && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
         }));
         assert_eq!(trace.vector_candidates.len(), 1);
-        assert_eq!(trace.vector_candidates[0].object.id, fixtures.hub_entity.id);
+        assert_eq!(
+            trace.vector_candidates[0].object.id,
+            fixtures.derived_reflection.id
+        );
         assert_eq!(
             trace
                 .section_assignments
@@ -3308,6 +3310,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
+        async fn query_notions_known_as(
+            &self,
+            _name: &str,
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            unreachable!("this test never queries names")
+        }
+
         async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
             Ok(())
         }

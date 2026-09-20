@@ -1,390 +1,105 @@
 # Graph Database Schema Design
 
-This document describes the Oxigraph/RDF graph schema design for Character Memory. It focuses on why the graph is shaped this way, not on exhaustively restating the Rust mapping code.
+Oxigraph is the authority for memory identity, content, relationships, provenance, suppression and supersession. Vector storage recalls content candidates; graph hydration and bounded expansion decide which memories enter retrieved context.
 
-The graph store is the authority for memory objects, relationships, provenance, lifecycle state, currentness, and bounded expansion. Qdrant can suggest candidates, but Oxigraph decides what those candidates mean and whether they belong in retrieved context.
+An `Entity` represents a notion: an identity that memories can be about. A `DerivedMemory` is an interpreted memory or belief whose text, subjects and optional assertions carry the character's commitments. These are separate graph objects so names and other beliefs can change while the notion keeps its identity.
 
-## Design Goal
+## Identity And Durable Storage
 
-Character Memory needs more than a ranked list of text snippets. It needs to answer continuity questions:
+Each canonical object or link has a UUID and a deterministic resource URI:
 
-```text
-What happened?
-Who or what was involved?
-Which memories came from this episode?
-Which memories are current?
-Which memories were corrected or suppressed?
-What nearby context should travel with this candidate?
-```
+| Domain object | Resource URI | RDF class |
+|---|---|---|
+| `Episode` | `urn:cmem:episode:<uuid>` | `urn:cmem:vocab:Episode` |
+| `Observation` | `urn:cmem:observation:<uuid>` | `urn:cmem:vocab:Observation` |
+| `Entity` | `urn:cmem:entity:<uuid>` | `urn:cmem:vocab:Entity` |
+| `MemoryThread` | `urn:cmem:thread:<uuid>` | `urn:cmem:vocab:MemoryThread` |
+| `DerivedMemory` | `urn:cmem:derived-memory:<uuid>` | `urn:cmem:vocab:DerivedMemory` |
+| `MemoryLink` | `urn:cmem:link:<uuid>` | `urn:cmem:vocab:MemoryLink` |
 
-Those questions are graph questions. The schema therefore prioritizes stable identity, typed object boundaries, inspectable links, lifecycle filtering, and bounded traversal.
+RDF named graphs store the authoritative representation. Common identity literals are `objectId`, `objectType`, `graphUri` and `schemaVersion`; timestamps belong to the object types that declare them. All predicate names below use the `urn:cmem:vocab:` namespace unless a relation URI is shown explicitly. The [RDF vocabulary](../../../src/adapters/oxigraph/vocabulary.rs) and [mapping](../../../src/adapters/oxigraph/rdf_mapping.rs) define the persisted spellings.
 
-## Backend Boundary
+Hydration reconstructs domain objects and links from the selected RDF named graphs. It does not require a process-local object cache or vector payload content. Raw transcripts remain in caller-owned storage; `rawRef` is a pointer to source material.
 
-Oxigraph is the graph authority regardless of backing adapter. This schema document describes authority and hydration boundaries only; operational setup belongs outside the schema reference.
+## Experiences, Notions And Threads
 
-Graph reads should hydrate only the named graphs needed for the current object query, provenance lookup, thread lookup, bounded expansion, or diagnostic category. They should not snapshot all named graphs into the application process for ordinary retrieval.
+Episodes record interaction spans with `summary`, `modality`, optional source and time metadata, `participantEntity` references, salience and retention. Observations record `text` tied to an `episode`, with observation time, an optional `speakerEntity` and an optional raw reference. Dedicated source references keep experience-based provenance queryable.
 
-The public domain model does not expose Oxigraph types. Domain objects are mapped into RDF at the infrastructure edge. This keeps the public API stable if the backing graph implementation changes later.
+A notion stores only its identity, `createdAt` and schema metadata. Its names and descriptions are carried by interpreted memories about it. Multiple notions may share a name, and one notion may have multiple naming beliefs.
 
-Raw transcript storage remains outside the graph boundary in v0.1. The graph may carry source pointers, but production raw storage is caller-owned/deferred and raw-reference resolution is not a public graph API.
+Threads are continuity overlays with `title`, `summary`, `threadStatus`, `lastTouchedAt`, `salienceScore`, optional `canonicalKey`, and creation/update timestamps. The status vocabulary is `active`, `dormant` and `resolved`. Memory membership is represented by `partOfThread` references or typed links. Suppressing thread members preserves the thread object and its retrieval surface.
 
-## Identity Model
+## Beliefs And Grounding
 
-Every graph resource uses a deterministic URI derived from object type and UUID:
+A `DerivedMemory` stores `derivedType`, `text`, `salienceScore`, `retentionState`, creation/update timestamps, and these reference lists:
 
-```text
-urn:cmem:episode:<uuid>
-urn:cmem:observation:<uuid>
-urn:cmem:entity:<uuid>
-urn:cmem:thread:<uuid>
-urn:cmem:derived-memory:<uuid>
-urn:cmem:link:<uuid>
-```
+| Domain field | RDF predicate | Meaning |
+|---|---|---|
+| `derived_from_episode_ids` | `derivedFromEpisode` | Source episodes |
+| `derived_from_observation_ids` | `derivedFromObservation` | Source observations |
+| `thread_ids` | `partOfThread` | Continuity threads |
+| `entity_ids` | `aboutEntity` | Notion subjects |
+| `supersedes` | `supersedes` | Older interpreted memories replaced by this memory |
 
-The graph also stores the UUID, object type, graph URI, and schema version as literal properties.
+An interpreted memory either cites at least one episode or observation, or declares `given_by_application=true`. The latter is persisted as `givenByApplication`, requires at least one notion subject, and excludes experience source references. Application-given beliefs carry application-supplied grounding without inventing an experience. Corrections of such beliefs require an explicit replacement with its grounding declared.
 
-This is redundant inside the graph representation by design. The URI is efficient for graph edges, while the literal fields make debugging and migration checks easier. Qdrant carries `object_id`; retrieval uses that stable identity to hydrate graph truth without duplicating the graph URI in vector payloads.
+The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
 
-## Object Classes
+### Assertions And Name Lookup
 
-The graph uses one RDF class per canonical memory object:
+Assertions record commitments the character holds about a memory's notion subjects. Reported claims and doubts can remain text without assertions. Every assertion subject must appear in the containing memory's `entity_ids`.
 
-```text
-Episode
-Observation
-Entity
-MemoryThread
-DerivedMemory
-MemoryLink
-```
-
-This object-backed graph is the core philosophical choice. Episodes, observations, and derived memories are different kinds of memory evidence. They should not collapse into one generic note because correction, provenance, and retrieval policy need to treat them differently.
-
-## Relationship Strategy
-
-The graph stores relationships in two forms:
-
-1. Direct typed relation triples between resources.
-2. Reified `MemoryLink` resources that preserve link identity, endpoint types, confidence, rationale, and creation time.
-
-The direct triples make traversal simple:
+The supported assertion predicate is `KnownAs { name }`, persisted as `known_as`. An assertion is represented by a resource beneath its containing memory:
 
 ```text
-<derived-memory> urn:cmem:relation:derived_from <episode>
-<derived-memory> urn:cmem:relation:part_of_thread <thread>
+<memory> assertion <memory>:assertion:<zero-padded ordinal>
+<assertion> assertionSubject <notion>
+<assertion> assertionPredicate "known_as"
+<assertion> assertionName "Alice"
+<assertion> normalizedName "alice"
 ```
 
-The reified `MemoryLink` object keeps the relationship inspectable as domain data:
-
-```text
-<link> from <derived-memory>
-<link> to <thread>
-<link> relation "part_of_thread"
-<link> confidence "0.9"
-<link> rationale "..."
-```
-
-This dual representation avoids a bad tradeoff. Direct triples alone are easy to traverse but lose link metadata. Reified links alone preserve metadata but make common traversal heavier. Keeping both gives retrieval fast graph expansion and keeps explanations auditable.
-
-## Provenance Shape
-
-Derived memories carry explicit provenance edges to episodes and observations:
-
-```text
-derivedFromEpisode
-derivedFromObservation
-```
-
-This is intentionally narrower than a generic "source" blob. Corrections and forget operations need to find derived memories affected by a source episode or source observation. Dedicated provenance predicates make that query direct and keep source-cascade behavior deterministic.
-
-Raw source material is not stored in the graph. Objects may carry `rawRef` pointers so callers can associate memories with original transcript material elsewhere. A `rawRef` is a source pointer, not the transcript content.
-
-## Lifecycle Shape
-
-Lifecycle state is graph-authoritative. The graph stores fields such as:
-
-```text
-retentionState
-isCurrent
-supersedes
-threadStatus
-```
-
-The reason is correctness under partial vector maintenance failure. If a memory is corrected or suppressed in the graph but Qdrant still returns a stale vector, retrieval must omit it by consulting graph lifecycle state.
-
-Supersession is represented as a relationship rather than overwriting history. That preserves the prior memory for audit/historical retrieval while making the replacement memory visible by default.
-
-## Core Predicate Groups
-
-The vocabulary is grouped by purpose.
-
-### Common Object Properties
-
-```text
-objectId
-objectType
-graphUri
-schemaVersion
-createdAt
-updatedAt
-```
+`assertionName` preserves the supplied spelling. `normalizedName` is derived by Unicode NFKC normalization, lowercase conversion and whitespace folding. Lowercasing keeps `ß` and `ss` distinct, as implemented by [name normalization](../../../src/domain/belief.rs#L68).
 
-These make graph resources self-describing and migration-aware.
+Assertions are ordered payloads: ordinal assertion resources preserve their order and repeated values. The [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389) sorts those resources before reconstructing the list. They do not use the ID-list set semantics.
 
-### Episode And Observation Properties
-
-```text
-modality
-sourceConversationId
-startedAt
-endedAt
-participantEntity
-summary
-rawRef
-episode
-speakerEntity
-observedAt
-text
-salienceScore
-retentionState
-```
-
-Episodes summarize interaction spans. Observations represent salient pieces inside or from those spans. This lets retrieval include either broad context or specific evidence without treating raw transcripts as memory objects.
+Name lookup selects notions named by active, non-superseded beliefs. An incoming `Supersedes` link excludes a naming belief even when its successor is suppressed; lookup can return multiple notion IDs for the same normalized name. The [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104) reads the assertion predicates and checks incoming supersession evidence.
 
-### Entity And Thread Properties
+## Relationships And Derived Links
 
-```text
-entityType
-name
-alias
-canonicalKey
-title
-threadStatus
-lastTouchedAt
-summary
-```
+Object-reference predicates preserve authored domain fields. Typed `MemoryLink` records provide inspectable relation identity and direct traversal triples. Each link stores `from`, `fromType`, `to`, `toType`, `relation`, optional `rationale`, `createdAt`, and common identity/schema metadata. Its direct traversal predicate is `urn:cmem:relation:<relation_name>`.
 
-Entities and threads are continuity anchors. They help memories cluster around people, characters, projects, places, objects, topics, open loops, and recurring concerns.
+Remember and correction derive two link families from interpreted-memory lists:
 
-### Derived Memory Properties
+| Authoritative list | Derived link | Direct traversal triple |
+|---|---|---|
+| `entity_ids` | `About`, memory to notion | `<memory> urn:cmem:relation:about <notion>` |
+| `supersedes` | `Supersedes`, successor to predecessor | `<successor> urn:cmem:relation:supersedes <predecessor>` |
 
-```text
-derivedType
-text
-derivedFromEpisode
-derivedFromObservation
-partOfThread
-aboutEntity
-confidence
-stability
-isCurrent
-supersedes
-salienceScore
-retentionState
-```
+Generated link IDs are deterministic for their endpoints and relation family. Objects and derived links are written in one graph batch. The [derived-link builder](../../../src/usecases/write_planning.rs#L467) preserves this relationship between object lists and graph traversal.
 
-Derived memories are explicit interpretations: preferences, reflections, relationship notes, commitments, corrections, and similar continuity signals. They need provenance and lifecycle fields because they are the most likely memory type to be corrected over time.
+Authored `Supersedes` links are rejected. Authored `About` links between interpreted memories and notions are rejected in either orientation; the memory's subject list owns those links. Other admitted link kinds remain caller-authored. Commit rejects duplicate link IDs, including collisions with generated links. Supersession predecessors must already exist in the graph; creating a predecessor in the same plan does not satisfy the reference.
 
-### Link Properties
+## Suppression And Supersession
 
-```text
-from
-fromType
-to
-toType
-relation
-rationale
-confidence
-createdAt
-```
+Episode, observation and interpreted-memory retention uses `active` and `suppressed`. Default retrieval omits suppressed memories. The retrieval policy can include them explicitly.
 
-The endpoint type literals are redundant with endpoint URIs, but they make link validation and diagnostics straightforward and avoid requiring URI parsing to understand a link.
+Interpreted-memory currency is derived from incoming `Supersedes` links between interpreted memories. A memory's own `supersedes` list names its predecessors; it does not determine whether that memory has a successor. A replacement leaves predecessor content and retention unchanged. Suppressing the replacement does not erase its supersession evidence. Default retrieval omits superseded interpreted memories, with an independent policy option for historical inclusion.
 
-## Query Patterns The Schema Optimizes
+These graph checks remain decisive when vector deletion or indexing fails. A stale vector cannot make a suppressed or superseded memory eligible for default context. Notions remain graph traversal anchors, while semantic recall reaches them through interpreted-memory content and derived `About` links.
 
-The schema is designed around retrieval and lifecycle operations:
+## Retrieval And Derived Statistics
 
-```text
-resolve vector candidates by object id / graph URI
-expand nearby objects through typed links
-find derived memories by source episode or observation
-find derived memories by thread
-exclude suppressed, archived, deleted, non-current, or superseded objects
-trace why a relationship was included
-bound traversal by depth, fanout, object type, relation type, lifecycle, and selectivity policy
-```
+Source lookup, thread lookup, name lookup and bounded expansion query the named graphs they need. Object hydration currently reads every stored quad into a subject map before picking the requested objects, so its cost grows with the store and not with the request; a targeted read is the known improvement. Expansion is bounded by depth, object and relation scope, lifecycle policy and fanout caps.
 
-The graph is not optimized for unconstrained exploration. Character Memory retrieval should be bounded because any recurring entity can become high-degree or low-selectivity over time. This could be a person, character, place, project, topic, object, organization, faction, scene, or application-specific concept.
+The retrieval stats store maintains derived entity/relation/object and global counters. Its `total_count` includes all indexed edges, `active_count` restricts retention to active, and `current_count` additionally excludes superseded interpreted-memory endpoints. Its cached `is_current` value is a projection input rather than a persisted memory field or a source of graph authority.
 
-The schema supports expansion, but the retrieval layer controls fanout and limits. A derived retrieval stats store lets normal retrieval use persisted selectivity counters instead of scanning the whole graph to classify entity broadness.
+The policy combination that includes suppressed memories while excluding superseded ones uses total counters as an approximation; the extra edges can skew fanout estimates in either direction. Graph eligibility filtering still applies independently. Missing or unhealthy statistics use conservative selectivity fallback.
 
-## Retrieval Stats Boundary
+## Cross-Store Failures
 
-Selectivity and fanout policy may use a derived retrieval stats store. These stats are maintained from graph writes and lifecycle/currentness changes, but they are not graph truth.
+Graph writes are critical. Vector and stats updates are repairable parts of the write outcome, with typed failures and affected IDs. A graph-only memory loses semantic recall until vector indexing is repaired; stale candidates are checked against graph existence and lifecycle before inclusion. Replaying an old plan does not re-index an interpreted memory that graph authority identifies as superseded.
 
-Normal retrieval should not scan the whole graph to classify entity selectivity. It should read persisted counters for only the entities involved in the current retrieval context or candidate set, then perform bounded graph expansion through Oxigraph.
+The library has no cross-store reconciliation or stats-rebuild operation. Stats health remains unhealthy after an internal failure; recovery requires a fresh store and caller-managed replay. Raw-source resolution and cross-store census operations belong to callers or operators.
 
-The stats store may track:
-
-```text
-entity/relation/object counters
-global relation/object counters
-active/current counts
-selectivity inputs
-fanout diagnostics
-low-information co-occurrence rejections
-```
-
-The stats store must not decide:
-
-```text
-whether a graph relationship exists
-whether a memory is current
-whether a memory is suppressed
-whether provenance exists
-whether final context inclusion is allowed
-```
-
-Those remain Oxigraph authority decisions.
-
-Revisit if Oxigraph gains efficient aggregate/materialized-view support that makes a separate stats store unnecessary.
-
-## Associative Recall Boundary
-
-The graph should distinguish ordinary relationship truth from associative recall evidence.
-
-Do not use ordinary durable pairwise `associated_with` links for weak low-selectivity co-occurrence.
-
-Instead, later associative recall should use graph-internal associative structures:
-
-```text
-AssociativeUnit
-AssociativeMembership
-AssociationSupport
-```
-
-This allows the graph to represent weak or emerging recall patterns without pretending that every weak co-occurrence is a stable relationship.
-
-### AssociativeUnit
-
-An `AssociativeUnit` represents an associative recall structure such as:
-
-```text
-Pair
-CueBundle
-Cluster
-ScopePattern
-```
-
-The unit has its own lifecycle status:
-
-```text
-Candidate
-Active
-Retired
-Rejected
-```
-
-### AssociativeMembership
-
-Membership is first-class because unit-level status is not enough.
-
-An active unit may contain memberships with different statuses:
-
-```text
-Active members
-Candidate members
-Retired memberships
-Rejected memberships
-```
-
-and different roles:
-
-```text
-Core members
-Exemplar members
-Peripheral members
-Bridge members
-Outlier members
-```
-
-A new memory can be a candidate member of an active unit without being treated as equally established.
-
-### AssociationSupport
-
-`AssociationSupport` records why a unit or membership exists.
-
-Support may come from:
-
-```text
-semantic coactivation
-shared selective entity
-shared concept
-same scope
-same thread
-temporal proximity
-repeated retrieval together
-explicit application link
-reflection rationale
-correction chain
-commitment lifecycle
-```
-
-### Retrieval rule
-
-Associative structures must not override graph authority.
-
-Suppressed, deleted, non-current, or superseded memories must be excluded from normal retrieval even if they remain members of an associative unit.
-
-Associative retrieval should be bounded by:
-
-```text
-selectivity
-scope
-thread support
-semantic support
-temporal support
-salience
-membership status
-membership role
-lifecycle/currentness
-retrieval mode
-```
-
-## Durable Hydration
-
-Canonical objects and links are hydrated from RDF/Oxigraph state. The persistent graph authority must not depend on a persisted sidecar object store or on Qdrant payloads to reconstruct domain memory after restart.
-
-The hydration boundary keeps these rules explicit:
-
-- RDF named graphs are the durable source for graph-authoritative object and link fields
-- Qdrant payloads can help find candidates, but cannot fill missing graph truth
-- Retrieval stats can guide expansion, but cannot fill missing graph truth
-- multi-value RDF fields are normalized deterministically when hydrated
-
-This means a reopened graph store can answer object queries, link queries, provenance lookup, lifecycle filtering, supersession checks, and bounded expansion without process-local sidecar state.
-
-## Cross-Store Contract
-
-Qdrant, Oxigraph, and the retrieval stats store share stable object IDs, but they do not share authority.
-
-```text
-Qdrant   recalls candidates and filters by canonical object type
-Stats    supplies derived selectivity/fanout inputs
-Oxigraph verifies existence, relationships, provenance, lifecycle, and context
-```
-
-The vector payload does not duplicate graph-derived hints. Retrieval joins candidates to Oxigraph by stable object ID, then applies relationships, provenance, lifecycle, currentness, and context from graph authority.
-
-No reconciliation pass runs between the stores. A vector write that fails after the graph commit surfaces as a typed vector-indexing failure in the write outcome while the graph commit stands, leaving a graph-only record whose semantic recall is degraded until it is re-indexed; a candidate with a malformed object id or an unknown object-type or surface token fails decoding (the schema version is enforced on write, not on read); every remaining candidate is verified through graph authority before it can enter a context pack, which omits points whose object is absent and, under the default lifecycle policy, points whose object is no longer current (the public retrieval policy can opt into non-current objects for historical retrieval); and the retrieval stats store reports its own health so retrieval falls back to conservative selectivity after an internal failure. That unhealthy state is sticky for the store, since the library has no rebuild or restore operation; recovery and cross-store census operations are operator concerns outside the library.
-
-## Future Revisit Points
-
-Revisit this design when:
-
-- cross-store reconciliation or census operations need a library facade
-- stats diagnostics reveal that the selectivity model needs more dimensions
-- belief/claim tracking adds richer factual rigor semantics
-- some relation types become important enough to deserve specialized objects
-- graph migrations need compatibility across stored schema versions
+See the [schema cheat sheet](schema_cheat_sheet.md) for predicate tables and the [vector payload contract](vector_payload_design.md) for recall record fields.

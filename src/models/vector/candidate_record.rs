@@ -144,7 +144,6 @@ fn vector_surface_rank(surface: VectorSurface) -> u8 {
     match surface {
         VectorSurface::Summary => 0,
         VectorSurface::Text => 1,
-        VectorSurface::Name => 2,
         VectorSurface::DerivedText => 3,
         VectorSurface::Query => 4,
     }

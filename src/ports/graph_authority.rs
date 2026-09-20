@@ -344,6 +344,13 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphObjectQuery,
     ) -> Result<Vec<MemoryObject>, GraphQueryError>;
 
+    /// Returns every notion with a current exact-name assertion; shared names remain ambiguous.
+    #[allow(
+        dead_code,
+        reason = "the scene slice will consume exact-name notion cues"
+    )]
+    async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError>;
+
     /// Returns requested predecessors with an incoming interpreted-memory Supersedes link,
     /// including links from suppressed successors.
     async fn query_superseded_derived_memory_ids(
@@ -374,6 +381,10 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
+        (**self).query_notions_known_as(name).await
+    }
+
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
         (**self).upsert_objects(objects).await
     }

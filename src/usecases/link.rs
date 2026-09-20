@@ -102,6 +102,14 @@ pub(crate) fn reject_divergent_links(
     planned: &[MemoryLink],
     existing: &[MemoryLink],
 ) -> Result<(), CustomError> {
+    let mut seen = std::collections::HashSet::new();
+    for link in planned {
+        if !seen.insert(link.id) {
+            return Err(CustomError::DeterministicIdCollision {
+                object: MemoryObjectRef::new(ObjectType::MemoryLink, link.id),
+            });
+        }
+    }
     for existing in existing {
         if let Some(planned) = planned.iter().find(|link| link.id == existing.id) {
             if planned != existing {
@@ -549,6 +557,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn query_notions_known_as(
+            &self,
+            _name: &str,
+        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+            unreachable!("this test never queries names")
+        }
+
         async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
             Ok(())
         }

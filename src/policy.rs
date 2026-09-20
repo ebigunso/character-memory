@@ -7,6 +7,6 @@ pub(crate) mod retrieval_selectivity;
 
 pub(crate) use embedding_surface::memory_object_vector_record;
 pub(crate) use retrieval_selectivity::{
-    selectivity_plan_for_candidate, RetrievalSelectivityPolicy, SelectivityPlan,
+    selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };

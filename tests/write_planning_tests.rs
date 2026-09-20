@@ -3,7 +3,7 @@
 
 use character_memory::{
     CandidateValidationIssue, CandidateValidationStatus, CharacterMemory, CommitOptions,
-    DerivedMemoryDraft, DerivedType, EntityDraft, EntityType, EpisodeDraft, IncludedDerivedMemory,
+    DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, IncludedDerivedMemory,
     MemoryCandidate, MemoryId, MemoryLinkDraft, ObjectType, PrepareOptions, RelationType,
     RememberDiagnosticCode, RememberInput, RememberOptions, RememberOutcome, RememberWritePlan,
     RetrievalContext, StatsUpdateCause, StatsUpdateStatus,
@@ -159,10 +159,11 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         wrapper_outcome.persisted_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
-    assert_eq!(wrapper_outcome.persisted_link_ids, vec![link_id]);
+    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 2);
+    assert!(wrapper_outcome.persisted_link_ids.contains(&link_id));
     assert_eq!(
         wrapper_outcome.vector_indexed_object_ids,
-        vec![episode_id, observation_id, entity_id, derived_id]
+        vec![episode_id, observation_id, derived_id]
     );
     let validation = wrapper_outcome
         .diagnostics
@@ -224,17 +225,21 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .find(|included| included.memory.id == derived_id)
         .expect("caller-supplied derived memory should be in canonical graph state");
     assert_eq!(derived.memory.text, "Equivalent graph state claim");
-    assert!(wrapper_retrieval
-        .trace
-        .as_ref()
-        .expect("trace requested")
-        .graph_relations
-        .iter()
-        .any(|relation| {
-            relation.from.id == entity_id
-                && relation.to.id == derived_id
-                && relation.relation == RelationType::About
-        }));
+    assert_eq!(
+        wrapper_retrieval
+            .trace
+            .as_ref()
+            .expect("trace requested")
+            .graph_relations
+            .iter()
+            .filter(|relation| {
+                relation.relation == RelationType::About
+                    && ((relation.from.id == entity_id && relation.to.id == derived_id)
+                        || (relation.from.id == derived_id && relation.to.id == entity_id))
+            })
+            .count(),
+        1
+    );
 
     base::close_and_remove_root(wrapper_memory, wrapper_root).await;
     base::close_and_remove_root(manual_memory, manual_root).await;
@@ -342,10 +347,9 @@ async fn setup_persistent(collection_name: &str, root: &TempDir) -> CharacterMem
 fn core_input(label: &str) -> RememberInput {
     let entity_id = stable_id(label, 1);
     let timestamp = fixed_timestamp();
-    let mut entity = EntityDraft::new(EntityType::Project, format!("{label} entity"));
+    let mut entity = EntityDraft::new();
     entity.id = Some(entity_id);
     entity.created_at = Some(timestamp);
-    entity.updated_at = Some(timestamp);
 
     let mut derived =
         DerivedMemoryDraft::new(DerivedType::Claim, format!("{label} derived memory"));
@@ -384,10 +388,9 @@ fn remember_equivalence_input() -> RememberInput {
     observation.id = Some(observation_id);
     observation.created_at = Some(timestamp);
 
-    let mut entity = EntityDraft::new(EntityType::Project, "Equivalence Project");
+    let mut entity = EntityDraft::new();
     entity.id = Some(entity_id);
     entity.created_at = Some(timestamp);
-    entity.updated_at = Some(timestamp);
 
     let mut derived = DerivedMemoryDraft::new(DerivedType::Claim, "Equivalent graph state claim")
         .with_source_episode(episode_id)
@@ -400,7 +403,7 @@ fn remember_equivalence_input() -> RememberInput {
     let mut link = MemoryLinkDraft::new(
         ObjectType::Entity,
         entity_id,
-        RelationType::About,
+        RelationType::AssociatedWith,
         ObjectType::DerivedMemory,
         derived_id,
     );

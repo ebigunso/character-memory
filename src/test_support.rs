@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
 use crate::domain::{
-    DerivedMemory, DerivedType, Entity, EntityType, Episode, MemoryId, MemoryLink, MemoryObject,
-    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, ThreadStatus,
+    DerivedMemory, DerivedType, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
+    Modality, ObjectType, Observation, RelationType, RetentionState, ThreadStatus,
     DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
@@ -208,30 +208,10 @@ impl RepresentativeFixtures {
 pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
     let episode = simple_episode();
     let salient_observation = salient_observation(episode.id, fixture_id(1));
-    let user_entity = entity(
-        fixture_id(1),
-        EntityType::User,
-        "Kohta",
-        Some("person:kohta"),
-    );
-    let assistant_entity = entity(
-        fixture_id(2),
-        EntityType::Assistant,
-        "Assistant",
-        Some("assistant:default"),
-    );
-    let project_entity = entity(
-        fixture_id(3),
-        EntityType::Project,
-        "CharacterMemory",
-        Some("project:character-memory"),
-    );
-    let hub_entity = entity(
-        fixture_id(4),
-        EntityType::Concept,
-        "Store contracts",
-        Some("concept:store-contracts"),
-    );
+    let user_entity = entity(fixture_id(1));
+    let assistant_entity = entity(fixture_id(2));
+    let project_entity = entity(fixture_id(3));
+    let hub_entity = entity(fixture_id(4));
     let soft_thread = soft_thread();
     let derived_reflection = derived_memory(
         fixture_id(30),
@@ -364,12 +344,7 @@ pub(crate) fn representative_fixtures() -> RepresentativeFixtures {
 pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
     let episode = simple_episode();
     let observation = salient_observation(episode.id, fixture_id(1));
-    let hub_entity = entity(
-        fixture_id(90),
-        EntityType::Concept,
-        "high fanout hub",
-        Some("concept:high-fanout-hub"),
-    );
+    let hub_entity = entity(fixture_id(90));
     let derived_memories = (0_u128..12)
         .map(|offset| {
             derived_memory(
@@ -467,22 +442,11 @@ pub(crate) fn salient_observation(
     }
 }
 
-fn entity(
-    id: MemoryId,
-    entity_type: EntityType,
-    name: impl Into<String>,
-    canonical_key: Option<&str>,
-) -> Entity {
+fn entity(id: MemoryId) -> Entity {
     Entity {
         id,
         object_type: ObjectType::Entity,
-        entity_type,
-        name: name.into(),
-        aliases: Vec::new(),
-        canonical_key: canonical_key.map(str::to_owned),
-        summary: Some("Representative fixture entity.".to_owned()),
         created_at: timestamp("2026-04-27T10:11:02Z"),
-        updated_at: timestamp("2026-04-27T10:11:03Z"),
         schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
     }
 }
@@ -516,6 +480,8 @@ fn derived_memory(
     retention_state: RetentionState,
 ) -> DerivedMemory {
     DerivedMemory {
+        assertions: Vec::new(),
+        given_by_application: false,
         id,
         object_type: ObjectType::DerivedMemory,
         derived_type,

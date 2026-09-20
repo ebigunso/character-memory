@@ -74,8 +74,12 @@ pub enum CandidateValidationIssue {
     EmptyEpisodeSummary,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
-    #[error("derived memory must reference at least one source episode or observation")]
+    #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]
     MissingDerivedSource,
+    #[error(transparent)]
+    InvalidBelief {
+        reason: super::BeliefValidationError,
+    },
     #[error("candidate score {field:?} must be finite and in 0.0..=1.0, got {actual}")]
     InvalidScore {
         field: CandidateScoreField,
@@ -91,8 +95,8 @@ pub enum CandidateValidationIssue {
     MemoryLinkRejectedByAdmissionPolicy,
     #[error("Supersedes links must be derived from a memory supersedes list")]
     AuthoredSupersedesLink,
-    #[error("supersession cycle contains memories: {memory_ids:?}")]
-    SupersessionCycle { memory_ids: Vec<MemoryId> },
+    #[error("About links between interpreted memories and entities must be derived from the memory subject list")]
+    AuthoredBeliefAboutLink,
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]
@@ -169,6 +173,7 @@ pub enum CandidateSourceSpanIssue {
 #[serde(rename_all = "snake_case")]
 pub enum CandidateReferenceRole {
     DerivedSourceEpisode,
+    BeliefSubject,
     DerivedSourceObservation,
     SupersededMemory,
     MemoryLinkFrom,
