@@ -1,226 +1,138 @@
 # Database Schema Cheat Sheet
 
-This is the compact schema reference. The companion design notes explain why the schema is shaped this way:
+Oxigraph holds memory truth. Qdrant recalls content candidates. Retrieval statistics guide bounded expansion. An `Entity` is a notion identity; names and other commitments belong to interpreted memories about it.
 
-- [Vector Database Payload Design](vector_payload_design.md)
-- [Graph Database Schema Design](graph_schema_design.md)
+## Stores And Join Keys
 
-## Authority Split
+| Store | Responsibility |
+|---|---|
+| Oxigraph | Objects, links, provenance, suppression, supersession and expansion context |
+| Qdrant Edge or Qdrant service | Vector candidates and object-type prefiltering |
+| Retrieval stats | Derived entity/relation/object and global counters, health and fanout inputs |
+| Caller storage | Raw transcripts and other source content behind pointers |
 
-| Store | Role | Authoritative For | Not Authoritative For |
+Vector payload `object_id` joins the graph's UUID `objectId`. RDF resources also carry `objectType`, `graphUri` and `schemaVersion`. Vector records carry `schema_version`; version admission is enforced when records are written.
+
+## Vector Records
+
+| Payload field | Shape | Purpose |
+|---|---|---|
+| `object_id` | UUID keyword | Graph join identity |
+| `object_type` | Closed keyword enum | Object kind and prefilter scope |
+| `surface` | Closed keyword enum | Embedded semantic surface |
+| `schema_version` | String | Write-side record compatibility marker |
+| `embedding_text` | Text | Exact embedding input for audit |
+
+These are the five emitted payload fields. The service indexes `object_id` and `object_type`. Returned candidates contain object identity, surface and score; content and lifecycle come from graph hydration. The [candidate reader (`payload.rs:115`)](../../../src/adapters/qdrant/payload.rs#L115) decodes identity/type/surface, and the [writer (`payload.rs:164`)](../../../src/adapters/qdrant/payload.rs#L164) checks the schema marker.
+
+| Object type | Surface | Text source | Maximum surfaces |
 |---|---|---|---|
-| Qdrant (service or embedded Qdrant Edge, one record contract) | Vector candidate recall and object-type prefiltering | Vector points and embedding-surface provenance | Memory content, existence, relationships, provenance, lifecycle, currentness, entity selectivity |
-| Oxigraph | Graph authority | Memory objects, typed links, provenance, lifecycle, currentness, expansion context | Semantic nearest-neighbor ranking, derived selectivity counters |
-| RetrievalStatsStore | Derived retrieval-policy statistics | Entity/relation counters, global counters, selectivity inputs, fanout diagnostics | Memory existence, relationships, provenance, lifecycle, currentness, semantic ranking |
-| Raw store / caller storage | Source material | Raw transcript or source content behind `raw_ref` | Canonical memory state |
+| `episode` | `summary` | Episode summary | 1 |
+| `observation` | `text` | Observation text | 1 |
+| `memory_thread` | `summary` | Thread title and summary | 1 |
+| `derived_memory` | `derived_text` | Interpreted-memory text | 1 |
+| `entity` | — | Graph notion identity | 0 |
+| `memory_link` | — | Graph relationship | 0 |
 
-Rule of thumb:
+The `query` surface represents search input. It is not emitted for a stored memory object. Names are recalled through belief content or looked up in graph assertions.
 
-```text
-Qdrant suggests.
-Stats guide fanout.
-Oxigraph decides.
-```
+## Graph Resources
 
-## Cross-Store Join Keys
+| Class suffix under `urn:cmem:vocab:` | Resource URI |
+|---|---|
+| `Episode` | `urn:cmem:episode:<uuid>` |
+| `Observation` | `urn:cmem:observation:<uuid>` |
+| `Entity` | `urn:cmem:entity:<uuid>` |
+| `MemoryThread` | `urn:cmem:thread:<uuid>` |
+| `DerivedMemory` | `urn:cmem:derived-memory:<uuid>` |
+| `MemoryLink` | `urn:cmem:link:<uuid>` |
 
-| Field | Stored In | Purpose |
+### Identity And Experience Predicates
+
+Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
+
+| Predicate | Meaning |
+|---|---|
+| `objectId`, `objectType`, `graphUri`, `schemaVersion` | Common identity and schema literals |
+| `createdAt`, `updatedAt` | Timestamps on the types that declare them |
+| `modality`, `sourceConversationId`, `startedAt`, `endedAt` | Episode source and time metadata |
+| `participantEntity` | Episode participant notion |
+| `summary` | Episode or thread summary |
+| `rawRef` | Episode or observation source pointer |
+| `episode`, `speakerEntity`, `observedAt` | Observation source, optional speaker and time |
+| `text` | Observation or interpreted-memory content |
+| `salienceScore` | Episode, observation, thread or interpreted-memory salience |
+| `retentionState` | `active` or `suppressed` for episodes, observations and interpreted memories |
+
+### Notions And Threads
+
+Notions carry only common identity/schema literals and `createdAt`. The following descriptive predicates belong to threads:
+
+| Predicate | Meaning |
+|---|---|
+| `title`, `summary` | Thread content |
+| `threadStatus` | `active`, `dormant` or `resolved` |
+| `lastTouchedAt` | Thread recency |
+| `canonicalKey` | Optional thread key |
+
+### Interpreted Memories And Assertions
+
+| Predicate | Meaning |
+|---|---|
+| `derivedType` | Interpreted-memory category |
+| `derivedFromEpisode`, `derivedFromObservation` | Experience provenance |
+| `partOfThread` | Thread membership |
+| `aboutEntity` | Notion subject from `entity_ids` |
+| `supersedes` | Predecessor reference from the memory's list |
+| `givenByApplication` | Source-free application grounding; requires a subject and excludes experience sources |
+| `assertion` | Reference to an ordinal assertion resource |
+| `assertionSubject` | Notion subject, present in the containing memory's subject list |
+| `assertionPredicate` | `known_as` |
+| `assertionName` | Supplied name spelling |
+| `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
+
+Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). ID lists use set semantics: duplicates are rejected before canonicalization. This includes episode participants and ordinary/replacement memory source, thread, subject and predecessor IDs.
+
+Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104).
+
+### Links And Currency
+
+| Predicate | Meaning |
+|---|---|
+| `from`, `fromType`, `to`, `toType` | Typed link endpoints |
+| `relation` | Relation token |
+| `rationale` | Optional explanation |
+| `createdAt` | Link creation time |
+| `urn:cmem:relation:<relation_name>` | Direct traversal predicate emitted with the reified link |
+
+| Memory list | Derived link | Direction |
 |---|---|---|
-| `object_id` / `objectId` | Qdrant payload and graph literal | Stable object UUID |
-| `graphUri` | Graph literal | Stable graph resource pointer |
-| `schema_version` / `schemaVersion` | Qdrant payload and graph literal | Persistence and migration marker |
+| `entity_ids` | `About` / `about` | Interpreted memory → notion |
+| `supersedes` | `Supersedes` / `supersedes` | Successor → predecessor |
 
-Graph URI pattern:
+Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and cyclic supersession plans.
 
-```text
-urn:cmem:episode:<uuid>
-urn:cmem:observation:<uuid>
-urn:cmem:entity:<uuid>
-urn:cmem:thread:<uuid>
-urn:cmem:derived-memory:<uuid>
-urn:cmem:link:<uuid>
-```
+Currency is determined by incoming interpreted-memory `Supersedes` links. Predecessor content and retention are preserved; a suppressed successor still supplies supersession evidence. Default retrieval excludes suppressed and superseded memories. `include_suppressed` and `include_superseded` independently opt into those histories. Notions and threads remain graph anchors.
 
-Retrieval stats store keys refer to the same `object_id` / entity ID values, but stats are derived and rebuildable.
+## Retrieval Stats
 
-## Qdrant Payload Fields
+The internal SQLite projection uses `entity_edge_index`, `entity_relation_counts`, `global_relation_counts` and `stats_meta`. The in-memory implementation follows the same counter contract.
 
-| Field | Type / Shape | Notes |
-|---|---|---|
-| `object_id` | indexed keyword UUID string | Stable vector-to-graph join id |
-| `object_type` | indexed keyword enum | Canonical memory object type |
-| `surface` | keyword enum | Embedded semantic surface |
-| `schema_version` | keyword string | Record compatibility marker |
-| `embedding_text` | text | Exact text used to generate the vector; not read-out content |
-
-These are the only Qdrant payload fields. Readable content, graph URI, object-specific state, relationships, lifecycle/currentness, ranking, timestamps, provenance, and raw references are hydrated from Oxigraph by `object_id`. Existing obsolete extra fields may remain on old points but readers ignore them.
-
-## Qdrant Indexed Object Types
-
-```text
-episode
-observation
-entity
-memory_thread
-derived_memory
-```
-
-`memory_link` is not indexed as a semantic memory object by default. Links are graph-authoritative relationship records.
-
-## Oxigraph Classes
-
-| Class URI | Domain Object |
+| Counter | Scope |
 |---|---|
-| `urn:cmem:vocab:Episode` | `Episode` |
-| `urn:cmem:vocab:Observation` | `Observation` |
-| `urn:cmem:vocab:Entity` | `Entity` |
-| `urn:cmem:vocab:MemoryThread` | `MemoryThread` |
-| `urn:cmem:vocab:DerivedMemory` | `DerivedMemory` |
-| `urn:cmem:vocab:MemoryLink` | `MemoryLink` |
+| `total_count` | All indexed edges |
+| `active_count` | Active retention, including superseded interpreted memories |
+| `current_count` | Active retention and no graph supersession evidence for interpreted-memory endpoints |
 
-## Oxigraph Predicates
+The edge cache's `is_current` value is derived from graph state. Including suppressed but excluding superseded memories uses total counts as an approximation, with possible fanout distortion in either direction; graph filtering still enforces eligibility.
 
-### Common Object Predicates
+Statistics cannot establish object existence, provenance, links or retrieval eligibility. An unhealthy stats store causes conservative selectivity fallback and requires caller-managed recovery.
 
-| Predicate URI | Purpose |
-|---|---|
-| `urn:cmem:vocab:objectId` | Stable UUID literal |
-| `urn:cmem:vocab:objectType` | Canonical object type literal |
-| `urn:cmem:vocab:graphUri` | Stable graph URI literal |
-| `urn:cmem:vocab:schemaVersion` | Schema migration marker |
-| `urn:cmem:vocab:createdAt` | Creation timestamp |
-| `urn:cmem:vocab:updatedAt` | Update timestamp |
+## Failure Boundaries
 
-### Episode And Observation Predicates
+- Graph failure rejects the authoritative write. Later vector or stats failure is reported as a typed repair outcome while the graph commit stands.
+- Malformed candidate IDs or unknown object-type/surface tokens fail decoding. Graph hydration rejects absent or lifecycle-ineligible objects before context inclusion.
+- A graph-only object has reduced semantic recall until indexed. Superseded interpreted memories are not re-indexed by replaying old plans.
+- Cross-store reconciliation and stats rebuild are caller/operator responsibilities; the library exposes no such operation.
 
-| Predicate URI | Purpose |
-|---|---|
-| `urn:cmem:vocab:modality` | Source modality |
-| `urn:cmem:vocab:sourceConversationId` | Source conversation id |
-| `urn:cmem:vocab:startedAt` | Episode start time |
-| `urn:cmem:vocab:endedAt` | Episode end time |
-| `urn:cmem:vocab:participantEntity` | Episode participant entity edge |
-| `urn:cmem:vocab:summary` | Episode/thread/entity summary |
-| `urn:cmem:vocab:rawRef` | Source pointer |
-| `urn:cmem:vocab:salienceScore` | Salience literal |
-| `urn:cmem:vocab:retentionState` | Lifecycle state |
-| `urn:cmem:vocab:episode` | Observation-to-episode edge |
-| `urn:cmem:vocab:speakerEntity` | Observation speaker entity edge |
-| `urn:cmem:vocab:observedAt` | Observation time |
-| `urn:cmem:vocab:text` | Observation or derived memory text |
-
-### Entity And Thread Predicates
-
-| Predicate URI | Purpose |
-|---|---|
-| `urn:cmem:vocab:entityType` | Entity subtype |
-| `urn:cmem:vocab:name` | Entity display name |
-| `urn:cmem:vocab:alias` | Entity alias |
-| `urn:cmem:vocab:canonicalKey` | Stable caller/domain key |
-| `urn:cmem:vocab:title` | Thread title |
-| `urn:cmem:vocab:threadStatus` | Thread status |
-| `urn:cmem:vocab:lastTouchedAt` | Thread recency |
-
-### Derived Memory Predicates
-
-| Predicate URI | Purpose |
-|---|---|
-| `urn:cmem:vocab:derivedType` | Derived memory subtype |
-| `urn:cmem:vocab:derivedFromEpisode` | Provenance edge to episode |
-| `urn:cmem:vocab:derivedFromObservation` | Provenance edge to observation |
-| `urn:cmem:vocab:partOfThread` | Thread membership edge |
-| `urn:cmem:vocab:aboutEntity` | Entity/topic edge |
-| `urn:cmem:vocab:confidence` | Confidence literal |
-| `urn:cmem:vocab:stability` | Stability literal |
-| `urn:cmem:vocab:isCurrent` | Currentness literal |
-| `urn:cmem:vocab:supersedes` | Supersession edge |
-
-### MemoryLink Predicates
-
-| Predicate URI | Purpose |
-|---|---|
-| `urn:cmem:vocab:from` | Link source resource |
-| `urn:cmem:vocab:fromType` | Link source object type |
-| `urn:cmem:vocab:to` | Link target resource |
-| `urn:cmem:vocab:toType` | Link target object type |
-| `urn:cmem:vocab:relation` | Relation enum literal |
-| `urn:cmem:vocab:rationale` | Optional relationship rationale |
-| `urn:cmem:vocab:confidence` | Link confidence literal |
-| `urn:cmem:vocab:createdAt` | Link creation timestamp |
-| `urn:cmem:relation:<relation_name>` | Direct traversal predicate emitted for typed links |
-
-## Future Associative Recall Concepts
-
-| Concept | Purpose | Important distinction |
-|---|---|---|
-| AssociativeUnit | Represents a pair, cue bundle, cluster, or scope pattern used for associative recall. | Unit lifecycle says whether the associative structure is candidate, active, retired, or rejected. |
-| AssociativeMembership | Represents a specific memory's membership in an associative unit. | Membership status says whether that memory is candidate, active, retired, or rejected; member role says whether it is core, exemplar, peripheral, bridge, or outlier. |
-| AssociationSupport | Records why a unit or membership exists. | Support explains association evidence; it is not ordinary relationship truth. |
-| QueryTimeActivation | Activates memories through semantic/entity/thread/scope/time/salience cues during retrieval. | Supports serendipitous recall before durable association is promoted. |
-
-Design rule:
-
-```text
-Weak association evidence belongs in the graph,
-but not as ordinary durable pairwise association.
-```
-
-Retrieval quality rule:
-
-```text
-An active cluster may contain tentative members.
-Candidate-status members are considered, not trusted.
-```
-
-## Retrieval Stats Store
-
-The retrieval stats store is an internal derived index used for selectivity scoring and fanout policy. It is not a memory store of record. It can be rebuilt from graph authority and must not override Oxigraph lifecycle/currentness/provenance decisions.
-
-Core stats tables:
-
-```text
-entity_edge_index
-entity_relation_counts
-global_relation_counts
-stats_meta
-```
-
-The stats store answers retrieval-policy questions such as:
-
-```text
-How selective is entity E under relation R for object type O?
-What fanout budget should this relation expansion receive?
-Which broad entity expansions were rejected as low-information?
-```
-
-It does not answer:
-
-```text
-Does this memory exist?
-Is this memory current?
-Is this relationship true?
-Is this memory suppressed?
-Should this memory enter final context?
-```
-
-Those remain graph-authoritative Oxigraph questions.
-
-## Retrieval Rule Of Thumb
-
-```text
-Qdrant narrows candidates.
-Stats guide bounded expansion.
-Oxigraph verifies graph truth.
-The final context pack follows Oxigraph state.
-```
-
-## Drift Handling
-
-There is no reconciliation pass between the stores. Drift is surfaced at write time; a stale or orphaned vector point is neutralised at read time, while a graph-only record simply stays outside semantic recall until it is re-indexed:
-
-- A vector write that fails after the graph commit is reported as a typed vector-indexing failure in the public write outcome, naming the affected objects and the cause; the graph commit stands, so a graph-only record exists and semantic recall of it is degraded until the caller re-indexes it.
-- A candidate whose payload carries a malformed object id or an unknown object-type or surface token fails decoding and never becomes a candidate. The schema version is enforced when a record is written, not when a point is read.
-- Every surviving candidate is hydrated and verified through graph authority before it can enter a context pack, so a vector point whose object is absent from the graph is omitted there, and one whose object is no longer current is omitted under the default lifecycle policy (the public retrieval policy can opt into non-current objects for historical retrieval).
-- The retrieval stats store records its own health; after an internal failure it reports unhealthy and retrieval falls back to conservative selectivity. The unhealthy state is sticky for that store: the library has no rebuild or restore operation, so recovery is an operator action (a fresh stats store rebuilt by replaying writes).
-
-Cross-store census operations (vector points without a graph object, graph objects without a vector point) are not part of the library; an operator performs them against the stores directly if needed.
+The [graph schema design](graph_schema_design.md) explains the authority and belief model. The [vector payload design](vector_payload_design.md) describes the recall record contract.

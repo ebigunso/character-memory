@@ -636,6 +636,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn correction_rejects_duplicate_reference_ids_before_writing() {
+        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
+        let graph = memory.memory_composition.graph_store.as_ref();
+        let query = GraphObjectQuery::by_ids(vec![fixtures.user_preference.id, replacement_id]);
+        let before = graph.query_objects(&query).await.unwrap();
+        let superseded_before = graph
+            .query_superseded_derived_memory_ids(&[fixtures.user_preference.id])
+            .await
+            .unwrap();
+        for (field, repeated_id) in [
+            (
+                "ReplacementDerivedMemoryDraft.derived_from_episode_ids",
+                fixtures.episode.id,
+            ),
+            (
+                "ReplacementDerivedMemoryDraft.derived_from_observation_ids",
+                fixtures.salient_observation.id,
+            ),
+            (
+                "ReplacementDerivedMemoryDraft.thread_ids",
+                fixtures.soft_thread.id,
+            ),
+            (
+                "ReplacementDerivedMemoryDraft.entity_ids",
+                fixtures.user_entity.id,
+            ),
+            (
+                "ReplacementDerivedMemoryDraft.supersedes",
+                fixtures.user_preference.id,
+            ),
+        ] {
+            let mut correction =
+                derived_correction_draft(&fixtures, replacement_id, fixtures.user_preference.id);
+            let replacement = &mut correction.replacement_derived_memories[0];
+            let ids = match field {
+                "ReplacementDerivedMemoryDraft.derived_from_episode_ids" => {
+                    &mut replacement.derived_from_episode_ids
+                }
+                "ReplacementDerivedMemoryDraft.derived_from_observation_ids" => {
+                    &mut replacement.derived_from_observation_ids
+                }
+                "ReplacementDerivedMemoryDraft.thread_ids" => &mut replacement.thread_ids,
+                "ReplacementDerivedMemoryDraft.entity_ids" => &mut replacement.entity_ids,
+                "ReplacementDerivedMemoryDraft.supersedes" => &mut replacement.supersedes,
+                _ => unreachable!(),
+            };
+            *ids = vec![repeated_id, repeated_id];
+            let result = memory.correct(correction).await;
+            assert!(
+                matches!(&result,
+                    Err(CustomError::LifecycleDraftInvalid(LifecycleDtoValidationError::DuplicateId { field: actual_field, id }))
+                        if *actual_field == field && *id == repeated_id
+                ),
+                "{field}: {result:?}"
+            );
+            assert_eq!(graph.query_objects(&query).await.unwrap(), before);
+            assert_eq!(
+                graph
+                    .query_superseded_derived_memory_ids(&[fixtures.user_preference.id])
+                    .await
+                    .unwrap(),
+                superseded_before
+            );
+        }
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn currency_review_older_correction_replay_keeps_superseded_replacement_out_of_index() {
         let (memory, fixtures, replacement_id) = lifecycle_memory().await;
         let old_correction =

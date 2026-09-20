@@ -284,13 +284,15 @@ fn validate_score(field: &'static str, value: f32) -> Result<(), DomainValidatio
 }
 
 fn validate_unique_ids(field: &'static str, ids: &[MemoryId]) -> Result<(), DomainValidationError> {
-    let mut seen = std::collections::HashSet::new();
-    for id in ids {
-        if !seen.insert(id) {
-            return Err(DomainValidationError::DuplicateId { field, id: *id });
-        }
+    if let Some(id) = first_duplicate_id(ids) {
+        return Err(DomainValidationError::DuplicateId { field, id });
     }
     Ok(())
+}
+
+pub(crate) fn first_duplicate_id(ids: &[MemoryId]) -> Option<MemoryId> {
+    let mut seen = std::collections::HashSet::new();
+    ids.iter().copied().find(|id| !seen.insert(*id))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
