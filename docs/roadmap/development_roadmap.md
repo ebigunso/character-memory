@@ -1342,11 +1342,11 @@ answer the concurrent-facade-call question; with no background derivation inside
 ## Design items decided 2026-09-17
 
 ```text
-currency is an invariant, not a retrieval driver; the stored current flag is at most a cache of the chain and joins the value-audit deletion candidates
+currency is an invariant, not a retrieval driver; there is no stored current flag, currency is read from the supersession chain
 purpose is emergent and never a field on the retrieval input
 open loops and commitments carry an actor, a counterpart, and an optional due date
 no reinforce operation; familiarity and stability derive from evidence at query time
-the archived and deleted retention states and the archive-thread-derived-memories knob are value-audit deletion candidates; thread status keeps dormant and resolved as currency
+the archived and deleted retention states and the archive machinery go in the phase's schema groundwork (ruled 2026-09-20); thread status keeps dormant and resolved as currency
 the user and assistant entity types are value-audit deletion candidates under ADR-D-0020
 scope keys on derived memories are derived from each memory's scene at write time and are never a caller-facing ID scheme; a stored scope object needs a consumer a graph query cannot serve
 ```

@@ -32,7 +32,7 @@ a bundle     one entry per event as the application sees it, which is the only s
 granularity  per turn pair or per bounded segment is the application's choice; the guide recommends one
 ```
 
-The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes, entities, and beliefs of sameness and containment, the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, and the confidence field leaves interpreted memory (ADR-D-0030), a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
+The existing prepare, validate, and commit path stays for a caller that deliberately authors durable memory, and it is the same path reflection uses. It gains the evidence rules of ADR-D-0028, with one difference: a caller-authored observation declares its grounding, the caller's own source reference, whether it was the character's own or perceived, and the quote and who said it for speech or who acted for an event, which the rules read as they read a recorded basis, because the library cannot verify words against a source it never held. Existing callers must therefore supply what each kind of candidate requires: declared grounding on observations, with register on those of speech, declared source grounding on caller-authored episodes and on beliefs the application gives about a notion it already knows (v0.2 records that grounding as a marker, which this phase widens into the basis), the supporting observations and episodes on every other interpreted memory, and attribution with its declared basis on all of them, and the confidence field has already left interpreted memory and links in the v0.2 schema groundwork (ADR-D-0030), so what remains is a breaking change the no-backcompat ruling allows and the plan schedules, including for the evaluation repository's hand-authored ingestion.
 
 ## 1.1 The memory tool
 
@@ -212,12 +212,12 @@ the promotion thresholds as measured defaults
 the completion port's signature and the output schema
 how the renderer labels unconsolidated items and notes
 the concurrent-facade-call census result and whether anything in the write path needs a guard
-how custom scene values are represented, and the forms of the beliefs about a notion, name, kind, standing, sameness, containment, and the cost of recall reading through them
+how custom scene values are represented, and the cost of recall reading through beliefs about a notion; their form is settled in the v0.2 schema groundwork (a belief is an ordinary interpreted memory about the notion and may carry machine-readable assertions; known as is built there, and sameness and containment gain their assertion and read-through in the slice whose scenario needs them)
 how stretches that belong to one relationship or thread are gathered into a scope's pass
 the forms of a locator and of a speaker hint
 who protects the short-term store at rest, keeps one character's trace from another's, and deletes securely, the library or the host application, decided before a storage engine is chosen
 what the store does as it nears the capacity it was given, short of dropping trace, and how a write it refuses shows in presence accounting
-whether the confidence on thread membership and other links goes the way of the confidence on interpreted memory (ADR-D-0030)
+link and thread-membership confidence: settled, removed with the confidence on interpreted memory in the v0.2 schema groundwork (ruled 2026-09-20)
 whether a consumer can correct or forget a reflection-written memory with only what it was handed, given ADR-I-0020
 the consolidation protocol of section 3.6, including the conditional upsert the write path itself still lacks
 ```
