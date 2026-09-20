@@ -327,7 +327,7 @@ async fn notion_belief_admission_is_enforced_at_validate_and_commit() {
 }
 
 #[tokio::test]
-async fn every_belief_subject_is_linked_without_duplicate_expansion_or_stats() {
+async fn every_belief_subject_is_linked_and_counted_once() {
     for sqlite in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut memory = memory().await;
@@ -341,35 +341,33 @@ async fn every_belief_subject_is_linked_without_duplicate_expansion_or_stats() {
         }
         let subject = MemoryId::from_u128(6301);
         let belief = given_belief(MemoryId::from_u128(6302), subject, "Alice");
-        let mut plan = plan_with_belief(belief.clone(), true);
-        // Caller-authored links in the same batch can repeat either direction.
-        for (link_id, from_type, from_id, to_type, to_id) in [
-            (
-                MemoryId::from_u128(6304),
-                ObjectType::DerivedMemory,
-                belief.id.unwrap(),
-                ObjectType::Entity,
-                subject,
-            ),
-            (
-                MemoryId::from_u128(6305),
-                ObjectType::Entity,
-                subject,
-                ObjectType::DerivedMemory,
-                belief.id.unwrap(),
-            ),
-        ] {
-            let mut draft =
-                MemoryLinkDraft::new(from_type, from_id, RelationType::About, to_type, to_id);
-            draft.id = Some(link_id);
-            draft.created_at = belief.created_at;
-            draft.schema_version = belief.schema_version.clone();
-            plan.candidates
-                .push(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
-                    draft,
-                    CandidateProvenance::caller("authored subject link"),
-                )));
+        let mut repeated = belief.clone();
+        repeated.entity_ids.push(subject);
+        let invalid = plan_with_belief(repeated, true);
+        let expected = CandidateValidationIssue::DuplicateId {
+            field: "DerivedMemory.entity_ids".to_owned(),
+            id: subject,
+        };
+        for _ in 0..2 {
+            assert!(memory
+                .validate_plan(&invalid)
+                .await
+                .unwrap()
+                .iter()
+                .any(|item| item.errors.contains(&expected)));
+            assert!(
+                matches!(memory.commit(invalid.clone(), CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations }) if validations.iter().any(|item| item.errors.contains(&expected)))
+            );
         }
+        assert!(memory
+            .memory_composition
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_ids(vec![subject, belief.id.unwrap()]))
+            .await
+            .unwrap()
+            .is_empty());
+        let plan = plan_with_belief(belief.clone(), true);
         let outcome = memory
             .commit(plan.clone(), CommitOptions::default())
             .await
@@ -380,7 +378,7 @@ async fn every_belief_subject_is_linked_without_duplicate_expansion_or_stats() {
             .query_links_by_ids(&outcome.persisted_link_ids)
             .await
             .unwrap();
-        assert_eq!(stored_links.len(), 3); // Each authored record retains its identity.
+        assert_eq!(stored_links.len(), 1);
         assert!(stored_links
             .iter()
             .all(|link| link.relation == RelationType::About));
@@ -631,6 +629,231 @@ async fn given_replacement_does_not_inherit_predecessor_sources() {
 }
 
 #[tokio::test]
+async fn unsorted_episode_and_belief_id_sets_commit_and_replay_canonically() {
+    let memory = memory().await;
+    let subjects = [MemoryId::from_u128(6901), MemoryId::from_u128(6902)];
+    let belief_id = MemoryId::from_u128(6903);
+    let episode_id = MemoryId::from_u128(6904);
+    let mut belief = given_belief(belief_id, subjects[1], "Alice");
+    belief.entity_ids = vec![subjects[1], subjects[0]];
+    let mut plan = plan_with_belief(belief.clone(), false);
+    for subject in subjects {
+        let mut notion = EntityDraft::new();
+        notion.id = Some(subject);
+        notion.created_at = belief.created_at;
+        notion.schema_version = belief.schema_version.clone();
+        plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+            notion,
+            CandidateProvenance::caller("notion"),
+        )));
+    }
+    let mut episode = EpisodeDraft::new("An experience with two notions.");
+    episode.id = Some(episode_id);
+    episode.participant_entity_ids = vec![subjects[1], subjects[0]];
+    episode.created_at = belief.created_at;
+    episode.schema_version = belief.schema_version.clone();
+    plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+        episode,
+        CandidateProvenance::caller("experience"),
+    )));
+    let first = memory
+        .commit(plan.clone(), CommitOptions::default())
+        .await
+        .unwrap();
+    let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+    assert_eq!(first.persisted_object_ids, replay.persisted_object_ids);
+    assert_eq!(first.persisted_link_ids, replay.persisted_link_ids);
+    let objects = memory
+        .memory_composition
+        .graph_store
+        .query_objects(&GraphObjectQuery::by_ids(vec![episode_id, belief_id]))
+        .await
+        .unwrap();
+    assert_eq!(objects.len(), 2);
+    for object in objects {
+        match object {
+            MemoryObject::Episode(episode) => assert_eq!(episode.participant_entity_ids, subjects),
+            MemoryObject::DerivedMemory(memory) => {
+                assert_eq!(memory.entity_ids, subjects);
+                assert_eq!(memory.assertions, belief.assertions);
+            }
+            _ => panic!("expected the authored episode or belief"),
+        }
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn authored_belief_about_links_are_rejected_in_both_directions() {
+    let memory = memory().await;
+    let subject = MemoryId::from_u128(6801);
+    let other_subject = MemoryId::from_u128(6802);
+    let belief_id = MemoryId::from_u128(6803);
+    let episode_id = MemoryId::from_u128(6804);
+    let observation_id = MemoryId::from_u128(6805);
+    let notion = |id| {
+        let mut draft = EntityDraft::new();
+        draft.id = Some(id);
+        draft
+    };
+    let mut belief = DerivedMemoryDraft::new(DerivedType::Reflection, "A belief about one notion.");
+    belief.id = Some(belief_id);
+    belief.entity_ids = vec![subject];
+    let mut episode = EpisodeDraft::new("An experience about the notion.");
+    episode.id = Some(episode_id);
+    let mut observation = ObservationDraft::new(episode_id, "I observed the notion.");
+    observation.id = Some(observation_id);
+    let valid = memory
+        .prepare(
+            RememberInput::new("An experience about the notion.")
+                .with_episode(episode)
+                .with_observation(observation)
+                .with_entity(notion(subject))
+                .with_entity(notion(other_subject))
+                .with_derived_memory(belief),
+            PrepareOptions::default(),
+        )
+        .await
+        .unwrap();
+    let mut rejected = Vec::new();
+    for target in [subject, other_subject] {
+        for reverse in [false, true] {
+            let mut draft = MemoryLinkDraft::new(
+                ObjectType::DerivedMemory,
+                belief_id,
+                RelationType::About,
+                ObjectType::Entity,
+                target,
+            );
+            if reverse {
+                std::mem::swap(&mut draft.from_id, &mut draft.to_id);
+                std::mem::swap(&mut draft.from_type, &mut draft.to_type);
+            }
+            draft.id = Some(MemoryId::from_u128(6810 + rejected.len() as u128));
+            draft.created_at = Some(chrono::Utc::now());
+            draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            let invalid = valid.clone().with_candidate(MemoryCandidate::MemoryLink(
+                MemoryLinkCandidate::new(
+                    draft.clone(),
+                    CandidateProvenance::caller("subject link"),
+                ),
+            ));
+            let validations = memory.validate_plan(&invalid).await.unwrap();
+            assert_eq!(
+                validations.last().unwrap().errors,
+                vec![CandidateValidationIssue::AuthoredBeliefAboutLink]
+            );
+            assert!(
+                matches!(memory.commit(invalid, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations })
+                if validations.last().unwrap().errors == vec![CandidateValidationIssue::AuthoredBeliefAboutLink])
+            );
+            rejected.push(draft);
+        }
+    }
+    let graph = &memory.memory_composition.graph_store;
+    assert!(graph
+        .query_objects(&GraphObjectQuery::by_ids(vec![
+            subject,
+            other_subject,
+            belief_id,
+            episode_id,
+            observation_id
+        ]))
+        .await
+        .unwrap()
+        .is_empty());
+    let first = memory
+        .commit(valid.clone(), CommitOptions::default())
+        .await
+        .unwrap();
+    let replay = memory
+        .commit(valid, CommitOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(first.persisted_link_ids, replay.persisted_link_ids);
+    let derived = graph
+        .query_links_by_ids(&first.persisted_link_ids)
+        .await
+        .unwrap();
+    assert!(matches!(derived.as_slice(), [link]
+        if link.from_id == belief_id && link.from_type == ObjectType::DerivedMemory
+        && link.to_id == subject && link.to_type == ObjectType::Entity && link.relation == RelationType::About));
+    for draft in &rejected {
+        assert!(matches!(
+            memory.link(draft.clone()).await,
+            Err(CustomError::DomainValidation(
+                DomainValidationError::AuthoredBeliefAboutLink
+            ))
+        ));
+    }
+    assert!(graph
+        .query_links_by_ids(
+            &rejected
+                .iter()
+                .map(|draft| draft.id.unwrap())
+                .collect::<Vec<_>>()
+        )
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        graph
+            .query_links_by_ids(&first.persisted_link_ids)
+            .await
+            .unwrap(),
+        derived
+    );
+
+    // About remains available for other endpoint pairs, through both writers.
+    for (from_type, from_id, to_type, to_id) in [
+        (
+            ObjectType::DerivedMemory,
+            belief_id,
+            ObjectType::Observation,
+            observation_id,
+        ),
+        (
+            ObjectType::Observation,
+            observation_id,
+            ObjectType::DerivedMemory,
+            belief_id,
+        ),
+        (ObjectType::Episode, episode_id, ObjectType::Entity, subject),
+        (ObjectType::Entity, subject, ObjectType::Episode, episode_id),
+    ] {
+        let linked = memory
+            .link(MemoryLinkDraft::new(
+                from_type,
+                from_id,
+                RelationType::About,
+                to_type,
+                to_id,
+            ))
+            .await
+            .unwrap()
+            .link;
+        let draft = MemoryLinkDraft {
+            id: Some(linked.id),
+            created_at: Some(linked.created_at),
+            schema_version: Some(linked.schema_version),
+            ..MemoryLinkDraft::new(from_type, from_id, RelationType::About, to_type, to_id)
+        };
+        let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::MemoryLink(
+            MemoryLinkCandidate::new(draft, CandidateProvenance::caller("non-subject link")),
+        ));
+        assert!(memory
+            .validate_plan(&plan)
+            .await
+            .unwrap()
+            .iter()
+            .all(|item| item.status == CandidateValidationStatus::Valid));
+        memory.commit(plan, CommitOptions::default()).await.unwrap();
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn plan_rejects_duplicate_authored_and_generated_link_ids_before_writes() {
     for collision in ["about", "supersedes", "authored"] {
         let memory = memory().await;
@@ -678,7 +901,7 @@ async fn plan_rejects_duplicate_authored_and_generated_link_ids_before_writes() 
             let mut draft = MemoryLinkDraft::new(
                 ObjectType::DerivedMemory,
                 replacement,
-                RelationType::About,
+                RelationType::AssociatedWith,
                 ObjectType::Entity,
                 target,
             );
@@ -767,7 +990,7 @@ async fn correction_rejects_preexisting_generated_link_id_collisions_before_writ
         let mut preclaimed = MemoryLinkDraft::new(
             ObjectType::DerivedMemory,
             previous,
-            RelationType::About,
+            RelationType::AssociatedWith,
             ObjectType::Entity,
             subject,
         );

@@ -162,22 +162,6 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
                         "Ledger Meridian contains a suppressed restart-safe note.",
                         episode_id,
                         &[entity_id],
-                    ))
-                    .with_memory_link(link(
-                        id("550e8400-e29b-41d4-a716-446655462006"),
-                        ObjectType::Entity,
-                        entity_id,
-                        RelationType::About,
-                        ObjectType::DerivedMemory,
-                        old_id,
-                    ))
-                    .with_memory_link(link(
-                        id("550e8400-e29b-41d4-a716-446655462007"),
-                        ObjectType::Entity,
-                        entity_id,
-                        RelationType::About,
-                        ObjectType::DerivedMemory,
-                        suppressed_id,
                     )),
                 RememberOptions::default(),
             )
@@ -485,27 +469,6 @@ fn high_degree_fixture(ids: &HighDegreeIds) -> RememberInput {
             &format!("Auxiliary neutral memory {index} expands global selectivity counts."),
             hub_episode_id,
             &[entity_id],
-        ));
-    }
-
-    for (index, memory_id) in ids.hub_derived_ids.iter().copied().enumerate() {
-        input = input.with_memory_link(link(
-            Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5546_3400 + index as u128),
-            ObjectType::Entity,
-            ids.hub_entity,
-            RelationType::About,
-            ObjectType::DerivedMemory,
-            memory_id,
-        ));
-    }
-    for (index, memory_id) in ids.other_derived_ids.iter().copied().enumerate() {
-        input = input.with_memory_link(link(
-            Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5546_3500 + index as u128),
-            ObjectType::Entity,
-            ids.other_entities[index % ids.other_entities.len()],
-            RelationType::About,
-            ObjectType::DerivedMemory,
-            memory_id,
         ));
     }
 

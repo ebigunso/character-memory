@@ -441,9 +441,6 @@ fn bounded_expansion_plan<'a>(
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
-        retain_unique_belief_subject_links(&mut incident_links, object_ref, |(link, neighbor)| {
-            (link.relation, *neighbor)
-        });
 
         let root_fanout_mode = RootFanoutMode::for_node(
             depth == 0
@@ -535,31 +532,6 @@ fn bounded_expansion_plan<'a>(
         fanout_utilization,
         bounded_failure,
     })
-}
-
-// Derived and caller-authored links can represent the same belief subject.
-// Keep the first link in canonical order before charging hub or fanout budgets.
-fn retain_unique_belief_subject_links<T>(
-    links: &mut Vec<T>,
-    node: MemoryObjectRef,
-    edge: impl Fn(&T) -> (RelationType, MemoryObjectRef),
-) {
-    let mut subjects = HashSet::new();
-    links.retain(|link| {
-        let (relation, neighbor) = edge(link);
-        !matches!(
-            (relation, node.object_type, neighbor.object_type),
-            (
-                RelationType::About,
-                ObjectType::DerivedMemory,
-                ObjectType::Entity
-            ) | (
-                RelationType::About,
-                ObjectType::Entity,
-                ObjectType::DerivedMemory
-            )
-        ) || subjects.insert(neighbor)
-    });
 }
 
 fn apply_fanout_limits<'a>(
@@ -882,10 +854,6 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
         })
         .collect::<Vec<_>>();
-
-    retain_unique_belief_subject_links(&mut incident_links, object_ref, |link_ref| {
-        (link_ref.relation(), link_ref.other_endpoint(object_ref))
-    });
 
     let root_fanout_mode = RootFanoutMode::for_node(depth == 0 && object_ref == root_ref);
     let pre_limit_counts = query.trace_mode.is_enabled().then(|| {

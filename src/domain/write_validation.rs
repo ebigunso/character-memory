@@ -85,6 +85,8 @@ pub enum CandidateValidationIssue {
         field: CandidateScoreField,
         actual: String,
     },
+    #[error("{field} contains repeated id {id}")]
+    DuplicateId { field: String, id: MemoryId },
     #[error("memory link endpoint {endpoint:?} cannot reference a memory link")]
     UnsupportedMemoryLinkEndpoint { endpoint: MemoryLinkEndpoint },
     #[error("memory link cannot point from an object to itself: {referenced:?}")]
@@ -95,6 +97,8 @@ pub enum CandidateValidationIssue {
     MemoryLinkRejectedByAdmissionPolicy,
     #[error("Supersedes links must be derived from a memory supersedes list")]
     AuthoredSupersedesLink,
+    #[error("About links between interpreted memories and entities must be derived from the memory subject list")]
+    AuthoredBeliefAboutLink,
     #[error(
         "link id {link_id} occurs more than once in the write plan, including generated links"
     )]

@@ -238,8 +238,14 @@ pub enum DomainValidationError {
     #[error("{field} must be in 0.0..=1.0 and finite, got {value}")]
     InvalidScore { field: &'static str, value: f32 },
 
+    #[error("{field} contains repeated id {id}")]
+    DuplicateId { field: &'static str, id: MemoryId },
+
     #[error("Supersedes links are derived from a memory supersedes list and cannot be authored")]
     AuthoredSupersedesLink,
+
+    #[error("About links between interpreted memories and entities must be derived from the memory subject list")]
+    AuthoredBeliefAboutLink,
 
     #[error("memory links cannot point at MemoryLink endpoints via {field}")]
     UnsupportedMemoryLinkEndpoint { field: &'static str },
@@ -275,6 +281,16 @@ fn validate_score(field: &'static str, value: f32) -> Result<(), DomainValidatio
     Ok(())
 }
 
+fn validate_unique_ids(field: &'static str, ids: &[MemoryId]) -> Result<(), DomainValidationError> {
+    let mut seen = std::collections::HashSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return Err(DomainValidationError::DuplicateId { field, id: *id });
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Episode {
     pub id: MemoryId,
@@ -298,6 +314,10 @@ impl Episode {
         if self.summary.trim().is_empty() {
             return Err(DomainValidationError::EmptyEpisodeSummary);
         }
+        validate_unique_ids(
+            "Episode.participant_entity_ids",
+            &self.participant_entity_ids,
+        )?;
         validate_score("Episode.salience_score", self.salience_score)
     }
 }
@@ -402,6 +422,21 @@ impl DerivedMemory {
             self.object_type,
             ObjectType::DerivedMemory,
         )?;
+        for (field, ids) in [
+            (
+                "DerivedMemory.derived_from_episode_ids",
+                &self.derived_from_episode_ids,
+            ),
+            (
+                "DerivedMemory.derived_from_observation_ids",
+                &self.derived_from_observation_ids,
+            ),
+            ("DerivedMemory.thread_ids", &self.thread_ids),
+            ("DerivedMemory.entity_ids", &self.entity_ids),
+            ("DerivedMemory.supersedes", &self.supersedes),
+        ] {
+            validate_unique_ids(field, ids)?;
+        }
         let has_sources = !self.derived_from_episode_ids.is_empty()
             || !self.derived_from_observation_ids.is_empty();
         belief::validate_belief(

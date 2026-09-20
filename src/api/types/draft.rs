@@ -149,7 +149,7 @@ impl EpisodeDraft {
         self,
         defaults: &mut DraftDefaults,
     ) -> Result<Episode, DomainValidationError> {
-        let episode = Episode {
+        let mut episode = Episode {
             id: defaults.id(self.id),
             object_type: ObjectType::Episode,
             modality: self.modality,
@@ -164,6 +164,7 @@ impl EpisodeDraft {
             created_at: defaults.timestamp(self.created_at),
             schema_version: defaults.schema_version(self.schema_version),
         };
+        episode.participant_entity_ids.sort_unstable();
         episode.validate()?;
         Ok(episode)
     }
@@ -390,7 +391,7 @@ impl DerivedMemoryDraft {
         defaults: &mut DraftDefaults,
     ) -> Result<DerivedMemory, DomainValidationError> {
         let created_at = defaults.timestamp(self.created_at);
-        let derived = DerivedMemory {
+        let mut derived = DerivedMemory {
             id: defaults.id(self.id),
             object_type: ObjectType::DerivedMemory,
             derived_type: self.derived_type,
@@ -408,6 +409,11 @@ impl DerivedMemoryDraft {
             updated_at: self.updated_at.unwrap_or(created_at),
             schema_version: defaults.schema_version(self.schema_version),
         };
+        derived.derived_from_episode_ids.sort_unstable();
+        derived.derived_from_observation_ids.sort_unstable();
+        derived.thread_ids.sort_unstable();
+        derived.entity_ids.sort_unstable();
+        derived.supersedes.sort_unstable();
         derived.validate()?;
         Ok(derived)
     }
@@ -426,6 +432,8 @@ impl TryFrom<DerivedMemoryDraft> for DerivedMemory {
 }
 
 /// Caller-supplied draft for a canonical typed memory link.
+/// Supersedes links and About links between interpreted memories and entities
+/// are derived from the memory's lists and cannot be authored.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryLinkDraft {
     pub id: Option<MemoryId>,
@@ -471,6 +479,15 @@ impl MemoryLinkDraft {
     ) -> Result<MemoryLink, DomainValidationError> {
         if self.relation == RelationType::Supersedes {
             return Err(DomainValidationError::AuthoredSupersedesLink);
+        }
+        if self.relation == RelationType::About
+            && matches!(
+                (self.from_type, self.to_type),
+                (ObjectType::DerivedMemory, ObjectType::Entity)
+                    | (ObjectType::Entity, ObjectType::DerivedMemory)
+            )
+        {
+            return Err(DomainValidationError::AuthoredBeliefAboutLink);
         }
         let link = MemoryLink {
             id: defaults.id(self.id),

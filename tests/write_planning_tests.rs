@@ -403,7 +403,7 @@ fn remember_equivalence_input() -> RememberInput {
     let mut link = MemoryLinkDraft::new(
         ObjectType::Entity,
         entity_id,
-        RelationType::About,
+        RelationType::AssociatedWith,
         ObjectType::DerivedMemory,
         derived_id,
     );

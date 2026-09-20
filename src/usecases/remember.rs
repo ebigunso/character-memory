@@ -778,7 +778,7 @@ mod tests {
                             id("550e8400-e29b-41d4-a716-446655443008"),
                             ObjectType::Entity,
                             fixtures.hub_entity.id,
-                            RelationType::About,
+                            RelationType::AssociatedWith,
                             ObjectType::DerivedMemory,
                             fixtures.suppressed_seed.id,
                         ),
@@ -792,7 +792,7 @@ mod tests {
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
                 entity_id: fixtures.hub_entity.id,
-                relation_kind: RelationType::About,
+                relation_kind: RelationType::AssociatedWith,
                 object_type: ObjectType::DerivedMemory,
             })
             .await
