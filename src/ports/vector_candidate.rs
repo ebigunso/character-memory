@@ -2,7 +2,7 @@
 use async_trait::async_trait;
 
 use crate::api::types::retrieval::VectorRecallCompleteness;
-use crate::domain::MemoryId;
+use crate::domain::MemoryObjectRef;
 use crate::errors::CustomError;
 use crate::models::vector::{CanonicalCandidates, VectorCandidateSearch, VectorRecordEmbedding};
 
@@ -38,7 +38,8 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError>;
 
-    async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError>;
+    /// Deletes every surface of each typed object, preserving other object types with the same ID.
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError>;
 }
 
 #[async_trait]
@@ -61,7 +62,7 @@ impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
         (**self).search_candidates(query).await
     }
 
-    async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        (**self).delete_candidates(object_ids).await
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        (**self).delete_candidates(objects).await
     }
 }

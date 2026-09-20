@@ -1284,7 +1284,7 @@ mod tests {
             })
         }
 
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             Ok(())
         }
     }

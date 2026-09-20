@@ -8,10 +8,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use qdrant_edge::{
     Condition, CountRequest, CreateIndex, Distance, EdgeConfig, EdgeOptimizersConfig, EdgeShard,
-    EdgeVectorParams, FieldCondition, FieldIndexOperations, Filter, Match, MatchValue, NamedQuery,
-    PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, PointStruct,
-    QueryEnum, ScoredPoint, ScrollRequest, SearchParams, SearchRequestBuilder, UpdateOperation,
-    ValueVariants, WithPayloadInterface, DEFAULT_VECTOR_NAME,
+    EdgeVectorParams, FieldCondition, FieldIndexOperations, Filter, NamedQuery, PayloadFieldSchema,
+    PayloadSchemaType, PointInsertOperations, PointOperations, PointStruct, QueryEnum, ScoredPoint,
+    ScrollRequest, SearchParams, SearchRequestBuilder, UpdateOperation, WithPayloadInterface,
+    DEFAULT_VECTOR_NAME,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
@@ -21,7 +21,7 @@ use crate::adapters::qdrant::payload::{
     QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
 };
 use crate::adapters::qdrant::tie_closure::close_tie_cohort;
-use crate::domain::{MemoryId, DEFAULT_SCHEMA_VERSION};
+use crate::domain::{MemoryObjectRef, DEFAULT_SCHEMA_VERSION};
 use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
     ConfigValidationReason, CustomError, IoErrorKind, VectorDatabaseError, VectorDatabaseErrorKind,
@@ -59,7 +59,7 @@ enum Command {
         reply: Reply<()>,
     },
     Delete {
-        object_ids: Vec<String>,
+        filter: Filter,
         reply: Reply<()>,
     },
     Search {
@@ -263,14 +263,29 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         })
     }
 
-    async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        if object_ids.is_empty() {
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        if objects.is_empty() {
             return Ok(());
         }
         let _operation = self.operation.lock().await;
         let (reply, receiver) = oneshot::channel();
+        let conditions = objects
+            .iter()
+            .map(|object| {
+                Condition::Filter(Filter {
+                    must: Some(vec![
+                        string_condition(OBJECT_ID_FIELD, object.id.to_string()),
+                        string_condition(OBJECT_TYPE_FIELD, object.object_type.to_string()),
+                    ]),
+                    ..Filter::new()
+                })
+            })
+            .collect();
         self.send(Command::Delete {
-            object_ids: object_ids.iter().map(ToString::to_string).collect(),
+            filter: Filter {
+                should: Some(conditions),
+                ..Filter::new()
+            },
             reply,
         })?;
         receive(receiver).await
@@ -319,8 +334,7 @@ fn owner_loop(shard: EdgeShard, commands: mpsc::Receiver<Command>) {
                     .and_then(|_| shard.flush().map_err(edge_error));
                 let _ = reply.send(result);
             }
-            Command::Delete { object_ids, reply } => {
-                let filter = string_filter(OBJECT_ID_FIELD, object_ids);
+            Command::Delete { filter, reply } => {
                 let result = shard
                     .update(UpdateOperation::PointOperation(
                         PointOperations::DeletePointsByFilter(filter),
@@ -586,21 +600,21 @@ fn payload_to_match(
 fn string_filter(field: &str, values: Vec<String>) -> Filter {
     let conditions = values
         .into_iter()
-        .map(|value| {
-            Condition::Field(FieldCondition::new_match(
-                field
-                    .try_into()
-                    .expect("adapter fields are valid JSON paths"),
-                Match::Value(MatchValue {
-                    value: ValueVariants::String(value),
-                }),
-            ))
-        })
+        .map(|value| string_condition(field, value))
         .collect();
     Filter {
         should: Some(conditions),
         ..Filter::new()
     }
+}
+
+fn string_condition(field: &str, value: String) -> Condition {
+    Condition::Field(FieldCondition::new_match(
+        field
+            .try_into()
+            .expect("adapter fields are valid JSON paths"),
+        value.into(),
+    ))
 }
 
 fn object_type_tokens(query: &VectorCandidateSearch) -> Vec<String> {
@@ -738,7 +752,7 @@ mod tests {
 
     use super::*;
     use crate::api::types::retrieval::VectorRecallCompleteness;
-    use crate::domain::{ObjectType, VectorSurface};
+    use crate::domain::{MemoryId, ObjectType, VectorSurface};
     use crate::models::vector::VectorRecord;
 
     const CHILD_MODE: &str = "CM_QDRANT_EDGE_CHILD_MODE";
@@ -889,7 +903,10 @@ mod tests {
         assert_eq!(store.search_candidates(&query(3)).await.unwrap(), first);
 
         store
-            .delete_candidates(&[records[0].object_id])
+            .delete_candidates(&[MemoryObjectRef::new(
+                records[0].object_type,
+                records[0].object_id,
+            )])
             .await
             .unwrap();
         store.close().await.unwrap();

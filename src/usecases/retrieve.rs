@@ -3300,8 +3300,8 @@ mod tests {
             Ok(recall)
         }
 
-        async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-            self.inner.delete_candidates(object_ids).await
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            self.inner.delete_candidates(objects).await
         }
     }
 

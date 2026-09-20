@@ -12,7 +12,7 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
-use crate::domain::MemoryId;
+use crate::domain::MemoryObjectRef;
 use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, CustomError, IoErrorKind, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind,
@@ -316,14 +316,19 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         })
     }
 
-    async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        if object_ids.is_empty() {
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        if objects.is_empty() {
             return Ok(());
         }
 
-        let conditions: Vec<_> = object_ids
+        let conditions: Vec<_> = objects
             .iter()
-            .map(|id| Condition::matches(OBJECT_ID_FIELD, id.to_string()))
+            .map(|object| {
+                Condition::from(Filter::must([
+                    Condition::matches(OBJECT_ID_FIELD, object.id.to_string()),
+                    Condition::matches(OBJECT_TYPE_FIELD, object.object_type.to_string()),
+                ]))
+            })
             .collect();
         let selector = PointsSelectorOneOf::Filter(Filter::should(conditions));
         let request = DeletePointsBuilder::new(&self.collection_name)
@@ -574,7 +579,7 @@ mod tests {
     use super::*;
     use crate::adapters::qdrant::payload::QdrantPayloadField;
     use crate::api::types::retrieval::VectorRecallCompleteness;
-    use crate::domain::{ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
+    use crate::domain::{MemoryId, ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
     use qdrant_client::qdrant::{
         point_id::PointIdOptions, value::Kind, vector, vectors, DeleteCollectionBuilder, PointId,
@@ -705,14 +710,16 @@ mod tests {
             store: &dyn VectorCandidateStore,
         ) -> Result<(VectorCandidateRecall, VectorCandidateRecall), CustomError> {
             let records = [
-                (MemoryId::from_u128(1), VectorSurface::Summary),
-                (MemoryId::from_u128(1), VectorSurface::Text),
-                (MemoryId::from_u128(2), VectorSurface::Summary),
+                (1, ObjectType::Episode, VectorSurface::Summary),
+                (1, ObjectType::Episode, VectorSurface::Text),
+                (2, ObjectType::Episode, VectorSurface::Summary),
+                (1, ObjectType::MemoryThread, VectorSurface::Summary),
+                (2, ObjectType::MemoryThread, VectorSurface::Summary),
             ]
-            .map(|(id, surface)| {
+            .map(|(id, object_type, surface)| {
                 VectorRecord::new(
-                    id,
-                    ObjectType::Episode,
+                    MemoryId::from_u128(id),
+                    object_type,
                     surface,
                     DEFAULT_SCHEMA_VERSION,
                     "surface",
@@ -723,9 +730,18 @@ mod tests {
                 .map(|record| VectorRecordEmbedding::new(record, &[1.0, 0.0]))
                 .collect::<Vec<_>>();
             store.upsert_vector_records(&embeddings).await?;
-            let query = VectorCandidateSearch::new(vec![1.0, 0.0], 10, vec![ObjectType::Episode]);
+            let query = VectorCandidateSearch::new(
+                vec![1.0, 0.0],
+                10,
+                vec![ObjectType::Episode, ObjectType::MemoryThread],
+            );
             let before = store.search_candidates(&query).await?;
-            store.delete_candidates(&[MemoryId::from_u128(1)]).await?;
+            store
+                .delete_candidates(&[
+                    MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1)),
+                    MemoryObjectRef::new(ObjectType::MemoryThread, MemoryId::from_u128(2)),
+                ])
+                .await?;
             let after = store.search_candidates(&query).await?;
             Ok((before, after))
         }
@@ -737,20 +753,37 @@ mod tests {
                 recall
                     .candidates
                     .iter()
-                    .map(|candidate| (candidate.object_id, candidate.surface))
+                    .map(|candidate| {
+                        (
+                            candidate.object_id,
+                            candidate.object_type,
+                            candidate.surface,
+                        )
+                    })
                     .collect::<HashSet<_>>()
             };
             assert_eq!(
                 surfaces(&before),
-                HashSet::from([
-                    (MemoryId::from_u128(1), VectorSurface::Summary),
-                    (MemoryId::from_u128(1), VectorSurface::Text),
-                    (MemoryId::from_u128(2), VectorSurface::Summary),
-                ])
+                [
+                    (1, ObjectType::Episode, VectorSurface::Summary),
+                    (1, ObjectType::Episode, VectorSurface::Text),
+                    (2, ObjectType::Episode, VectorSurface::Summary),
+                    (1, ObjectType::MemoryThread, VectorSurface::Summary),
+                    (2, ObjectType::MemoryThread, VectorSurface::Summary),
+                ]
+                .map(|(id, object_type, surface)| (MemoryId::from_u128(id), object_type, surface))
+                .into_iter()
+                .collect()
             );
             assert_eq!(
                 surfaces(&after),
-                HashSet::from([(MemoryId::from_u128(2), VectorSurface::Summary)])
+                [
+                    (2, ObjectType::Episode, VectorSurface::Summary),
+                    (1, ObjectType::MemoryThread, VectorSurface::Summary),
+                ]
+                .map(|(id, object_type, surface)| (MemoryId::from_u128(id), object_type, surface))
+                .into_iter()
+                .collect()
             );
         }
     }

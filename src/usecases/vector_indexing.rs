@@ -138,8 +138,7 @@ pub(crate) async fn delete_vectors<V: VectorCandidateStore + ?Sized>(
     if objects.is_empty() {
         return Ok(None);
     }
-    let ids = objects.iter().map(|object| object.id).collect::<Vec<_>>();
-    match vector_store.delete_candidates(&ids).await {
+    match vector_store.delete_candidates(objects).await {
         Ok(()) => Ok(None),
         Err(CustomError::VectorDatabaseError(error)) => {
             Ok(Some(crate::api::types::VectorMaintenanceFailureItem {
@@ -167,7 +166,6 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
 
-    use crate::domain::MemoryId;
     use crate::models::vector::{zero_norm_record_fixture, EmbeddingInput, VectorCandidateSearch};
     use crate::ports::vector_candidate::VectorCandidateRecall;
 
@@ -205,7 +203,7 @@ mod tests {
             unreachable!("search is not part of this test")
         }
 
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             unreachable!("deletion is not part of this test")
         }
     }
