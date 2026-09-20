@@ -220,6 +220,13 @@ fn graph_uri_maps_object_types_to_stable_urns() {
 }
 
 #[test]
+fn schema_version_constants_are_pinned_to_the_initial_episodic_memory_schema() {
+    assert_eq!(EPISODIC_MEMORY_SCHEMA_VERSION, "episodic_memory_initial");
+    assert_eq!(CURRENT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
+    assert_eq!(DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
+}
+
+#[test]
 fn validation_accepts_representative_valid_objects() {
     let episode = valid_episode();
     let observation = valid_observation();
