@@ -20,7 +20,7 @@
 - A marker on a belief about a notion that its grounding was given by the application, accepted in place of source experiences only on a memory that has at least one notion among its subjects and no sources. Needed because: the source floor otherwise rejects a name given before any experience exists, and a source-less memory with no marker is indistinguishable from a defect (ADR-D-0028).
 
 ## Scope / Non-goals
-- Scope: `src/**`, `tests/**`, `README.md`, one implementation record, this plan.
+- Scope: `src/**`, `tests/**`, `Cargo.toml`, `Cargo.lock`, `README.md`, up to two decision records, this plan.
 - Non-goals: the scene, scope keys, routes, floors, prospective memory fields, the renderer (later v0.2 slices, each with its own plan); sameness and containment assertions and their read-through (they arrive with the scenario that needs them; until then they are held as ordinary beliefs); a fork diagnostic on supersession; an un-suppress operation (known gap); the user and assistant preference subtypes (decided with the scene slice); the stats-projection clones in the correction path beyond what Task_2 touches; whether `api` and `domain` stay public modules (decided once after these deletions); any concurrency guard (the census's risk families are recorded for the write-path slice); migration of stored data (no consumers).
 
 ## Design
@@ -59,11 +59,11 @@
   - README.md
 - depends_on: []
 - description: |
-  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; the two aliased schema-version constants (keep one); `operation_id`, `idempotency_key` and the `PrepareOptions` override, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
+  Delete, per the census site lists: `RememberInput.scope_ids`; the five lifecycle options whose non-default value is rejected, their knob enum and error, and the deferred-destructive policy; `Stability`; the two aliased schema-version constants (keep one); `operation_id`, `idempotency_key`, the `PrepareOptions` override and the remember input hash whose only consumer is that key, with the doc comment that promises retry checks; `DerivedMemory.confidence`, `MemoryLink.confidence`, the replacement draft's confidence, the shared predicate and score validation where nothing else uses it; the archived and deleted retention states, `ThreadStatus::Archived`, `ArchivePolicy`, `ForgetMemoryDraft::archive_thread`, the settable target retention state and thread status, the include-archived and include-deleted flags and their omission reasons, the stats parser arms and the selectivity arms that named them. Keep the thread-member cascade of forget. The supported behavior of each deleted option becomes the invariant.
 - acceptance:
   - None of the deleted names appears in `src`, `tests` or `README.md`, and no deleted field is accepted by a draft or emitted to the graph or the stats store.
   - Forgetting a thread's members still suppresses them and removes their vectors; nothing deletes a thread's own vector any more, so a thread stays reachable (ADR-D-0018).
-  - Correction identity and the remember input hash are still deterministic, shown by the existing retry tests passing unchanged in intent.
+  - Retry identity is what it really is: prepared candidate ids are deterministic from supplied ids and stable defaults, a replay of the same plan is accepted by content equality, and correction identity is still deterministic; the existing retry tests pass unchanged in intent.
   - The three-tier selectivity count still means something with two retention states, or is reduced to what it means, with the reason in the report.
 - validation:
   - kind: command
@@ -83,12 +83,13 @@
   - README.md
 - depends_on: [Task_1]
 - description: |
-  Remove the stored current flag from the domain, the drafts, the graph mapping and the API lifecycle filter. A memory is current when its retention allows it and no interpreted memory supersedes it; a suppressed successor still supersedes, so forgetting a correction does not resurrect what it corrected. Delete the two staged-validation rules that reject a current memory with predecessors (they contradict `correct`). `correct` stops rewriting the memory it supersedes. Commit derives a Supersedes link for each predecessor a memory names and writes a commit's objects and links as one graph batch (the combined write `correct` already uses), so no reader sees a successor without its link. The `link` operation rejects a Supersedes relation. The stats projection keeps its current counters as a cache it derives itself. Shrink the correction path's projection clones to an immutable plan if this task's edits reach them; otherwise leave them.
+  Remove the stored current flag from the domain, the drafts, the graph mapping and the API lifecycle filter. A memory is current when its retention allows it and no interpreted memory supersedes it; a suppressed successor still supersedes, so forgetting a correction does not resurrect what it corrected. Delete the two staged-validation rules that reject a current memory with predecessors (they contradict `correct`). `correct` stops rewriting the memory it supersedes, and so a correction is a supersession and nothing else: the two remaining correction options go, `supersede_replaced_derived_memories` because a correction that did not supersede could no longer end currency at all, and `suppress_superseded_derived_memories` because suppression is a separate decision about a memory (ADR-D-0018), made through forget when a caller wants the corrected version out of history too. A corrected predecessor is therefore Active and superseded, where today it is Suppressed. Commit derives a Supersedes link for each predecessor a memory names and writes a commit's objects and links as one graph batch (the combined write `correct` already uses), so no reader sees a successor without its link. The `link` operation rejects a Supersedes relation. The stats projection keeps its current counters as a cache it derives itself. Shrink the correction path's projection clones to an immutable plan if this task's edits reach them; otherwise leave them.
 - acceptance:
   - A superseding interpreted memory written through prepare, validate and commit is current and its predecessor is not, with no in-place mutation of the predecessor.
   - A caller-built plan that names a predecessor and carries no link still ends the predecessor's currency, and `link` with a Supersedes relation is rejected.
-  - Retrieval's lifecycle filtering and omission reasons give the same results as before for superseded and suppressed memories, read from links and retention alone.
+  - Intended outcomes, read from links and retention alone: a corrected or otherwise superseded predecessor is omitted by default with the reason superseded and returned under the include-superseded policy; an independently forgotten memory is omitted with the reason suppressed and returned only under include-suppressed; a memory both superseded and suppressed reports suppressed, since retention is checked first. The README and the tests that expected a corrected predecessor to be suppressed are changed to say this.
   - The correction retry tests still show stats repair on an idempotent retry.
+  - One focused scenario on both the in-memory and the SQLite stats stores: a predecessor is stored and indexed, an ordinary successor is committed without rewriting it, and the graph's currency and the predecessor's cached current counters both show it no longer current; the successor is then suppressed and the predecessor does not become current again.
   - Selectivity's current counts are unchanged for the existing test fixtures.
 - validation:
   - kind: command
@@ -106,7 +107,9 @@
   - src/**
   - tests/**
   - README.md
-  - docs/decisions/implementation/**
+  - Cargo.toml
+  - Cargo.lock
+  - docs/decisions/**
 - depends_on: [Task_2]
 - description: |
   The entity keeps its id, type tag, creation time and schema version; name, aliases, entity type (the enum goes), canonical key, summary and the updated time go. The entity has no embedding surface and leaves the default candidate object types. An interpreted memory may carry assertions (subject notion, predicate, name) with a closed predicate vocabulary of one, known as; the graph stores, beside the name as given, a normalized literal (Unicode NFKC through the `unicode-normalization` crate as a direct dependency, then case-folded, then whitespace-collapsed), and a crate-internal query on the graph authority port returns the notions currently known by an exact name, several when the name is shared. The query's first production reader is the scene slice; until then it is exercised by tests, and a scoped allow that cites the scene slice is acceptable if the lint demands it. A belief about a notion may be marked as given by the application, which satisfies the source floor in place of source experiences: only with at least one notion subject and no sources. Commit derives the About links the Planner-added requirements name. Two decisions here may deserve records, each held to invariants with mechanism left in this plan: the form of a belief about a notion (an ordinary interpreted memory; assertions with a closed vocabulary; the assertion is the character's own commitment), and how a belief the application gives enters (which closes an item ADR-D-0034 and ADR-D-0028 leave uncovered). Propose each if its admission test passes and let the test choose the record type (`durable-docs-authoring`); the decider accepts or returns them.
@@ -151,7 +154,8 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Trigger / new insight: the groundwork census, a value audit, a design consult on the belief form, and a second value test the decider asked for.
   - Plan delta (what changed): link confidence goes with memory confidence; no idempotency ledger; a first belief enters with a given-by-the-application marker (a marker, not a free-text source string, since nothing would read the string); un-suppression is a known gap; the preference subtypes wait for the scene slice; a belief is an ordinary interpreted memory with optional assertions, not a typed subtype; only known as is built, sameness and containment wait for their scenario; no fork diagnostic; no `known_as` sugar on the entity draft until the example loop shows the friction.
   - Tradeoffs considered: in the Design section.
-  - User approval: yes, 2026-09-20.
+  - A consequence the plan review surfaced, for the decider's eye at approval: with no predecessor rewrite, a correction no longer suppresses what it corrects; the corrected version is superseded history, reachable under the include-superseded policy, and the two correction options that said otherwise are deleted.
+  - User approval: yes, 2026-09-20, for the decisions above; the consequence is presented with the plan.
   - Record proposed: up to two in Task_3, one decision each (the form of a belief about a notion; how an application-given belief enters), type chosen by the admission test; the name query and the entity surface are mechanism and stay in this plan. Acceptance pending.
 
 ## Notes
