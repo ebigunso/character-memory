@@ -128,17 +128,27 @@
     detail: "Tier D diff review; Tier A review of the floor rule against ADR-D-0022 and ADR-I-0022"
 
 ### Task_4: The floors are measured
-- type: chore
+- type: impl
 - owns:
+  - src/**
+  - tests/**
+  - README.md
   - docs/decisions/**
-  - docs/coding-agent/plans/active/v0-2-cues-and-floors-plan.md
 - depends_on: [Task_3]
 - description: |
-  Hand the pinned commit of Task_3 to the companion evaluation repository with what a calibration needs: pressure on each kind whose floor is claimed (participant, place, activity) under a loud topic and against each other, read from the trace's cue kinds, with a census of what ran and what did not. The companion repository plans and runs it under its own plan. From its result, set the floor values, replace the provisional ones in a follow-up change if they differ, and propose the measured-floors record in the pattern of ADR-I-0022. This does not replace the companion's one final re-measurement of the continuity baselines.
+  Hand the pinned commit of Task_3 to the companion evaluation repository with what a calibration needs: pressure on each kind whose floor is claimed (participant, place, activity) under a loud topic and against each other, read from the trace's cue kinds, with a census of what ran and what did not. The companion repository plans and runs it under its own plan. From its result the orchestrator sets the floor values, and a worker makes them the defaults in this task: the values, the removal of the provisional naming, and the tests that named them. The orchestrator proposes the measured-floors record in the pattern of ADR-I-0022. This does not replace the companion's one final re-measurement of the continuity baselines.
 - acceptance:
   - The floor values in the code are the measured ones and nothing calls them provisional.
   - The proposed record states the corpus, the pressure applied to each kind, and what would reopen the values.
 - validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review of the value change"
   - kind: review
     required: true
     owner: orchestrator
