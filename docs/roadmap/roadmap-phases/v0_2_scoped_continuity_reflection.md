@@ -47,7 +47,7 @@ Scope keys on derived memories are derived from each memory's scene at write tim
 
 ## 1.1 The scene is reported, and nothing is withheld by it
 
-Recall is never gated by the scene, by default or by option (ADR-D-0038). A character from whom a confidence is withheld is not discreet, only ignorant, and what it perceives of the room is often partial, so the library reports and never decides: each admitted memory comes with its scene as recorded, and the result states the present scene as given and whether it was partial. The library computes no verdict about who may hear a memory. An application with an obligation discretion cannot carry filters what it passes on, using the reported scene, or keeps what must never mix in separate stores. The B1 and B2 scenarios check that the memory from the other scene is recalled with its scene reported.
+Recall is never gated by the scene, by default or by option (ADR-D-0038). A character from whom a confidence is withheld is not discreet, only ignorant, and what it perceives of the room is often partial, so the library reports and never decides: each admitted memory comes with its scene as recorded, and the result states the present scene as given and whether it was partial. The library computes no verdict about who may hear a memory. Where an application has an obligation that discretion alone cannot meet, it meets it outside recall: it filters what it passes on, using the reported scene, or it keeps what must never mix in separate stores. The B1 and B2 scenarios check that the memory from the other scene is recalled with its scene reported.
 
 ---
 
