@@ -119,7 +119,12 @@ where
                 .retain(|evidence| !idempotent_ids.contains(&evidence.superseded_by_memory_id));
         }
         let vector_result = self
-            .maintain_vectors(&plan.vector_delete_refs, &plan.graph_objects, embeddings)
+            .maintain_vectors(
+                &plan.vector_delete_refs,
+                &plan.graph_objects,
+                &inputs,
+                embeddings,
+            )
             .await?;
         apply_vector_result(&mut outcome, vector_result);
         if !plan.graph_objects.is_empty() || !plan.graph_links.is_empty() {
@@ -144,7 +149,7 @@ where
 
         let mut outcome = plan.outcome_after_graph_success();
         let vector_result = self
-            .maintain_vectors(&plan.vector_delete_refs, &[], Ok(Vec::new()))
+            .maintain_vectors(&plan.vector_delete_refs, &[], &[], Ok(Vec::new()))
             .await?;
         apply_vector_result(&mut outcome, vector_result);
         let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
@@ -669,6 +674,7 @@ where
         &self,
         delete_refs: &[MemoryObjectRef],
         upsert_objects: &[MemoryObject],
+        inputs: &[EmbeddingInput],
         embeddings: Result<Vec<Vec<f32>>, CustomError>,
     ) -> Result<VectorMaintenanceResult, CustomError> {
         let mut maintained = Vec::new();
@@ -687,7 +693,7 @@ where
             .collect::<Vec<_>>();
         if !vector_records.is_empty() {
             let indexing = VectorIndexingService::new(self.vector_store)
-                .index(self.graph_store, vector_records, embeddings)
+                .index(self.graph_store, vector_records, inputs, embeddings)
                 .await?;
             maintained.extend(indexing.indexed_objects);
             if let Some(failure) = indexing.failure {
@@ -775,7 +781,7 @@ fn correction_embedding_inputs(
             crate::policy::embedding_surface::derived_embedding_text(derived_type, text),
         )
     };
-    let mut inputs = if draft.replacement_derived_memories.is_empty() {
+    Ok(if draft.replacement_derived_memories.is_empty() {
         vec![input(
             replacement_memory_id(seed, 0),
             DerivedType::Correction,
@@ -796,10 +802,7 @@ fn correction_embedding_inputs(
                 )
             })
             .collect()
-    };
-    // MutationPlan sorts replacement objects by identity; preserve that batch order.
-    inputs.sort_by_key(|input| input.object_id);
-    Ok(inputs)
+    })
 }
 
 fn replacement_drafts_or_default(
