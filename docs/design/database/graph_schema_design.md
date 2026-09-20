@@ -43,7 +43,7 @@ A `DerivedMemory` stores `derivedType`, `text`, `salienceScore`, `retentionState
 
 An interpreted memory either cites at least one episode or observation, or declares `given_by_application=true`. The latter is persisted as `givenByApplication`, requires at least one notion subject, and excludes experience source references. Application-given beliefs carry application-supplied grounding without inventing an experience. Corrections of such beliefs require an explicit replacement with its grounding declared.
 
-The reference lists have set semantics: duplicate IDs are rejected on admission, and accepted lists are canonicalized for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
+The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
 
 ### Assertions And Name Lookup
 

@@ -261,24 +261,6 @@ impl ReplacementDerivedMemoryDraft {
             return Err(LifecycleDtoValidationError::EmptyReplacementText);
         }
 
-        for (field, ids) in [
-            (
-                "ReplacementDerivedMemoryDraft.derived_from_episode_ids",
-                &self.derived_from_episode_ids,
-            ),
-            (
-                "ReplacementDerivedMemoryDraft.derived_from_observation_ids",
-                &self.derived_from_observation_ids,
-            ),
-            ("ReplacementDerivedMemoryDraft.thread_ids", &self.thread_ids),
-            ("ReplacementDerivedMemoryDraft.entity_ids", &self.entity_ids),
-            ("ReplacementDerivedMemoryDraft.supersedes", &self.supersedes),
-        ] {
-            if let Some(id) = crate::domain::first_duplicate_id(ids) {
-                return Err(LifecycleDtoValidationError::DuplicateId { field, id });
-            }
-        }
-
         let has_sources = !self.derived_from_episode_ids.is_empty()
             || !self.derived_from_observation_ids.is_empty();
         crate::domain::belief::validate_belief(

@@ -341,32 +341,6 @@ async fn every_belief_subject_is_linked_and_counted_once() {
         }
         let subject = MemoryId::from_u128(6301);
         let belief = given_belief(MemoryId::from_u128(6302), subject, "Alice");
-        let mut repeated = belief.clone();
-        repeated.entity_ids.push(subject);
-        let invalid = plan_with_belief(repeated, true);
-        let expected = CandidateValidationIssue::DuplicateId {
-            field: "DerivedMemory.entity_ids".to_owned(),
-            id: subject,
-        };
-        for _ in 0..2 {
-            assert!(memory
-                .validate_plan(&invalid)
-                .await
-                .unwrap()
-                .iter()
-                .any(|item| item.errors.contains(&expected)));
-            assert!(
-                matches!(memory.commit(invalid.clone(), CommitOptions::default()).await,
-                Err(CustomError::WritePlanValidationRejected { validations }) if validations.iter().any(|item| item.errors.contains(&expected)))
-            );
-        }
-        assert!(memory
-            .memory_composition
-            .graph_store
-            .query_objects(&GraphObjectQuery::by_ids(vec![subject, belief.id.unwrap()]))
-            .await
-            .unwrap()
-            .is_empty());
         let plan = plan_with_belief(belief.clone(), true);
         let outcome = memory
             .commit(plan.clone(), CommitOptions::default())
@@ -629,27 +603,43 @@ async fn given_replacement_does_not_inherit_predecessor_sources() {
 }
 
 #[tokio::test]
-async fn unsorted_episode_and_belief_id_sets_commit_and_replay_canonically() {
+async fn repeated_episode_and_belief_id_sets_commit_and_replay_canonically() {
     let memory = memory().await;
     let subjects = [MemoryId::from_u128(6901), MemoryId::from_u128(6902)];
+    let predecessors = [MemoryId::from_u128(6905), MemoryId::from_u128(6906)];
+    let mut stored = RememberWritePlan::new();
     let belief_id = MemoryId::from_u128(6903);
     let episode_id = MemoryId::from_u128(6904);
     let mut belief = given_belief(belief_id, subjects[1], "Alice");
-    belief.entity_ids = vec![subjects[1], subjects[0]];
+    belief.entity_ids = vec![subjects[1], subjects[0], subjects[0]];
+    belief.supersedes = vec![predecessors[1], predecessors[0], predecessors[0]];
     let mut plan = plan_with_belief(belief.clone(), false);
     for subject in subjects {
         let mut notion = EntityDraft::new();
         notion.id = Some(subject);
         notion.created_at = belief.created_at;
         notion.schema_version = belief.schema_version.clone();
-        plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+        let candidate = MemoryCandidate::Entity(EntityCandidate::new(
             notion,
             CandidateProvenance::caller("notion"),
-        )));
+        ));
+        plan = plan.with_candidate(candidate.clone());
+        stored = stored.with_candidate(candidate);
     }
+    for predecessor in predecessors {
+        stored =
+            stored.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+                given_belief(predecessor, subjects[0], "An earlier name"),
+                CandidateProvenance::caller("earlier belief"),
+            )));
+    }
+    memory
+        .commit(stored, CommitOptions::default())
+        .await
+        .unwrap();
     let mut episode = EpisodeDraft::new("An experience with two notions.");
     episode.id = Some(episode_id);
-    episode.participant_entity_ids = vec![subjects[1], subjects[0]];
+    episode.participant_entity_ids = vec![subjects[1], subjects[0], subjects[0]];
     episode.created_at = belief.created_at;
     episode.schema_version = belief.schema_version.clone();
     plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
@@ -675,6 +665,7 @@ async fn unsorted_episode_and_belief_id_sets_commit_and_replay_canonically() {
             MemoryObject::Episode(episode) => assert_eq!(episode.participant_entity_ids, subjects),
             MemoryObject::DerivedMemory(memory) => {
                 assert_eq!(memory.entity_ids, subjects);
+                assert_eq!(memory.supersedes, predecessors);
                 assert_eq!(memory.assertions, belief.assertions);
             }
             _ => panic!("expected the authored episode or belief"),

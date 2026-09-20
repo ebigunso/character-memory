@@ -1460,10 +1460,6 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         DomainValidationError::AuthoredBeliefAboutLink => {
             CandidateValidationIssue::AuthoredBeliefAboutLink
         }
-        DomainValidationError::DuplicateId { field, id } => CandidateValidationIssue::DuplicateId {
-            field: field.to_owned(),
-            id,
-        },
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
