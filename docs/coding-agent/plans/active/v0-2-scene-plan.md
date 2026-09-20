@@ -151,6 +151,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 - 2026-09-21 Task_1 implemented (2493603) and approved at Tier D: one facade-owned turn on every write path, embedding before it, recall outside it. Seven real-store regressions; the review's value test kept all seven, each the sole observer of a distinct failure or of the hold through the stats write.
 - 2026-09-21 Task_2 implemented (5ea091b) and approved at Tier D and Tier A: one `Scene` on the episode, stored as given, its words indexed with the episode, a missing time never guessed. The Tier A value pass removed the activity field and its errors before they shipped.
+- 2026-09-21 Task_3 implemented (7a52011) and approved at Tier D and Tier A: a retrieval is asked from a scene and an optional topic; every admitted memory reports its recorded scenes in the result, a forgotten or missing source says so, and what each reference resolved to is part of the result. The Tier A pass removed a list of parts not given, which read as a completeness flag when empty.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -197,6 +198,13 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Plan delta (what changed): `Scene` loses the activity field, its type and both rejection variants; the routes plan adds the activity together with its cue and decides there whether it belongs to the scene or beside the topic.
   - User approval: decided without the decider under the standing instruction; logged for presentation.
   - Record proposed: none.
+
+- 2026-09-21 Decision: two changes to what recall reports, from the Tier A review of Task_3.
+  - Trigger / new insight: a list of scene parts not given reads as "nothing missing" when it is empty, and it cannot express people present and unperceived; and the outcome of each reference (resolved, ambiguous, unknown, taken as a content cue) sat only in the optional trace, so a default retrieval left a model to infer unfamiliarity from an empty pack.
+  - Plan delta (what changed): the result echoes the scene as given, where an unset part means not given and no scene is ever complete, and carries no list of absences; the reference outcomes are part of the result, and the trace keeps only mechanism. A belief whose source experience was forgotten reports that the source is not available because it was forgotten, with no contents, unless the caller explicitly includes suppressed memories.
+  - Tradeoffs considered: a participant who is in nearly every memory (the self, or the one user of a one-to-one deployment) is left to the routes plan as a general question about roots that discriminate nothing; the existing measured selectivity already admits none or one neighbour for such a root, and ADR-D-0020 forbids a special role for the self.
+  - User approval: decided without the decider under the standing instruction; logged for presentation.
+  - Record proposed: none; the admission test fails, since ADR-D-0029 and ADR-D-0038 already hold these constraints.
 
 ## Notes
 - Risks: an embedding computed before the turn is wasted when the write is then rejected. Reference resolution by description can be noisy; the routes plan's floors and the companion repository's scenarios are where that is judged.
