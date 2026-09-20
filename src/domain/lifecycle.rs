@@ -16,11 +16,6 @@ pub enum LifecycleDtoValidationError {
     EmptyCorrectionOrigin,
     #[error("replacement derived memory text must not be empty")]
     EmptyReplacementText,
-    #[error("{field} contains repeated id {id}")]
-    DuplicateId {
-        field: &'static str,
-        id: super::MemoryId,
-    },
     #[error(
         "replacement derived memory must cite a source episode or observation, or declare application-given grounding"
     )]

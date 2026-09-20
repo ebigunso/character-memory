@@ -43,7 +43,7 @@ A `DerivedMemory` stores `derivedType`, `text`, `salienceScore`, `retentionState
 
 An interpreted memory either cites at least one episode or observation, or declares `given_by_application=true`. The latter is persisted as `givenByApplication`, requires at least one notion subject, and excludes experience source references. Application-given beliefs carry application-supplied grounding without inventing an experience. Corrections of such beliefs require an explicit replacement with its grounding declared.
 
-The reference lists have set semantics: duplicate IDs are rejected on admission, and accepted lists are canonicalized for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
+The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to episode participant IDs and to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts.
 
 ### Assertions And Name Lookup
 
@@ -78,7 +78,7 @@ Remember and correction derive two link families from interpreted-memory lists:
 
 Generated link IDs are deterministic for their endpoints and relation family. Objects and derived links are written in one graph batch. The [derived-link builder](../../../src/usecases/write_planning.rs#L467) preserves this relationship between object lists and graph traversal.
 
-Authored `Supersedes` links are rejected. Authored `About` links between interpreted memories and notions are rejected in either orientation; the memory's subject list owns those links. Other admitted link kinds remain caller-authored. Whole-plan validation also rejects duplicate link IDs, including collisions with generated links, and cycles among supersession candidates.
+Authored `Supersedes` links are rejected. Authored `About` links between interpreted memories and notions are rejected in either orientation; the memory's subject list owns those links. Other admitted link kinds remain caller-authored. Commit rejects duplicate link IDs, including collisions with generated links. Supersession predecessors must already exist in the graph; creating a predecessor in the same plan does not satisfy the reference.
 
 ## Suppression And Supersession
 

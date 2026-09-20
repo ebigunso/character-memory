@@ -165,6 +165,7 @@ impl EpisodeDraft {
             schema_version: defaults.schema_version(self.schema_version),
         };
         episode.participant_entity_ids.sort_unstable();
+        episode.participant_entity_ids.dedup();
         episode.validate()?;
         Ok(episode)
     }
@@ -409,11 +410,16 @@ impl DerivedMemoryDraft {
             updated_at: self.updated_at.unwrap_or(created_at),
             schema_version: defaults.schema_version(self.schema_version),
         };
-        derived.derived_from_episode_ids.sort_unstable();
-        derived.derived_from_observation_ids.sort_unstable();
-        derived.thread_ids.sort_unstable();
-        derived.entity_ids.sort_unstable();
-        derived.supersedes.sort_unstable();
+        for ids in [
+            &mut derived.derived_from_episode_ids,
+            &mut derived.derived_from_observation_ids,
+            &mut derived.thread_ids,
+            &mut derived.entity_ids,
+            &mut derived.supersedes,
+        ] {
+            ids.sort_unstable();
+            ids.dedup();
+        }
         derived.validate()?;
         Ok(derived)
     }

@@ -193,8 +193,8 @@ The old belief remains history. To change that given belief again through `corre
 
 ```rust
 use character_memory::{
-    CorrectMemoryDraft, CorrectionTarget, ExternalSourceReference,
-    ReplacementDerivedMemoryDraft, SourceProvenanceReference,
+    BeliefAssertion, BeliefPredicate, CorrectMemoryDraft, CorrectionTarget, DerivedType,
+    ExternalSourceReference, ReplacementDerivedMemoryDraft, SourceProvenanceReference,
 };
 
 let origin = SourceProvenanceReference {
