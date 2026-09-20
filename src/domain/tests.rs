@@ -238,49 +238,6 @@ fn validation_accepts_representative_valid_objects() {
 }
 
 #[test]
-fn episode_validation_rejects_repeated_participants() {
-    let mut episode = valid_episode();
-    let id = episode.participant_entity_ids[0];
-    episode.participant_entity_ids.push(id);
-    assert_eq!(
-        episode.validate(),
-        Err(DomainValidationError::DuplicateId {
-            field: "Episode.participant_entity_ids",
-            id,
-        })
-    );
-}
-
-#[test]
-fn derived_memory_validation_rejects_repeated_ids_in_set_fields() {
-    let id = MemoryId::from_u128(42);
-    for field in [
-        "DerivedMemory.derived_from_episode_ids",
-        "DerivedMemory.derived_from_observation_ids",
-        "DerivedMemory.thread_ids",
-        "DerivedMemory.entity_ids",
-        "DerivedMemory.supersedes",
-    ] {
-        let mut derived = valid_derived_memory();
-        let ids = match field {
-            "DerivedMemory.derived_from_episode_ids" => &mut derived.derived_from_episode_ids,
-            "DerivedMemory.derived_from_observation_ids" => {
-                &mut derived.derived_from_observation_ids
-            }
-            "DerivedMemory.thread_ids" => &mut derived.thread_ids,
-            "DerivedMemory.entity_ids" => &mut derived.entity_ids,
-            "DerivedMemory.supersedes" => &mut derived.supersedes,
-            _ => unreachable!(),
-        };
-        *ids = vec![id, id];
-        assert_eq!(
-            derived.validate(),
-            Err(DomainValidationError::DuplicateId { field, id })
-        );
-    }
-}
-
-#[test]
 fn episode_validation_rejects_empty_or_whitespace_summary() {
     for summary in ["", "   \n\t"] {
         let mut episode = valid_episode();
