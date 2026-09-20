@@ -110,7 +110,7 @@ Name lookup reads active beliefs with no incoming `Supersedes` link. It can reso
 | `entity_ids` | `About` / `about` | Interpreted memory → notion |
 | `supersedes` | `Supersedes` / `supersedes` | Successor → predecessor |
 
-Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and cyclic supersession plans.
+Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and supersession predecessors that do not already exist in the graph.
 
 Currency is determined by incoming interpreted-memory `Supersedes` links. Predecessor content and retention are preserved; a suppressed successor still supplies supersession evidence. Default retrieval excludes suppressed and superseded memories. `include_suppressed` and `include_superseded` independently opt into those histories. Notions and threads remain graph anchors.
 

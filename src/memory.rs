@@ -394,113 +394,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn supersession_plan_rejects_cycles_before_writing() {
-        for cycle_len in [2, 3] {
-            let memory = injected_memory().await;
-            let episode_id = MemoryId::from_u128(1100);
-            let cycle_ids = (1..=cycle_len)
-                .map(|offset| MemoryId::from_u128(1100 + offset))
-                .collect::<Vec<_>>();
-            let root_id = MemoryId::from_u128(1104);
-            let leaf_id = MemoryId::from_u128(1105);
-            let mut episode = EpisodeDraft::new("Supersession source.");
-            episode.id = Some(episode_id);
-            let mut input = RememberInput::new("Supersession source.").with_episode(episode);
-            for memory_id in [root_id]
-                .into_iter()
-                .chain(cycle_ids.iter().copied())
-                .chain([leaf_id])
-            {
-                let mut draft = DerivedMemoryDraft::new(
-                    DerivedType::UserPreference,
-                    format!("Preference {memory_id}."),
-                )
+    async fn supersession_requires_an_already_stored_predecessor() {
+        let memory = injected_memory().await;
+        let episode_id = MemoryId::from_u128(1100);
+        let predecessor_id = MemoryId::from_u128(1101);
+        let mut episode = EpisodeDraft::new("Supersession source.");
+        episode.id = Some(episode_id);
+        let mut predecessor =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Old preference.")
                 .with_source_episode(episode_id);
-                draft.id = Some(memory_id);
-                if memory_id == root_id {
-                    draft.supersedes = vec![cycle_ids[0], leaf_id];
-                } else if let Some(index) = cycle_ids.iter().position(|id| *id == memory_id) {
-                    draft.supersedes = vec![leaf_id];
-                    if let Some(next) = cycle_ids.get(index + 1) {
-                        draft.supersedes.push(*next);
-                    }
-                }
-                input = input.with_derived_memory(draft);
-            }
-            let acyclic_plan = memory
-                .prepare(input, PrepareOptions::default())
-                .await
-                .unwrap();
-            assert!(memory
-                .validate_plan(&acyclic_plan)
-                .await
-                .unwrap()
-                .iter()
-                .all(|validation| validation.status == CandidateValidationStatus::Valid));
-            let mut cyclic_plan = acyclic_plan.clone();
-            for candidate in &mut cyclic_plan.candidates {
-                if let MemoryCandidate::DerivedMemory(candidate) = candidate {
-                    if candidate.draft.id == cycle_ids.last().copied() {
-                        candidate.draft.supersedes.push(cycle_ids[0]);
-                    }
-                }
-            }
-            let validations = memory.validate_plan(&cyclic_plan).await.unwrap();
-            for validation in &validations {
-                let is_cycle_member = matches!(
-                    &cyclic_plan.candidates[validation.candidate_index],
-                    MemoryCandidate::DerivedMemory(candidate)
-                        if candidate.draft.id.is_some_and(|id| cycle_ids.contains(&id))
-                );
-                if is_cycle_member {
-                    assert_eq!(validation.status, CandidateValidationStatus::Invalid);
-                    assert_eq!(
-                        validation.errors,
-                        vec![CandidateValidationIssue::SupersessionCycle {
-                            memory_ids: cycle_ids.clone(),
-                        }]
-                    );
-                } else {
-                    assert_eq!(validation.status, CandidateValidationStatus::Valid);
-                }
-            }
-            assert!(matches!(
-                memory.commit(cyclic_plan, CommitOptions::default()).await,
-                Err(CustomError::WritePlanValidationRejected { validations: rejected })
-                    if rejected == validations
-            ));
-            let graph = memory.memory_composition.graph_store.as_ref();
-            assert!(graph
-                .query_objects(&GraphObjectQuery::by_types(
-                    vec![ObjectType::Episode, ObjectType::DerivedMemory],
-                    None,
-                ))
-                .await
-                .unwrap()
-                .is_empty());
-            assert!(graph
-                .query_superseded_derived_memory_ids(&cycle_ids)
-                .await
-                .unwrap()
-                .is_empty());
-            assert!(memory
-                .memory_composition
-                .vector_store
-                .search_candidates(&VectorCandidateSearch::new(
-                    vec![1.0; 8],
-                    100,
-                    vec![ObjectType::Episode, ObjectType::DerivedMemory]
-                ))
-                .await
-                .unwrap()
-                .candidates
-                .is_empty());
-            memory
-                .commit(acyclic_plan, CommitOptions::default())
-                .await
-                .unwrap();
-            memory.close().await.unwrap();
-        }
+        predecessor.id = Some(predecessor_id);
+        let mut successor = DerivedMemoryDraft::new(DerivedType::UserPreference, "New preference.")
+            .with_source_episode(episode_id);
+        successor.supersedes = vec![predecessor_id];
+        let plan = memory
+            .prepare(
+                RememberInput::new("Supersession source.")
+                    .with_episode(episode)
+                    .with_derived_memory(predecessor)
+                    .with_derived_memory(successor),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        let expected = CandidateValidationIssue::UnknownObjectRef {
+            role: CandidateReferenceRole::SupersededMemory,
+            referenced: MemoryObjectRef::new(ObjectType::DerivedMemory, predecessor_id),
+        };
+        assert!(
+            matches!(memory.commit(plan, CommitOptions::default()).await,
+            Err(CustomError::WritePlanValidationRejected { validations })
+                if validations.iter().any(|item| item.errors.contains(&expected)))
+        );
+        memory.close().await.unwrap();
     }
 
     #[tokio::test]
