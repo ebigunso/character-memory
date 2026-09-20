@@ -1,6 +1,6 @@
 # Plan: v0.2 schema groundwork
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-20
 - last_updated: 2026-09-20
 - work_type: code
@@ -151,6 +151,8 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Validation evidence: each task's four gates passed for the worker and independently for the Tier D reviewer (Task_3: 368 reported, 364 exercised, 4 opt-in service cases left to CI). Tier D found and the worker fixed at the root: a stale rustdoc (Task_1); a generated Supersedes link retargetable through `link`, and a replay that reindexed a superseded memory (Task_2); a same-plan link-id collision between an authored and a derived link (Task_3). Tier A reviewed the Task_3 public shape, README and both proposed records.
   - Notes: ADR-D-0035 and ADR-D-0036 were accepted by the decider on 2026-09-21 and marked accepted on the Task_3 branch. Task_3 stays pending until PR 116 rejects an authored About link between an interpreted memory and an entity at both entry points (in progress after external review), and Task_1 until the PR 113 review fixes land. Not done until: those, CI on each PR including the service-parity job, and the merges. After PR 116 merges, its commit goes to the companion repository's Task_4.
 
+- 2026-09-21 Plan complete: external review findings answered on every PR of the stack, the completion value audit applied (net about 620 lines removed) and approved at Tier D at 2856d23 (371 tests reported, 367 exercised, 4 opt-in service cases left to CI). All task acceptance criteria met; ADR-D-0035, ADR-D-0036, ADR-D-0037 and ADR-D-0038 accepted by the decider.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-20 Decision: the planning decisions, ruled by the decider before drafting.
@@ -187,6 +189,13 @@ One crate, shared files: the tasks are sequential, one worker at a time, each PR
   - Plan delta (what changed): the aliases are restored and removed from Task_1's deletion list. Replacing a whole record to drop two aliases is not worth it.
   - Tradeoffs considered: two redundant constants remain in the public surface.
   - User approval: not needed.
+  - Record proposed: none
+- 2026-09-21 Value audit at plan completion, every part, review-driven additions included (the decider's standing condition for merging this stack).
+  - Trigger / new insight: the planned work earned its place; the excess was in additions made during review rounds, which had answered "could this state exist" without asking "can a public caller produce it, and does something already catch it".
+  - Plan delta (what changed): a memory may supersede only a memory that already exists, so no cycle can be built, and the cycle search, its error and tests are gone; a repeated id in a set-backed id list is normalized (sorted, repeats dropped) and no longer rejected; the extra in-plan link-id check and its error are gone because the existing collision check already rejects both a replayed generated id and two authored links sharing one; an unknown stored retention value is reported through the existing SQLite error and still never read as active; two tests that pinned mechanism are deleted and four are renamed after the behavior they show. Net about 620 lines removed.
+  - Tradeoffs considered: keeping the link-id check was first accepted on a worker's public call sequence and then reversed under the decider's rule that anything kept against an audit recommendation must itself pass the existence test; the sequence was real but already covered.
+  - Load-bearing decisions taken without the decider, judged by character behavior: (1) supersession needs an existing predecessor, because a change of mind comes after the belief it replaces and a belief with its replacement in one act of remembering describes nothing a character experiences; (2) a repeated id is not an error, because a clerical repeat should not make the character refuse to remember something true.
+  - User approval: standing authorization of 2026-09-21; decisions to be presented at the end of the phase.
   - Record proposed: none
 
 ## Notes
