@@ -93,6 +93,11 @@ where
             .cloned()
             .collect::<Vec<_>>();
         if !graph_objects.is_empty() || !graph_links.is_empty() {
+            let existing_links = self
+                .graph_store
+                .query_links_by_ids(&graph_links.iter().map(|link| link.id).collect::<Vec<_>>())
+                .await?;
+            crate::usecases::link::reject_divergent_links(&graph_links, &existing_links)?;
             self.graph_store
                 .upsert_objects_and_links(&graph_objects, &graph_links)
                 .await?;
@@ -237,11 +242,9 @@ where
             .collect::<Result<Vec<_>, _>>()?;
 
         for memory in &replacement_memories {
-            if memory.given_by_application || !memory.assertions.is_empty() {
-                for subject in &memory.entity_ids {
-                    self.fetch_one(MemoryObjectRef::new(ObjectType::Entity, *subject))
-                        .await?;
-                }
+            for subject in &memory.entity_ids {
+                self.fetch_one(MemoryObjectRef::new(ObjectType::Entity, *subject))
+                    .await?;
             }
         }
 
@@ -1181,7 +1184,11 @@ mod tests {
             let fixtures = representative_fixtures();
             let graph = in_memory_graph_store();
             graph
-                .upsert_objects(&[MemoryObject::Episode(fixtures.episode.clone())])
+                .upsert_objects(&[
+                    MemoryObject::Episode(fixtures.episode.clone()),
+                    MemoryObject::Entity(fixtures.user_entity.clone()),
+                    MemoryObject::Entity(fixtures.assistant_entity.clone()),
+                ])
                 .await
                 .unwrap();
             let vector = OneShotDeleteFailingVectorStore::new().await;
@@ -1258,7 +1265,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(outcome.persisted_object_ids, vec![successor_id]);
-            assert_eq!(outcome.persisted_link_ids.len(), 1);
+            assert_eq!(outcome.persisted_link_ids.len(), 2);
             assert!(outcome.vector_indexing_failure.is_none());
             assert!(
                 matches!(outcome.repair_needed.as_slice(), [RepairMarker::VectorMaintenance { failure }]
@@ -1792,7 +1799,13 @@ mod tests {
         let entity_id = MemoryId::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_8301);
         let mut old = old_memory(&ids);
         old.entity_ids = vec![entity_id];
-        let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old)]).await;
+        let mut notion = representative_fixtures().user_entity;
+        notion.id = entity_id;
+        let graph = RecordingGraphStore::new(vec![
+            MemoryObject::DerivedMemory(old),
+            MemoryObject::Entity(notion),
+        ])
+        .await;
         let vector = RecordingVectorStore::default();
         let embedder = RecordingEmbedder::default();
         let stats = OneShotEdgeFailingStatsStore::new();

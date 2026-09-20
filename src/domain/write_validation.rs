@@ -95,6 +95,10 @@ pub enum CandidateValidationIssue {
     MemoryLinkRejectedByAdmissionPolicy,
     #[error("Supersedes links must be derived from a memory supersedes list")]
     AuthoredSupersedesLink,
+    #[error(
+        "link id {link_id} occurs more than once in the write plan, including generated links"
+    )]
+    DuplicateLinkId { link_id: MemoryId },
     #[error("candidate provenance is invalid: {reason:?}")]
     InvalidProvenance { reason: CandidateProvenanceIssue },
     #[error("candidate source span is invalid: {reason:?}")]

@@ -20,6 +20,8 @@ A notion's name and everything else understood about it are beliefs, but recall 
 
 A belief about a notion is ordinary interpreted memory with that notion among its subjects. It can express anything in text, with the same grounding and supersession as other interpreted memory. Where recall needs a mechanical reading, the belief may carry assertions drawn from a closed predicate vocabulary. Each assertion concerns one of that belief's notion subjects and expresses the character's own commitment, never merely another speaker's claim or a possibility under consideration. Doubt and reported claims remain representable without an assertion.
 
+The distinction between a commitment and a reported or tentative belief is an authoring contract. Validation does not check it in the v0.2 groundwork; structural checks arrive with attribution in v0.3. As ADR-D-0028 requires, those checks enforce what the evidence can support, never the truth of a judgment.
+
 New predicates enter with a concrete reading behavior that needs them. The vocabulary does not enumerate everything the character might think about a notion.
 
 ## Why
@@ -29,8 +31,8 @@ Recall must distinguish what the character takes to be so from what it has merel
 ## Rejected Alternatives
 
 - A distinct subtype for every aspect of a notion: rejected outright because unanticipated beliefs would require a schema change to exist.
-- Treating every statement about a notion as an assertion: rejected outright because a reported claim or doubt would become an accepted understanding without justification.
-- Prose alone for every reading: reopen if evaluation demonstrates that interpreting text at recall provides the required deterministic cues without a structured assertion.
+- An entity-to-entity link for a belief relating notions: rejected outright because a link carries no evidence and cannot be superseded; sameness and other relations the character believes need the evidence and revision of an ordinary belief.
+- Prose alone for every reading: rejected because it cannot honor an exact-name cue; reopen if evaluation demonstrates that interpreting text at recall provides that deterministic cue without a structured assertion.
 
 ## Decision Boundary
 
@@ -47,3 +49,8 @@ Not covered: predicate names and payloads, serialization, graph representation, 
 ## Revisit When
 
 A required recall behavior cannot distinguish commitment from reported or tentative understanding within ordinary interpreted memory.
+
+## More Information
+
+- This record settles the forms of beliefs about notions, the first half of ADR-D-0034's open item on their forms and how recall follows them. The cost of recall reading through those beliefs remains unmeasured.
+- ADR-D-0028 supplies the grounding and attribution rules; the attribution checks in v0.3 enforce the structural support for an assertion without judging its truth.

@@ -1,6 +1,6 @@
 use crate::api::types::*;
 use crate::domain::*;
-use crate::ports::graph_authority::GraphObjectQuery;
+use crate::ports::graph_authority::{GraphExpansionQuery, GraphObjectQuery, TraceMode};
 use crate::ports::retrieval_stats::RetrievalStatsCounterKey;
 use crate::test_support::{
     in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
@@ -289,6 +289,29 @@ async fn notion_belief_admission_is_enforced_at_validate_and_commit() {
             Err(CustomError::WritePlanValidationRejected { .. })
         ));
     }
+    let mut plain = DerivedMemoryDraft::new(DerivedType::Claim, "Someone calls this notion Alice.");
+    plain.entity_ids = vec![subject];
+    let plain_plan = memory
+        .prepare(
+            RememberInput::new("A reported name.").with_derived_memory(plain),
+            PrepareOptions::default(),
+        )
+        .await
+        .unwrap();
+    let missing = CandidateValidationIssue::UnknownObjectRef {
+        role: CandidateReferenceRole::BeliefSubject,
+        referenced: MemoryObjectRef::new(ObjectType::Entity, subject),
+    };
+    assert!(memory
+        .validate_plan(&plain_plan)
+        .await
+        .unwrap()
+        .iter()
+        .any(|item| item.errors.contains(&missing)));
+    assert!(
+        matches!(memory.commit(plain_plan, CommitOptions::default()).await,
+        Err(CustomError::WritePlanValidationRejected { validations }) if validations.iter().any(|item| item.errors.contains(&missing)))
+    );
     assert!(serde_json::from_value::<BeliefAssertion>(
         serde_json::json!({"subject": subject, "predicate": "same_as", "name": "Alice"})
     )
@@ -304,7 +327,7 @@ async fn notion_belief_admission_is_enforced_at_validate_and_commit() {
 }
 
 #[tokio::test]
-async fn notion_about_links_are_scoped_and_do_not_double_count_stats() {
+async fn every_belief_subject_is_linked_without_duplicate_expansion_or_stats() {
     for sqlite in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut memory = memory().await;
@@ -318,23 +341,80 @@ async fn notion_about_links_are_scoped_and_do_not_double_count_stats() {
         }
         let subject = MemoryId::from_u128(6301);
         let belief = given_belief(MemoryId::from_u128(6302), subject, "Alice");
-        let plan = plan_with_belief(belief.clone(), true);
+        let mut plan = plan_with_belief(belief.clone(), true);
+        // Caller-authored links in the same batch can repeat either direction.
+        for (link_id, from_type, from_id, to_type, to_id) in [
+            (
+                MemoryId::from_u128(6304),
+                ObjectType::DerivedMemory,
+                belief.id.unwrap(),
+                ObjectType::Entity,
+                subject,
+            ),
+            (
+                MemoryId::from_u128(6305),
+                ObjectType::Entity,
+                subject,
+                ObjectType::DerivedMemory,
+                belief.id.unwrap(),
+            ),
+        ] {
+            let mut draft =
+                MemoryLinkDraft::new(from_type, from_id, RelationType::About, to_type, to_id);
+            draft.id = Some(link_id);
+            draft.created_at = belief.created_at;
+            draft.schema_version = belief.schema_version.clone();
+            plan.candidates
+                .push(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+                    draft,
+                    CandidateProvenance::caller("authored subject link"),
+                )));
+        }
         let outcome = memory
             .commit(plan.clone(), CommitOptions::default())
             .await
             .unwrap();
         memory.commit(plan, CommitOptions::default()).await.unwrap();
-        let links = memory
-            .memory_composition
-            .graph_store
+        let graph = &memory.memory_composition.graph_store;
+        let stored_links = graph
             .query_links_by_ids(&outcome.persisted_link_ids)
             .await
             .unwrap();
-        assert_eq!(links.len(), 1);
-        assert_eq!(
-            (links[0].from_id, links[0].to_id, links[0].relation),
-            (belief.id.unwrap(), subject, RelationType::About)
-        );
+        assert_eq!(stored_links.len(), 3); // Each authored record retains its identity.
+        assert!(stored_links
+            .iter()
+            .all(|link| link.relation == RelationType::About));
+        let objects = graph
+            .query_objects(&GraphObjectQuery::by_ids(vec![subject, belief.id.unwrap()]))
+            .await
+            .unwrap();
+        for (root_id, root_type) in [
+            (subject, ObjectType::Entity),
+            (belief.id.unwrap(), ObjectType::DerivedMemory),
+        ] {
+            let query = GraphExpansionQuery::new(root_id, root_type, 2, 2)
+                .with_max_hub_edges(1)
+                .with_max_fanout_per_node(1)
+                .with_fanout_utilization_recording(TraceMode::Enabled);
+            for expanded in [
+                graph.expand_bounded(&query).await.unwrap(),
+                crate::policy::graph_expansion::bounded_expansion(
+                    &query,
+                    objects.clone(),
+                    stored_links.clone(),
+                )
+                .unwrap(),
+            ] {
+                assert_eq!(expanded.objects.len(), 2);
+                assert_eq!(expanded.links.len(), 1);
+                assert_eq!(expanded.relations.len(), 1);
+                assert!(expanded.bounded_failure.is_none());
+                assert!(expanded
+                    .fanout_utilization
+                    .iter()
+                    .all(|item| item.retained_count == 1 && item.omitted_by_fanout_count == 0));
+            }
+        }
         let counter = memory
             .memory_composition
             .stats_store
@@ -379,7 +459,26 @@ async fn notion_about_links_are_scoped_and_do_not_double_count_stats() {
             )
             .await
             .unwrap();
-        assert!(ordinary_outcome.persisted_link_ids.is_empty());
+        assert_eq!(ordinary_outcome.persisted_link_ids.len(), 1);
+        let plain_link = graph
+            .query_links_by_ids(&ordinary_outcome.persisted_link_ids)
+            .await
+            .unwrap();
+        assert_eq!(plain_link[0].to_id, subject);
+        assert_eq!(plain_link[0].relation, RelationType::About);
+        let counter = memory
+            .memory_composition
+            .stats_store
+            .counter(&RetrievalStatsCounterKey {
+                entity_id: subject,
+                relation_kind: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(counter.total_count, 3);
+        assert_eq!(counter.current_count, 3);
         memory.close().await.unwrap();
     }
 }
@@ -499,6 +598,15 @@ async fn given_replacement_does_not_inherit_predecessor_sources() {
             LifecycleDtoValidationError::InvalidBelief(BeliefValidationError::GivenWithSources)
         ))
     ));
+    let mut missing_subject = correction.clone();
+    let plain = &mut missing_subject.replacement_derived_memories[0];
+    plain.given_by_application = false;
+    plain.assertions.clear();
+    plain.entity_ids = vec![sources[0].id()]; // An episode is not a notion.
+    plain.derived_from_episode_ids = vec![sources[0].id()];
+    assert!(matches!(memory.correct(missing_subject).await,
+        Err(CustomError::GraphExpansionRootNotFound { object_type: ObjectType::Entity, object_id })
+        if object_id == sources[0].id()));
     memory.correct(correction).await.unwrap();
     let stored = graph
         .query_objects(&GraphObjectQuery::by_ids(vec![replacement_id]))
@@ -520,4 +628,190 @@ async fn given_replacement_does_not_inherit_predecessor_sources() {
         .unwrap()
         .is_empty());
     memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn plan_rejects_duplicate_authored_and_generated_link_ids_before_writes() {
+    for collision in ["about", "supersedes", "authored"] {
+        let memory = memory().await;
+        let subject = MemoryId::from_u128(6601);
+        let previous = MemoryId::from_u128(6602);
+        let replacement = MemoryId::from_u128(6603);
+        let other_subject = MemoryId::from_u128(6604);
+        memory
+            .commit(
+                plan_with_belief(given_belief(previous, subject, "Alice"), true),
+                CommitOptions::default(),
+            )
+            .await
+            .unwrap();
+        let mut belief = given_belief(replacement, subject, "Bob");
+        if collision == "supersedes" {
+            belief.supersedes = vec![previous];
+        }
+        let generated = crate::usecases::write_planning::derived_memory_links(
+            &belief.clone().into_domain().unwrap(),
+        );
+        let duplicate_id = if collision == "authored" {
+            MemoryId::from_u128(6605)
+        } else {
+            let relation = if collision == "about" {
+                RelationType::About
+            } else {
+                RelationType::Supersedes
+            };
+            generated
+                .iter()
+                .find(|link| link.relation == relation)
+                .unwrap()
+                .id
+        };
+        let mut other = EntityDraft::new();
+        other.id = Some(other_subject);
+        other.created_at = belief.created_at;
+        other.schema_version = belief.schema_version.clone();
+        let valid =
+            plan_with_belief(belief.clone(), false).with_candidate(MemoryCandidate::Entity(
+                EntityCandidate::new(other, CandidateProvenance::caller("second notion")),
+            ));
+        let authored = |target| {
+            let mut draft = MemoryLinkDraft::new(
+                ObjectType::DerivedMemory,
+                replacement,
+                RelationType::About,
+                ObjectType::Entity,
+                target,
+            );
+            draft.id = Some(duplicate_id);
+            draft.created_at = belief.created_at;
+            draft.schema_version = belief.schema_version.clone();
+            MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+                draft,
+                CandidateProvenance::caller("authored edge"),
+            ))
+        };
+        let mut invalid = valid.clone().with_candidate(authored(other_subject));
+        if collision == "authored" {
+            invalid.candidates.push(authored(subject));
+        }
+        let expected = CandidateValidationIssue::DuplicateLinkId {
+            link_id: duplicate_id,
+        };
+        // Candidate order cannot decide which producer owns a link identity.
+        for reverse in [false, true] {
+            let mut plan = invalid.clone();
+            if reverse {
+                plan.candidates.reverse();
+            }
+            let validations = memory.validate_plan(&plan).await.unwrap();
+            assert_eq!(
+                validations
+                    .iter()
+                    .filter(|item| item.errors.contains(&expected))
+                    .count(),
+                2,
+                "{collision}"
+            );
+            assert!(
+                matches!(memory.commit(plan, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations }) if validations.iter().any(|item| item.errors.contains(&expected)))
+            );
+        }
+        let graph = &memory.memory_composition.graph_store;
+        assert!(graph
+            .query_objects(&GraphObjectQuery::by_ids(vec![replacement, other_subject]))
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(graph
+            .query_links_by_ids(&[duplicate_id])
+            .await
+            .unwrap()
+            .is_empty());
+        let first = memory
+            .commit(valid.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        let replay = memory
+            .commit(valid, CommitOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(first.persisted_link_ids, replay.persisted_link_ids);
+        assert!(replay.vector_indexing_failure.is_none());
+        memory.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn correction_rejects_preexisting_generated_link_id_collisions_before_writes() {
+    for relation in [RelationType::About, RelationType::Supersedes] {
+        let memory = memory().await;
+        let subject = MemoryId::from_u128(6701);
+        let previous = MemoryId::from_u128(6702);
+        let replacement_id = MemoryId::from_u128(6703);
+        memory
+            .commit(
+                plan_with_belief(given_belief(previous, subject, "Alice"), true),
+                CommitOptions::default(),
+            )
+            .await
+            .unwrap();
+        let mut next = given_belief(replacement_id, subject, "Bob");
+        next.supersedes = vec![previous];
+        let link_id =
+            crate::usecases::write_planning::derived_memory_links(&next.into_domain().unwrap())
+                .into_iter()
+                .find(|link| link.relation == relation)
+                .unwrap()
+                .id;
+        let mut preclaimed = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            previous,
+            RelationType::About,
+            ObjectType::Entity,
+            subject,
+        );
+        preclaimed.id = Some(link_id);
+        let existing = memory.link(preclaimed).await.unwrap().link;
+        let origin = SourceProvenanceReference {
+            episode_ids: vec![],
+            observation_ids: vec![],
+            external_refs: vec![ExternalSourceReference::source("application:correction")],
+        };
+        let mut replacement =
+            ReplacementDerivedMemoryDraft::new(DerivedType::Correction, "The name is Bob.");
+        replacement.id = Some(replacement_id);
+        replacement.entity_ids = vec![subject];
+        replacement.assertions = vec![assertion(subject, "Bob")];
+        replacement.given_by_application = true;
+        replacement.correction_origin_provenance = origin.clone();
+        let mut correction = CorrectMemoryDraft::new(
+            CorrectionTarget::derived_memory(previous),
+            "Change the name.",
+        )
+        .with_replacement(replacement);
+        correction.correction_origin = origin;
+        assert!(matches!(memory.correct(correction).await,
+            Err(CustomError::DeterministicIdCollision { object }) if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id)));
+        let graph = &memory.memory_composition.graph_store;
+        assert!(graph
+            .query_objects(&GraphObjectQuery::by_ids(vec![replacement_id]))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            graph.query_links_by_ids(&[link_id]).await.unwrap(),
+            vec![existing]
+        );
+        assert_eq!(
+            graph.query_notions_known_as("Alice").await.unwrap(),
+            vec![subject]
+        );
+        assert!(graph
+            .query_notions_known_as("Bob")
+            .await
+            .unwrap()
+            .is_empty());
+        memory.close().await.unwrap();
+    }
 }

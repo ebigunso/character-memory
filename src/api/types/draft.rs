@@ -335,6 +335,7 @@ pub struct DerivedMemoryDraft {
     pub derived_from_episode_ids: Vec<MemoryId>,
     pub derived_from_observation_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
+    /// The notions this interpreted memory is about (its subjects).
     pub entity_ids: Vec<MemoryId>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,

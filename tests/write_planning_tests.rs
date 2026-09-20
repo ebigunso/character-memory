@@ -159,7 +159,8 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         wrapper_outcome.persisted_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
-    assert_eq!(wrapper_outcome.persisted_link_ids, vec![link_id]);
+    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 2);
+    assert!(wrapper_outcome.persisted_link_ids.contains(&link_id));
     assert_eq!(
         wrapper_outcome.vector_indexed_object_ids,
         vec![episode_id, observation_id, derived_id]
@@ -224,17 +225,21 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         .find(|included| included.memory.id == derived_id)
         .expect("caller-supplied derived memory should be in canonical graph state");
     assert_eq!(derived.memory.text, "Equivalent graph state claim");
-    assert!(wrapper_retrieval
-        .trace
-        .as_ref()
-        .expect("trace requested")
-        .graph_relations
-        .iter()
-        .any(|relation| {
-            relation.from.id == entity_id
-                && relation.to.id == derived_id
-                && relation.relation == RelationType::About
-        }));
+    assert_eq!(
+        wrapper_retrieval
+            .trace
+            .as_ref()
+            .expect("trace requested")
+            .graph_relations
+            .iter()
+            .filter(|relation| {
+                relation.relation == RelationType::About
+                    && ((relation.from.id == entity_id && relation.to.id == derived_id)
+                        || (relation.from.id == derived_id && relation.to.id == entity_id))
+            })
+            .count(),
+        1
+    );
 
     base::close_and_remove_root(wrapper_memory, wrapper_root).await;
     base::close_and_remove_root(manual_memory, manual_root).await;

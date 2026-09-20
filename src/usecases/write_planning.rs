@@ -485,24 +485,22 @@ pub(crate) fn derived_memory_links(memory: &crate::domain::DerivedMemory) -> Vec
             schema_version: memory.schema_version.clone(),
         })
         .collect::<Vec<_>>();
-    if memory.given_by_application || !memory.assertions.is_empty() {
-        links.extend(memory.entity_ids.iter().map(|subject| MemoryLink {
-            id: deterministic_uuid(&[
-                b"character_memory.belief.about_link",
-                memory.id.as_bytes(),
-                subject.as_bytes(),
-            ]),
-            object_type: ObjectType::MemoryLink,
-            from_id: memory.id,
-            from_type: ObjectType::DerivedMemory,
-            to_id: *subject,
-            to_type: ObjectType::Entity,
-            relation: RelationType::About,
-            rationale: None,
-            created_at: memory.created_at,
-            schema_version: memory.schema_version.clone(),
-        }));
-    }
+    links.extend(memory.entity_ids.iter().map(|subject| MemoryLink {
+        id: deterministic_uuid(&[
+            b"character_memory.belief.about_link",
+            memory.id.as_bytes(),
+            subject.as_bytes(),
+        ]),
+        object_type: ObjectType::MemoryLink,
+        from_id: memory.id,
+        from_type: ObjectType::DerivedMemory,
+        to_id: *subject,
+        to_type: ObjectType::Entity,
+        relation: RelationType::About,
+        rationale: None,
+        created_at: memory.created_at,
+        schema_version: memory.schema_version.clone(),
+    }));
     links.sort_by_key(|link| link.id);
     links.dedup_by_key(|link| link.id);
     links
@@ -698,12 +696,13 @@ where
             }
         }
 
-        let validations = plan
+        let mut validations = plan
             .candidates
             .iter()
             .enumerate()
             .map(|(index, candidate)| context.validate_candidate(index, candidate))
             .collect::<Vec<_>>();
+        validate_plan_link_ids(plan, &mut validations);
         let decision = if validations
             .iter()
             .all(|validation| validation.status == CandidateValidationStatus::Valid)
@@ -717,6 +716,40 @@ where
             validations,
             decision,
         })
+    }
+}
+
+// Validate the whole batch, including generated links, before any store mutation.
+fn validate_plan_link_ids(plan: &RememberWritePlan, validations: &mut [CandidateValidation]) {
+    let mut owners = HashMap::new();
+    for (index, candidate) in plan.candidates.iter().enumerate() {
+        let ids = match candidate {
+            MemoryCandidate::MemoryLink(candidate) => candidate.draft.id.into_iter().collect(),
+            MemoryCandidate::DerivedMemory(candidate) if candidate.draft.id.is_some() => candidate
+                .draft
+                .clone()
+                .into_domain()
+                .map(|memory| {
+                    derived_memory_links(&memory)
+                        .into_iter()
+                        .map(|link| link.id)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for link_id in ids {
+            if let Some(first) = owners.insert(link_id, index) {
+                for owner in [first, index] {
+                    let validation = &mut validations[owner];
+                    let issue = CandidateValidationIssue::DuplicateLinkId { link_id };
+                    if !validation.errors.contains(&issue) {
+                        validation.errors.push(issue);
+                    }
+                    validation.status = CandidateValidationStatus::Invalid;
+                }
+            }
+        }
     }
 }
 
@@ -791,10 +824,8 @@ impl PlanValidationContext {
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
             MemoryCandidate::DerivedMemory(candidate) => {
-                if candidate.draft.given_by_application || !candidate.draft.assertions.is_empty() {
-                    for entity_id in &candidate.draft.entity_ids {
-                        self.add_ref_to_check(MemoryObjectRef::new(ObjectType::Entity, *entity_id));
-                    }
+                for entity_id in &candidate.draft.entity_ids {
+                    self.add_ref_to_check(MemoryObjectRef::new(ObjectType::Entity, *entity_id));
                 }
                 for predecessor_id in &candidate.draft.supersedes {
                     self.add_ref_to_check(MemoryObjectRef::from_id_type(
@@ -1085,13 +1116,11 @@ impl PlanValidationContext {
         object: &crate::domain::DerivedMemory,
     ) -> Vec<CandidateValidationIssue> {
         let mut errors = Vec::new();
-        if object.given_by_application || !object.assertions.is_empty() {
-            for entity_id in &object.entity_ids {
-                errors.extend(self.validate_graph_authoritative_ref(
-                    MemoryObjectRef::new(ObjectType::Entity, *entity_id),
-                    CandidateReferenceRole::BeliefSubject,
-                ));
-            }
+        for entity_id in &object.entity_ids {
+            errors.extend(self.validate_graph_authoritative_ref(
+                MemoryObjectRef::new(ObjectType::Entity, *entity_id),
+                CandidateReferenceRole::BeliefSubject,
+            ));
         }
         for episode_id in &object.derived_from_episode_ids {
             errors.extend(self.validate_graph_authoritative_ref(
@@ -2394,7 +2423,15 @@ mod tests {
             outcome.persisted_object_ids,
             vec![entity_id, episode_id, derived_id]
         );
-        assert_eq!(outcome.persisted_link_ids, vec![link_id]);
+        assert_eq!(outcome.persisted_link_ids.len(), 2);
+        assert!(outcome.persisted_link_ids.contains(&link_id));
+        let persisted_links = graph
+            .query_links_by_ids(&outcome.persisted_link_ids)
+            .await
+            .unwrap();
+        assert!(persisted_links.iter().any(|link| link.from_id == derived_id
+            && link.to_id == entity_id
+            && link.relation == RelationType::About));
         assert_graph_only_outcome(&outcome);
 
         let objects = graph

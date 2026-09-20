@@ -157,7 +157,7 @@ The write path is deliberately not an extraction system. Character Memory core d
 
 ## Notions and naming beliefs
 
-An `Entity` represents a notion the character holds: an id, object type, creation time and schema version. Construct its draft with `EntityDraft::new()` and supply or retain its id. Names and other descriptions belong to ordinary `DerivedMemory` beliefs about that id. A belief's `assertions: Vec<BeliefAssertion>` can carry `BeliefPredicate::KnownAs { name }` for a subject in its `entity_ids`. An assertion is the character's own commitment; hearsay, doubt and aspects without a mechanical reader remain plain text.
+An `Entity` represents a notion the character holds: an id, object type, creation time and schema version. An entity has no name. Construct its draft with `EntityDraft::new()` and supply or retain its id. Names and other descriptions belong to ordinary `DerivedMemory` beliefs about that id. A belief's `assertions: Vec<BeliefAssertion>` can carry `BeliefPredicate::KnownAs { name }` for a subject in its `entity_ids`. An assertion is the character's own commitment; hearsay, doubt and aspects without a mechanical reader remain plain text.
 
 Set `given_by_application = true` when the application gives a belief about a notion without source episodes or observations. That declaration requires a notion subject and cannot coexist with source experiences. With neither sources nor the declaration, admission fails. To initialize a notion and a given belief before any experience, author their candidates in a `RememberWritePlan` with explicit ids, timestamps and schema versions; validate and commit the plan. The `RememberInput` convenience path also creates an episode and observation for its input, but does not attach those as sources to a given belief.
 
@@ -169,7 +169,7 @@ use character_memory::{
     DerivedMemoryDraft, DerivedType, PrepareOptions, RememberInput,
 };
 
-let mut renamed = DerivedMemoryDraft::new(DerivedType::Claim, "I know this notion as Bob.");
+let mut renamed = DerivedMemoryDraft::new(DerivedType::Reflection, "I know this notion as Bob.");
 renamed.id = Some(new_belief_id);
 renamed.entity_ids = vec![notion_id];
 renamed.assertions = vec![BeliefAssertion {
@@ -216,9 +216,9 @@ let outcome = memory.correct(correction).await?;
 // Persist outcome.graph_mutated_object_ids with the caller's external identifiers.
 ```
 
-Notions have no vector surface. Recall starts from belief content and follows derived `About` links to its notions; commit creates these links only for beliefs carrying assertions or the given marker. `RetrievalContext::object_type_defaults` scopes vector candidates, while `graph_limits.allowed_object_types` separately scopes traversal and includes entities by default. Entity selectivity remains available internally for scene cues, with no production input until that slice; notions reached from content use the static graph caps.
+Notions have no vector surface. Recall starts from belief content and follows derived `About` links to its notions; commit creates one for every notion in the memory's `entity_ids`, and validates that every subject exists. Callers author that subject list and do not need to author the same `About` links. `RetrievalContext::object_type_defaults` scopes vector candidates, while `graph_limits.allowed_object_types` separately scopes traversal and includes entities by default.
 
-Exact-name matching is crate-internal, with no public lookup method. It reads only current naming beliefs and supports shared names and several names for one notion. Names retain their original spelling; matching applies Unicode NFKC, standard Unicode lowercasing and whitespace collapse, preserving scripts and punctuation. This is not full case folding: `Straße` and `STRASSE` remain different names. Continue to retain caller ids across restarts as described below.
+Names retain their original spelling and match ignoring case, width and spacing; `Straße` with sharp s and `STRASSE` with double s still differ. There is no lookup by name; retain ids across restarts as described below.
 
 ## Memory identity across restarts
 
