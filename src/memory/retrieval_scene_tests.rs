@@ -232,6 +232,56 @@ fn keyed(key: u128) -> SceneParticipant {
 }
 
 #[tokio::test]
+async fn authored_episode_without_links_is_recalled_by_its_participant() {
+    let (memory, queries) = scene_memory().await;
+    create_notion(&memory, 100, Some("Mira")).await;
+    create_notion(&memory, 200, None).await;
+    let mut elsewhere = scene();
+    elsewhere.participants.push(keyed(200));
+    write_episode(&memory, 6000, elsewhere).await;
+    let mut past = scene();
+    past.participants = vec![keyed(100), keyed(100)];
+    let episode_id = MemoryId::from_u128(5000);
+    let mut episode = EpisodeDraft::new("An authored experience.");
+    episode.id = Some(episode_id);
+    episode.created_at = Some(past.time);
+    episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    episode.scene = Some(past.clone());
+    let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
+        EpisodeCandidate::new(episode, CandidateProvenance::caller("experience")),
+    ));
+    let first = memory
+        .commit(plan.clone(), CommitOptions::default())
+        .await
+        .unwrap();
+    let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+    assert_eq!(first.persisted_link_ids.len(), 1);
+    assert_eq!(first.persisted_link_ids, replay.persisted_link_ids);
+    queries.lock().unwrap().clear();
+    let mut present = scene();
+    present.participants.push(keyed(100));
+    let result = memory
+        .retrieve(RetrievalContext::default().with_scene(present).with_trace())
+        .await
+        .unwrap();
+    assert!(queries.lock().unwrap().is_empty());
+    assert_eq!(result.pack.relevant_episodes.len(), 1);
+    assert_eq!(result.pack.relevant_episodes[0].id, episode_id);
+    assert_eq!(
+        recorded(&result, ObjectType::Episode, episode_id),
+        [SourceScene::Recorded {
+            episode_id,
+            scene: past
+        }]
+    );
+    assert!(result.trace.unwrap().graph_relations.iter().any(|link| {
+        link.from.id == episode_id
+            && link.to.id == MemoryId::from_u128(100)
+            && link.relation == RelationType::Involves
+    }));
+}
+
+#[tokio::test]
 async fn participant_references_resolve_and_expand_without_a_topic_under_root_budget() {
     let (memory, queries) = scene_memory().await;
     create_notion(&memory, 100, Some("Mira")).await;

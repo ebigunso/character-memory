@@ -1258,8 +1258,59 @@ impl WritePlanCommitValues {
         }
 
         for object in &objects {
-            if let MemoryObject::DerivedMemory(memory) = object {
-                links.extend(derived_memory_links(memory));
+            match object {
+                MemoryObject::DerivedMemory(memory) => links.extend(derived_memory_links(memory)),
+                MemoryObject::Episode(episode) => {
+                    let sources = std::iter::once(object.object_ref())
+                        .chain(objects.iter().filter_map(|object| match object {
+                            MemoryObject::Observation(observation)
+                                if observation.episode_id == episode.id =>
+                            {
+                                Some(object.object_ref())
+                            }
+                            _ => None,
+                        }))
+                        .collect::<HashSet<_>>();
+                    let mut linked = links
+                        .iter()
+                        .filter_map(|link| {
+                            let from = MemoryObjectRef::new(link.from_type, link.from_id);
+                            let to = MemoryObjectRef::new(link.to_type, link.to_id);
+                            if sources.contains(&from) && to.object_type == ObjectType::Entity {
+                                Some(to.id)
+                            } else if sources.contains(&to)
+                                && from.object_type == ObjectType::Entity
+                            {
+                                Some(from.id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<HashSet<_>>();
+                    for participant in episode
+                        .scene
+                        .participant_keys()
+                        .filter(|id| linked.insert(*id))
+                    {
+                        links.push(MemoryLink {
+                            id: deterministic_uuid(&[
+                                b"character_memory.scene.participant_link",
+                                episode.id.as_bytes(),
+                                participant.as_bytes(),
+                            ]),
+                            object_type: ObjectType::MemoryLink,
+                            from_id: episode.id,
+                            from_type: ObjectType::Episode,
+                            to_id: participant,
+                            to_type: ObjectType::Entity,
+                            relation: RelationType::Involves,
+                            rationale: None,
+                            created_at: episode.created_at,
+                            schema_version: episode.schema_version.clone(),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 
