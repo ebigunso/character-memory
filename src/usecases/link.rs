@@ -1,7 +1,7 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, LinkOutcome, MemoryLinkDraft};
-use crate::domain::{MemoryLink, RelationType};
+use crate::domain::{MemoryLink, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::retrieval_stats::RetrievalStatsStore;
@@ -70,14 +70,24 @@ where
         defaults: &mut DraftDefaults,
         evidence: LinkAdmissionEvidence,
     ) -> Result<LinkOutcome, CustomError> {
-        let link = draft.into_domain_with_defaults(defaults)?;
+        let default_created_at = draft.created_at.is_none();
+        let mut link = draft.into_domain_with_defaults(defaults)?;
         if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
         {
             return Err(CustomError::LowInformationCoOccurrence { link_id: link.id });
         }
-        self.graph_store
-            .upsert_links(std::slice::from_ref(&link))
-            .await?;
+        let existing = self.graph_store.query_links_by_ids(&[link.id]).await?;
+        if default_created_at {
+            if let Some(previous) = existing.first() {
+                link.created_at = previous.created_at;
+            }
+        }
+        reject_divergent_links(std::slice::from_ref(&link), &existing)?;
+        if existing.is_empty() {
+            self.graph_store
+                .upsert_links(std::slice::from_ref(&link))
+                .await?;
+        }
         let projection = StatsProjectionService::new(self.graph_store, self.stats_store)
             .project(&[], std::slice::from_ref(&link))
             .await;
@@ -86,6 +96,22 @@ where
             stats_update_status: projection.into_status(),
         })
     }
+}
+
+pub(crate) fn reject_divergent_links(
+    planned: &[MemoryLink],
+    existing: &[MemoryLink],
+) -> Result<(), CustomError> {
+    for existing in existing {
+        if let Some(planned) = planned.iter().find(|link| link.id == existing.id) {
+            if planned != existing {
+                return Err(CustomError::DeterministicIdCollision {
+                    object: MemoryObjectRef::new(ObjectType::MemoryLink, planned.id),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn admit_link(

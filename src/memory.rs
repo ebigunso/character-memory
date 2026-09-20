@@ -100,6 +100,7 @@ impl CharacterMemory {
     }
 
     /// Persists a canonical typed relationship and reports its repairable stats projection.
+    /// Existing IDs accept identical content only; an omitted creation time retains the stored time.
     pub async fn link(&self, draft: MemoryLinkDraft) -> Result<LinkOutcome, CustomError> {
         let parts = self.memory_composition();
         LinkPipeline::new_with_stats(parts.graph_store.as_ref(), parts.stats_store.as_ref())
@@ -387,6 +388,217 @@ mod tests {
             CustomError::DeterministicIdCollision { object }
                 if object.object_type == ObjectType::Episode
         ));
+    }
+
+    #[tokio::test]
+    async fn currency_review_older_plan_replay_keeps_predecessor_out_of_vector_index() {
+        let memory = injected_memory().await;
+        let episode_id = MemoryId::from_u128(1000);
+        let predecessor_id = MemoryId::from_u128(1001);
+        let successor_id = MemoryId::from_u128(1002);
+        let mut episode = EpisodeDraft::new("Preference source.");
+        episode.id = Some(episode_id);
+        let mut predecessor =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Original preference.")
+                .with_source_episode(episode_id);
+        predecessor.id = Some(predecessor_id);
+        let old_plan = memory
+            .prepare(
+                RememberInput::new("Preference source.")
+                    .with_episode(episode)
+                    .with_derived_memory(predecessor),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .commit(old_plan.clone(), CommitOptions::default())
+            .await
+            .unwrap();
+        let mut successor =
+            DerivedMemoryDraft::new(DerivedType::UserPreference, "Updated preference.")
+                .with_source_episode(episode_id);
+        successor.id = Some(successor_id);
+        successor.supersedes = vec![predecessor_id];
+        memory
+            .remember(
+                RememberInput::new("Preference update.").with_derived_memory(successor),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        let replay = memory
+            .commit(old_plan, CommitOptions::default())
+            .await
+            .expect("older identical plan is accepted");
+        assert!(!replay.vector_indexed_object_ids.contains(&predecessor_id));
+        assert!(replay.vector_indexing_failure.is_none());
+        let recall = memory
+            .memory_composition
+            .vector_store
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0; 8],
+                100,
+                vec![ObjectType::DerivedMemory],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            recall
+                .candidates
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![successor_id]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_older_correction_replay_keeps_superseded_replacement_out_of_index() {
+        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
+        let old_correction =
+            derived_correction_draft(&fixtures, replacement_id, fixtures.user_preference.id);
+        memory.correct(old_correction.clone()).await.unwrap();
+        let newest_id = MemoryId::from_u128(1003);
+        memory
+            .correct(derived_correction_draft(
+                &fixtures,
+                newest_id,
+                replacement_id,
+            ))
+            .await
+            .unwrap();
+        let replay = memory
+            .correct(old_correction)
+            .await
+            .expect("older identical correction is accepted");
+        assert!(replay.graph_mutated_object_ids.is_empty());
+        assert!(replay.graph_mutated_link_ids.is_empty());
+        assert!(!replay
+            .vector_maintained_object_ids
+            .contains(&MemoryObjectRef::new(
+                ObjectType::DerivedMemory,
+                replacement_id
+            )));
+        assert!(replay.vector_maintenance_failure.is_none());
+        let recall = memory
+            .memory_composition
+            .vector_store
+            .search_candidates(&VectorCandidateSearch::new(
+                vec![1.0; 4],
+                100,
+                vec![ObjectType::DerivedMemory],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            recall
+                .candidates
+                .iter()
+                .map(|candidate| candidate.object_id)
+                .collect::<Vec<_>>(),
+            vec![newest_id]
+        );
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_link_cannot_overwrite_generated_supersession() {
+        let (memory, fixtures, replacement_id) = lifecycle_memory().await;
+        let correction = memory
+            .correct(derived_correction_draft(
+                &fixtures,
+                replacement_id,
+                fixtures.user_preference.id,
+            ))
+            .await
+            .unwrap();
+        let link_id = correction.graph_mutated_link_ids[0];
+        let graph = memory.memory_composition.graph_store.as_ref();
+        let original = graph.query_links_by_ids(&[link_id]).await.unwrap();
+        let mut replacement = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            replacement_id,
+            RelationType::About,
+            ObjectType::DerivedMemory,
+            fixtures.user_preference.id,
+        );
+        replacement.id = Some(link_id);
+        replacement.created_at = Some(original[0].created_at);
+        let error = memory
+            .link(replacement)
+            .await
+            .expect_err("generated supersession is immutable");
+        assert!(
+            matches!(error, CustomError::DeterministicIdCollision { object }
+            if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id))
+        );
+        assert_eq!(
+            graph.query_links_by_ids(&[link_id]).await.unwrap(),
+            original
+        );
+        assert_eq!(
+            graph
+                .query_superseded_derived_memory_ids(&[fixtures.user_preference.id])
+                .await
+                .unwrap(),
+            vec![fixtures.user_preference.id]
+        );
+        let retrieved = memory
+            .retrieve(RetrievalContext::new("corrected preference"))
+            .await
+            .unwrap();
+        assert!(!pack_contains_derived_memory(
+            &retrieved.pack,
+            fixtures.user_preference.id
+        ));
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn currency_review_link_replay_accepts_equal_content_and_rejects_divergence() {
+        let memory = injected_memory().await;
+        let link_id = MemoryId::from_u128(1010);
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::Episode,
+            MemoryId::from_u128(1011),
+            RelationType::Mentions,
+            ObjectType::Entity,
+            MemoryId::from_u128(1012),
+        );
+        draft.id = Some(link_id);
+        let first = memory.link(draft.clone()).await.unwrap();
+        let replay = memory
+            .link(draft.clone())
+            .await
+            .expect("identical link replay is accepted");
+        assert_eq!(replay.link, first.link);
+        draft.created_at = Some(first.link.created_at);
+        assert_eq!(memory.link(draft.clone()).await.unwrap().link, first.link);
+        let mut changed_timestamp = draft.clone();
+        changed_timestamp.created_at = Some(first.link.created_at + chrono::Duration::seconds(1));
+        assert!(matches!(memory.link(changed_timestamp).await.unwrap_err(),
+            CustomError::DeterministicIdCollision { object } if object.id == link_id));
+        draft.rationale = Some("different content".to_owned());
+        let error = memory
+            .link(draft)
+            .await
+            .expect_err("a plain link also rejects divergent content");
+        assert!(
+            matches!(error, CustomError::DeterministicIdCollision { object }
+            if object == MemoryObjectRef::new(ObjectType::MemoryLink, link_id))
+        );
+        assert_eq!(
+            memory
+                .memory_composition
+                .graph_store
+                .query_links_by_ids(&[link_id])
+                .await
+                .unwrap(),
+            vec![first.link]
+        );
+        memory.close().await.unwrap();
     }
 
     #[tokio::test]

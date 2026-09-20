@@ -144,13 +144,9 @@ where
                 outcome.diagnostics.repair_needed.push(marker);
             }
             let vector_records = match vector_intent {
-                VectorWriteIntent::PlanTargets(targets) => vector_records_for_targets(
-                    &objects,
-                    &targets
-                        .into_iter()
-                        .filter(|target| !predecessors.contains(target))
-                        .collect::<Vec<_>>(),
-                ),
+                VectorWriteIntent::PlanTargets(targets) => {
+                    vector_records_for_targets(&objects, &targets)
+                }
                 VectorWriteIntent::None => Vec::new(),
             };
             self.record_vector_outcome(&mut outcome, &vector_records)
@@ -175,7 +171,7 @@ where
         }
 
         let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
-            .index(vector_records.to_vec())
+            .index(self.graph_store, vector_records.to_vec())
             .await?;
         outcome.vector_indexed_object_ids = indexing
             .indexed_objects
@@ -280,18 +276,8 @@ where
 
         if !links.is_empty() {
             let link_ids = links.iter().map(|link| link.id).collect::<Vec<_>>();
-            for existing in self.graph_store.query_links_by_ids(&link_ids).await? {
-                if let Some(planned) = links.iter().find(|link| link.id == existing.id) {
-                    if planned != &existing {
-                        return Err(CustomError::DeterministicIdCollision {
-                            object: MemoryObjectRef::new(
-                                crate::domain::ObjectType::MemoryLink,
-                                planned.id,
-                            ),
-                        });
-                    }
-                }
-            }
+            let existing = self.graph_store.query_links_by_ids(&link_ids).await?;
+            crate::usecases::link::reject_divergent_links(links, &existing)?;
         }
 
         Ok(())
@@ -417,8 +403,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_currency_lookup_reports_repair_without_writing_guessed_stats() {
-        let graph = RecordingGraphStore {
+    async fn failed_currency_lookup_reports_repair_without_indexing_or_guessing_stats() {
+        let mut graph = RecordingGraphStore {
             fail_currency_query: true,
             ..RecordingGraphStore::default()
         };
@@ -449,6 +435,27 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+        assert!(matches!(
+            outcome.vector_indexing_failure.unwrap().cause,
+            VectorIndexingCause::GraphQuery(crate::errors::GraphQueryError::Selection { .. })
+        ));
+        assert!(outcome.vector_indexed_object_ids.is_empty());
+        assert_eq!(
+            outcome.persisted_object_ids,
+            expected_object_ids(&fixed_ids())
+        );
+        assert!(embedder.calls().is_empty());
+        assert!(vector.calls().is_empty());
+        graph.fail_currency_query = false;
+        let retry = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
+            .commit(representative_plan(&fixed_ids()), CommitOptions::default())
+            .await
+            .unwrap();
+        assert!(retry.vector_indexing_failure.is_none());
+        assert_eq!(
+            retry.vector_indexed_object_ids,
+            expected_object_ids(&fixed_ids())
+        );
     }
 
     #[tokio::test]

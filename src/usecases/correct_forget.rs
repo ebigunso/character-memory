@@ -659,12 +659,11 @@ where
 
         let vector_records = upsert_objects
             .iter()
-            .filter(|object| !delete_refs.contains(&object.object_ref()))
             .filter_map(memory_object_vector_record)
             .collect::<Vec<_>>();
         if !vector_records.is_empty() {
             let indexing = VectorIndexingService::new(self.vector_store, self.embedder)
-                .index(vector_records)
+                .index(self.graph_store, vector_records)
                 .await?;
             maintained.extend(indexing.indexed_objects);
             if let Some(failure) = indexing.failure {
