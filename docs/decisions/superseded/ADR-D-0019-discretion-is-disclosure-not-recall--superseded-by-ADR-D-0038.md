@@ -1,16 +1,18 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-09-17
 deciders: ["ebigunso"]
 consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
-superseded_by: null
+superseded_by: ../design/ADR-D-0038-discretion-is-disclosure-and-no-recall-is-gated-by-the-scene.md
 depends_on: [../implementation/ADR-I-0016-use-retrieval-intent-as-query-time-policy.md]
 ---
 
 # ADR-D-0019: Discretion is a property of disclosure, and recall is never gated by sensitivity by default
+
+Retired on 2026-09-21. Replaced by ADR-D-0038.
 
 ## Context and Problem Statement
 

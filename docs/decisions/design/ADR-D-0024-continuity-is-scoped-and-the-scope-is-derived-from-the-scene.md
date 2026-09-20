@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: [../superseded/ADR-D-0011-scope-continuity-around-arbitrary-entities-and-contexts--superseded-by-ADR-D-0024.md]
 superseded_by: null
-depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ADR-D-0019-discretion-is-disclosure-not-recall.md, ADR-D-0022-recall-is-activation-by-scene-cues.md]
+depends_on: [ADR-D-0009-entity-neutral-retrieval-policy.md, ../superseded/ADR-D-0019-discretion-is-disclosure-not-recall--superseded-by-ADR-D-0038.md, ADR-D-0022-recall-is-activation-by-scene-cues.md]
 ---
 
 # ADR-D-0024: Continuity is scoped to arbitrary entities and contexts, and the scope is derived from the scene rather than named by the application

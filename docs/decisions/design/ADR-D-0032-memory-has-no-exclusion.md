@@ -7,7 +7,7 @@ consulted: ["Claude Fable 5.1"]
 informed: []
 supersedes: []
 superseded_by: null
-depends_on: [ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ADR-D-0019-discretion-is-disclosure-not-recall.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md]
+depends_on: [ADR-D-0018-recall-is-complete-and-forgetting-is-explicit.md, ../superseded/ADR-D-0019-discretion-is-disclosure-not-recall--superseded-by-ADR-D-0038.md, ADR-D-0021-append-only-memory-record-with-out-of-band-purge.md, ADR-D-0026-a-short-term-store-outside-core-memory-holds-recent-trace.md]
 ---
 
 # ADR-D-0032: Memory has no exclusion: nothing the character was present for is withheld from it at the library's door
