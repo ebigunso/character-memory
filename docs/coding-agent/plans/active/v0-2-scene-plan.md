@@ -146,7 +146,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-21 Task_1 implemented (2493603) and approved at Tier D: one facade-owned turn on every write path, embedding before it, recall outside it. Seven real-store regressions; the review's value test kept all seven, each the sole observer of a distinct failure or of the hold through the stats write.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
