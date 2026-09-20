@@ -1,6 +1,6 @@
 # Plan: the scene, on every write and as the retrieval input
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-21
 - last_updated: 2026-09-21
 - work_type: code
@@ -152,6 +152,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 - 2026-09-21 Task_1 implemented (2493603) and approved at Tier D: one facade-owned turn on every write path, embedding before it, recall outside it. Seven real-store regressions; the review's value test kept all seven, each the sole observer of a distinct failure or of the hold through the stats write.
 - 2026-09-21 Task_2 implemented (5ea091b) and approved at Tier D and Tier A: one `Scene` on the episode, stored as given, its words indexed with the episode, a missing time never guessed. The Tier A value pass removed the activity field and its errors before they shipped.
 - 2026-09-21 Task_3 implemented (7a52011) and approved at Tier D and Tier A: a retrieval is asked from a scene and an optional topic; every admitted memory reports its recorded scenes in the result, a forgotten or missing source says so, and what each reference resolved to is part of the result. The Tier A pass removed a list of parts not given, which read as a completeness flag when empty.
+- 2026-09-21 Plan complete. Value audit at completion, every part, review-driven additions included: the rulings held; removed a test of a state no public caller can produce, the raw nearest-neighbour list a description reported as its matches, a rejection of blank participants (they are dropped and the experience kept), positional pairing of embeddings (now by object type, id and surface), and schema text that repeated the vector guide; added the one missing behavior, that a participant named by key in a caller-built plan is linked at commit and so reached by participant recall. Tier D approved the cleanup at 33064de after one finding. No decision record was proposed; two records' wording is noted above for the decider.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -206,6 +207,13 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - User approval: decided without the decider under the standing instruction; logged for presentation.
   - Record proposed: none; the admission test fails, since ADR-D-0029 and ADR-D-0038 already hold these constraints.
   - Record wording to bring to the decider at the slice boundary: both records' Decision Boundary invariants are met, and two sentences in their Decision text read more narrowly than what ships. ADR-D-0038 says retrieval reports the present scene as given "and whether it was partial": the result echoes the scene, where an unset part is a part not given, and carries no separate flag, because a flag's absence would read as a complete scene, which the same record warns against. ADR-D-0029 says "the retrieval trace reports" how each reference resolved: the result reports it, always, and the optional trace does not repeat it, because a default retrieval would otherwise leave unfamiliarity to be inferred from an empty pack. The invariants say "retrieval reports" and "recall ... reports", which is what ships. Whether either record wants a replacement for its wording is the decider's call; nothing here changes a decision.
+
+- 2026-09-21 Decisions carried by the completion audit, judged by character behavior.
+  - A blank participant is dropped, not rejected and not stored: a clerical blank must not cost the character the experience, and a stored blank would read as an unidentified someone being present.
+  - A description is reported as used for a content cue, with no list of what it reached: before an admission floor exists any words reach something, so a list would imply familiarity the library cannot assert, and after a failed vector delete it could name a forgotten memory. Per-cue reach returns with measured floors.
+  - Commit links every participant named by key to its episode where no link already reaches that person, so `remember`'s link set and the measured baselines do not move.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
 
 ## Notes
 - Risks: an embedding computed before the turn is wasted when the write is then rejected. Reference resolution by description can be noisy; the routes plan's floors and the companion repository's scenarios are where that is judged.
