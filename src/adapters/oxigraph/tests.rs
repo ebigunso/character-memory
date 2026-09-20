@@ -962,6 +962,7 @@ mod tests {
             filtered.object_ref
                 == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
+                && filtered.superseded_by == vec![replacement.id]
         }));
 
         let depth_one_neighbor = store
@@ -982,6 +983,7 @@ mod tests {
             filtered.object_ref
                 == MemoryObjectRef::from_id_type(superseded_memory.id, ObjectType::DerivedMemory)
                 && filtered.reason == GraphExpansionFilteredReason::Superseded
+                && filtered.superseded_by == vec![replacement.id]
         }));
 
         let historical_neighbor = store

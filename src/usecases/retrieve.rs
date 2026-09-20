@@ -397,13 +397,11 @@ impl RetrieveAssembly {
 
         let mut root_filtered = false;
         for filtered in expansion.filtered_nodes {
-            let superseded_by = self
-                .superseded_by
-                .get(&filtered.object_ref.id)
-                .cloned()
-                .unwrap_or_default();
-            let decision =
-                filtered_lifecycle_decision(filtered.object_ref, filtered.reason, &superseded_by);
+            let decision = filtered_lifecycle_decision(
+                filtered.object_ref,
+                filtered.reason,
+                &filtered.superseded_by,
+            );
             if filtered.object_ref == candidate_ref {
                 root_filtered = true;
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
@@ -2429,50 +2427,6 @@ mod tests {
             ));
     }
 
-    #[test]
-    fn filtered_superseded_decision_uses_relation_evidence_without_links() {
-        let fixtures = representative_fixtures();
-        let candidate = candidate(fixtures.suppressed_seed.id, ObjectType::DerivedMemory, 0.99);
-        let mut expansion = GraphExpansion::new(Vec::new(), Vec::new());
-        expansion
-            .relations
-            .push(crate::ports::graph_authority::GraphExpansionRelation {
-                link_id: Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0120),
-                from: MemoryObjectRef::from_id_type(
-                    fixtures.correction.id,
-                    ObjectType::DerivedMemory,
-                ),
-                to: MemoryObjectRef::from_id_type(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                ),
-                relation: RelationType::Supersedes,
-                proximity: 1,
-            });
-        expansion
-            .filtered_nodes
-            .push(crate::ports::graph_authority::GraphExpansionFilteredNode {
-                object_ref: MemoryObjectRef::from_id_type(
-                    fixtures.suppressed_seed.id,
-                    ObjectType::DerivedMemory,
-                ),
-                reason: GraphExpansionFilteredReason::Superseded,
-            });
-        let mut assembly = RetrieveAssembly::new(TraceMode::Enabled);
-
-        assembly.absorb_expansion(&candidate, expansion);
-
-        assert!(assembly.lifecycle_decisions.iter().any(|decision| {
-            decision.object.id == fixtures.suppressed_seed.id
-                && decision.reason == LifecycleFilterReason::SupersededOmitted
-                && decision.superseded_by == vec![fixtures.correction.id]
-        }));
-        assert!(assembly.stale_omissions.iter().any(|omission| {
-            omission.candidate.id == fixtures.suppressed_seed.id
-                && omission.reason == StaleCandidateReason::Superseded
-        }));
-    }
-
     #[tokio::test]
     async fn bounded_expansion_failure_errors_when_degraded_results_are_disabled() {
         let fixtures = representative_fixtures();
@@ -2970,6 +2924,27 @@ mod tests {
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let mut root_only = RetrievalContext::new("lifecycle graph truth").with_trace();
+        root_only.graph_limits.max_depth = 0;
+        let root_only = pipeline.retrieve(root_only).await.unwrap();
+        let decision = root_only
+            .trace
+            .as_ref()
+            .unwrap()
+            .lifecycle_filter_decisions
+            .iter()
+            .find(|decision| decision.object.id == superseded_memory.id)
+            .unwrap();
+        assert_eq!(decision.reason, LifecycleFilterReason::SupersededOmitted);
+        assert_eq!(decision.superseded_by, vec![replacement.id]);
+        assert!(root_only
+            .trace
+            .as_ref()
+            .unwrap()
+            .stale_candidate_omissions
+            .iter()
+            .any(|omission| omission.candidate.id == superseded_memory.id
+                && omission.reason == StaleCandidateReason::Superseded));
         let outcome = pipeline
             .retrieve(RetrievalContext::new("lifecycle graph truth").with_trace())
             .await
