@@ -37,10 +37,10 @@ impl CharacterMemory {
 
     /// Prepares a remember write plan without persisting graph, vector, or stats data.
     ///
-    /// The default facade path uses fresh operation defaults, so repeated calls with
-    /// the same input produce distinct object identifiers. Use the lower-level
-    /// write-plan helper APIs with fixed defaults when byte-for-byte deterministic
-    /// planning is required.
+    /// The default facade path uses fresh operation defaults, so identifiers generated
+    /// during preparation differ across calls. Caller-supplied draft identifiers are
+    /// preserved. Use the lower-level write-plan helper APIs with fixed defaults when
+    /// byte-for-byte deterministic planning is required.
     pub async fn prepare(
         &self,
         input: RememberInput,

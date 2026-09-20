@@ -22,7 +22,9 @@ use thiserror::Error;
 
 pub type MemoryId = uuid::Uuid;
 
-pub const DEFAULT_SCHEMA_VERSION: &str = "episodic_memory_initial";
+pub const EPISODIC_MEMORY_SCHEMA_VERSION: &str = "episodic_memory_initial";
+pub const CURRENT_SCHEMA_VERSION: &str = EPISODIC_MEMORY_SCHEMA_VERSION;
+pub const DEFAULT_SCHEMA_VERSION: &str = CURRENT_SCHEMA_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
