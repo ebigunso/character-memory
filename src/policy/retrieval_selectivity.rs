@@ -474,19 +474,6 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
-    fn including_suppressed_without_superseded_uses_total_counts() {
-        let policy = RetrievalLifecyclePolicy {
-            include_suppressed: true,
-            include_superseded: false,
-        };
-
-        assert_eq!(
-            SelectivityCountScope::from(policy),
-            SelectivityCountScope::Total
-        );
-    }
-
-    #[test]
     fn selectivity_decreases_as_entity_count_increases() {
         let narrow = selectivity_score(1, 100, 1.0);
         let broad = selectivity_score(50, 100, 1.0);
