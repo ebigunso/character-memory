@@ -100,6 +100,8 @@ The policy combination that includes suppressed memories while excluding superse
 
 Graph writes are critical. Vector and stats updates are repairable parts of the write outcome, with typed failures and affected IDs. A graph-only memory loses semantic recall until vector indexing is repaired; stale candidates are checked against graph existence and lifecycle before inclusion. Replaying an old plan does not re-index an interpreted memory that graph authority identifies as superseded.
 
+A failed graph read feeding the stats projection is reported as `StatsUpdateCause::GraphRead` and retained in unhealthy stats as `RetrievalStatsHealthCause::GraphRead`. Both carry the underlying `GraphQueryError`, whether the read was endpoint hydration or currency lookup.
+
 The library has no cross-store reconciliation or stats-rebuild operation. Stats health remains unhealthy after an internal failure; recovery requires a fresh store and caller-managed replay. Raw-source resolution and cross-store census operations belong to callers or operators.
 
 See the [schema cheat sheet](schema_cheat_sheet.md) for predicate tables and the [vector payload contract](vector_payload_design.md) for recall record fields.

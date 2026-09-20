@@ -71,7 +71,7 @@ where
                     let causes = if missing_endpoint_refs.is_empty() {
                         Vec::new()
                     } else {
-                        vec![StatsUpdateCause::EndpointHydration {
+                        vec![StatsUpdateCause::GraphRead {
                             error: GraphQueryError::Hydration {
                                 detail: format_missing_endpoint_refs(&missing_endpoint_refs),
                             },
@@ -84,7 +84,7 @@ where
                 }
                 Err(error) => (
                     objects.to_vec(),
-                    vec![StatsUpdateCause::EndpointHydration { error }],
+                    vec![StatsUpdateCause::GraphRead { error }],
                 ),
             }
         };
@@ -138,7 +138,7 @@ where
                 .await
             {
                 Ok(ids) => ids.into_iter().collect(),
-                Err(error) => return vec![StatsUpdateCause::EndpointHydration { error }],
+                Err(error) => return vec![StatsUpdateCause::GraphRead { error }],
             }
         };
         let states = retrieval_stats_object_states(objects, &superseded);
@@ -509,13 +509,13 @@ mod tests {
         );
         assert!(matches!(
             failure.causes.as_slice(),
-            [StatsUpdateCause::EndpointHydration {
+            [StatsUpdateCause::GraphRead {
                 error: GraphQueryError::Hydration { .. },
             }]
         ));
         assert!(matches!(
             stats_store.marked_causes.lock().unwrap().as_slice(),
-            [RetrievalStatsHealthCause::EndpointHydration {
+            [RetrievalStatsHealthCause::GraphRead {
                 error: GraphQueryError::Hydration { .. },
             }]
         ));
