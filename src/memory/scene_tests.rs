@@ -293,6 +293,8 @@ async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_pla
 #[tokio::test]
 async fn scene_override_preserves_participants_involvement_threads_interval_and_observation() {
     let (memory, inputs) = memory().await;
+    let episode_id = MemoryId::from_u128(8220);
+    let observation_id = MemoryId::from_u128(8221);
     let present = MemoryId::from_u128(8201);
     let involved = MemoryId::from_u128(8202);
     let existing = MemoryId::from_u128(8203);
@@ -327,8 +329,8 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         },
     ]);
     let episode = episode_draft(8220, Some(scene.clone()));
-    let mut observation = ObservationDraft::new(episode.id.unwrap(), "Explicitly timed statement");
-    observation.id = Some(MemoryId::from_u128(8221));
+    let mut observation = ObservationDraft::new(episode_id, "Explicitly timed statement");
+    observation.id = Some(observation_id);
     observation.observed_at = Some(time() + chrono::Duration::seconds(10));
     observation.speaker_entity_id = Some(involved);
     let ended_at = time() + chrono::Duration::minutes(5);
@@ -361,57 +363,37 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         .lock()
         .unwrap()
         .iter()
-        .any(|input| input.object_id == Some(MemoryId::from_u128(8220))
-            && input.text.ends_with("\nWith: Mira\nWith: the host")));
+        .any(|input| input.object_id == Some(episode_id)
+            && input.text.ends_with("\nWith: Mira, the host")));
 
-    let saved = memory
-        .memory_composition
-        .graph_store
-        .query_objects(&GraphObjectQuery::by_ids(vec![
-            MemoryId::from_u128(8220),
-            MemoryId::from_u128(8221),
-        ]))
+    let graph = &memory.memory_composition.graph_store;
+    let saved = graph
+        .query_objects(&GraphObjectQuery::by_ids(vec![episode_id, observation_id]))
         .await
         .unwrap();
-    assert_eq!(saved.len(), 2);
-    for object in saved {
-        match object {
-            MemoryObject::Episode(episode) => {
-                assert_eq!(episode.scene, scene);
-                assert_eq!(episode.ended_at, Some(ended_at));
-            }
-            MemoryObject::Observation(saved) => {
-                assert_eq!(saved.observed_at, observation.observed_at);
-                assert_eq!(saved.speaker_entity_id, Some(involved));
-            }
-            _ => panic!("unexpected object"),
-        }
-    }
-    let links = memory
-        .memory_composition
-        .graph_store
+    let [MemoryObject::Episode(saved_episode), MemoryObject::Observation(saved_observation)] =
+        saved.as_slice()
+    else {
+        panic!("expected the source episode and observation")
+    };
+    assert_eq!(saved_episode.scene, scene);
+    assert_eq!(saved_episode.ended_at, Some(ended_at));
+    assert_eq!(saved_observation.observed_at, observation.observed_at);
+    assert_eq!(saved_observation.speaker_entity_id, Some(involved));
+    let links = graph
         .query_links_by_ids(&outcome.persisted_link_ids)
         .await
         .unwrap();
-    let actual = links
-        .iter()
-        .map(|link| (link.from_id, link.relation, link.to_id))
-        .collect::<Vec<_>>();
-    assert_eq!(actual.len(), 5);
-    assert!(actual.contains(&(MemoryId::from_u128(8220), RelationType::Involves, involved)));
-    for participant in [present, existing] {
-        assert!(actual.contains(&(
-            MemoryId::from_u128(8221),
-            RelationType::Mentions,
-            participant
-        )));
-    }
-    for thread in thread_ids {
-        assert!(actual.contains(&(
-            MemoryId::from_u128(8221),
-            RelationType::PartOfThread,
-            thread
-        )));
+    for (from, relation, to) in [
+        (episode_id, RelationType::Involves, involved),
+        (observation_id, RelationType::Mentions, present),
+        (observation_id, RelationType::Mentions, existing),
+        (observation_id, RelationType::PartOfThread, thread_ids[0]),
+        (observation_id, RelationType::PartOfThread, thread_ids[1]),
+    ] {
+        assert!(links
+            .iter()
+            .any(|link| (link.from_id, link.relation, link.to_id) == (from, relation, to)));
     }
     for participant in [present, existing] {
         let counter = memory
@@ -479,11 +461,11 @@ async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_creat
 }
 
 #[tokio::test]
-async fn writes_reject_missing_scene_time_activity_and_unknown_participant_keys() {
+async fn writes_reject_missing_scene_empty_participants_and_unknown_keys() {
     let (memory, inputs) = memory().await;
     assert_eq!(
         episode_draft(8401, None).into_domain(),
-        Err(DomainValidationError::MissingSceneTime)
+        Err(DomainValidationError::MissingScene)
     );
     let error = memory
         .commit(
@@ -498,57 +480,45 @@ async fn writes_reject_missing_scene_time_activity_and_unknown_participant_keys(
             field: CandidateTimestampField::SceneTime,
         },
     );
-    for activity in [
-        SceneActivity::Thread(MemoryId::from_u128(8411)),
-        SceneActivity::OpenLoop(MemoryId::from_u128(8412)),
+    for participant in [
+        SceneParticipant::default(),
+        SceneParticipant {
+            name: Some(" \n ".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            description: Some("\t".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            name: Some(String::new()),
+            description: Some(" \t ".to_owned()),
+            key: None,
+        },
     ] {
-        let mut scene = Scene::at(time());
-        scene.activity = Some(activity);
+        let mut empty_participant = Scene::at(time());
+        empty_participant.participants.push(participant);
         assert_eq!(
-            episode_draft(8401, Some(scene.clone())).into_domain(),
-            Err(DomainValidationError::SceneActivityOnWrite)
+            episode_draft(8401, Some(empty_participant.clone())).into_domain(),
+            Err(DomainValidationError::EmptySceneParticipant)
         );
         let error = memory
             .remember(
-                RememberInput::new("An experience").with_scene(scene.clone()),
+                RememberInput::new("An experience").with_scene(empty_participant.clone()),
                 RememberOptions::default(),
             )
             .await
             .unwrap_err();
-        assert_issue(error, CandidateValidationIssue::SceneActivityOnWrite);
+        assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
         let error = memory
             .commit(
-                episode_plan(episode_draft(8401, Some(scene))),
+                episode_plan(episode_draft(8401, Some(empty_participant))),
                 CommitOptions::default(),
             )
             .await
             .unwrap_err();
-        assert_issue(error, CandidateValidationIssue::SceneActivityOnWrite);
+        assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
     }
-    let mut empty_participant = Scene::at(time());
-    empty_participant
-        .participants
-        .push(SceneParticipant::default());
-    assert_eq!(
-        episode_draft(8401, Some(empty_participant.clone())).into_domain(),
-        Err(DomainValidationError::EmptySceneParticipant)
-    );
-    let error = memory
-        .remember(
-            RememberInput::new("An experience").with_scene(empty_participant.clone()),
-            RememberOptions::default(),
-        )
-        .await
-        .unwrap_err();
-    assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
-    let error = memory
-        .commit(
-            episode_plan(episode_draft(8401, Some(empty_participant))),
-            CommitOptions::default(),
-        )
-        .await
-        .unwrap_err();
-    assert_issue(error, CandidateValidationIssue::EmptySceneParticipant);
     let unknown = MemoryId::from_u128(8499);
     let mut scene = Scene::at(time());
     scene.participants.push(SceneParticipant {

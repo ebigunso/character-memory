@@ -12,7 +12,7 @@ pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
 };
-pub use scene::{Scene, SceneActivity, SceneParticipant, SceneSetting};
+pub use scene::{Scene, SceneParticipant, SceneSetting};
 pub use write_validation::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
@@ -230,13 +230,10 @@ pub enum DomainValidationError {
     #[error("episode summary must not be empty")]
     EmptyEpisodeSummary,
 
-    #[error("an episode scene must state its time")]
-    MissingSceneTime,
+    #[error("a caller-built episode must state its scene")]
+    MissingScene,
 
-    #[error("an activity cannot be supplied on a write")]
-    SceneActivityOnWrite,
-
-    #[error("a scene participant must have a key, name or description")]
+    #[error("a scene participant must have a key or nonblank name or description")]
     EmptySceneParticipant,
 
     #[error("observation episode_id must reference an episode")]
@@ -312,13 +309,12 @@ impl Episode {
         if self.summary.trim().is_empty() {
             return Err(DomainValidationError::EmptyEpisodeSummary);
         }
-        if self.scene.activity.is_some() {
-            return Err(DomainValidationError::SceneActivityOnWrite);
-        }
         if self.scene.participants.iter().any(|participant| {
             participant.key.is_none()
-                && participant.name.is_none()
-                && participant.description.is_none()
+                && [&participant.name, &participant.description]
+                    .into_iter()
+                    .flatten()
+                    .all(|words| words.trim().is_empty())
         }) {
             return Err(DomainValidationError::EmptySceneParticipant);
         }

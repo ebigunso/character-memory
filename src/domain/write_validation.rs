@@ -72,9 +72,7 @@ pub enum CandidateValidationIssue {
     },
     #[error("episode summary must not be empty")]
     EmptyEpisodeSummary,
-    #[error("an activity cannot be supplied on a write")]
-    SceneActivityOnWrite,
-    #[error("a scene participant must have a key, name or description")]
+    #[error("a scene participant must have a key or nonblank name or description")]
     EmptySceneParticipant,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,

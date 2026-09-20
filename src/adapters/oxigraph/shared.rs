@@ -308,7 +308,6 @@ pub(super) fn memory_object_from_rdf(
                 .map_err(|error| {
                     rdf_parse_error(subject, super::vocabulary::SCENE_CUSTOM_VALUES, error)
                 })?,
-                activity: None,
             },
             ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
             summary: values.literal(subject, super::vocabulary::SUMMARY)?,

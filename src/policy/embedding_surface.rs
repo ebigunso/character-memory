@@ -23,20 +23,21 @@ pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
         .setting
         .words
         .as_deref()
-        .map(|words| ("Setting", words));
-    let participants = episode.scene.participants.iter().flat_map(|participant| {
-        [
-            participant.name.as_deref(),
-            participant.description.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|words| ("With", words))
+        .map(|words| ("Setting", clean_text(words)));
+    let participants = episode.scene.participants.iter().map(|participant| {
+        let words = [&participant.name, &participant.description]
+            .into_iter()
+            .flatten()
+            .map(|words| clean_text(words))
+            .filter(|words| !words.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        ("With", words)
     });
     for (label, words) in setting.into_iter().chain(participants) {
-        if !words.trim().is_empty() {
+        if !words.is_empty() {
             text.push('\n');
-            text.push_str(&prefixed_text(label, words));
+            text.push_str(&prefixed_text(label, &words));
         }
     }
     VectorRecord::new(

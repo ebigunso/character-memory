@@ -150,7 +150,7 @@ impl EpisodeDraft {
             id: defaults.id(self.id),
             object_type: ObjectType::Episode,
             modality: self.modality,
-            scene: self.scene.ok_or(DomainValidationError::MissingSceneTime)?,
+            scene: self.scene.ok_or(DomainValidationError::MissingScene)?,
             ended_at: self.ended_at,
             summary: self.summary,
             raw_ref: self.raw_ref,

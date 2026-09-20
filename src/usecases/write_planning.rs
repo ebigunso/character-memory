@@ -1501,12 +1501,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
             CandidateValidationIssue::AuthoredBeliefAboutLink
         }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
-        DomainValidationError::MissingSceneTime => CandidateValidationIssue::MissingTimestamp {
+        DomainValidationError::MissingScene => CandidateValidationIssue::MissingTimestamp {
             field: CandidateTimestampField::SceneTime,
         },
-        DomainValidationError::SceneActivityOnWrite => {
-            CandidateValidationIssue::SceneActivityOnWrite
-        }
         DomainValidationError::EmptySceneParticipant => {
             CandidateValidationIssue::EmptySceneParticipant
         }

@@ -12,8 +12,6 @@ pub struct Scene {
     pub participants: Vec<SceneParticipant>,
     pub setting: SceneSetting,
     pub custom_values: BTreeMap<String, String>,
-    /// Thread or open-loop context; writes reject it.
-    pub activity: Option<SceneActivity>,
 }
 
 impl Scene {
@@ -23,7 +21,6 @@ impl Scene {
             participants: Vec::new(),
             setting: SceneSetting::default(),
             custom_values: BTreeMap::new(),
-            activity: None,
         }
     }
 
@@ -38,7 +35,7 @@ impl Scene {
     }
 }
 
-/// Perceived words and a known identity can coexist; writes require at least one field.
+/// Perceived words and a known identity can coexist; writes require a key or nonblank words.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SceneParticipant {
     pub key: Option<MemoryId>,
@@ -51,11 +48,4 @@ pub struct SceneSetting {
     /// An application-owned context key, not a notion identity.
     pub key: Option<String>,
     pub words: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum SceneActivity {
-    Thread(MemoryId),
-    OpenLoop(MemoryId),
 }
