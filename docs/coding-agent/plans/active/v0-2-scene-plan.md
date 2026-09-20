@@ -150,6 +150,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 ## Progress Log (append-only)
 
 - 2026-09-21 Task_1 implemented (2493603) and approved at Tier D: one facade-owned turn on every write path, embedding before it, recall outside it. Seven real-store regressions; the review's value test kept all seven, each the sole observer of a distinct failure or of the hold through the stats write.
+- 2026-09-21 Task_2 implemented (5ea091b) and approved at Tier D and Tier A: one `Scene` on the episode, stored as given, its words indexed with the episode, a missing time never guessed. The Tier A value pass removed the activity field and its errors before they shipped.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
