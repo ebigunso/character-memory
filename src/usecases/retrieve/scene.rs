@@ -16,7 +16,7 @@ pub(super) struct RecallCues {
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
     pub floor_admissions: Vec<CueFloorAdmission>,
-    pub reminder_only: HashSet<MemoryObjectRef>,
+    pub topic_scores: HashMap<MemoryObjectRef, f32>,
     pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
 }
 
@@ -94,18 +94,15 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
+        let policy = GraphExpansionLifecyclePolicy {
+            include_suppressed: context.lifecycle_policy.include_suppressed,
+            include_superseded: context.lifecycle_policy.include_superseded,
+        };
         let mut last_interactions = HashMap::new();
         for &participant in &participants {
             let last = self
                 .graph_store
-                .query_last_interaction(
-                    participant,
-                    context.scene.time,
-                    GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    },
-                )
+                .query_last_interaction(participant, context.scene.time, policy)
                 .await?;
             last_interactions.insert(
                 participant,
@@ -132,7 +129,7 @@ where
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
-        let mut full_standing = HashSet::new();
+        let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
         let mut scene_cue_omitted_counts = BTreeMap::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
@@ -181,7 +178,7 @@ where
                 let candidates = if kind == CueKind::Topic {
                     recall.candidates.iter().cloned().collect::<Vec<_>>()
                 } else {
-                    let pool = recall.scene_pool.as_ref().unwrap_or(&recall.candidates);
+                    let pool = &recall.scene_pool;
                     let objects = pool
                         .iter()
                         .map(|candidate| {
@@ -189,10 +186,6 @@ where
                         })
                         .collect::<Vec<_>>();
                     let occasions = self.graph_store.query_episode_occasions(&objects).await?;
-                    let policy = GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    };
                     let mut eligible = pool
                         .iter()
                         .filter(|candidate| {
@@ -236,7 +229,10 @@ where
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
                 kinds.entry(object).or_default().insert(kind);
                 if kind == CueKind::Topic {
-                    full_standing.insert(object);
+                    topic_scores
+                        .entry(object)
+                        .and_modify(|score| *score = score.max(candidate.score))
+                        .or_insert(candidate.score);
                 }
             }
         }
@@ -278,7 +274,11 @@ where
         let selection = select_with_cue_floors(
             candidates.iter().map(|candidate| {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
-                (object, &kinds[&object], !full_standing.contains(&object))
+                (
+                    object,
+                    &kinds[&object],
+                    !kinds[&object].contains(&CueKind::Topic),
+                )
             }),
             &orders,
             context.candidate_limits.max_vector_candidates,
@@ -300,13 +300,8 @@ where
                 candidate.clone()
             })
             .collect::<Vec<_>>();
-        let reminder_only = kinds
-            .keys()
-            .filter(|object| !full_standing.contains(object))
-            .copied()
-            .collect();
         Ok(RecallCues {
-            reminder_only,
+            topic_scores,
             candidates: CanonicalCandidates::new(selected),
             kinds,
             orders,

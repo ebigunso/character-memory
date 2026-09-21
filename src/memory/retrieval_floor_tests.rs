@@ -231,6 +231,7 @@ async fn overlapping_scene_memory() -> (CharacterMemory, MemoryId) {
             "The work included a passing mention of orchids."
         };
         let mut scene = occasion();
+        scene.time -= chrono::Duration::days((id - 6000) as i64);
         scene.setting.words = Some(text.to_owned());
         let mut episode = EpisodeDraft::new(text);
         episode.id = Some(MemoryId::from_u128(id));

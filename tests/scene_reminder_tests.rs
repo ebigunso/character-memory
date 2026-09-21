@@ -223,7 +223,7 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
         let mut past = scene();
         past.time -= Duration::days(48 - index as i64);
         past.participants[0].key = Some(id(7));
-        plan = add_episode(plan, 1000 + index, "Another ordinary day", past);
+        plan = add_episode(plan, 1047 - index, "Another ordinary day", past);
     }
     for index in 0..8 {
         plan = add_episode(
@@ -312,6 +312,10 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
     }
     memory.close().await.unwrap();
     root.close().unwrap();
+    println!(
+        "REMINDER_EVIDENCE={}",
+        serde_json::to_string(&rows).unwrap()
+    );
     for row in &rows {
         let case = row["case"].as_str().unwrap();
         if case == "topic-alone" {
@@ -320,14 +324,14 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
             assert_eq!(row["topic_counts"], json!([8, 8, 7]), "{case}");
             assert_eq!(
                 row["episode_ids"],
-                json!([1047, 2000, 2001, 2002, 2003, 2004, 2005, 2006].map(id)),
+                json!([1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006].map(id)),
                 "{case}"
             );
         } else if case.starts_with("descriptions-only") {
             let expected = if case.ends_with("floor-3") {
-                vec![id(1045), id(1046), id(1047)]
+                vec![id(1000), id(1001), id(1002)]
             } else {
-                vec![id(1047)]
+                vec![id(1000)]
             };
             assert_eq!(row["episode_ids"], json!(expected), "{case}");
             let omitted = 48 - expected.len();
@@ -343,10 +347,6 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
             assert_eq!(row["belief_ids"], json!([id(3000), id(3001)]), "{case}");
         }
     }
-    println!(
-        "REMINDER_EVIDENCE={}",
-        serde_json::to_string(&rows).unwrap()
-    );
 }
 
 #[tokio::test]
@@ -445,11 +445,32 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
         MemoryThreadCandidate::new(thread, provenance()),
     ));
     for n in [10, 11] {
-        let mut past = Scene::at(time() - Duration::days(12 - n as i64));
+        let mut past = Scene::at(time() - Duration::days(n as i64 - 9));
         past.setting.words = Some("studio".to_owned());
-        plan = add_episode(plan, n, "Encounter", past);
+        plan = add_episode(plan, n, "Another ordinary day", past);
     }
+    let mut interpretation =
+        DerivedMemoryDraft::new(DerivedType::Claim, "The work from this occasion.")
+            .with_source_episode(id(10));
+    interpretation.id = Some(id(90));
+    interpretation.created_at = Some(time());
+    interpretation.updated_at = Some(time());
+    interpretation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+        interpretation,
+        provenance(),
+    )));
     commit(&memory, plan).await;
+    memory
+        .link(MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            id(90),
+            RelationType::DerivedFrom,
+            ObjectType::Episode,
+            id(10),
+        ))
+        .await
+        .unwrap();
     for n in [10, 11] {
         memory
             .link(MemoryLinkDraft::new(
@@ -472,7 +493,7 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .iter()
             .map(|e| e.id)
             .collect::<Vec<_>>(),
-        [id(11)]
+        [id(10)]
     );
     assert_eq!(
         result
@@ -483,14 +504,45 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .collect::<Vec<_>>(),
         [id(7)]
     );
-    let mut context = query(Some("Encounter"), current);
-    context.candidate_limits.max_graph_roots = 1;
-    let full = memory.retrieve(context).await.unwrap();
-    assert_eq!(
-        full.pack.relevant_episodes.len(),
-        2,
-        "the shared topic route retains full expansion"
-    );
+    // In this small store every topic returns both episodes; membership alone
+    // must not let the high reminder score travel through the thread.
+    for (topic, history_cue) in [("orchids", 0.075_f32), ("Another ordinary day", 0.75)] {
+        let mut context = query(Some(topic), current.clone());
+        context.candidate_limits.max_graph_roots = 1;
+        let full = memory.retrieve(context).await.unwrap();
+        assert_eq!(full.pack.relevant_episodes.len(), 2);
+        let trace = full.trace.unwrap();
+        let row = |kind, n| {
+            trace
+                .section_assignments
+                .iter()
+                .find(|row| row.object == MemoryObjectRef::new(kind, id(n)))
+                .unwrap()
+        };
+        let cue = |kind, n| match &row(kind, n).reason {
+            SectionAssignmentReason::Selected { scores } => scores.cue_score.unwrap(),
+            reason => panic!("expected selected object, got {reason:?}"),
+        };
+        assert!((cue(ObjectType::Episode, 10) - 1.0).abs() < 0.000001);
+        assert!((cue(ObjectType::MemoryThread, 7) - 0.75).abs() < 0.000001);
+        assert!((cue(ObjectType::DerivedMemory, 90) - 0.75).abs() < 0.000001);
+        assert!((cue(ObjectType::Episode, 11) - history_cue).abs() < 0.000001);
+        assert_eq!(
+            row(ObjectType::Episode, 11).cue_kinds,
+            [CueKind::Topic].into_iter().collect()
+        );
+        assert!(row(ObjectType::DerivedMemory, 90)
+            .cue_kinds
+            .contains(&CueKind::Place));
+        assert_eq!(
+            trace
+                .graph_expansions
+                .iter()
+                .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+                .count(),
+            1
+        );
+    }
     memory.close().await.unwrap();
     root.close().unwrap();
 }

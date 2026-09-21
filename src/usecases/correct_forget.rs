@@ -3657,7 +3657,7 @@ mod tests {
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
             Ok(VectorCandidateRecall {
-                scene_pool: None,
+                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
                 candidates: CanonicalCandidates::new([]),
                 completeness: if query.limit == 0 || query.object_types.is_empty() {
                     crate::api::types::retrieval::VectorRecallCompleteness::NotRequested

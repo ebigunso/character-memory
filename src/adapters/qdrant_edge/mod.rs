@@ -233,7 +233,7 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         if query.limit == 0 || query.object_types.is_empty() || query.surfaces.is_empty() {
             return Ok(VectorCandidateRecall {
                 candidates: CanonicalCandidates::new([]),
-                scene_pool: None,
+                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
                 completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
             });
         }
@@ -261,17 +261,7 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         Ok(VectorCandidateRecall {
             completeness: closed.completeness(scanned),
             candidates: closed.candidates,
-            scene_pool: query
-                .surfaces
-                .iter()
-                .any(|surface| {
-                    matches!(
-                        surface,
-                        crate::domain::VectorSurface::SceneSetting
-                            | crate::domain::VectorSurface::SceneParticipants
-                    )
-                })
-                .then_some(closed.pool),
+            scene_pool: closed.pool,
         })
     }
 
@@ -846,7 +836,7 @@ mod tests {
         request.surfaces = vec![VectorSurface::SceneSetting];
         let result = store.search_candidates(&request).await.unwrap();
         assert_eq!(result.candidates.len(), 1);
-        let pool = result.scene_pool.as_ref().unwrap();
+        let pool = &result.scene_pool;
         assert_eq!(pool.len(), 4_097);
         assert_eq!(result.candidates[0], pool[0]);
         assert!(pool

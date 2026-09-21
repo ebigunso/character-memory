@@ -22,7 +22,7 @@ impl MemoryEmbedder for CohortEmbedder {
                 text if text.starts_with("botanist") => (0.0, 1.0, 0.0),
                 text => panic!("unexpected query {text}"),
             }
-        } else if input.object_id == Some(MemoryId::from_u128(3000)) {
+        } else if input.object_id == Some(MemoryId::from_u128(900)) {
             (0.8, 0.6, 0.0)
         } else if matches!(
             input.surface,
@@ -116,7 +116,7 @@ async fn cohort_memory() -> CharacterMemory {
         let mut scene = context().scene;
         scene.time += chrono::Duration::days(index as i64);
         scene.participants[0].key = Some(MemoryId::from_u128(7));
-        for candidate in episode(1000 + index, "Another ordinary day.".to_owned(), scene) {
+        for candidate in episode(1047 - index, "Another ordinary day.".to_owned(), scene) {
             plan = plan.with_candidate(candidate);
         }
     }
@@ -178,7 +178,7 @@ async fn shared_scene_cohort_keeps_the_latest_occasion_and_score_fills_the_pack(
                 .iter()
                 .map(|episode| episode.id.as_u128())
                 .collect::<Vec<_>>(),
-            [1047, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
+            [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
         );
         assert!(trace.floor_admissions.is_empty());
         assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Participant], 47);
@@ -216,12 +216,12 @@ async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics(
                 .pack
                 .relevant_episodes
                 .iter()
-                .any(|episode| episode.id == MemoryId::from_u128(1047)),
+                .any(|episode| episode.id == MemoryId::from_u128(1000)),
             "latest participant occasion must reach the pack: {:?}",
             trace
                 .section_assignments
                 .iter()
-                .find(|row| row.object.id == MemoryId::from_u128(1047))
+                .find(|row| row.object.id == MemoryId::from_u128(1000))
         );
     }
     // More than one explicit occasion must retain selector order, not ID order.
@@ -240,14 +240,14 @@ async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics(
     let result = memory.retrieve(query).await.unwrap();
     assert_eq!(
         result.pack.relevant_episodes[0].id,
-        MemoryId::from_u128(1047)
+        MemoryId::from_u128(1000)
     );
     assert!(result
         .trace
         .unwrap()
         .section_assignments
         .iter()
-        .any(|row| row.object.id == MemoryId::from_u128(1046)));
+        .any(|row| row.object.id == MemoryId::from_u128(1001)));
     memory.close().await.unwrap();
 }
 
@@ -289,7 +289,7 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
     let mut plan = RememberWritePlan::new();
     let mut latest = context().scene;
     latest.time += chrono::Duration::days(49);
-    for candidate in episode(3000, "Orchid shared".to_owned(), latest.clone()) {
+    for candidate in episode(900, "Orchid shared".to_owned(), latest.clone()) {
         plan = plan.with_candidate(candidate);
     }
     memory.commit(plan, CommitOptions::default()).await.unwrap();
@@ -302,7 +302,7 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
         trace
             .vector_candidates
             .iter()
-            .filter(|row| row.object.id == MemoryId::from_u128(3000))
+            .filter(|row| row.object.id == MemoryId::from_u128(900))
             .count(),
         1
     );
@@ -310,7 +310,7 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
         trace
             .graph_expansions
             .iter()
-            .filter(|row| row.root.id == MemoryId::from_u128(3000)
+            .filter(|row| row.root.id == MemoryId::from_u128(900)
                 && row.outcome == GraphExpansionOutcome::Expanded)
             .count(),
         1
@@ -320,14 +320,14 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
             .pack
             .relevant_episodes
             .iter()
-            .filter(|episode| episode.id == MemoryId::from_u128(3000))
+            .filter(|episode| episode.id == MemoryId::from_u128(900))
             .count(),
         1
     );
     let shared = trace
         .section_assignments
         .iter()
-        .find(|row| row.object.id == MemoryId::from_u128(3000))
+        .find(|row| row.object.id == MemoryId::from_u128(900))
         .unwrap();
     assert_eq!(
         shared.cue_kinds,

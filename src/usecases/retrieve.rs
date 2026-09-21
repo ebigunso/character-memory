@@ -105,7 +105,8 @@ where
                 source: GraphRootSource::Participant,
                 vector_score: None,
                 cue_kinds: BTreeSet::from([CueKind::Participant]),
-                reminder_only: false,
+                full_standing_score: Some(1.0),
+                full_standing_kinds: BTreeSet::from([CueKind::Participant]),
             })
             .collect::<Vec<_>>();
         let mut assembly = RetrieveAssembly::new(trace_mode);
@@ -166,7 +167,8 @@ where
                         source: GraphRootSource::Place,
                         vector_score: None,
                         cue_kinds: BTreeSet::from([CueKind::Place]),
-                        reminder_only: false,
+                        full_standing_score: Some(1.0),
+                        full_standing_kinds: BTreeSet::from([CueKind::Place]),
                     });
                 }
             }
@@ -201,7 +203,7 @@ where
             &vector_candidates,
             &cues.kinds,
             &explicit_roots,
-            (&cues.orders, &cues.reminder_only),
+            (&cues.orders, &cues.topic_scores),
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
             (&state_scopes, &root_order, &scope_kinds),
@@ -313,7 +315,7 @@ where
                             .or_default()
                             .extend(&expansion.selection_order);
                     }
-                    assembly.absorb_expansion(candidate, expansion);
+                    assembly.absorb_expansion(candidate, &query, expansion)?;
                 }
                 Err(CustomError::GraphExpansionRootNotFound { .. }) => {
                     graph_expansion_telemetry.missing_root_count += 1;
@@ -467,10 +469,40 @@ impl RetrieveAssembly {
         }
     }
 
-    fn absorb_expansion(&mut self, candidate: &CandidateRoot, expansion: GraphExpansion) {
+    fn absorb_expansion(
+        &mut self,
+        candidate: &CandidateRoot,
+        query: &GraphExpansionQuery,
+        expansion: GraphExpansion,
+    ) -> Result<(), CustomError> {
         let bounded_failure = expansion.bounded_failure;
         let candidate_ref =
             MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
+
+        // Reuse the traversal rule on the admitted graph. This reads no store and
+        // cannot widen the root's bounds; it identifies where the reminder road ends.
+        let reminder_reached = if candidate.full_standing_score.is_some()
+            && candidate.cue_kinds != candidate.full_standing_kinds
+            && expansion
+                .objects
+                .iter()
+                .any(|object| object.object_ref() == candidate_ref)
+        {
+            let mut reminder_query = query.clone();
+            reminder_query.reminder_only = true;
+            crate::policy::graph_expansion::bounded_expansion(
+                &reminder_query,
+                expansion.objects.clone(),
+                expansion.links.clone(),
+                &crate::policy::graph_expansion::ParticipantOccasions::new(),
+            )?
+            .objects
+            .into_iter()
+            .map(|object| object.object_ref())
+            .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
 
         for relation in &expansion.relations {
             if relation.relation == RelationType::Supersedes
@@ -520,11 +552,20 @@ impl RetrieveAssembly {
                 .copied()
                 .map(graph_component)
                 .unwrap_or(0.0);
-            let inherited_cue = if object_ref == candidate_ref {
-                candidate.score
-            } else {
-                candidate.score * 0.75
+            let (score, kinds) = match candidate.full_standing_score {
+                Some(score)
+                    if object_ref != candidate_ref && !reminder_reached.contains(&object_ref) =>
+                {
+                    (score, &candidate.full_standing_kinds)
+                }
+                _ => (candidate.score, &candidate.cue_kinds),
             };
+            let inherited_cue = if object_ref == candidate_ref {
+                score
+            } else {
+                score * 0.75
+            };
+            let reminder_only = candidate.full_standing_score.is_none();
             let candidate_score = candidate
                 .vector_score
                 .filter(|_| object_ref == candidate_ref);
@@ -533,8 +574,8 @@ impl RetrieveAssembly {
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
-                    ranked.cue_kinds.extend(&candidate.cue_kinds);
-                    ranked.reminder_only &= candidate.reminder_only;
+                    ranked.cue_kinds.extend(kinds);
+                    ranked.reminder_only &= reminder_only;
                     ranked.graph_component = ranked.graph_component.max(graph_component);
                     if let Some(candidate_score) = candidate_score {
                         ranked.vector_candidate_score = Some(
@@ -549,11 +590,11 @@ impl RetrieveAssembly {
                     let mut ranked = RankedObject::new(
                         object,
                         inherited_cue,
-                        candidate.cue_kinds.clone(),
+                        kinds.clone(),
                         graph_component,
                         candidate_score,
                     );
-                    ranked.reminder_only = candidate.reminder_only;
+                    ranked.reminder_only = reminder_only;
                     ranked
                 });
             if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
@@ -589,6 +630,7 @@ impl RetrieveAssembly {
                 self.omit_missing_candidate(candidate);
             }
         }
+        Ok(())
     }
 
     fn omit_bounded_candidate(&mut self, candidate: &CandidateRoot) {
@@ -1105,7 +1147,8 @@ struct CandidateRoot {
     source: GraphRootSource,
     vector_score: Option<f32>,
     cue_kinds: BTreeSet<CueKind>,
-    reminder_only: bool,
+    full_standing_score: Option<f32>,
+    full_standing_kinds: BTreeSet<CueKind>,
 }
 
 #[derive(Debug)]
@@ -1121,9 +1164,9 @@ fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
     kinds: &HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
     explicit_roots: &[CandidateRoot],
-    (content_orders, reminder_only): (
+    (content_orders, topic_scores): (
         &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
-        &HashSet<MemoryObjectRef>,
+        &HashMap<MemoryObjectRef, f32>,
     ),
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
@@ -1176,10 +1219,22 @@ fn select_candidate_roots(
                 score: candidate.score,
                 source: GraphRootSource::Vector,
                 vector_score: Some(candidate.score),
-                reminder_only: reminder_only.contains(&MemoryObjectRef::new(
-                    candidate.object_type,
-                    candidate.object_id,
-                )),
+                full_standing_score: topic_scores
+                    .get(&MemoryObjectRef::new(
+                        candidate.object_type,
+                        candidate.object_id,
+                    ))
+                    .copied(),
+                full_standing_kinds: kinds
+                    .get(&MemoryObjectRef::new(
+                        candidate.object_type,
+                        candidate.object_id,
+                    ))
+                    .into_iter()
+                    .flatten()
+                    .filter(|&&kind| kind == CueKind::Topic)
+                    .copied()
+                    .collect(),
                 cue_kinds: kinds
                     .get(&MemoryObjectRef::new(
                         candidate.object_type,
@@ -1197,7 +1252,17 @@ fn select_candidate_roots(
         if let Some(index) = indices.get(&object).copied() {
             let existing: &mut CandidateRoot = &mut merged[index];
             existing.cue_kinds.extend(root.cue_kinds);
-            existing.reminder_only &= root.reminder_only;
+            existing.score = existing.score.max(root.score);
+            existing
+                .full_standing_kinds
+                .extend(root.full_standing_kinds);
+            if let Some(score) = root.full_standing_score {
+                existing.full_standing_score = Some(
+                    existing
+                        .full_standing_score
+                        .map_or(score, |previous| previous.max(score)),
+                );
+            }
             if let Some(score) = root.vector_score {
                 existing.vector_score = Some(
                     existing
@@ -1254,7 +1319,7 @@ fn select_candidate_roots(
             (
                 MemoryObjectRef::new(root.object_type, root.object_id),
                 &root.cue_kinds,
-                root.reminder_only,
+                root.full_standing_score.is_none(),
             )
         }),
         &orders,
@@ -1315,7 +1380,7 @@ fn graph_query_for_candidate(
     });
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
-    query.reminder_only = candidate.reminder_only;
+    query.reminder_only = candidate.full_standing_score.is_none();
     query.participant_reference_time = context.scene.time;
     query
 }
@@ -1673,7 +1738,7 @@ mod tests {
             &[middle.clone(), low, high.clone()],
             &HashMap::new(),
             &[],
-            (&BTreeMap::new(), &HashSet::new()),
+            (&BTreeMap::new(), &HashMap::new()),
             2,
             RetrievalCueFloors::default(),
             (&state::StateScopes::new(), &HashMap::new(), &[]),
