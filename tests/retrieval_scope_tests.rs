@@ -323,11 +323,18 @@ async fn key_scopes_share_root_and_pack_caps_with_shared_members_and_activity() 
         ..Default::default()
     });
     scoped.graph_limits.max_depth = 1;
-    let result = memory.retrieve(scoped).await.unwrap();
+    let result = memory.retrieve(scoped.clone()).await.unwrap();
     assert_eq!(ids(&result), vec![id(311), id(301), id(321)]);
     assert_eq!(
         ids(&result).iter().filter(|&&key| key == id(311)).count(),
         1
+    );
+    scoped.scene.setting.key = None;
+    scoped.scene.custom_values.clear();
+    assert_eq!(
+        ids(&memory.retrieve(scoped).await.unwrap()),
+        vec![id(311), id(321)],
+        "participant precedes activity even without context keys"
     );
     memory.close().await.unwrap();
     root.close().unwrap();
@@ -430,7 +437,7 @@ async fn dense_place_records_topic_admission_at_root_cap() {
     let mut request = context(scene(Some("place"), &[]));
     request.topic = Some(topic.into());
     assert_eq!(request.candidate_limits.max_graph_roots, 12);
-    let result = memory.retrieve(request).await.unwrap();
+    let result = memory.retrieve(request.clone()).await.unwrap();
     let trace = result.trace.as_ref().unwrap();
     let recalled = trace
         .vector_candidates
@@ -467,6 +474,30 @@ async fn dense_place_records_topic_admission_at_root_cap() {
     );
     assert_eq!(root_trace.outcome, GraphExpansionOutcome::Expanded);
     assert!(ids(&result).contains(&id(901)));
+    let mut additional = RememberInput::new("more topical notes");
+    for n in 902..908 {
+        let mut topical = belief(n, 102);
+        topical.text = topic.into();
+        additional = additional.with_derived_memory(topical);
+    }
+    commit(&memory, additional).await;
+    let shared = memory.retrieve(request).await.unwrap();
+    let selected = ids(&shared);
+    assert_eq!(
+        selected
+            .iter()
+            .filter(|key| (901..908).contains(&key.as_u128()))
+            .count(),
+        6,
+        "topic receives spare root turns beyond its floor"
+    );
+    assert_eq!(
+        selected
+            .iter()
+            .filter(|key| (301..314).contains(&key.as_u128()))
+            .count(),
+        6
+    );
     memory.close().await.unwrap();
     root.close().unwrap();
 }
