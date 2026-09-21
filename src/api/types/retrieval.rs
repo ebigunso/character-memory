@@ -347,7 +347,6 @@ pub struct IncludedDerivedMemory {
     pub source_episode_ids: Vec<MemoryId>,
     pub source_observation_ids: Vec<MemoryId>,
     /// Memories linked by Resolves or FulfillsCommitment; empty means unresolved.
-    #[serde(default)]
     pub resolved_by: Vec<MemoryId>,
 }
 
