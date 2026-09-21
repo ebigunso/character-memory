@@ -624,6 +624,7 @@ mod tests {
                 is_current: true,
                 first_seen_at: chrono::DateTime::UNIX_EPOCH,
                 last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                source_observation: None,
             }])
             .await
             .unwrap();
@@ -820,6 +821,7 @@ mod tests {
                     is_current: true,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    source_observation: None,
                 },
                 RetrievalStatsEdge {
                     edge_key: format!("{entity_id}:about:derived_memory:non_current"),
@@ -832,6 +834,7 @@ mod tests {
                     is_current: false,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    source_observation: None,
                 },
                 RetrievalStatsEdge {
                     edge_key: format!("{entity_id}:about:derived_memory:suppressed"),
@@ -844,6 +847,7 @@ mod tests {
                     is_current: false,
                     first_seen_at: chrono::DateTime::UNIX_EPOCH,
                     last_seen_at: chrono::DateTime::UNIX_EPOCH,
+                    source_observation: None,
                 },
             ])
             .await

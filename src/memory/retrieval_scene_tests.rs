@@ -300,6 +300,103 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
 }
 
 #[tokio::test]
+async fn observation_forget_recounts_notion_presence_without_removing_scene_participants() {
+    for sqlite in [false, true] {
+        for (in_scene, direct_link) in [(false, false), (true, false), (false, true)] {
+            let directory = tempfile::tempdir().unwrap();
+            let (mut memory, _) = scene_memory().await;
+            if sqlite {
+                memory.memory_composition.stats_store = Box::new(
+                    crate::adapters::stats::SqliteRetrievalStatsStore::open(
+                        directory.path().join("stats.sqlite"),
+                    )
+                    .unwrap(),
+                );
+            }
+            create_notion(&memory, 100, None).await;
+            let mut occasion = scene();
+            if in_scene {
+                occasion.participants.push(keyed(100));
+            }
+            let episode = write_episode(&memory, 30_000, occasion).await;
+            if direct_link {
+                memory
+                    .link(MemoryLinkDraft::new(
+                        ObjectType::Episode,
+                        episode,
+                        RelationType::Involves,
+                        ObjectType::Entity,
+                        MemoryId::from_u128(100),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            write_episode(&memory, 31_000, scene()).await;
+            let mut extra = ObservationDraft::new(episode, "Another remark.");
+            extra.id = Some(MemoryId::from_u128(30_002));
+            extra.created_at = Some(scene().time);
+            extra.observed_at = Some(scene().time);
+            extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            memory
+                .commit(
+                    RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
+                        ObservationCandidate::new(extra, CandidateProvenance::caller("remark")),
+                    )),
+                    CommitOptions::default(),
+                )
+                .await
+                .unwrap();
+            for observation in [30_001, 30_002] {
+                memory
+                    .link(MemoryLinkDraft::new(
+                        ObjectType::Observation,
+                        MemoryId::from_u128(observation),
+                        RelationType::Mentions,
+                        ObjectType::Entity,
+                        MemoryId::from_u128(100),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let mut context = RetrievalContext::default().with_trace();
+            context.scene.participants.push(keyed(100));
+            for (forgotten, expected) in [
+                (None, 1),
+                (Some(30_001), 1),
+                (Some(30_002), u64::from(in_scene || direct_link)),
+            ] {
+                if let Some(id) = forgotten {
+                    memory
+                        .forget(ForgetMemoryDraft::suppress(
+                            LifecycleTargetRef::observation(MemoryId::from_u128(id)),
+                            "Forget only this remark.",
+                        ))
+                        .await
+                        .unwrap();
+                }
+                let result = memory.retrieve(context.clone()).await.unwrap();
+                let decision = result
+                    .trace
+                    .unwrap()
+                    .selectivity_decisions
+                    .into_iter()
+                    .find(|row| {
+                        row.root.id == MemoryId::from_u128(100)
+                            && row.relation == RelationType::Mentions
+                    })
+                    .unwrap();
+                assert_eq!(
+                    (decision.entity_count, decision.global_count),
+                    (Some(expected), Some(2)),
+                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}"
+                );
+            }
+            memory.close().await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
 async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
