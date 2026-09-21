@@ -613,6 +613,80 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
 }
 
 #[tokio::test]
+async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
+    struct WeekdayEmbedder;
+    #[async_trait]
+    impl MemoryEmbedder for WeekdayEmbedder {
+        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+            Ok(vec![
+                f32::from(input.text.contains("Monday")),
+                f32::from(input.text.contains("Tuesday")),
+                1.0,
+            ])
+        }
+        async fn embed_batch(
+            &self,
+            inputs: &[EmbeddingInput],
+        ) -> Result<Vec<Vec<f32>>, CustomError> {
+            let mut vectors = Vec::new();
+            for input in inputs {
+                vectors.push(self.embed(input).await?);
+            }
+            Ok(vectors)
+        }
+    }
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(3).await),
+        Box::new(WeekdayEmbedder),
+    );
+    let old_id = MemoryId::from_u128(8902);
+    let mut old = DerivedMemoryDraft::new(DerivedType::Claim, "The meeting is Monday.");
+    old.id = Some(old_id);
+    memory
+        .remember(
+            RememberInput::new("We discussed the meeting.")
+                .with_episode(episode_draft(8901, Some(Scene::at(time()))))
+                .with_derived_memory(old),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    let mut correction = CorrectMemoryDraft::new(
+        CorrectionTarget::derived_memory(old_id),
+        "The meeting is Tuesday.",
+    );
+    correction.correction_origin = SourceProvenanceReference {
+        episode_ids: vec![],
+        observation_ids: vec![],
+        external_refs: vec![ExternalSourceReference::source("calendar:update")],
+    };
+    let outcome = memory.correct(correction).await.unwrap();
+    assert!(outcome.vector_maintenance_failure.is_none());
+    let [replacement] = outcome.graph_mutated_object_ids.as_slice() else {
+        panic!("one default replacement expected")
+    };
+    assert!(outcome.vector_maintained_object_ids.contains(replacement));
+    let mut query = RetrievalContext::new("Tuesday").with_trace();
+    query.object_type_defaults = vec![ObjectType::DerivedMemory];
+    query.graph_limits.max_depth = 0;
+    let result = memory.retrieve(query).await.unwrap();
+    assert!(result
+        .trace
+        .unwrap()
+        .vector_candidates
+        .iter()
+        .any(|candidate| candidate.object == *replacement && candidate.score > 0.9999));
+    assert!(result
+        .pack
+        .derived_memories
+        .iter()
+        .any(|entry| entry.memory.id == replacement.id
+            && entry.memory.text == "The meeting is Tuesday."));
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn source_correction_uses_setting_key_and_preserves_every_source_scene() {
     for observation_target in [false, true] {
         let (memory, _) = memory().await;
