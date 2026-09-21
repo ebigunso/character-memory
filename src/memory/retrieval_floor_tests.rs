@@ -177,6 +177,59 @@ async fn a_large_activity_shares_roots_with_the_topic() {
 }
 
 #[tokio::test]
+async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
+    let memory = floor_memory().await;
+    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
+    for id in 6000..6016 {
+        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    for (cap, activity_count, topic_count) in [(6, 5, 1), (8, 6, 2), (4, 3, 1)] {
+        let mut context = RetrievalContext::new("topic")
+            .with_activity(ActivityRef::Thread(MemoryId::from_u128(5000)))
+            .with_scene(occasion())
+            .with_trace();
+        context.candidate_limits.max_graph_roots = cap;
+        context.graph_limits.max_depth = 1;
+        context.cue_floors = RetrievalCueFloors {
+            participant: 0,
+            place: 0,
+            activity: 5,
+            topic: 1,
+        };
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        let repeat = memory.retrieve(context).await.unwrap();
+        assert_eq!(result.pack, repeat.pack);
+        assert_eq!(result.trace, repeat.trace);
+        let expanded = result
+            .trace
+            .unwrap()
+            .graph_expansions
+            .into_iter()
+            .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+            .map(|row| row.root.id.as_u128())
+            .collect::<Vec<_>>();
+        let topics = expanded
+            .iter()
+            .filter(|id| (1000..1048).contains(*id))
+            .count();
+        assert_eq!(
+            (expanded.len() - topics, topics),
+            (activity_count, topic_count),
+            "cap={cap}"
+        );
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let memory = floor_memory().await;
     let result = memory.retrieve(mixed_context()).await.unwrap();
