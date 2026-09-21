@@ -247,33 +247,32 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
     }
 }
 
+struct TextEmbedder([&'static str; 2]);
+#[async_trait]
+impl MemoryEmbedder for TextEmbedder {
+    async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+        Ok(vec![
+            f32::from(input.text.contains(self.0[0])),
+            f32::from(input.text.contains(self.0[1])),
+            1.0,
+        ])
+    }
+
+    async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
+        let mut embeddings = Vec::new();
+        for input in inputs {
+            embeddings.push(self.embed(input).await?);
+        }
+        Ok(embeddings)
+    }
+}
+
 #[tokio::test]
 async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
-    struct TextEmbedder;
-    #[async_trait]
-    impl MemoryEmbedder for TextEmbedder {
-        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(vec![
-                f32::from(input.text.contains("volcano")),
-                f32::from(input.text.contains("harbor")),
-            ])
-        }
-
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            let mut embeddings = Vec::new();
-            for input in inputs {
-                embeddings.push(self.embed(input).await?);
-            }
-            Ok(embeddings)
-        }
-    }
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(2).await),
-        Box::new(TextEmbedder),
+        Box::new(TemporaryVectorCandidateStore::open(3).await),
+        Box::new(TextEmbedder(["volcano", "harbor"])),
     );
     let id = MemoryId::from_u128(8801);
     let mut episode = episode_draft(id.as_u128(), Some(Scene::at(time())));
@@ -609,31 +608,10 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
 
 #[tokio::test]
 async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
-    struct WeekdayEmbedder;
-    #[async_trait]
-    impl MemoryEmbedder for WeekdayEmbedder {
-        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(vec![
-                f32::from(input.text.contains("Monday")),
-                f32::from(input.text.contains("Tuesday")),
-                1.0,
-            ])
-        }
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            let mut vectors = Vec::new();
-            for input in inputs {
-                vectors.push(self.embed(input).await?);
-            }
-            Ok(vectors)
-        }
-    }
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
         Box::new(TemporaryVectorCandidateStore::open(3).await),
-        Box::new(WeekdayEmbedder),
+        Box::new(TextEmbedder(["Monday", "Tuesday"])),
     );
     let old_id = MemoryId::from_u128(8902);
     let mut old = DerivedMemoryDraft::new(DerivedType::Claim, "The meeting is Monday.");

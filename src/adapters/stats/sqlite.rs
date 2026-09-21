@@ -162,7 +162,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let connection = lock(&self.connection)?;
         if is_episode_presence(key.relation_kind, key.object_type) {
             return if self.has_episode_index {
-                episode_presence_counter(&connection, Some(key.entity_id.to_string()))
+                episode_presence_counter(&connection, key.entity_id.to_string())
             } else {
                 Ok(None)
             };
@@ -191,13 +191,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
-        if is_episode_presence(relation_kind, object_type) {
-            return if self.has_episode_index {
-                episode_presence_counter(&connection, None)
-            } else {
-                Ok(None)
-            };
-        }
         connection
             .query_row(
                 "SELECT total_count, active_count, current_count
@@ -308,20 +301,15 @@ fn upsert_episode_presence(
 
 fn episode_presence_counter(
     connection: &Connection,
-    entity_id: Option<String>,
+    entity_id: String,
 ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-    let filter = if entity_id.is_some() {
-        "entity_id = ?1"
-    } else {
-        "?1 IS NULL"
-    };
     let counter = connection.query_row(
-        &format!("SELECT COUNT(*), COALESCE(SUM(active), 0), COALESCE(SUM(current), 0) FROM (
+        "SELECT COUNT(*), COALESCE(SUM(active), 0), COALESCE(SUM(current), 0) FROM (
             SELECT MAX(retention_state = 'active' AND source_retention_state = 'active') AS active,
                    MAX(retention_state = 'active' AND source_retention_state = 'active' AND is_current) AS current
-            FROM episode_presence_index WHERE {filter}
+            FROM episode_presence_index WHERE entity_id = ?1
             GROUP BY entity_id, episode_id
-        )"), [entity_id], raw_counter_row,
+        )", [entity_id], raw_counter_row,
     ).map_err(sqlite_error).and_then(counter_from_raw)?;
     Ok((counter.total_count > 0).then_some(counter))
 }
@@ -753,55 +741,45 @@ mod tests {
 
     #[tokio::test]
     async fn absent_episode_index_remains_missing_after_writes_and_reopen() {
-        for old_episode_counts in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("stats.sqlite");
-            if old_episode_counts {
-                drop(SqliteRetrievalStatsStore::open(&path).unwrap());
-            }
-            let connection = Connection::open(&path).unwrap();
-            initialize_schema(&connection).unwrap();
-            if old_episode_counts {
-                connection
-                    .execute_batch("DROP TABLE episode_presence_index;")
-                    .unwrap();
-            }
-            drop(connection);
-            let store = SqliteRetrievalStatsStore::open(&path).unwrap();
-            assert_eq!(store.global_episode_counter().await.unwrap(), None);
-            let edge = test_edge(
-                MemoryId::from_u128(2),
-                MemoryId::from_u128(1),
-                RetentionState::Active,
-                true,
-            );
-            store.record_edges(&[edge]).await.unwrap();
-            store
-                .record_object_states(&[RetrievalStatsObjectState {
-                    object_id: crate::domain::MemoryId::from_u128(1),
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        initialize_schema(&connection).unwrap();
+        drop(connection);
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(store.global_episode_counter().await.unwrap(), None);
+        let edge = test_edge(
+            MemoryId::from_u128(2),
+            MemoryId::from_u128(1),
+            RetentionState::Active,
+            true,
+        );
+        store.record_edges(&[edge]).await.unwrap();
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: crate::domain::MemoryId::from_u128(1),
+                object_type: ObjectType::Episode,
+                retention_state: RetentionState::Active,
+                is_current: true,
+                observed_at: timestamp(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(store.global_episode_counter().await.unwrap(), None);
+        drop(store);
+        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(reopened.global_episode_counter().await.unwrap(), None);
+        assert_eq!(
+            reopened
+                .counter(&RetrievalStatsCounterKey {
+                    entity_id: MemoryId::from_u128(2),
+                    relation_kind: RelationType::Involves,
                     object_type: ObjectType::Episode,
-                    retention_state: RetentionState::Active,
-                    is_current: true,
-                    observed_at: timestamp(),
-                }])
+                })
                 .await
-                .unwrap();
-            assert_eq!(store.global_episode_counter().await.unwrap(), None);
-            drop(store);
-            let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
-            assert_eq!(reopened.global_episode_counter().await.unwrap(), None);
-            assert_eq!(
-                reopened
-                    .counter(&RetrievalStatsCounterKey {
-                        entity_id: MemoryId::from_u128(2),
-                        relation_kind: RelationType::Involves,
-                        object_type: ObjectType::Episode,
-                    })
-                    .await
-                    .unwrap(),
-                None
-            );
-        }
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

@@ -133,7 +133,7 @@ The edge index deduplicates `(entity, relation, object type, object)` tuples. `e
 
 The edge cache's `is_current` value is derived from graph state. Episodes have no supersession, so their active and current counts are equal. Including suppressed but excluding superseded memories uses total relation/object counts as an approximation, with possible fanout distortion in either direction; graph filtering still enforces eligibility.
 
-An existing statistics database without `episode_presence_index` reports missing episode statistics, even if it has the older episode-total tables and after subsequent writes. Fresh schema creation is one transaction, including the episode tables. A fresh statistics store is required to use episode-frequency counting; no migration or graph-to-statistics rebuild is provided.
+An existing statistics database without `episode_presence_index` reports missing episode statistics, including after subsequent writes. Fresh schema creation is one transaction, including the episode tables. A fresh statistics store is required to use episode-frequency counting; no migration or graph-to-statistics rebuild is provided.
 
 Statistics cannot establish object existence, provenance, links or retrieval eligibility. An unhealthy stats store causes conservative selectivity fallback and requires caller-managed recovery.
 

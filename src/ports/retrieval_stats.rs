@@ -613,36 +613,30 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
-        let global = store
-            .global_counter(RelationType::Involves, ObjectType::Episode)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(global.total_count, 1);
     }
 
     async fn counts_global_relation_object_pairs(store: &dyn RetrievalStatsStore) {
         let first_entity_id = id("550e8400-e29b-41d4-a716-446655460031");
         let second_entity_id = id("550e8400-e29b-41d4-a716-446655460032");
-        let first_episode_id = id("550e8400-e29b-41d4-a716-446655460033");
-        let second_episode_id = id("550e8400-e29b-41d4-a716-446655460034");
+        let first_memory_id = id("550e8400-e29b-41d4-a716-446655460033");
+        let second_memory_id = id("550e8400-e29b-41d4-a716-446655460034");
 
         store
             .record_edges(&[
                 edge(
                     first_entity_id,
-                    RelationType::Involves,
-                    first_episode_id,
-                    ObjectType::Episode,
+                    RelationType::About,
+                    first_memory_id,
+                    ObjectType::DerivedMemory,
                     RetentionState::Active,
                     true,
                     timestamp(),
                 ),
                 edge(
                     second_entity_id,
-                    RelationType::Involves,
-                    second_episode_id,
-                    ObjectType::Episode,
+                    RelationType::About,
+                    second_memory_id,
+                    ObjectType::DerivedMemory,
                     RetentionState::Suppressed,
                     false,
                     timestamp(),
@@ -652,7 +646,7 @@ mod tests {
             .unwrap();
 
         let counter = store
-            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .global_counter(RelationType::About, ObjectType::DerivedMemory)
             .await
             .unwrap()
             .unwrap();

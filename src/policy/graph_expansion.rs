@@ -480,7 +480,7 @@ fn bounded_expansion_plan<'a>(
             }
             bounded_failure.get_or_insert(failure);
         }
-        let exclusions = limit_participant_occasions(
+        limit_participant_occasions(
             query,
             &mut incident_links,
             root_fanout_mode,
@@ -490,7 +490,6 @@ fn bounded_expansion_plan<'a>(
         if exceeds_hub_limit {
             incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
         }
-        let utilization_start = fanout_utilization.len();
         if let Some(pre_limit_counts) = pre_limit_counts {
             let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
                 query,
@@ -504,12 +503,6 @@ fn bounded_expansion_plan<'a>(
         } else {
             incident_links = apply_fanout_limits(query, incident_links, root_fanout_mode);
         }
-        exclusions.record(
-            incident_links.iter().map(|(_, neighbor)| *neighbor),
-            &mut fanout_utilization[utilization_start..],
-            &mut filtered_nodes,
-        );
-
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
                 relations.push(GraphExpansionRelation {
@@ -955,11 +948,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         )
     };
     let mut filtered_nodes = Vec::new();
-    exclusions.record(
-        links.iter().map(|link| link.other_endpoint(object_ref)),
-        &mut utilization,
-        &mut filtered_nodes,
-    );
+    exclusions.record(&mut utilization, &mut filtered_nodes);
     Ok(BoundedIncidentLinks {
         links,
         utilization,
@@ -978,29 +967,16 @@ pub(crate) fn is_participant_pair(relation: RelationType, object_type: ObjectTyp
 #[derive(Default)]
 struct ParticipantExclusions {
     // The excluded route's type can differ from its suppressed parent object's type.
-    candidates: Vec<(usize, RelationType, ObjectType, GraphExpansionFilteredNode)>,
-    admitted_order: HashMap<MemoryObjectRef, usize>,
+    candidates: Vec<(RelationType, ObjectType, GraphExpansionFilteredNode)>,
 }
 
 impl ParticipantExclusions {
     fn record(
         self,
-        retained: impl IntoIterator<Item = MemoryObjectRef>,
         utilization: &mut [GraphExpansionFanoutUtilization],
         filtered_nodes: &mut Vec<GraphExpansionFilteredNode>,
     ) {
-        let cut = retained
-            .into_iter()
-            .filter_map(|neighbor| self.admitted_order.get(&neighbor))
-            .max();
-        // Other hard caps can remove every otherwise eligible participant neighbor.
-        if cut.is_none() && !self.admitted_order.is_empty() {
-            return;
-        }
-        for (rank, relation, object_type, filtered) in self.candidates {
-            if cut.is_some_and(|cut| rank > *cut) {
-                continue;
-            }
+        for (relation, object_type, filtered) in self.candidates {
             if let Some(row) = utilization
                 .iter_mut()
                 .find(|row| row.relation == relation && row.object_type == object_type)
@@ -1058,7 +1034,6 @@ fn limit_participant_occasions<T: Copy>(
     let mut selected_routes = HashSet::new();
     let mut excluded_routes = HashSet::new();
     let mut excluded_counts = FanoutCounts::new();
-    let mut rank = 0;
     incident_items.retain_mut(|item| {
         if !is_participant(item) {
             return true;
@@ -1066,8 +1041,6 @@ fn limit_participant_occasions<T: Copy>(
         *item = participants
             .next()
             .expect("one sorted item per participant slot");
-        let item_rank = rank;
-        rank += 1;
         let (relation, neighbor) = neighbor_for_item(item);
         let route_budget = fanout_limit_for_pair(query, relation, neighbor.object_type);
         if route_budget == 0 {
@@ -1097,12 +1070,12 @@ fn limit_participant_occasions<T: Copy>(
                 .entry((relation, neighbor.object_type))
                 .or_default();
             if *count < route_budget
+                && (selected_episodes.contains(&episode) || selected_episodes.len() < budget)
                 && !selected_routes.contains(&(relation, episode))
                 && excluded_routes.insert((relation, episode))
             {
                 *count += 1;
                 exclusions.candidates.push((
-                    item_rank,
                     relation,
                     neighbor.object_type,
                     GraphExpansionFilteredNode {
@@ -1120,11 +1093,7 @@ fn limit_participant_occasions<T: Copy>(
         selected_episodes.insert(episode);
         // A single episode can have both routes, but never several observation
         // admissions that would multiply its one occasion of selectivity.
-        let admitted = selected_routes.insert((relation, episode));
-        if admitted {
-            exclusions.admitted_order.insert(neighbor, item_rank);
-        }
-        admitted
+        selected_routes.insert((relation, episode))
     });
     exclusions
 }
