@@ -1,7 +1,8 @@
 use character_memory::{
     CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft,
-    MemoryId, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
-    DEFAULT_SCHEMA_VERSION,
+    ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryId, ObjectType,
+    RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
+    SelectivityDecision, DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
 
@@ -176,12 +177,23 @@ async fn named_people_share_section_room_in_scope_rounds() {
             .filter(|id| id.as_u128() != 9500)
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
-        assert_eq!(&states[..6], &[1199, 9100, 9001, 9002, 9003, 9004]);
-        assert_eq!(&states[6..8], &[1198, 9000]);
+        assert_eq!(&states[..6], &[1184, 9000, 9001, 9002, 9003, 9004]);
+        assert_eq!(&states[6..8], &[1185, 9100]);
         assert_eq!(result.pack.derived_memories.len(), 12);
-        assert!(result
-            .trace
-            .unwrap()
+        let trace = result.trace.unwrap();
+        let named_roots = trace
+            .selectivity_decisions
+            .iter()
+            .filter(|row| row.decision == SelectivityDecision::SkippedSceneNamedRoot)
+            .collect::<Vec<_>>();
+        assert_eq!(named_roots.len(), 6);
+        assert!(named_roots
+            .iter()
+            .all(|row| row.relation == RelationType::About
+                && row.chosen_fanout == 16
+                && row.score.is_none()
+                && !row.fallback));
+        assert!(trace
             .section_assignments
             .iter()
             .filter(|row| row.rank.is_some() && states.contains(&row.object.id.as_u128()))
@@ -259,14 +271,137 @@ async fn named_subject_fanout_selects_current_salient_then_recent_state() {
     for topic in [None, Some("loud topic")] {
         let mut context = RetrievalContext::default().with_scene(scene(&[60], 1000));
         context.topic = topic.map(str::to_owned);
+        context.section_limits.derived_memories = 30;
         let result = memory.retrieve(context).await.unwrap();
         let states = ids(&result)
             .into_iter()
             .filter(|id| id.as_u128() != 9500)
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
-        assert_eq!(&states[..5], &[2003, 2017, 2022, 2023, 2024]);
+        assert_eq!(
+            &states[..16],
+            &[
+                2003, 2017, 2022, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2018, 2019, 2020, 2021,
+                2023, 2024
+            ]
+        );
         assert!(states.iter().all(|id| !(1980..1996).contains(id)));
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn named_person_topic_match_keeps_first_place_in_their_scope() {
+    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let mut seed = RememberInput::new("six topic-test notions");
+    for id in 70..76 {
+        seed = seed.with_entity(entity(id));
+    }
+    commit_input(&memory, seed).await;
+    let mut salient = belief(8000, 16000, Some(70), "unrelated habitual preference", 100);
+    salient.salience_score = 1.0;
+    let topic = "telescope optics astronomy observatory";
+    let mut on_topic = belief(8001, 16000, Some(70), topic, 10);
+    on_topic.salience_score = 0.5;
+    let mut beliefs = vec![salient, on_topic];
+    for person in 71..76 {
+        beliefs.push(belief(
+            8000 + person,
+            16000,
+            Some(person),
+            "other person state",
+            0,
+        ));
+    }
+    write_many(&memory, 16000, &[], beliefs, 0).await;
+    let mut context =
+        RetrievalContext::new(topic).with_scene(scene(&[70, 71, 72, 73, 74, 75], 1000));
+    context.section_limits.derived_memories = 6;
+    let result = memory.retrieve(context).await.unwrap();
+    assert_eq!(
+        ids(&result)
+            .iter()
+            .map(|id| id.as_u128())
+            .collect::<Vec<_>>(),
+        vec![8001, 8071, 8072, 8073, 8074, 8075]
+    );
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn named_subject_preserves_lifecycle_evidence_and_independent_opt_ins() {
+    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    commit_input(
+        &memory,
+        RememberInput::new("lifecycle notion").with_entity(entity(70)),
+    )
+    .await;
+    let mut old = belief(8000, 16000, Some(70), "old state", 0);
+    old.salience_score = 1.0;
+    let mut suppressed = belief(8001, 16000, Some(70), "suppressed state", 0);
+    suppressed.salience_score = 0.9;
+    write_many(&memory, 16000, &[], vec![old, suppressed], 0).await;
+    let mut current = belief(8002, 16001, Some(70), "current state", 10);
+    current.salience_score = 0.1;
+    current.supersedes.push(MemoryId::from_u128(8000));
+    // A second successor is outside the named subject's graph frontier.
+    let mut outside = belief(8003, 16001, None, "another correction", 10);
+    outside.supersedes.push(MemoryId::from_u128(8000));
+    write_many(&memory, 16001, &[], vec![current, outside], 10).await;
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::derived_memory(MemoryId::from_u128(8001)),
+            "test suppression",
+        ))
+        .await
+        .unwrap();
+    for (include_superseded, include_suppressed) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let mut context = RetrievalContext::default()
+            .with_scene(scene(&[70], 1000))
+            .with_trace();
+        context.graph_limits.max_depth = 1;
+        context.graph_limits.allowed_relation_types = vec![RelationType::About];
+        context.graph_limits.allowed_object_types = vec![ObjectType::DerivedMemory];
+        context.lifecycle_policy.include_superseded = include_superseded;
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        let returned = ids(&result);
+        assert!(returned.contains(&MemoryId::from_u128(8002)));
+        assert_eq!(
+            returned.contains(&MemoryId::from_u128(8000)),
+            include_superseded
+        );
+        assert_eq!(
+            returned.contains(&MemoryId::from_u128(8001)),
+            include_suppressed
+        );
+        let trace = result.trace.unwrap();
+        if !include_superseded {
+            let decision = trace
+                .lifecycle_filter_decisions
+                .iter()
+                .find(|row| row.object.id == MemoryId::from_u128(8000))
+                .unwrap();
+            assert_eq!(decision.reason, LifecycleFilterReason::SupersededOmitted);
+            assert_eq!(
+                decision.superseded_by,
+                vec![MemoryId::from_u128(8002), MemoryId::from_u128(8003)]
+            );
+        }
+        if !include_suppressed {
+            assert!(trace
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|row| row.object.id == MemoryId::from_u128(8001)
+                    && row.reason == LifecycleFilterReason::SuppressedOmitted));
+            context.graph_limits.max_fanout_per_node = 1;
+            assert_eq!(ids(&memory.retrieve(context).await.unwrap()), vec![MemoryId::from_u128(8002)],
+                "superseded high-salience state must not displace current state at the neighbour cap");
+        }
     }
     memory.close().await.unwrap();
     root.close().unwrap();

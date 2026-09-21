@@ -17,7 +17,7 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionFanoutUtilization, GraphExpansionQuery,
+    GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionQuery,
 };
 
 use super::rdf_mapping::{RdfObject, RdfTriple};
@@ -551,6 +551,7 @@ pub(super) struct BoundedGraphVisibility {
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
     pub(super) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
+    pub(super) filtered_nodes: Vec<GraphExpansionFilteredNode>,
     pub(super) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
@@ -574,16 +575,17 @@ pub(super) fn bounded_graph_visible_refs(
     let mut fanout_utilization = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
-    let state_ranks = if query.current_subject_state {
-        selectors
-            .select_current_subject_state(query.root_id, query.lifecycle_policy.include_suppressed)?
-            .into_iter()
-            .enumerate()
-            .map(|(rank, id)| (id, rank))
-            .collect()
+    let (state_ids, state_filtered) = if query.current_subject_state {
+        selectors.select_subject_state(query.root_id, query.lifecycle_policy)?
     } else {
-        HashMap::new()
+        (Vec::new(), Vec::new())
     };
+    let state_ranks = state_ids
+        .into_iter()
+        .enumerate()
+        .map(|(rank, id)| (id, rank))
+        .collect();
+    let mut filtered_nodes = Vec::new();
 
     for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
@@ -596,6 +598,25 @@ pub(super) fn bounded_graph_visible_refs(
                 .unwrap_or_default();
             let ordered;
             let incident_link_refs = if depth == 0 && query.current_subject_state {
+                if (query.allowed_relation_types.is_empty()
+                    || query.allowed_relation_types.contains(&RelationType::About))
+                    && (query.allowed_object_types.is_empty()
+                        || query
+                            .allowed_object_types
+                            .contains(&ObjectType::DerivedMemory))
+                {
+                    let about_refs = incident_link_refs
+                        .iter()
+                        .filter(|link| link.relation == RelationType::About)
+                        .map(|link| link.other_endpoint(*object_ref))
+                        .collect::<HashSet<_>>();
+                    filtered_nodes.extend(
+                        state_filtered
+                            .iter()
+                            .filter(|entry| about_refs.contains(&entry.object_ref))
+                            .cloned(),
+                    );
+                }
                 ordered = order_current_subject_links(
                     incident_link_refs.to_vec(),
                     &state_ranks,
@@ -657,6 +678,7 @@ pub(super) fn bounded_graph_visible_refs(
         traversal_link_ids: graph_link_ids,
         lifecycle_link_ids,
         fanout_utilization,
+        filtered_nodes,
         bounded_failure,
     })
 }

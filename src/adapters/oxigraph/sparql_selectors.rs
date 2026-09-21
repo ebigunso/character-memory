@@ -8,10 +8,13 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::domain::{graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType};
+use crate::domain::{
+    graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType, RetentionState,
+};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{
-    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
+    GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansionFilteredNode,
+    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectQuery,
 };
 
 use super::vocabulary as vocab;
@@ -214,35 +217,32 @@ impl<'a> SparqlGraphSelectors<'a> {
         )
     }
 
-    pub(crate) fn select_current_subject_state(
+    // Do not LIMIT here: own-subject metadata can exist without a traversable About
+    // link. Limiting before that intersection can leave the state bucket underfilled.
+    pub(crate) fn select_subject_state(
         &self,
         subject_id: MemoryId,
-        include_suppressed: bool,
-    ) -> Result<Vec<MemoryId>, CustomError> {
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let subject = graph_uri(ObjectType::Entity, subject_id);
-        let retention_filter = if include_suppressed {
-            ""
-        } else {
-            "FILTER (?retention != \"suppressed\")"
-        };
         let query = format!(
             r#"
             PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT ?id WHERE {{
+            SELECT ?id ?retention ?successor WHERE {{
               GRAPH ?g {{
                 ?memory a <{derived_class}> ; <{object_id}> ?id ;
                   <{about}> <{subject}> ; <{salience}> ?salience ;
                   <{created}> ?created ; <{retention}> ?retention .
               }}
-              {retention_filter}
-              FILTER NOT EXISTS {{
+              OPTIONAL {{
                 GRAPH ?linkGraph {{
                   ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ; <{to}> ?memory .
+                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ;
+                    <{from}> ?successor ; <{to}> ?memory .
                 }}
               }}
             }}
-            ORDER BY DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id
+            ORDER BY BOUND(?successor) DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id ?successor
             "#,
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
@@ -254,12 +254,56 @@ impl<'a> SparqlGraphSelectors<'a> {
             from_type = vocab::FROM_TYPE,
             to_type = vocab::TO_TYPE,
             relation = vocab::RELATION,
+            from = vocab::FROM,
             to = vocab::TO,
         );
-        self.query_solutions(&query)?
-            .iter()
-            .map(|solution| memory_id_binding(solution, "id"))
-            .collect()
+        let mut ranked_ids = Vec::new();
+        let mut filtered = Vec::<GraphExpansionFilteredNode>::new();
+        for solution in self.query_solutions(&query)? {
+            let id = memory_id_binding(&solution, "id")?;
+            let successor = match solution.get("successor") {
+                Some(Term::NamedNode(node)) => {
+                    Some(super::shared::memory_id_from_resource(node.as_str())?)
+                }
+                Some(value) => {
+                    return Err(oxigraph_sparql_error(format!(
+                        "expected successor IRI, got {value}"
+                    )))
+                }
+                None => None,
+            };
+            let reason = if enum_binding::<RetentionState>(&solution, "retention")?
+                == RetentionState::Suppressed
+                && !policy.include_suppressed
+            {
+                Some(GraphExpansionFilteredReason::Suppressed)
+            } else if successor.is_some() && !policy.include_superseded {
+                Some(GraphExpansionFilteredReason::Superseded)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                if filtered
+                    .last()
+                    .is_none_or(|entry| entry.object_ref.id != id)
+                {
+                    filtered.push(GraphExpansionFilteredNode {
+                        object_ref: MemoryObjectRef::new(ObjectType::DerivedMemory, id),
+                        reason,
+                        superseded_by: Vec::new(),
+                    });
+                }
+                if let Some(successor) = successor {
+                    let successors = &mut filtered.last_mut().unwrap().superseded_by;
+                    if successors.last() != Some(&successor) {
+                        successors.push(successor);
+                    }
+                }
+            } else if ranked_ids.last() != Some(&id) {
+                ranked_ids.push(id);
+            }
+        }
+        Ok((ranked_ids, filtered))
     }
 
     pub(crate) fn select_links_touching(

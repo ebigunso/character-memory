@@ -391,7 +391,8 @@ fn bounded_expansion_plan<'a>(
             MemoryObject::DerivedMemory(memory)
                 if query.current_subject_state
                     && memory.entity_ids.contains(&query.root_id)
-                    && !superseded.contains_key(&memory.id)
+                    && (query.lifecycle_policy.include_superseded
+                        || !superseded.contains_key(&memory.id))
                     && (query.lifecycle_policy.include_suppressed
                         || memory.retention_state != RetentionState::Suppressed) =>
             {
@@ -401,9 +402,10 @@ fn bounded_expansion_plan<'a>(
         })
         .collect::<Vec<_>>();
     state_memories.sort_by(|left, right| {
-        right
-            .salience_score
-            .total_cmp(&left.salience_score)
+        superseded
+            .contains_key(&left.id)
+            .cmp(&superseded.contains_key(&right.id))
+            .then_with(|| right.salience_score.total_cmp(&left.salience_score))
             .then_with(|| right.created_at.cmp(&left.created_at))
             .then_with(|| left.id.cmp(&right.id))
     });
@@ -469,6 +471,13 @@ fn bounded_expansion_plan<'a>(
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
         if depth == 0 && query.current_subject_state {
+            for (link, neighbor) in &incident_links {
+                if link.relation == RelationType::About {
+                    if let Some(reason) = object_lifecycle.get(neighbor).copied().flatten() {
+                        push_filtered_node(&mut filtered_nodes, *neighbor, reason, &superseded);
+                    }
+                }
+            }
             incident_links =
                 order_current_subject_links(incident_links, &state_ranks, |(link, neighbor)| {
                     (link.relation == RelationType::About
@@ -570,7 +579,7 @@ fn bounded_expansion_plan<'a>(
 }
 
 // Replace only About-neighbour positions; every other relation retains its order.
-// Missing ranks are non-current memories and cannot consume the state bucket.
+// Missing ranks are ineligible memories and cannot consume the state bucket.
 pub(crate) fn order_current_subject_links<T: Copy>(
     links: Vec<T>,
     ranks: &HashMap<MemoryId, usize>,

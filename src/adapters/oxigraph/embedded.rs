@@ -307,6 +307,15 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         hydrated_query.trace_mode = crate::ports::graph_authority::TraceMode::Disabled;
         let mut expansion = bounded_expansion(&hydrated_query, objects, links)?;
         assign_expanded_fanout_utilization(&mut expansion, visibility.fanout_utilization);
+        if expansion.expanded_nodes.contains(&root_ref) {
+            expansion.filtered_nodes.extend(visibility.filtered_nodes);
+        }
+        expansion
+            .filtered_nodes
+            .sort_by_key(|entry| entry.object_ref.stable_order_key());
+        expansion
+            .filtered_nodes
+            .dedup_by_key(|entry| entry.object_ref);
         if expansion.bounded_failure.is_none() {
             expansion.bounded_failure = visibility.bounded_failure;
         }
