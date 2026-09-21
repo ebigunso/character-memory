@@ -159,6 +159,7 @@ where
             }),
             context.candidate_limits.max_vector_candidates,
             context.cue_floors,
+            false,
         );
         let mut floor_admissions = Vec::new();
         let selected = selection

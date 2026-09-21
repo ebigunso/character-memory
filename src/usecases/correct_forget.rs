@@ -80,10 +80,24 @@ where
         write_turn: &tokio::sync::Mutex<()>,
     ) -> Result<LifecycleMutationOutcome, CustomError> {
         draft.validate()?;
-        let inputs = correction_embedding_inputs(&draft)?;
+        let replacements = correction_replacements(&draft)?;
+        let inputs = replacements
+            .iter()
+            .map(|replacement| {
+                EmbeddingInput::new(
+                    replacement.id,
+                    Some(ObjectType::DerivedMemory),
+                    crate::domain::VectorSurface::DerivedText,
+                    crate::policy::embedding_surface::derived_embedding_text(
+                        replacement.derived_type,
+                        &replacement.text,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
         let embeddings = self.embedder.embed_batch(&inputs).await;
         let _turn = write_turn.lock().await;
-        let plan = self.correction_plan(draft).await?;
+        let plan = self.correction_plan(draft, replacements).await?;
         let idempotent_ids = self.idempotent_replacement_ids(&plan).await?;
         let graph_objects = plan
             .graph_objects
@@ -162,8 +176,8 @@ where
     async fn correction_plan(
         &self,
         draft: CorrectMemoryDraft,
+        replacements: Vec<ReplacementDerivedMemoryDraft>,
     ) -> Result<MutationPlan, CustomError> {
-        let correction_seed = correction_seed(&draft)?;
         let mut superseded = Vec::new();
         let mut source_episode_ids = Vec::new();
         let mut source_observation_ids = Vec::new();
@@ -224,19 +238,19 @@ where
         }
         sort_derived_memories(&mut superseded);
 
-        let mut replacement_drafts = replacement_drafts_or_default(
+        let mut replacement_drafts = ground_replacement_drafts(
             &draft,
+            replacements,
             &superseded,
             &source_episode_ids,
             &source_observation_ids,
         )?;
         let replacement_ids = replacement_drafts
             .iter()
-            .enumerate()
-            .map(|(index, replacement)| {
+            .map(|replacement| {
                 replacement
                     .id
-                    .unwrap_or_else(|| replacement_memory_id(correction_seed, index))
+                    .expect("replacement id prepared before embedding")
             })
             .collect::<Vec<_>>();
         ensure_unique_replacement_ids(&replacement_ids)?;
@@ -769,83 +783,60 @@ struct VectorMaintenanceResult {
     failure: Option<VectorMaintenanceFailure>,
 }
 
-fn correction_embedding_inputs(
+fn correction_replacements(
     draft: &CorrectMemoryDraft,
-) -> Result<Vec<EmbeddingInput>, CustomError> {
+) -> Result<Vec<ReplacementDerivedMemoryDraft>, CustomError> {
     let seed = correction_seed(draft)?;
-    let input = |id, derived_type, text: &str| {
-        EmbeddingInput::new(
-            Some(id),
-            Some(ObjectType::DerivedMemory),
-            crate::domain::VectorSurface::DerivedText,
-            crate::policy::embedding_surface::derived_embedding_text(derived_type, text),
-        )
-    };
-    Ok(if draft.replacement_derived_memories.is_empty() {
-        vec![input(
-            replacement_memory_id(seed, 0),
+    let mut replacements = if draft.replacement_derived_memories.is_empty() {
+        vec![ReplacementDerivedMemoryDraft::new(
             DerivedType::Correction,
             &draft.rationale,
         )]
     } else {
-        draft
-            .replacement_derived_memories
-            .iter()
-            .enumerate()
-            .map(|(index, replacement)| {
-                input(
-                    replacement
-                        .id
-                        .unwrap_or_else(|| replacement_memory_id(seed, index)),
-                    replacement.derived_type,
-                    &replacement.text,
-                )
-            })
-            .collect()
-    })
+        draft.replacement_derived_memories.clone()
+    };
+    for (index, replacement) in replacements.iter_mut().enumerate() {
+        replacement
+            .id
+            .get_or_insert_with(|| replacement_memory_id(seed, index));
+    }
+    Ok(replacements)
 }
 
-fn replacement_drafts_or_default(
+fn ground_replacement_drafts(
     draft: &CorrectMemoryDraft,
+    mut replacements: Vec<ReplacementDerivedMemoryDraft>,
     superseded: &[DerivedMemory],
     source_episode_ids: &[MemoryId],
     source_observation_ids: &[MemoryId],
 ) -> Result<Vec<ReplacementDerivedMemoryDraft>, CustomError> {
-    let mut replacements = if draft.replacement_derived_memories.is_empty() {
-        vec![ReplacementDerivedMemoryDraft {
-            id: None,
-            derived_type: DerivedType::Correction,
-            text: draft.rationale.clone(),
-            derived_from_episode_ids: source_episode_ids.to_vec(),
-            derived_from_observation_ids: source_observation_ids.to_vec(),
-            thread_ids: stable_union(
-                superseded
-                    .iter()
-                    .flat_map(|memory| memory.thread_ids.clone()),
-            ),
-            assertions: Vec::new(),
-            given_by_application: false,
-            entity_ids: stable_union(
-                superseded
-                    .iter()
-                    .flat_map(|memory| memory.entity_ids.clone()),
-            ),
-            salience_score: superseded
+    if draft.replacement_derived_memories.is_empty() {
+        let replacement = &mut replacements[0];
+        replacement.derived_from_episode_ids = source_episode_ids.to_vec();
+        replacement.derived_from_observation_ids = source_observation_ids.to_vec();
+        replacement.thread_ids = stable_union(
+            superseded
                 .iter()
-                .map(|memory| memory.salience_score)
-                .max_by(f32::total_cmp)
-                .unwrap_or(0.5),
-            supersedes: superseded.iter().map(|memory| memory.id).collect(),
-            original_source_provenance: SourceProvenanceReference {
-                episode_ids: source_episode_ids.to_vec(),
-                observation_ids: source_observation_ids.to_vec(),
-                external_refs: Vec::new(),
-            },
-            correction_origin_provenance: draft.correction_origin.clone(),
-        }]
-    } else {
-        draft.replacement_derived_memories.clone()
-    };
+                .flat_map(|memory| memory.thread_ids.clone()),
+        );
+        replacement.entity_ids = stable_union(
+            superseded
+                .iter()
+                .flat_map(|memory| memory.entity_ids.clone()),
+        );
+        replacement.salience_score = superseded
+            .iter()
+            .map(|memory| memory.salience_score)
+            .max_by(f32::total_cmp)
+            .unwrap_or(0.5);
+        replacement.supersedes = superseded.iter().map(|memory| memory.id).collect();
+        replacement.original_source_provenance = SourceProvenanceReference {
+            episode_ids: source_episode_ids.to_vec(),
+            observation_ids: source_observation_ids.to_vec(),
+            external_refs: Vec::new(),
+        };
+        replacement.correction_origin_provenance = draft.correction_origin.clone();
+    }
 
     for replacement in &mut replacements {
         merge_sources(

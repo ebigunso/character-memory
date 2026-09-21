@@ -6,12 +6,12 @@
 - work_type: code
 
 ## Goal
-- When a character arrives somewhere, who is there, where it is and what it is doing bring memories to mind as surely as the topic does. A loud topic cannot crowd them out, and neither can one of them crowd out another. A notion that is part of nearly every experience, the character itself above all, brings almost nothing, because it distinguishes nothing.
+- When a character arrives somewhere, who is there, where it is and what it is doing bring memories to mind as surely as the topic does. A loud topic cannot crowd them out, and neither can one of them crowd out another. A notion that is part of nearly every experience, the character itself above all, brings its latest occasion, with further occasions admitted as its distinctiveness increases.
 
 ## Definition of Done
 - A retrieval can say what the character is doing: the id of a thread or an open loop, beside the topic, echoed in the result. It brings what belongs to that thread or loop as the application's ordinary writes recorded it, with no topic needed. Inferring it when absent belongs to the next plan.
 - The trace names, for every admitted memory, the set of cue kinds that admitted it, from the closed vocabulary the decider ruled. This plan produces topic, participant, place and activity, and ships only those; the other four arrive with the plans that build their routes. A memory reached by several cues names all of them.
-- A notion's weight as a cue falls with the share of experiences it takes part in, on every link path a write can make. A notion in nearly every experience admits few or no neighbours, whether it is the self, the one user of a one-to-one deployment, or a room everything happens in. No identity is special-cased (ADR-D-0020).
+- A notion's weight as a cue falls with the share of experiences it takes part in, on every link path a write can make. A notion in nearly every experience admits its latest occasion, whether it is the self, the one user of a one-to-one deployment, or a room everything happens in. No identity is special-cased (ADR-D-0020).
 - Among the cue kinds present in a retrieval, none is starved by another at the three places the census found it can happen: where several content searches merge into one candidate list, where roots are chosen for expansion, and where admitted memories compete for a section. When the room that exists cannot hold every kind's floor, what yields is stated and deterministic.
 - A retrieval that gives only a topic, or only one kind of cue, selects what it selects today.
 - The floors ship with provisional values and the plan does not complete on them: it completes when the companion repository has measured them at a pinned commit of this slice and the measured-floors record is proposed for the decider.
@@ -31,7 +31,7 @@
 - Alternative: one budget per cue kind end to end. Rejected for now: it multiplies every cap by the number of kinds and fixes numbers before anything is measured.
 - Alternative: cue kinds in the result. Rejected for this slice: the ruling puts them in the trace; a bare kind is thin knowledge, and with two people present "participant" says less than the result already does through each memory's recorded scene and each reference's outcome. Naming the reference itself is a richer idea and the decider's to weigh.
 - The activity's reach, chosen: read what ordinary writes already record, a memory's own thread list and an open loop's threads and sources, through the field-backed queries the graph port already has. Alternative: derive membership links at commit from those fields, as was done for beliefs about a notion. Rejected here: it changes the stored graph of every existing fixture with thread affiliations and moves the measured baselines for a gain the query already gives; it stays available if a later route needs traversal through membership.
-- The ubiquitous notion, chosen: one inverse-frequency rule over experiences for every notion. Alternative: drop the self from the roots by identity. Rejected by ADR-D-0020, and it leaves the one-user case untouched. The rule lowers a root's reach; it does not promise that the self brings nothing, and the conservative fallback when statistics are missing still admits a little.
+- The ubiquitous notion, chosen: one inverse-frequency rule over experiences for every notion. Alternative: drop the self from the roots by identity. Rejected by ADR-D-0020, and it leaves the one-user case untouched. The rule lowers a root's reach to a minimum of one occasion, selected by recorded Scene.time. Direct episode and observation routes share that episode budget, with at most one observation per selected episode on the observation route; missing-statistics fallback selects the same latest occasion.
 - Why chosen: smallest shape that makes ADR-D-0022's invariant true for the cue kinds that exist and gives the later routes a rule to join. Fit: v0.2 draft sections 2 and 3; ADR-D-0020, D-0022, D-0029, D-0038, ADR-I-0022, I-0029.
 
 ## Compatibility stance (required if a contract/interface/persisted format is touched)
@@ -79,7 +79,7 @@
     owner: reviewer
     detail: "Tier D diff review; Tier A review of the retrieval input and the trace vocabulary"
 
-### Task_2: A notion that is in nearly every experience cues nearly nothing
+### Task_2: A notion that is in nearly every experience cues its latest occasion
 - type: impl
 - owns:
   - src/**
@@ -87,9 +87,9 @@
   - README.md
 - depends_on: [Task_1]
 - description: |
-  A notion's share is measured against experiences, not against link counts, and the cap on an entity root's neighbours that follows from it covers every link path a write can make for a participant, including the one to an observation that an ordinary `remember` makes. One rule for every notion. It lowers a ubiquitous root's reach; it does not claim the root brings nothing, and the conservative fallback when statistics are missing or unhealthy stays and is stated in the README.
+  A notion's share is measured against experiences, not against link counts, and the cap on an entity root's neighbours that follows from it covers every link path a write can make for a participant, including the one to an observation that an ordinary `remember` makes. One rule for every notion. It lowers a ubiquitous root's reach to its latest occasion by recorded Scene.time, shared across the episode and observation paths. The conservative fallback when statistics are missing or unhealthy has the same minimum and is stated in the README.
 - acceptance:
-  - In a store of a few dozen experiences with several participants each, where one notion takes part in all of them and another in a few, a retrieval naming both brings the second one's memories and few or none through the first, on the `remember` path and on a caller-built path alike.
+  - In a store of a few dozen experiences with several participants each, where one notion takes part in all of them and another in a few, a retrieval naming both brings the second one's memories and the latest occasion through the first, on the `remember` path and on a caller-built path alike.
   - The same holds whether or not the ubiquitous notion is the one the application thinks of as the character.
   - The measured cases of ADR-I-0022 keep their results, or each difference is listed with its cause.
 - validation:
@@ -208,4 +208,4 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 ## Notes
 - Risks: admission changes move the pollution and context-size baselines of ADR-I-0022; the companion repository re-measures once, at its own closing task. A calibration corpus authored for other pressures may not isolate these three floors; Task_4 names the pressure it needs.
-- Edge cases, with the expected result: a scene whose only participant is ubiquitous brings little or nothing until the time route exists; an activity naming a closed thread is found and brings its memories, though the thread itself has no pack section today; a memory carrying every kind takes one slot and satisfies all four floors.
+- Edge cases, with the expected result: a scene whose only participant is ubiquitous brings the latest recorded occasion with that participant; asking about a day still needs the time route; an activity naming a closed thread is found and brings its memories, though the thread itself has no pack section today; a memory carrying every kind takes one slot and satisfies all four floors.

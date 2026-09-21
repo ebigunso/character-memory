@@ -97,7 +97,7 @@ where
             .map(|(input, embedding)| {
                 (
                     (input.object_type, input.object_id, input.surface),
-                    embedding,
+                    (input.text.as_str(), embedding),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -123,6 +123,7 @@ where
         }
         if let Some(record) = records.iter().find(|record| {
             embeddings[&record_key(record)]
+                .1
                 .iter()
                 .all(|value| *value == 0.0)
         }) {
@@ -135,7 +136,14 @@ where
 
         let record_embeddings = records
             .iter()
-            .map(|record| VectorRecordEmbedding::new(record, &embeddings[&record_key(record)]))
+            .map(|record| {
+                let (text, embedding) = &embeddings[&record_key(record)];
+                debug_assert_eq!(
+                    *text, record.embedding_text,
+                    "paired embedding text changed"
+                );
+                VectorRecordEmbedding::new(record, embedding)
+            })
             .collect::<Vec<_>>();
         match self
             .vector_store
