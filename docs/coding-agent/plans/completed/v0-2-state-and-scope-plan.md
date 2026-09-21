@@ -1,6 +1,6 @@
 # Plan: arriving somewhere brings what the character currently holds about who and what is there
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-21
 - last_updated: 2026-09-21
 - work_type: code
@@ -12,7 +12,7 @@
 - The state route: for every notion the present scene resolves (a participant given by key, or by a name the character currently knows them by), retrieval admits the current interpreted memories that are about that notion, read through the memories' own subjects, with no topic needed. For the activity it admits the current memories of that thread, read through their own thread lists. It reports the cue kind that implied each (participant, activity); current state is not a cue kind of its own. It takes the floors of the cues slice.
 - When several scopes are implied, each brings something before any brings a second: within a cue kind, scopes are served in rounds, and within a scope the order is salience. One long relationship cannot crowd out the five other people in the room.
 - The last interaction with each resolved participant is brought with its state, and the result reports the time since then, from recorded scene times. Never met is reported as never met, not as zero. A participant given only by description has no identity to measure against and is not reported.
-- The setting key and custom values, stored and echoed since the scene slice, become cues: interpreted memories carry a scope key for the setting key and one per custom value (its name and its value together), derived at commit from the scenes of the experiences they rest on, never authored, never an identifier a caller must discover (ADR-D-0024). A memory resting on several experiences carries the keys they share. The state route reads them.
+- The setting key and custom values, stored and echoed since the scene slice, become cues: interpreted memories carry a scope key for the setting key and one per custom value (its name and its value together), derived at commit from the scenes of the experiences they rest on, never authored, never an identifier a caller must discover (ADR-D-0024). A memory resting on several experiences carries every setting key and custom value of the scenes it rests on (Decision Log, 2026-09-21). The state route reads them.
 - Resolution ends being current state and nothing else. A memory that a later one resolves, or a commitment that a later one fulfils, is left out of the state route with a reason that says so. Every other route admits it as before (ADR-D-0018), and wherever it is admitted the result says it is resolved and by which memory, so a settled debt never looks open.
 - A retrieval that gives only a topic selects what it selects today.
 
@@ -200,6 +200,12 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Plan delta (what changed): wherever this plan says a memory resting on several experiences carries the keys they share, read: it carries every setting key and custom value of the scenes it rests on. Task_2's first acceptance bullet becomes: one formed from two conversations comes back under either. The authored-key rejection leaves Task_2: derivation overwrites unconditionally, so nothing can be authored and the rejection guarded nothing. No record is proposed in Task_2; the narrowing of ADR-D-0024 (participants are read from a memory's own subjects, not stored from presence) goes to the decider as a replacement of that record at the slice boundary.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: a replacement of ADR-D-0024, at the slice boundary.
+- 2026-09-21 Milestone: all four tasks are reviewed and up as pull requests, and the completion value audit ran.
+  - Evidence: Task_1 (129), Task_2 (131), Task_3 (132, with a follow-up that keeps a settled matter out of the open-matters and commitments sections), Task_4 (134). Each was approved by the Tier D reviewer with red-then-green reproductions and by a Tier A review where the plan asked for one.
+  - Audit result: the slice delivers its Definition of Done; a cleanup removes a debug print, a test of nothing, a public trace variant the orchestrator had asked for that nothing reads, a coupled option, and bounds the last-interaction read to one indexed query. Recorded exceptions: an activity's thread members are ordered by recency, not salience, because where a piece of work stands is its latest step; state ordering written in both the selector and the policy is left until the two drift.
+  - Ruled since the plan was written: a kind's reserved slot is served from that kind's own order even when it is the only kind present, so the occasion admitted under a cap is the one reported as the last interaction; sharing spare room by turns at the candidate merge and the section caps is withdrawn in the next slice (the scene-words plan), which deletes what depends on it.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: a replacement of ADR-D-0024 at the slice boundary (unchanged).
 
 ## Notes
 - Risks: if the baseline already brings a ubiquitous notion's beliefs adequately, Task_1 is smaller than written, and the plan says to find out first. Deriving keys inside the write turn reads source scenes and lengthens the turn. A memory whose sources share no setting carries no key, which is correct. State for one person can be large after a long relationship; rounds, salience order, floors and section caps bound it, and which of it matters most over time is the time plan's and the renderer's.
