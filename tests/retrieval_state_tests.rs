@@ -178,7 +178,17 @@ async fn named_people_share_section_room_in_scope_rounds() {
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
         assert_eq!(&states[..6], &[1184, 9000, 9001, 9002, 9003, 9004]);
-        assert_eq!(&states[6..8], &[1185, 9100]);
+        if topic.is_some() {
+            assert_eq!(
+                ids(&result)
+                    .iter()
+                    .map(|id| id.as_u128())
+                    .collect::<Vec<_>>(),
+                [9500, 1184, 9000, 9001, 9002, 9003, 9004, 1083, 1000, 1001, 1002, 1003]
+            );
+        } else {
+            assert_eq!(&states[6..8], &[1185, 9100]);
+        }
         assert_eq!(result.pack.derived_memories.len(), 12);
         let trace = result.trace.unwrap();
         let named_roots = trace
@@ -193,10 +203,15 @@ async fn named_people_share_section_room_in_scope_rounds() {
                 && row.chosen_fanout == 16
                 && row.score.is_none()
                 && !row.fallback));
+        let scope_states = if topic.is_some() {
+            &states[..6]
+        } else {
+            &states[..]
+        };
         assert!(trace
             .section_assignments
             .iter()
-            .filter(|row| row.rank.is_some() && states.contains(&row.object.id.as_u128()))
+            .filter(|row| row.rank.is_some() && scope_states.contains(&row.object.id.as_u128()))
             .all(|row| row
                 .cue_kinds
                 .contains(&character_memory::CueKind::Participant)));
@@ -318,14 +333,23 @@ async fn named_person_topic_match_keeps_first_place_in_their_scope() {
     let mut context =
         RetrievalContext::new(topic).with_scene(scene(&[70, 71, 72, 73, 74, 75], 1000));
     context.section_limits.derived_memories = 6;
+    context.include_trace = true;
     let result = memory.retrieve(context).await.unwrap();
     assert_eq!(
         ids(&result)
             .iter()
             .map(|id| id.as_u128())
             .collect::<Vec<_>>(),
-        vec![8001, 8071, 8072, 8073, 8074, 8075]
+        vec![8001, 8071, 8072, 8073, 8074, 8000]
     );
+    assert!(result.trace.unwrap().floor_admissions.iter().any(|row| {
+        row.object.id == MemoryId::from_u128(8000)
+            && row.cue_kind == character_memory::CueKind::Topic
+            && row.stage
+                == character_memory::api::types::CueFloorStage::Section {
+                    section: character_memory::ContextPackSection::DerivedMemories,
+                }
+    }));
     memory.close().await.unwrap();
     root.close().unwrap();
 }

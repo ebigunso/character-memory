@@ -111,8 +111,8 @@ impl Default for RetrievalCandidateLimits {
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///
-/// Unused room returns to the common pool. Zero disables that kind's floor;
-/// all floors remain subject to the existing hard caps.
+/// After reservations, every present kind shares spare turns, including kinds
+/// with a zero floor. All turns remain subject to the existing hard caps.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
@@ -536,7 +536,7 @@ impl Default for RetrievalTrace {
     }
 }
 
-/// A floor admitted this object outside the stage's original capped prefix.
+/// A reserved or spare cue turn admitted this object outside the stage's original capped prefix.
 /// Earlier-stage admissions remain here even if the object is omitted later.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CueFloorAdmission {
