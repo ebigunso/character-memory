@@ -50,7 +50,7 @@ fn derived(
     draft
 }
 
-async fn fixture() -> (CharacterMemory, tempfile::TempDir) {
+async fn fixture(resolvers_share_state: bool) -> (CharacterMemory, tempfile::TempDir) {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     let mut person = EntityDraft::new();
     person.id = Some(id(501));
@@ -81,26 +81,20 @@ async fn fixture() -> (CharacterMemory, tempfile::TempDir) {
         input = input.with_derived_memory(draft);
     }
     commit(&memory, input).await;
-    commit(
-        &memory,
-        RememberInput::new("later results")
-            .with_episode(episode(102, Scene::at(at(20))))
-            .with_derived_memory(derived(
-                401,
-                DerivedType::Claim,
-                "calibration completed successfully",
-                102,
-                20,
-            ))
-            .with_derived_memory(derived(
-                402,
-                DerivedType::Claim,
-                "delivered all supplies",
-                102,
-                20,
-            )),
-    )
-    .await;
+    let mut input =
+        RememberInput::new("later results").with_episode(episode(102, Scene::at(at(20))));
+    for (n, text) in [
+        (401, "calibration completed successfully"),
+        (402, "delivered all supplies"),
+    ] {
+        let mut resolver = derived(n, DerivedType::Claim, text, 102, 20);
+        if resolvers_share_state {
+            resolver.entity_ids.push(id(501));
+            resolver.thread_ids.push(id(601));
+        }
+        input = input.with_derived_memory(resolver);
+    }
+    commit(&memory, input).await;
     for (n, source, target, relation) in [
         (701, 401, 301, RelationType::Resolves),
         (702, 402, 302, RelationType::FulfillsCommitment),
@@ -172,7 +166,7 @@ fn omitted(result: &RetrieveOutcome, target: u128, reason: LifecycleFilterReason
 
 #[tokio::test]
 async fn resolution_leaves_all_state_routes_before_their_caps() {
-    let (memory, root) = fixture().await;
+    let (memory, root) = fixture(false).await;
     let mut input = RememberInput::new("remaining work");
     for (n, kind) in [(303, DerivedType::OpenLoop), (304, DerivedType::Commitment)] {
         let mut live = derived(n, kind, "still pending", 101, 5);
@@ -218,7 +212,7 @@ async fn resolution_leaves_all_state_routes_before_their_caps() {
 
 #[tokio::test]
 async fn recall_names_resolvers_without_trace_even_after_resolvers_are_suppressed() {
-    let (memory, root) = fixture().await;
+    let (memory, root) = fixture(false).await;
     for suppress_resolvers in [false, true] {
         if suppress_resolvers {
             for resolver in [401, 402] {
@@ -302,7 +296,7 @@ async fn recall_names_resolvers_without_trace_even_after_resolvers_are_suppresse
 
 #[tokio::test]
 async fn resolution_does_not_override_existing_lifecycle_omission_reasons() {
-    let (memory, root) = fixture().await;
+    let (memory, root) = fixture(false).await;
     let mut replacement = derived(
         405,
         DerivedType::Correction,
@@ -357,7 +351,7 @@ async fn resolution_does_not_override_existing_lifecycle_omission_reasons() {
 
 #[tokio::test]
 async fn thread_forget_still_cascades_to_resolved_members() {
-    let (memory, root) = fixture().await;
+    let (memory, root) = fixture(false).await;
     let mut forget =
         ForgetMemoryDraft::suppress(LifecycleTargetRef::memory_thread(id(601)), "forget work");
     forget.cascade_policy.apply_to_thread_members = true;
@@ -370,6 +364,85 @@ async fn thread_forget_still_cascades_to_resolved_members() {
                 |reference| reference.object_type == ObjectType::DerivedMemory
                     && reference.id == id(target)
             ));
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn settled_results_arrive_as_named_and_thread_current_state() {
+    let (memory, root) = fixture(true).await;
+    for route in ["named", "thread", "thread_expansion"] {
+        let result = memory.retrieve(request(route)).await.unwrap();
+        assert_eq!(
+            result
+                .pack
+                .derived_memories
+                .iter()
+                .map(|item| item.memory.id)
+                .collect::<Vec<_>>(),
+            vec![id(401), id(402)],
+            "{route}"
+        );
+        assert!(result
+            .pack
+            .derived_memories
+            .iter()
+            .all(|item| item.resolved_by.is_empty()));
+        assert!(result.pack.open_loops.is_empty());
+        assert!(result.pack.commitments.is_empty());
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn recalled_resolution_has_no_omission_but_section_capped_resolution_does() {
+    let (memory, root) = fixture(true).await;
+    for include_trace in [true, false] {
+        let mut context = request("named");
+        context.include_trace = include_trace;
+        context.graph_limits.allowed_relation_types.clear();
+        context.graph_limits.max_depth = 2;
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        assert_eq!(result.pack.open_loops[0].memory.id, id(301));
+        assert_eq!(
+            result.pack.open_loops[0].resolved_by,
+            vec![id(401), id(402)]
+        );
+        assert_eq!(result.pack.commitments[0].memory.id, id(302));
+        assert_eq!(result.pack.commitments[0].resolved_by, vec![id(402)]);
+        if let Some(trace) = result.trace {
+            assert!(trace
+                .lifecycle_filter_decisions
+                .iter()
+                .all(|entry| entry.object.id != id(301) && entry.object.id != id(302)));
+        }
+        assert!(result
+            .rationale
+            .lifecycle_omission_reasons
+            .iter()
+            .all(|entry| entry.reason != LifecycleFilterReason::ResolvedOmitted));
+        assert_eq!(result.rationale.lifecycle_omission_count, 0);
+
+        // Reaching an object during expansion is not enough: only pack admission clears the omission.
+        context.include_trace = true;
+        context.section_limits.open_loops = 0;
+        let result = memory.retrieve(context).await.unwrap();
+        assert!(result.pack.open_loops.is_empty());
+        omitted(&result, 301, LifecycleFilterReason::ResolvedOmitted);
+        assert!(result
+            .trace
+            .as_ref()
+            .unwrap()
+            .lifecycle_filter_decisions
+            .iter()
+            .all(|entry| entry.object.id != id(302)));
+        assert!(result
+            .rationale
+            .lifecycle_omission_reasons
+            .iter()
+            .any(|entry| entry.reason == LifecycleFilterReason::ResolvedOmitted));
     }
     memory.close().await.unwrap();
     root.close().unwrap();

@@ -806,6 +806,11 @@ fn build_pack(
         }
     }
 
+    // A state-route omission no longer describes a memory admitted by another route.
+    details.lifecycle_filter_decisions.retain(|entry| {
+        entry.reason != LifecycleFilterReason::ResolvedOmitted || !selected.contains(&entry.object)
+    });
+
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked.object) else {
             details.section_assignments.push(SectionAssignment {
@@ -1368,8 +1373,9 @@ fn filtered_lifecycle_decision(
 
 fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCandidateReason {
     match reason {
-        GraphExpansionFilteredReason::Suppressed | GraphExpansionFilteredReason::Resolved => {
-            StaleCandidateReason::LifecycleMismatch
+        GraphExpansionFilteredReason::Suppressed => StaleCandidateReason::LifecycleMismatch,
+        GraphExpansionFilteredReason::Resolved => {
+            unreachable!("resolution filters state neighbors, never recall roots")
         }
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
     }
