@@ -1,9 +1,10 @@
 use character_memory::{
     ActivityRef, CharacterMemory, CommitOptions, CorrectMemoryDraft, CorrectionTarget,
-    DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft, GraphRootSource,
-    LifecycleFilterReason, LifecycleTargetRef, MemoryId, MemoryThreadDraft, ObjectType,
-    ObservationDraft, RememberInput, RememberPlanDefaults, ReplacementDerivedMemoryDraft,
-    RetrievalContext, Scene, SceneParticipant, SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
+    DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft,
+    GraphExpansionOutcome, GraphRootSource, LifecycleFilterReason, LifecycleTargetRef, MemoryId,
+    MemoryThreadDraft, ObjectType, ObservationDraft, RememberInput, RememberPlanDefaults,
+    ReplacementDerivedMemoryDraft, RetrievalContext, Scene, SceneParticipant,
+    SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -453,7 +454,6 @@ async fn dense_place_records_topic_admission_at_root_cap() {
         .iter()
         .find(|row| row.root.id == id(901))
         .unwrap();
-    // Record allocation without making topic starvation a permanent contract.
     println!(
         "DENSE_PLACE_TOPIC={}",
         json!({
@@ -465,6 +465,8 @@ async fn dense_place_records_topic_admission_at_root_cap() {
             "attempted_roots": result.rationale.telemetry.graph_expansion.attempted_root_count,
         })
     );
+    assert_eq!(root_trace.outcome, GraphExpansionOutcome::Expanded);
+    assert!(ids(&result).contains(&id(901)));
     memory.close().await.unwrap();
     root.close().unwrap();
 }

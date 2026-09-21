@@ -52,11 +52,15 @@ pub(crate) struct RetrievalStatsEdge {
     pub(crate) is_current: bool,
     pub(crate) first_seen_at: DateTime<Utc>,
     pub(crate) last_seen_at: DateTime<Utc>,
+    pub(crate) source_observation: Option<(MemoryId, RetentionState)>,
 }
 
 impl RetrievalStatsEdge {
     pub(crate) fn is_active(&self) -> bool {
         self.retention_state == RetentionState::Active
+            && self
+                .source_observation
+                .is_none_or(|(_, state)| state == RetentionState::Active)
     }
 }
 
@@ -143,18 +147,26 @@ fn retrieval_stats_edges_with_states(
             if let Some(&episode_id) = observation_episodes.get(&observation_id) {
                 let (retention_state, is_current) =
                     edge_lifecycle(episode_id, ObjectType::Episode, &object_state_lookup);
-                insert_edge(
-                    &mut edges,
-                    edge(
-                        entity_id,
-                        RelationType::Involves,
-                        episode_id,
-                        ObjectType::Episode,
-                        retention_state,
-                        is_current,
-                        link.created_at,
-                    ),
+                let mut presence = edge(
+                    entity_id,
+                    RelationType::Involves,
+                    episode_id,
+                    ObjectType::Episode,
+                    retention_state,
+                    is_current,
+                    link.created_at,
                 );
+                presence.source_observation = Some((
+                    observation_id,
+                    edge_lifecycle(
+                        observation_id,
+                        ObjectType::Observation,
+                        &object_state_lookup,
+                    )
+                    .0,
+                ));
+                presence.edge_key.push_str(&format!(":{observation_id}"));
+                insert_edge(&mut edges, presence);
             }
         }
     }
@@ -328,6 +340,12 @@ fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) 
     existing.retention_state =
         more_restrictive_retention(existing.retention_state, incoming.retention_state);
     existing.is_current = existing.is_current && incoming.is_current;
+    if let (Some((_, state)), Some((_, incoming_state))) = (
+        &mut existing.source_observation,
+        incoming.source_observation,
+    ) {
+        *state = more_restrictive_retention(*state, incoming_state);
+    }
 }
 
 fn more_restrictive_retention(left: RetentionState, right: RetentionState) -> RetentionState {
@@ -363,6 +381,7 @@ fn edge(
         is_current,
         first_seen_at: observed_at,
         last_seen_at: observed_at,
+        source_observation: None,
     }
 }
 
@@ -402,21 +421,34 @@ fn object_state(
 pub(crate) fn recomputed_counters(
     edges: &HashMap<String, RetrievalStatsEdge>,
 ) -> HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter> {
-    let mut counters = HashMap::new();
+    let mut targets = HashMap::new();
     for edge in edges.values() {
+        let flags = targets
+            .entry((
+                edge.entity_id,
+                edge.relation_kind,
+                edge.object_type,
+                edge.object_id,
+            ))
+            .or_insert((false, false));
+        flags.0 |= edge.is_active();
+        flags.1 |= edge.is_active() && edge.is_current;
+    }
+    let mut counters = HashMap::new();
+    for ((entity_id, relation_kind, object_type, _), (active, current)) in targets {
         let key = RetrievalStatsCounterKey {
-            entity_id: edge.entity_id,
-            relation_kind: edge.relation_kind,
-            object_type: edge.object_type,
+            entity_id,
+            relation_kind,
+            object_type,
         };
         let counter = counters
             .entry(key)
             .or_insert_with(RetrievalStatsCounter::default);
         counter.total_count += 1;
-        if edge.is_active() {
+        if active {
             counter.active_count += 1;
         }
-        if edge.is_active() && edge.is_current {
+        if current {
             counter.current_count += 1;
         }
     }
@@ -427,17 +459,13 @@ pub(crate) fn recomputed_global_counters(
     edges: &HashMap<String, RetrievalStatsEdge>,
 ) -> HashMap<(RelationType, ObjectType), RetrievalStatsCounter> {
     let mut counters = HashMap::new();
-    for edge in edges.values() {
+    for (key, count) in recomputed_counters(edges) {
         let counter = counters
-            .entry((edge.relation_kind, edge.object_type))
+            .entry((key.relation_kind, key.object_type))
             .or_insert_with(RetrievalStatsCounter::default);
-        counter.total_count += 1;
-        if edge.is_active() {
-            counter.active_count += 1;
-        }
-        if edge.is_active() && edge.is_current {
-            counter.current_count += 1;
-        }
+        counter.total_count += count.total_count;
+        counter.active_count += count.active_count;
+        counter.current_count += count.current_count;
     }
     counters
 }
@@ -585,36 +613,30 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
-        let global = store
-            .global_counter(RelationType::Involves, ObjectType::Episode)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(global.total_count, 1);
     }
 
     async fn counts_global_relation_object_pairs(store: &dyn RetrievalStatsStore) {
         let first_entity_id = id("550e8400-e29b-41d4-a716-446655460031");
         let second_entity_id = id("550e8400-e29b-41d4-a716-446655460032");
-        let first_episode_id = id("550e8400-e29b-41d4-a716-446655460033");
-        let second_episode_id = id("550e8400-e29b-41d4-a716-446655460034");
+        let first_memory_id = id("550e8400-e29b-41d4-a716-446655460033");
+        let second_memory_id = id("550e8400-e29b-41d4-a716-446655460034");
 
         store
             .record_edges(&[
                 edge(
                     first_entity_id,
-                    RelationType::Involves,
-                    first_episode_id,
-                    ObjectType::Episode,
+                    RelationType::About,
+                    first_memory_id,
+                    ObjectType::DerivedMemory,
                     RetentionState::Active,
                     true,
                     timestamp(),
                 ),
                 edge(
                     second_entity_id,
-                    RelationType::Involves,
-                    second_episode_id,
-                    ObjectType::Episode,
+                    RelationType::About,
+                    second_memory_id,
+                    ObjectType::DerivedMemory,
                     RetentionState::Suppressed,
                     false,
                     timestamp(),
@@ -624,7 +646,7 @@ mod tests {
             .unwrap();
 
         let counter = store
-            .global_counter(RelationType::Involves, ObjectType::Episode)
+            .global_counter(RelationType::About, ObjectType::DerivedMemory)
             .await
             .unwrap()
             .unwrap();

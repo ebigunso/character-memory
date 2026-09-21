@@ -120,9 +120,9 @@ Currency is determined by incoming interpreted-memory `Supersedes` links. Predec
 
 ## Retrieval Stats
 
-The internal SQLite projection uses `entity_edge_index`, `entity_relation_counts`, `global_relation_counts`, `episode_state_index`, `episode_counts` and `stats_meta`. The in-memory implementation follows the same counter contract.
+The internal SQLite projection uses `entity_edge_index`, `entity_relation_counts`, `global_relation_counts`, `episode_state_index`, `episode_counts`, `episode_presence_index` and `stats_meta`. The in-memory implementation follows the same counter contract.
 
-The edge index deduplicates `(entity, relation, object type, object)` tuples. Its `Involves`/`Episode` entries combine scene participant keys, episode involvement links and observation mentions mapped through the observation's episode, counting each notion once per episode without creating graph links. `episode_state_index` stores one row per episode, including episodes with no keyed participants, with its retention state. The two participant paths use this episode total as their denominator and share the existing participant fanout budget; `About` and `PartOfThread` retain their relation/object edge-count denominators.
+The edge index deduplicates `(entity, relation, object type, object)` tuples. `episode_presence_index` keeps scene participant keys and episode involvement links separately from observation mentions mapped through the observation's episode. Each mention retains its producing observation and retention state; each notion counts once per episode when the episode and any presence source are active, without creating graph links. Forgetting one observation leaves presence from another observation, a scene participant or a direct involvement link intact. `episode_state_index` stores one row per episode, including episodes with no keyed participants, with its retention state. The two participant paths use this episode total as their denominator and share the existing participant fanout budget; `About` and `PartOfThread` retain their relation/object edge-count denominators.
 
 `episode_counts` caches total and active episode counts in one row, updated in the same transaction as episode state changes. Retrieval reads that row without scanning episodes. The in-memory adapter refreshes episode counts with its existing dirty-counter cache.
 
@@ -134,7 +134,7 @@ The edge index deduplicates `(entity, relation, object type, object)` tuples. It
 
 The edge cache's `is_current` value is derived from graph state. Episodes have no supersession, so their active and current counts are equal. Including suppressed but excluding superseded memories uses total relation/object counts as an approximation, with possible fanout distortion in either direction; graph filtering still enforces eligibility.
 
-An existing statistics database without `episode_state_index` keeps that index absent and reports missing episode statistics, including after subsequent writes. A fresh statistics store is required to use episode-frequency counting; no migration or graph-to-statistics rebuild is provided.
+An existing statistics database without `episode_presence_index` reports missing episode statistics, including after subsequent writes. Fresh schema creation is one transaction, including the episode tables. A fresh statistics store is required to use episode-frequency counting; no migration or graph-to-statistics rebuild is provided.
 
 Statistics cannot establish object existence, provenance, links or retrieval eligibility. An unhealthy stats store causes conservative selectivity fallback and requires caller-managed recovery.
 

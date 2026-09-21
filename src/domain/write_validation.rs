@@ -72,6 +72,8 @@ pub enum CandidateValidationIssue {
     },
     #[error("episode summary must not be empty")]
     EmptyEpisodeSummary,
+    #[error("episode scene must be present")]
+    MissingScene,
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
     #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]
@@ -127,7 +129,6 @@ pub enum CandidateValidationIssue {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateTimestampField {
-    SceneTime,
     CreatedAt,
     UpdatedAt,
     LastTouchedAt,
