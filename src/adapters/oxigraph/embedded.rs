@@ -106,6 +106,19 @@ impl OxigraphGraphAuthorityStore {
 
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
+    async fn query_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: chrono::DateTime<chrono::Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+        SparqlGraphSelectors::new(&self.store).select_last_interaction(
+            participant,
+            reference_time,
+            policy,
+        )
+    }
+
     async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
         SparqlGraphSelectors::new(&self.store)
             .select_notions_known_as(name)

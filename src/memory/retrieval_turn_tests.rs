@@ -201,6 +201,7 @@ async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics(
     let mut memory = cohort_memory().await;
     for topic in ["orchids", "unlived"] {
         let mut query = context();
+        query.scene.time += chrono::Duration::days(48);
         query.topic = Some(topic.to_owned());
         query.scene.participants[0].key = Some(MemoryId::from_u128(7));
         query.graph_limits.max_depth = 1;
@@ -241,6 +242,7 @@ async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics(
         )
         .unwrap();
     let mut query = context();
+    query.scene.time += chrono::Duration::days(48);
     query.scene.participants[0].key = Some(MemoryId::from_u128(7));
     query.graph_limits.max_depth = 1;
     query.section_limits.relevant_episodes = 1;

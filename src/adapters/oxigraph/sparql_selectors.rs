@@ -2,6 +2,7 @@
 // return backend-neutral IDs/refs; canonical object hydration reads RDF state.
 use std::collections::HashSet;
 
+use chrono::{DateTime, Utc};
 use oxigraph::model::Term;
 use oxigraph::sparql::{QueryResults, QuerySolution, SparqlEvaluator};
 use oxigraph::store::Store;
@@ -12,7 +13,9 @@ use crate::domain::{
     graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType, RetentionState,
 };
 use crate::errors::CustomError;
-use crate::policy::graph_expansion::{ParticipantOccasion, ParticipantOccasions};
+use crate::policy::graph_expansion::{
+    is_participant_pair, ParticipantOccasion, ParticipantOccasions,
+};
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansionFilteredNode,
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectQuery,
@@ -401,6 +404,38 @@ impl<'a> SparqlGraphSelectors<'a> {
             )
         });
         Ok(refs)
+    }
+
+    pub(crate) fn select_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: DateTime<Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, DateTime<Utc>)>, CustomError> {
+        let root = MemoryObjectRef::new(ObjectType::Entity, participant);
+        let neighbors = self
+            .select_links_touching(&[root])?
+            .into_iter()
+            .filter_map(|link| {
+                let neighbor = if link.from == root {
+                    link.to
+                } else {
+                    link.from
+                };
+                is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+            })
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let occasions = self.select_participant_occasions(&neighbors)?;
+        Ok(occasions
+            .iter()
+            .filter(|(neighbor, occasion)| {
+                occasion.time <= reference_time
+                    && occasion.filtered_reason(**neighbor, policy).is_none()
+            })
+            .min_by_key(|(_, occasion)| (std::cmp::Reverse(occasion.time), occasion.episode_id))
+            .map(|(_, occasion)| (occasion.episode_id, occasion.time)))
     }
 
     pub(crate) fn select_participant_occasions(

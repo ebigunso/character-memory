@@ -712,7 +712,8 @@ struct RankKey {
 
 // Only a kind's own queue head credits its turn, even if already selected.
 // Direct selector/search order precedes inherited-only members in stage order.
-// Floors reserve the first turns; every present kind shares the spare turns.
+// Floors reserve the first turns; multiple kinds share the spare turns.
+// A single kind fills the rest from the final-ranked prefix.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
     candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>)>,
@@ -725,7 +726,7 @@ fn select_with_cue_floors<'a>(
         .iter()
         .flat_map(|(_, kinds)| kinds.iter().copied())
         .collect::<BTreeSet<_>>();
-    if candidates.len() <= limit || kinds.len() <= 1 {
+    if candidates.len() <= limit || kinds.is_empty() {
         return (0..candidates.len().min(limit))
             .map(|index| (index, None))
             .collect();
@@ -756,6 +757,9 @@ fn select_with_cue_floors<'a>(
     });
     let mut selected = BTreeMap::new();
     'selection: for reserve_floors in [true, false] {
+        if !reserve_floors && kinds.len() == 1 {
+            break;
+        }
         for round in 0..limit {
             for (kind, floor, queue) in &mut queues {
                 if selected.len() == limit {
@@ -1258,6 +1262,7 @@ fn graph_query_for_candidate(
     });
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
+    query.participant_reference_time = query.current_subject_state.then_some(context.scene.time);
     query
 }
 
@@ -1515,6 +1520,27 @@ mod tests {
         high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
+
+    #[test]
+    fn single_kind_reserves_own_head_then_fills_final_ranked_room() {
+        let objects =
+            [1, 2, 3].map(|id| MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(id)));
+        let kinds = BTreeSet::from([CueKind::Participant]);
+        let orders = BTreeMap::from([(
+            CueKind::Participant,
+            vec![objects[2], objects[1], objects[0]],
+        )]);
+        let selected = select_with_cue_floors(
+            objects.into_iter().map(|object| (object, &kinds)),
+            &orders,
+            2,
+            RetrievalCueFloors {
+                participant: 1,
+                ..Default::default()
+            },
+        );
+        assert_eq!(selected, vec![(0, None), (2, Some(CueKind::Participant))]);
+    }
 
     #[tokio::test]
     async fn section_rows_with_distinct_final_scores_are_descending() {
@@ -2987,6 +3013,16 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
+        async fn query_last_interaction(
+            &self,
+            participant: MemoryId,
+            reference_time: chrono::DateTime<chrono::Utc>,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+            let _ = (participant, reference_time, policy);
+            unreachable!("this fixture never queries participant interactions")
+        }
+
         async fn query_notions_known_as(
             &self,
             _name: &str,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::types::{
-    MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult, SourceScene,
-    SourceSceneUnavailableReason, VectorRecallCompleteness,
+    LastInteraction, MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult,
+    SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
 };
 use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
@@ -55,6 +55,7 @@ where
                 references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantKey { index },
                     resolution,
+                    last_interactions: BTreeMap::new(),
                 });
             }
             if let Some(name) = nonblank(participant.name.as_deref()) {
@@ -79,6 +80,7 @@ where
                 references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantName { index },
                     resolution,
+                    last_interactions: BTreeMap::new(),
                 });
             }
             if let Some(description) = nonblank(participant.description.as_deref()) {
@@ -93,6 +95,39 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
+        let mut last_interactions = HashMap::new();
+        for &participant in &participants {
+            let last = self
+                .graph_store
+                .query_last_interaction(
+                    participant,
+                    context.scene.time,
+                    GraphExpansionLifecyclePolicy {
+                        include_suppressed: context.lifecycle_policy.include_suppressed,
+                        include_superseded: context.lifecycle_policy.include_superseded,
+                    },
+                )
+                .await?;
+            last_interactions.insert(
+                participant,
+                last.map(|(episode_id, scene_time)| LastInteraction {
+                    episode_id,
+                    scene_time,
+                    seconds_since: (context.scene.time - scene_time).num_seconds(),
+                }),
+            );
+        }
+        for reference in &mut references {
+            let ids = match &reference.resolution {
+                SceneReferenceResolution::Resolved { notion_id } => std::slice::from_ref(notion_id),
+                SceneReferenceResolution::Ambiguous { notion_ids } => notion_ids.as_slice(),
+                _ => &[],
+            };
+            reference.last_interactions = ids
+                .iter()
+                .map(|id| (*id, last_interactions[id].clone()))
+                .collect();
+        }
         let mut searches = HashMap::new();
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
@@ -137,6 +172,7 @@ where
                 references.push(SceneReferenceResult {
                     reference,
                     resolution: SceneReferenceResolution::ContentCue,
+                    last_interactions: BTreeMap::new(),
                 });
             }
         }

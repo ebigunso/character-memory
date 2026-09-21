@@ -565,6 +565,16 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn query_last_interaction(
+            &self,
+            participant: MemoryId,
+            reference_time: chrono::DateTime<chrono::Utc>,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+            let _ = (participant, reference_time, policy);
+            unreachable!("this fixture never queries participant interactions")
+        }
+
         async fn query_notions_known_as(
             &self,
             _name: &str,

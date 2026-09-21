@@ -1,5 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
@@ -266,6 +267,17 @@ pub enum SceneReference {
 pub struct SceneReferenceResult {
     pub reference: SceneReference,
     pub resolution: SceneReferenceResolution,
+    /// One entry per resolved notion, independent of retrieval caps. `None` means
+    /// never met at or before the scene time; content cues and unknowns are empty.
+    pub last_interactions: BTreeMap<MemoryId, Option<LastInteraction>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LastInteraction {
+    pub episode_id: MemoryId,
+    pub scene_time: DateTime<Utc>,
+    /// Whole seconds from the recorded experience to the retrieval scene time.
+    pub seconds_since: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -79,6 +79,26 @@ pub(crate) struct ParticipantOccasion {
     pub(crate) episode_retention_state: RetentionState,
 }
 
+impl ParticipantOccasion {
+    pub(crate) fn filtered_reason(
+        &self,
+        neighbor: MemoryObjectRef,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Option<(MemoryObjectRef, GraphExpansionFilteredReason)> {
+        [
+            (neighbor, self.retention_state),
+            (
+                MemoryObjectRef::new(ObjectType::Episode, self.episode_id),
+                self.episode_retention_state,
+            ),
+        ]
+        .into_iter()
+        .find_map(|(object, state)| {
+            retention_filter_reason(state, policy).map(|reason| (object, reason))
+        })
+    }
+}
+
 pub(crate) fn bounded_expansion(
     query: &GraphExpansionQuery,
     objects: impl IntoIterator<Item = MemoryObject>,
@@ -1129,20 +1149,20 @@ fn limit_participant_occasions<T: Copy>(
             .get(&neighbor)
             .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
-        if let Some((object_ref, reason)) = occasions.get(&neighbor).and_then(|occasion| {
-            [
-                (neighbor, occasion.retention_state),
-                (
-                    MemoryObjectRef::new(ObjectType::Episode, episode),
-                    occasion.episode_retention_state,
-                ),
-            ]
-            .into_iter()
-            .find_map(|(object_ref, state)| {
-                retention_filter_reason(state, query.lifecycle_policy)
-                    .map(|reason| (object_ref, reason))
+        if query
+            .participant_reference_time
+            .is_some_and(|reference_time| {
+                occasions
+                    .get(&neighbor)
+                    .is_some_and(|occasion| occasion.time > reference_time)
             })
-        }) {
+        {
+            return false;
+        }
+        if let Some((object_ref, reason)) = occasions
+            .get(&neighbor)
+            .and_then(|occasion| occasion.filtered_reason(neighbor, query.lifecycle_policy))
+        {
             let count = excluded_counts
                 .entry((relation, neighbor.object_type))
                 .or_default();
