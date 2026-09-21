@@ -16,6 +16,8 @@ pub(super) struct RecallCues {
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
     pub floor_admissions: Vec<CueFloorAdmission>,
+    pub topic_scores: HashMap<MemoryObjectRef, f32>,
+    pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
 }
 
 impl<G, V, E> RetrievePipeline<'_, G, V, E>
@@ -92,18 +94,15 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
+        let policy = GraphExpansionLifecyclePolicy {
+            include_suppressed: context.lifecycle_policy.include_suppressed,
+            include_superseded: context.lifecycle_policy.include_superseded,
+        };
         let mut last_interactions = HashMap::new();
         for &participant in &participants {
             let last = self
                 .graph_store
-                .query_last_interaction(
-                    participant,
-                    context.scene.time,
-                    GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    },
-                )
+                .query_last_interaction(participant, context.scene.time, policy)
                 .await?;
             last_interactions.insert(
                 participant,
@@ -130,6 +129,8 @@ where
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
+        let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
+        let mut scene_cue_omitted_counts = BTreeMap::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| {
@@ -174,8 +175,50 @@ where
                 query.surfaces = surfaces;
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
-                all_candidates.extend(recall.candidates.iter().cloned());
-                searches.insert(key.clone(), recall.candidates);
+                let candidates = if kind == CueKind::Topic {
+                    recall.candidates.iter().cloned().collect::<Vec<_>>()
+                } else {
+                    let pool = &recall.scene_pool;
+                    let objects = pool
+                        .iter()
+                        .map(|candidate| {
+                            MemoryObjectRef::new(candidate.object_type, candidate.object_id)
+                        })
+                        .collect::<Vec<_>>();
+                    let occasions = self.graph_store.query_episode_occasions(&objects).await?;
+                    let mut eligible = pool
+                        .iter()
+                        .filter(|candidate| {
+                            let object =
+                                MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                            occasions.get(&object).is_some_and(|occasion| {
+                                occasion.time <= context.scene.time
+                                    && occasion.filtered_reason(object, policy).is_none()
+                            })
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    eligible.sort_by_key(|candidate| {
+                        let object =
+                            MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                        (
+                            std::cmp::Reverse(occasions[&object].time),
+                            candidate.object_id,
+                        )
+                    });
+                    let count = eligible.len();
+                    let limit = if kind == CueKind::Place {
+                        context.cue_floors.place
+                    } else {
+                        context.cue_floors.participant
+                    }
+                    .max(1);
+                    eligible.truncate(limit);
+                    scene_cue_omitted_counts.insert(kind, count - eligible.len());
+                    eligible
+                };
+                all_candidates.extend(candidates.iter().cloned());
+                searches.insert(key.clone(), candidates);
             }
             let search = &searches[&key];
             candidates_by_kind
@@ -185,6 +228,12 @@ where
             for candidate in search.iter() {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
                 kinds.entry(object).or_default().insert(kind);
+                if kind == CueKind::Topic {
+                    topic_scores
+                        .entry(object)
+                        .and_modify(|score| *score = score.max(candidate.score))
+                        .or_insert(candidate.score);
+                }
             }
         }
         references.extend(
@@ -211,9 +260,8 @@ where
         let orders = candidates_by_kind
             .into_iter()
             .map(|(kind, candidates)| {
-                let ordered = CanonicalCandidates::new(candidates);
                 let mut seen = HashSet::new();
-                let order = ordered
+                let order = candidates
                     .iter()
                     .map(|candidate| {
                         MemoryObjectRef::new(candidate.object_type, candidate.object_id)
@@ -226,11 +274,16 @@ where
         let selection = select_with_cue_floors(
             candidates.iter().map(|candidate| {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
-                (object, &kinds[&object])
+                (
+                    object,
+                    &kinds[&object],
+                    !kinds[&object].contains(&CueKind::Topic),
+                )
             }),
             &orders,
             context.candidate_limits.max_vector_candidates,
             context.cue_floors,
+            CueFloorStage::CandidateMerge,
         );
         let mut floor_admissions = Vec::new();
         let selected = selection
@@ -248,6 +301,7 @@ where
             })
             .collect::<Vec<_>>();
         Ok(RecallCues {
+            topic_scores,
             candidates: CanonicalCandidates::new(selected),
             kinds,
             orders,
@@ -256,6 +310,7 @@ where
             dimension,
             completeness,
             floor_admissions,
+            scene_cue_omitted_counts,
         })
     }
 

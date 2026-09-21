@@ -76,21 +76,16 @@ pub(crate) async fn derive_scope_keys(
         let MemoryObject::DerivedMemory(memory) = object else {
             continue;
         };
-        let episode_ids = memory
-            .derived_from_episode_ids
-            .iter()
-            .copied()
-            .map(Some)
-            .chain(memory.derived_from_observation_ids.iter().map(|id| {
+        let episode_ids = memory.derived_from_episode_ids.iter().copied().chain(
+            memory.derived_from_observation_ids.iter().filter_map(|id| {
                 match sources.get(&MemoryObjectRef::new(ObjectType::Observation, *id)) {
                     Some(MemoryObject::Observation(observation)) => Some(observation.episode_id),
                     _ => None,
                 }
-            }));
+            }),
+        );
         memory.scope_keys = episode_ids
-            .filter_map(|id| {
-                id.and_then(|id| sources.get(&MemoryObjectRef::new(ObjectType::Episode, id)))
-            })
+            .filter_map(|id| sources.get(&MemoryObjectRef::new(ObjectType::Episode, id)))
             .filter_map(|object| match object {
                 MemoryObject::Episode(episode) => Some(&episode.scene),
                 _ => None,

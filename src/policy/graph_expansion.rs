@@ -345,7 +345,7 @@ pub(crate) fn bounded_expansion_node_set(
             continue;
         }
 
-        if depth >= query.max_depth {
+        if depth >= query.max_depth || !query.may_continue_from(object_type) {
             continue;
         }
 
@@ -523,7 +523,7 @@ fn bounded_expansion_plan<'a>(
         visited.insert(object_ref);
         selection_order.push(object_ref);
 
-        if depth >= query.max_depth {
+        if depth >= query.max_depth || !query.may_continue_from(object_ref.object_type) {
             continue;
         }
 
@@ -1206,13 +1206,10 @@ fn limit_participant_occasions<T: Copy>(
             .get(&neighbor)
             .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
-        if query
-            .participant_reference_time
-            .is_some_and(|reference_time| {
-                occasions
-                    .get(&neighbor)
-                    .is_some_and(|occasion| occasion.time > reference_time)
-            })
+        if query.current_subject_state
+            && occasions
+                .get(&neighbor)
+                .is_some_and(|occasion| occasion.time > query.participant_reference_time)
         {
             return false;
         }

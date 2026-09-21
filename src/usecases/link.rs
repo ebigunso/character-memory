@@ -565,6 +565,14 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn query_episode_occasions(
+            &self,
+            episodes: &[crate::domain::MemoryObjectRef],
+        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+            let _ = episodes;
+            unreachable!("this fixture never queries episode occasions")
+        }
+
         async fn query_last_interaction(
             &self,
             participant: MemoryId,

@@ -276,21 +276,17 @@ async fn recall_names_resolvers_without_trace_even_after_resolvers_are_suppresse
         for route in ["topic_loop", "topic_commitment", "mixed", "explicit_loop"] {
             let result = memory.retrieve(request(route)).await.unwrap();
             assert!(result.trace.is_none());
-            let item = if route == "topic_commitment" {
-                result
-                    .pack
-                    .commitments
-                    .iter()
-                    .find(|item| item.memory.id == id(302))
-                    .unwrap()
+            let target = if route == "topic_commitment" {
+                302
             } else {
-                result
-                    .pack
-                    .open_loops
-                    .iter()
-                    .find(|item| item.memory.id == id(301))
-                    .unwrap()
+                301
             };
+            let item = result
+                .pack
+                .derived_memories
+                .iter()
+                .find(|item| item.memory.id == id(target))
+                .unwrap();
             let expected = if route == "topic_commitment" {
                 vec![id(402)]
             } else {
@@ -325,9 +321,9 @@ async fn recall_names_resolvers_without_trace_even_after_resolvers_are_suppresse
         .push(RelationType::AssociatedWith);
     let result = memory.retrieve(request).await.unwrap();
     assert!(result.trace.is_none());
-    assert_eq!(result.pack.open_loops[0].memory.id, id(301));
+    assert_eq!(result.pack.derived_memories[0].memory.id, id(301));
     assert_eq!(
-        result.pack.open_loops[0].resolved_by,
+        result.pack.derived_memories[0].resolved_by,
         vec![id(401), id(402)]
     );
     memory.close().await.unwrap();
@@ -382,7 +378,7 @@ async fn resolution_does_not_override_existing_lifecycle_omission_reasons() {
     request.lifecycle_policy.include_superseded = true;
     let result = memory.retrieve(request).await.unwrap();
     assert_eq!(
-        result.pack.open_loops[0].resolved_by,
+        result.pack.derived_memories[0].resolved_by,
         vec![id(401), id(402)]
     );
     memory.close().await.unwrap();
@@ -437,6 +433,70 @@ async fn settled_results_arrive_as_named_and_thread_current_state() {
 }
 
 #[tokio::test]
+async fn settled_recall_uses_ordinary_memory_slots_and_leaves_unsettled_slots_free() {
+    let (memory, root) = fixture(true).await;
+    let mut input = RememberInput::new("remaining matters");
+    for (n, kind) in [(303, DerivedType::OpenLoop), (304, DerivedType::Commitment)] {
+        let mut live = derived(n, kind, "still pending", 101, 10);
+        live.salience_score = 0.1;
+        input = input.with_derived_memory(live);
+    }
+    commit(&memory, input).await;
+    for (resolver, live) in [(401, 303), (402, 304)] {
+        memory
+            .link(MemoryLinkDraft::new(
+                ObjectType::DerivedMemory,
+                id(resolver),
+                RelationType::AssociatedWith,
+                ObjectType::DerivedMemory,
+                id(live),
+            ))
+            .await
+            .unwrap();
+    }
+    for include_trace in [true, false] {
+        let mut context = request("named");
+        context.include_trace = include_trace;
+        context.graph_limits.allowed_relation_types.clear();
+        context.graph_limits.max_depth = 2;
+        let uncapped = memory.retrieve(context.clone()).await.unwrap();
+        context.section_limits.open_loops = 1;
+        context.section_limits.commitments = 1;
+        let capped = memory.retrieve(context).await.unwrap();
+        assert_eq!(capped.pack.open_loops[0].memory.id, id(303));
+        assert_eq!(capped.pack.commitments[0].memory.id, id(304));
+        for result in [&uncapped, &capped] {
+            for (target, kind, resolvers) in [
+                (301, DerivedType::OpenLoop, vec![id(401), id(402)]),
+                (302, DerivedType::Commitment, vec![id(402)]),
+            ] {
+                let item = result
+                    .pack
+                    .derived_memories
+                    .iter()
+                    .find(|item| item.memory.id == id(target))
+                    .unwrap();
+                assert_eq!(item.memory.derived_type, kind);
+                assert_eq!(item.resolved_by, resolvers);
+                if let Some(trace) = &result.trace {
+                    let assignment = trace
+                        .section_assignments
+                        .iter()
+                        .find(|entry| entry.object.id == id(target))
+                        .unwrap();
+                    assert_eq!(
+                        assignment.section,
+                        character_memory::ContextPackSection::DerivedMemories
+                    );
+                }
+            }
+        }
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
 async fn recalled_resolution_has_no_omission_but_section_capped_resolution_does() {
     let (memory, root) = fixture(true).await;
     for include_trace in [true, false] {
@@ -445,13 +505,15 @@ async fn recalled_resolution_has_no_omission_but_section_capped_resolution_does(
         context.graph_limits.allowed_relation_types.clear();
         context.graph_limits.max_depth = 2;
         let result = memory.retrieve(context.clone()).await.unwrap();
-        assert_eq!(result.pack.open_loops[0].memory.id, id(301));
-        assert_eq!(
-            result.pack.open_loops[0].resolved_by,
-            vec![id(401), id(402)]
-        );
-        assert_eq!(result.pack.commitments[0].memory.id, id(302));
-        assert_eq!(result.pack.commitments[0].resolved_by, vec![id(402)]);
+        for (target, resolvers) in [(301, vec![id(401), id(402)]), (302, vec![id(402)])] {
+            let item = result
+                .pack
+                .derived_memories
+                .iter()
+                .find(|item| item.memory.id == id(target))
+                .unwrap();
+            assert_eq!(item.resolved_by, resolvers);
+        }
         if let Some(trace) = result.trace {
             assert!(trace
                 .lifecycle_filter_decisions
@@ -467,17 +529,11 @@ async fn recalled_resolution_has_no_omission_but_section_capped_resolution_does(
 
         // Reaching an object during expansion is not enough: only pack admission clears the omission.
         context.include_trace = true;
-        context.section_limits.open_loops = 0;
+        context.section_limits.derived_memories = 0;
         let result = memory.retrieve(context).await.unwrap();
-        assert!(result.pack.open_loops.is_empty());
+        assert!(result.pack.derived_memories.is_empty());
         omitted(&result, 301, LifecycleFilterReason::ResolvedOmitted);
-        assert!(result
-            .trace
-            .as_ref()
-            .unwrap()
-            .lifecycle_filter_decisions
-            .iter()
-            .all(|entry| entry.object.id != id(302)));
+        omitted(&result, 302, LifecycleFilterReason::ResolvedOmitted);
         assert!(result
             .rationale
             .lifecycle_omission_reasons

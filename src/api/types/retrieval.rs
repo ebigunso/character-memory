@@ -112,8 +112,8 @@ impl Default for RetrievalCandidateLimits {
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///
-/// After reservations, every present kind shares spare turns, including kinds
-/// with a zero floor. All turns remain subject to the existing hard caps.
+/// After reservations, spare room follows score order except at root selection,
+/// where present kinds share turns. A zero floor removes only the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
@@ -520,6 +520,10 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    /// Recallable scene matches left out by each description search's occasion limit.
+    /// Participant words share one search and therefore one count.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
     pub floor_admissions: Vec<CueFloorAdmission>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
@@ -534,6 +538,7 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
+            scene_cue_omitted_counts: BTreeMap::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
@@ -644,8 +649,6 @@ pub enum SelectivityCountScope {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectivityDecision {
-    /// About fanout is not reduced when the scene explicitly names the subject.
-    SkippedSceneNamedRoot,
     HighSelectivity,
     LowSelectivitySupported,
     LowSelectivityRejected,

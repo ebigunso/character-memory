@@ -9,6 +9,8 @@ use crate::models::vector::{CanonicalCandidates, VectorCandidateSearch, VectorRe
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct VectorCandidateRecall {
     pub(crate) candidates: CanonicalCandidates,
+    /// Full fetched pool; completeness reports whether its boundary closed.
+    pub(crate) scene_pool: CanonicalCandidates,
     pub(crate) completeness: VectorRecallCompleteness,
 }
 
@@ -33,6 +35,8 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
     /// cutoff cohort closed; `scanned` is the number of scoped records actually scored
     /// by that path. An index-produced result prefix reports whether its boundary tie
     /// closed or remained open at the fetch bound.
+    /// The full fetched pool is also returned for scene occasion selection;
+    /// this does not widen the returned `candidates` limit.
     async fn search_candidates(
         &self,
         query: &VectorCandidateSearch,

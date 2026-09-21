@@ -277,6 +277,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         if query.limit == 0 || query.object_types.is_empty() || query.surfaces.is_empty() {
             return Ok(VectorCandidateRecall {
                 candidates: crate::models::vector::CanonicalCandidates::new([]),
+                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
                 completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
             });
         }
@@ -312,6 +313,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         let completeness = closed.completeness(scanned);
         Ok(VectorCandidateRecall {
             candidates: closed.candidates,
+            scene_pool: closed.pool,
             completeness,
         })
     }

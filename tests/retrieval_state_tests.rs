@@ -2,7 +2,7 @@ use character_memory::{
     CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft,
     ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryId, ObjectType,
     RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
-    SelectivityDecision, DEFAULT_SCHEMA_VERSION,
+    DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
 
@@ -184,25 +184,21 @@ async fn named_people_share_section_room_in_scope_rounds() {
                     .iter()
                     .map(|id| id.as_u128())
                     .collect::<Vec<_>>(),
-                [9500, 1184, 9000, 9001, 9002, 9003, 9004, 1083, 1000, 1001, 1002, 1003]
+                [9500, 1184, 9000, 9001, 9002, 9003, 9004, 1185, 9100, 1186, 1187, 1188]
             );
         } else {
             assert_eq!(&states[6..8], &[1185, 9100]);
         }
         assert_eq!(result.pack.derived_memories.len(), 12);
+        let telemetry = &result.rationale.telemetry.selectivity;
+        assert_eq!(
+            telemetry.decision_count,
+            telemetry.high_selectivity_count
+                + telemetry.low_selectivity_supported_count
+                + telemetry.low_selectivity_rejected_count
+                + telemetry.fallback_count
+        );
         let trace = result.trace.unwrap();
-        let named_roots = trace
-            .selectivity_decisions
-            .iter()
-            .filter(|row| row.decision == SelectivityDecision::SkippedSceneNamedRoot)
-            .collect::<Vec<_>>();
-        assert_eq!(named_roots.len(), 6);
-        assert!(named_roots
-            .iter()
-            .all(|row| row.relation == RelationType::About
-                && row.chosen_fanout == 16
-                && row.score.is_none()
-                && !row.fallback));
         let scope_states = if topic.is_some() {
             &states[..6]
         } else {
@@ -340,9 +336,9 @@ async fn named_person_topic_match_keeps_first_place_in_their_scope() {
             .iter()
             .map(|id| id.as_u128())
             .collect::<Vec<_>>(),
-        vec![8001, 8071, 8072, 8073, 8074, 8000]
+        vec![8001, 8071, 8072, 8073, 8074, 8075]
     );
-    assert!(result.trace.unwrap().floor_admissions.iter().any(|row| {
+    assert!(!result.trace.unwrap().floor_admissions.iter().any(|row| {
         row.object.id == MemoryId::from_u128(8000)
             && row.cue_kind == character_memory::CueKind::Topic
             && row.stage
