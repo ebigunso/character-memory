@@ -819,6 +819,12 @@ fn build_pack(
     let mut pack = ContinuityContextPack::empty();
     let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
+    let scopes_by_kind = [CueKind::Participant, CueKind::Place, CueKind::Activity].map(|kind| {
+        (
+            kind,
+            state::scopes_for_kind(state_scopes, scope_kinds, kind),
+        )
+    });
     for section in prompt_ready_sections() {
         state::order_section_state(&mut ranked_objects, section, state_scopes);
         let candidates = ranked_objects
@@ -827,8 +833,7 @@ fn build_pack(
             .collect::<Vec<_>>();
         let mut orders = orders.clone();
         // A named route takes its state scope rounds before other expansion results.
-        for kind in [CueKind::Participant, CueKind::Place, CueKind::Activity] {
-            let scopes = state::scopes_for_kind(state_scopes, scope_kinds, kind);
+        for (kind, scopes) in &scopes_by_kind {
             let mut state_order = candidates
                 .iter()
                 .copied()
@@ -837,11 +842,11 @@ fn build_pack(
             state_order.sort_by_key(|ranked| ranked.rank_key());
             state::order_state(
                 &mut state_order,
-                &scopes,
+                scopes,
                 |ranked| Some(ranked.object.object_ref()),
                 |_, _| 0,
             );
-            orders.entry(kind).or_default().splice(
+            orders.entry(*kind).or_default().splice(
                 ..0,
                 state_order.iter().map(|ranked| ranked.object.object_ref()),
             );
