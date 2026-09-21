@@ -148,8 +148,7 @@ fn mixed_context() -> RetrievalContext {
     context
 }
 
-#[tokio::test]
-async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
         Box::new(TemporaryVectorCandidateStore::open(4).await),
@@ -178,6 +177,12 @@ async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
         .remember(input, RememberOptions::default())
         .await
         .unwrap();
+    (memory, strong_id)
+}
+
+#[tokio::test]
+async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
     let mut outcomes = Vec::new();
     let mut included = Vec::new();
     for place_cue in [false, true] {
@@ -222,6 +227,96 @@ async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
     }
     assert_eq!(outcomes, [GraphExpansionOutcome::Expanded; 2]);
     assert_eq!(included, [true; 2]);
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 12;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 48;
+    let mut topic_only = context.clone();
+    topic_only.scene.setting.words = None;
+    let topic_only = memory.retrieve(topic_only).await.unwrap();
+    let candidates = topic_only.trace.unwrap().vector_candidates;
+    assert_eq!(candidates[0].object.id, strong_id);
+    assert!((candidates[0].score - 0.89).abs() < 0.0001);
+    assert!(candidates[1..]
+        .iter()
+        .all(|candidate| (candidate.score - 0.2).abs() < 0.0001));
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert_eq!(trace.vector_candidates.len(), 12);
+    assert!(
+        trace
+            .vector_candidates
+            .iter()
+            .any(|row| row.object.id == strong_id),
+        "the strongest Topic hit was lost at candidate merge"
+    );
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::CandidateMerge,
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    assert!(result
+        .pack
+        .derived_memories
+        .iter()
+        .any(|row| row.memory.id == strong_id));
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 48;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 2;
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert!(trace
+        .vector_candidates
+        .iter()
+        .any(|row| row.object.id == strong_id));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    let assignment = trace
+        .section_assignments
+        .iter()
+        .find(|row| row.object.id == strong_id)
+        .unwrap();
+    assert_eq!(result.pack.derived_memories.len(), 2);
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::Section {
+            section: ContextPackSection::DerivedMemories,
+        },
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(
+        result
+            .pack
+            .derived_memories
+            .iter()
+            .any(|row| row.memory.id == strong_id),
+        "the strongest Topic hit was lost only at the section cap: {assignment:?}"
+    );
     memory.close().await.unwrap();
 }
 

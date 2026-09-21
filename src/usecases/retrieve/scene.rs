@@ -10,7 +10,7 @@ use crate::ports::graph_authority::GraphObjectQuery;
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
     pub kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
-    pub topic_order: Vec<MemoryObjectRef>,
+    pub orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
@@ -96,7 +96,7 @@ where
         let mut searches = HashMap::new();
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
-        let mut topic_order = Vec::new();
+        let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| (None, text));
@@ -116,28 +116,22 @@ where
                 );
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
-                searches.insert(
-                    text,
-                    recall
-                        .candidates
-                        .iter()
-                        .map(|candidate| {
-                            MemoryObjectRef::new(candidate.object_type, candidate.object_id)
-                        })
-                        .collect::<Vec<_>>(),
-                );
                 all_candidates.extend(recall.candidates.iter().cloned());
+                searches.insert(text, recall.candidates);
             }
             let kind = match &reference {
                 None => CueKind::Topic,
                 Some(SceneReference::SettingWords) => CueKind::Place,
                 Some(_) => CueKind::Participant,
             };
-            if kind == CueKind::Topic {
-                topic_order = searches[text].clone();
-            }
-            for object in &searches[text] {
-                kinds.entry(*object).or_default().insert(kind);
+            let search = &searches[text];
+            candidates_by_kind
+                .entry(kind)
+                .or_default()
+                .extend(search.iter().cloned());
+            for candidate in search.iter() {
+                let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                kinds.entry(object).or_default().insert(kind);
             }
             if let Some(reference) = reference {
                 references.push(SceneReferenceResult {
@@ -158,12 +152,30 @@ where
             })
             .cloned()
             .collect::<Vec<_>>();
+        let orders = candidates_by_kind
+            .into_iter()
+            .map(|(kind, candidates)| {
+                let ordered = CanonicalCandidates::new(candidates);
+                let mut seen = HashSet::new();
+                let order = ordered
+                    .iter()
+                    .map(|candidate| {
+                        MemoryObjectRef::new(candidate.object_type, candidate.object_id)
+                    })
+                    .filter(|object| seen.insert(*object))
+                    .collect();
+                (kind, order)
+            })
+            .collect();
         let selection = select_with_cue_floors(
             candidates.iter().map(|candidate| {
-                &kinds[&MemoryObjectRef::new(candidate.object_type, candidate.object_id)]
+                let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                (object, &kinds[&object])
             }),
+            &orders,
             context.candidate_limits.max_vector_candidates,
             context.cue_floors,
+            false,
         );
         let mut floor_admissions = Vec::new();
         let selected = selection
@@ -183,7 +195,7 @@ where
         Ok(RecallCues {
             candidates: CanonicalCandidates::new(selected),
             kinds,
-            topic_order,
+            orders,
             participants,
             references,
             dimension,
