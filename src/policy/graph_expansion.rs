@@ -1206,13 +1206,10 @@ fn limit_participant_occasions<T: Copy>(
             .get(&neighbor)
             .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
-        if query
-            .participant_reference_time
-            .is_some_and(|reference_time| {
-                occasions
-                    .get(&neighbor)
-                    .is_some_and(|occasion| occasion.time > reference_time)
-            })
+        if query.current_subject_state
+            && occasions
+                .get(&neighbor)
+                .is_some_and(|occasion| occasion.time > query.participant_reference_time)
         {
             return false;
         }

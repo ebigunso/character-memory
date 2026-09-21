@@ -2,7 +2,7 @@ use character_memory::{
     CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft,
     ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryId, ObjectType,
     RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
-    SelectivityDecision, DEFAULT_SCHEMA_VERSION,
+    DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
 
@@ -190,19 +190,15 @@ async fn named_people_share_section_room_in_scope_rounds() {
             assert_eq!(&states[6..8], &[1185, 9100]);
         }
         assert_eq!(result.pack.derived_memories.len(), 12);
+        let telemetry = &result.rationale.telemetry.selectivity;
+        assert_eq!(
+            telemetry.decision_count,
+            telemetry.high_selectivity_count
+                + telemetry.low_selectivity_supported_count
+                + telemetry.low_selectivity_rejected_count
+                + telemetry.fallback_count
+        );
         let trace = result.trace.unwrap();
-        let named_roots = trace
-            .selectivity_decisions
-            .iter()
-            .filter(|row| row.decision == SelectivityDecision::SkippedSceneNamedRoot)
-            .collect::<Vec<_>>();
-        assert_eq!(named_roots.len(), 6);
-        assert!(named_roots
-            .iter()
-            .all(|row| row.relation == RelationType::About
-                && row.chosen_fanout == 16
-                && row.score.is_none()
-                && !row.fallback));
         let scope_states = if topic.is_some() {
             &states[..6]
         } else {

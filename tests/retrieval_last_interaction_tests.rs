@@ -315,9 +315,18 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         let recent = reference_time() - Duration::hours(1);
         linked_experience(&memory, 400, old, mentions, reverse).await;
         linked_experience(&memory, 401, recent, mentions, reverse).await;
+        linked_experience(
+            &memory,
+            499,
+            reference_time() + Duration::days(1),
+            mentions,
+            reverse,
+        )
+        .await;
         let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
         assert_eq!(last(&result), Some(&fact(401, recent)));
         assert!(occasions(&result).contains(&id(401)));
+        assert!(!occasions(&result).contains(&id(499)));
         let mut tight = request(vec![keyed(100)]);
         tight.section_limits.relevant_episodes = 1;
         tight.section_limits.salient_observations = 1;

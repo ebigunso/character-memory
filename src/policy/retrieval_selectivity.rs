@@ -211,29 +211,11 @@ pub(crate) async fn selectivity_plan_for_entity(
     for spec in &stats_context.specs {
         if current_subject_state && spec.relation == RelationType::About {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
-            let decision = SelectivityDecision::SkippedSceneNamedRoot;
-            increment_telemetry(&mut plan.telemetry, decision);
             plan.fanout_overrides.push(GraphExpansionFanoutOverride {
                 relation: spec.relation,
                 object_type: spec.object_type,
                 max_fanout,
             });
-            if trace_mode.is_enabled() {
-                plan.traces.push(SelectivityTrace {
-                    root: MemoryObjectRef::new(ObjectType::Entity, entity_id),
-                    relation: spec.relation,
-                    object_type: spec.object_type,
-                    count_scope,
-                    score: None,
-                    entity_count: None,
-                    global_count: None,
-                    support_factor,
-                    chosen_fanout: max_fanout,
-                    max_fanout,
-                    decision,
-                    fallback: false,
-                });
-            }
             continue;
         }
         let (count_relation, count_object_type) = spec.count_bucket();
@@ -456,7 +438,6 @@ impl SelectivityCountScope {
 fn increment_telemetry(telemetry: &mut SelectivityTelemetry, decision: SelectivityDecision) {
     telemetry.decision_count += 1;
     match decision {
-        SelectivityDecision::SkippedSceneNamedRoot => {}
         SelectivityDecision::HighSelectivity => telemetry.high_selectivity_count += 1,
         SelectivityDecision::LowSelectivitySupported => {
             telemetry.low_selectivity_supported_count += 1
