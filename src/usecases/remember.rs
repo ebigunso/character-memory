@@ -1265,7 +1265,13 @@ mod tests {
         async fn query_derived_memories_by_thread(
             &self,
             query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
+        ) -> Result<
+            (
+                Vec<crate::domain::DerivedMemory>,
+                Vec<GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
             self.store.query_derived_memories_by_thread(query).await
         }
 

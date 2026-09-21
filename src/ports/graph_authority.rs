@@ -35,6 +35,8 @@ pub(crate) struct GraphDerivedMemoryProvenanceQuery {
 pub(crate) struct GraphDerivedMemoryThreadQuery {
     pub(crate) thread_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
+    // Activity state excludes resolved members; lifecycle operations still see them.
+    pub(crate) current_state: bool,
 }
 
 impl GraphDerivedMemoryProvenanceQuery {
@@ -60,6 +62,7 @@ impl GraphDerivedMemoryThreadQuery {
         Self {
             thread_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
+            current_state: false,
         }
     }
 
@@ -150,7 +153,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_object_types: Vec<ObjectType>,
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
-    pub(crate) current_subject_state: bool,
+    pub(crate) current_state: bool,
     pub(crate) trace_mode: TraceMode,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     pub(crate) failure_policy: GraphExpansionFailurePolicy,
@@ -180,7 +183,7 @@ impl GraphExpansionQuery {
             allowed_object_types: Vec::new(),
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
-            current_subject_state: false,
+            current_state: false,
             trace_mode: TraceMode::Disabled,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
@@ -241,6 +244,7 @@ impl GraphExpansionQuery {
 pub(crate) enum GraphExpansionFilteredReason {
     Suppressed,
     Superseded,
+    Resolved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,6 +282,7 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
+    pub(crate) resolved_by: std::collections::HashMap<MemoryId, Vec<MemoryId>>,
     pub(crate) expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
@@ -302,29 +307,10 @@ impl GraphExpansion {
             links,
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
+            resolved_by: std::collections::HashMap::new(),
             expanded_nodes: std::collections::HashSet::new(),
             fanout_utilization: Vec::new(),
             bounded_failure: None,
-        }
-    }
-
-    pub(crate) fn from_plan(
-        objects: Vec<MemoryObject>,
-        links: Vec<MemoryLink>,
-        relations: Vec<GraphExpansionRelation>,
-        filtered_nodes: Vec<GraphExpansionFilteredNode>,
-        expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
-        fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
-        bounded_failure: Option<GraphExpansionBoundedFailure>,
-    ) -> Self {
-        Self {
-            objects,
-            links,
-            relations,
-            filtered_nodes,
-            expanded_nodes,
-            fanout_utilization,
-            bounded_failure,
         }
     }
 }
@@ -373,7 +359,7 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
     async fn query_derived_memories_by_thread(
         &self,
         query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError>;
+    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError>;
 
     async fn query_scope_state(
         &self,
@@ -442,7 +428,7 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
     async fn query_derived_memories_by_thread(
         &self,
         query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
+    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         (**self).query_derived_memories_by_thread(query).await
     }
 

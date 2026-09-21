@@ -165,7 +165,12 @@ where
                 }
             }
         }
-        let (activity, activity_roots) = self.activity_roots(&context).await?;
+        let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
+        assembly
+            .lifecycle_decisions
+            .extend(filtered.into_iter().map(|entry| {
+                filtered_lifecycle_decision(entry.object_ref, entry.reason, &entry.superseded_by)
+            }));
         for (rank, root) in activity_roots.iter().enumerate() {
             if root.object_type == ObjectType::DerivedMemory {
                 root_order.insert(
@@ -479,7 +484,8 @@ impl RetrieveAssembly {
             let candidate_score = candidate
                 .vector_score
                 .filter(|_| object_ref == candidate_ref);
-            self.objects
+            let ranked = self
+                .objects
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
@@ -503,6 +509,11 @@ impl RetrieveAssembly {
                         candidate_score,
                     )
                 });
+            if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
+                ranked.resolved_by.extend(resolvers);
+                ranked.resolved_by.sort_unstable();
+                ranked.resolved_by.dedup();
+            }
         }
 
         let mut root_filtered = false;
@@ -602,6 +613,7 @@ struct RankedObject {
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     salience_component: f32,
+    resolved_by: Vec<MemoryId>,
 }
 
 impl RankedObject {
@@ -620,6 +632,7 @@ impl RankedObject {
             vector_candidate_score,
             graph_component,
             salience_component,
+            resolved_by: Vec::new(),
         }
     }
 
@@ -835,7 +848,9 @@ fn build_pack(
             MemoryObject::Episode(object) => pack.relevant_episodes.push(object),
             MemoryObject::Observation(object) => pack.salient_observations.push(object),
             MemoryObject::MemoryThread(object) => pack.active_threads.push(object),
-            MemoryObject::DerivedMemory(object) => push_derived(&mut pack, object),
+            MemoryObject::DerivedMemory(object) => {
+                push_derived(&mut pack, object, ranked.resolved_by)
+            }
             MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {}
         }
     }
@@ -947,9 +962,14 @@ fn summarize_lifecycle_omissions(
     summaries
 }
 
-fn push_derived(pack: &mut ContinuityContextPack, object: DerivedMemory) {
+fn push_derived(
+    pack: &mut ContinuityContextPack,
+    object: DerivedMemory,
+    resolved_by: Vec<MemoryId>,
+) {
     let section = object.derived_type;
-    let included = IncludedDerivedMemory::from(object);
+    let mut included = IncludedDerivedMemory::from(object);
+    included.resolved_by = resolved_by;
     match section {
         DerivedType::UserPreference | DerivedType::AssistantPreference => {
             pack.preferences.push(included)
@@ -1215,8 +1235,11 @@ fn graph_query_for_candidate(
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,
     });
-    query.current_subject_state = candidate.object_type == ObjectType::Entity
-        && candidate.source == GraphRootSource::Participant;
+    query.current_state = candidate.object_type == ObjectType::Entity
+        && candidate.source == GraphRootSource::Participant
+        || candidate.object_type == ObjectType::MemoryThread
+            && context.activity
+                == Some(crate::api::types::ActivityRef::Thread(candidate.object_id));
     query
 }
 
@@ -1331,13 +1354,16 @@ fn filtered_lifecycle_decision(
         reason: match reason {
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
+            GraphExpansionFilteredReason::Resolved => LifecycleFilterReason::ResolvedOmitted,
         },
     }
 }
 
 fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCandidateReason {
     match reason {
-        GraphExpansionFilteredReason::Suppressed => StaleCandidateReason::LifecycleMismatch,
+        GraphExpansionFilteredReason::Suppressed | GraphExpansionFilteredReason::Resolved => {
+            StaleCandidateReason::LifecycleMismatch
+        }
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
     }
 }
@@ -1426,6 +1452,7 @@ fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
         LifecycleFilterReason::GraphExpansionBounded => 12,
+        LifecycleFilterReason::ResolvedOmitted => 13,
     }
 }
 
@@ -3003,8 +3030,14 @@ mod tests {
         async fn query_derived_memories_by_thread(
             &self,
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
-            Ok(Vec::new())
+        ) -> Result<
+            (
+                Vec<crate::domain::DerivedMemory>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            Ok((Vec::new(), Vec::new()))
         }
 
         async fn query_scope_state(

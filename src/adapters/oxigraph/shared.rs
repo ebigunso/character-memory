@@ -590,16 +590,34 @@ pub(super) fn bounded_graph_visible_refs(
     let mut filtered_nodes = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
-    let (state_ids, state_filtered) = if query.current_subject_state {
-        selectors.select_subject_state(query.root_id, query.lifecycle_policy)?
+    let (state_ids, state_filtered) = if query.current_state {
+        if query.root_type == ObjectType::MemoryThread {
+            selectors.select_thread_state(query.root_id, query.lifecycle_policy)?
+        } else {
+            selectors.select_subject_state(query.root_id, query.lifecycle_policy)?
+        }
     } else {
         (Vec::new(), Vec::new())
     };
-    let state_ranks = state_ids
+    let state_relation = if query.root_type == ObjectType::MemoryThread {
+        RelationType::PartOfThread
+    } else {
+        RelationType::About
+    };
+    let state_ranks: HashMap<_, _> = state_ids
         .into_iter()
         .enumerate()
         .map(|(rank, id)| (id, rank))
         .collect();
+    // Thread expansion keeps its existing edge order and lifecycle filtering.
+    // Only resolved own members are removed by the new state rule.
+    let resolved_state_ids = state_filtered
+        .iter()
+        .filter(|entry| {
+            entry.reason == crate::ports::graph_authority::GraphExpansionFilteredReason::Resolved
+        })
+        .map(|entry| entry.object_ref.id)
+        .collect::<HashSet<_>>();
     let mut participant_occasions = ParticipantOccasions::new();
 
     for depth in 0..query.max_depth {
@@ -629,36 +647,47 @@ pub(super) fn bounded_graph_visible_refs(
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let ordered;
-            let incident_link_refs = if depth == 0 && query.current_subject_state {
+            let incident_link_refs = if depth == 0 && query.current_state {
                 if (query.allowed_relation_types.is_empty()
-                    || query.allowed_relation_types.contains(&RelationType::About))
+                    || query.allowed_relation_types.contains(&state_relation))
                     && (query.allowed_object_types.is_empty()
                         || query
                             .allowed_object_types
                             .contains(&ObjectType::DerivedMemory))
                 {
-                    let about_refs = incident_link_refs
+                    let state_refs = incident_link_refs
                         .iter()
-                        .filter(|link| link.relation == RelationType::About)
+                        .filter(|link| link.relation == state_relation)
                         .map(|link| link.other_endpoint(*object_ref))
                         .collect::<HashSet<_>>();
                     filtered_nodes.extend(
                         state_filtered
                             .iter()
-                            .filter(|entry| about_refs.contains(&entry.object_ref))
+                            .filter(|entry| state_refs.contains(&entry.object_ref)
+                                && (query.root_type == ObjectType::Entity
+                                    || entry.reason == crate::ports::graph_authority::GraphExpansionFilteredReason::Resolved))
                             .cloned(),
                     );
                 }
-                ordered = order_current_subject_links(
-                    incident_link_refs.to_vec(),
-                    &state_ranks,
-                    |link| {
+                ordered = if query.root_type == ObjectType::Entity {
+                    order_current_subject_links(incident_link_refs.to_vec(), &state_ranks, |link| {
                         let neighbor = link.other_endpoint(*object_ref);
-                        (link.relation == RelationType::About
+                        (link.relation == state_relation
                             && neighbor.object_type == ObjectType::DerivedMemory)
                             .then_some(neighbor.id)
-                    },
-                );
+                    })
+                } else {
+                    incident_link_refs
+                        .iter()
+                        .filter(|link| {
+                            let neighbor = link.other_endpoint(*object_ref);
+                            link.relation != state_relation
+                                || neighbor.object_type != ObjectType::DerivedMemory
+                                || !resolved_state_ids.contains(&neighbor.id)
+                        })
+                        .copied()
+                        .collect()
+                };
                 &ordered
             } else {
                 incident_link_refs
@@ -700,8 +729,12 @@ pub(super) fn bounded_graph_visible_refs(
         .select_links_touching(&candidate_refs)?
         .into_iter()
         .filter(|link_ref| {
-            link_ref.relation == RelationType::Supersedes
-                && link_ref.to.object_type == ObjectType::DerivedMemory
+            matches!(
+                link_ref.relation,
+                RelationType::Supersedes
+                    | RelationType::Resolves
+                    | RelationType::FulfillsCommitment
+            ) && link_ref.to.object_type == ObjectType::DerivedMemory
                 && graph_refs.contains(&link_ref.to)
         })
         .map(|link_ref| link_ref.link_id)

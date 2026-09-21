@@ -999,7 +999,7 @@ mod tests {
             .unwrap();
         let mut query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
             .with_max_fanout_per_node(1);
-        query.current_subject_state = true;
+        query.current_state = true;
         let expansion = store.expand_bounded(&query).await.unwrap();
         assert!(expansion
             .objects
@@ -1336,7 +1336,7 @@ mod tests {
             .objects
             .contains(&MemoryObject::MemoryThread(dormant_thread.clone())));
 
-        let default_thread_matches = store
+        let (default_thread_matches, _) = store
             .query_derived_memories_by_thread(&GraphDerivedMemoryThreadQuery::by_threads(vec![
                 fixtures.soft_thread.id,
             ]))

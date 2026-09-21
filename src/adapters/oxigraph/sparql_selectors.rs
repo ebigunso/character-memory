@@ -229,6 +229,15 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_state(&format!("<{}> <{subject}>", vocab::ABOUT_ENTITY), policy)
     }
 
+    pub(crate) fn select_thread_state(
+        &self,
+        thread_id: MemoryId,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        let thread = graph_uri(ObjectType::MemoryThread, thread_id);
+        self.select_state(&format!("<{}> <{thread}>", vocab::PART_OF_THREAD), policy)
+    }
+
     pub(crate) fn select_scope_state(
         &self,
         key: &crate::domain::ScopeKey,
@@ -251,7 +260,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         let query = format!(
             r#"
             PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT ?id ?retention ?successor WHERE {{
+            SELECT ?id ?retention ?relation ?source WHERE {{
               GRAPH ?g {{
                 ?memory a <{derived_class}> ; <{object_id}> ?id ;
                   {scope_predicate} ; <{salience}> ?salience ;
@@ -260,12 +269,13 @@ impl<'a> SparqlGraphSelectors<'a> {
               OPTIONAL {{
                 GRAPH ?linkGraph {{
                   ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ;
-                    <{from}> ?successor ; <{to}> ?memory .
+                    <{to_type}> "derived_memory" ; <{relation}> ?relation ;
+                    <{from}> ?source ; <{to}> ?memory .
+                  VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
                 }}
               }}
             }}
-            ORDER BY BOUND(?successor) DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id ?successor
+            ORDER BY DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id ?relation ?source
             "#,
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
@@ -279,52 +289,58 @@ impl<'a> SparqlGraphSelectors<'a> {
             from = vocab::FROM,
             to = vocab::TO,
         );
-        let mut ranked_ids = Vec::new();
-        let mut filtered = Vec::<GraphExpansionFilteredNode>::new();
+        // Aggregate all lifecycle rows before filtering: a memory can be both
+        // superseded and resolved, with several incoming links of either kind.
+        let mut states = Vec::<(MemoryId, RetentionState, Vec<MemoryId>, bool)>::new();
         for solution in self.query_solutions(&query)? {
             let id = memory_id_binding(&solution, "id")?;
-            let successor = match solution.get("successor") {
-                Some(Term::NamedNode(node)) => {
-                    Some(super::shared::memory_id_from_resource(node.as_str())?)
-                }
-                Some(value) => {
+            if states.last().is_none_or(|entry| entry.0 != id) {
+                states.push((id, enum_binding(&solution, "retention")?, Vec::new(), false));
+            }
+            let state = states.last_mut().unwrap();
+            if let Some(source) = solution.get("source") {
+                let Term::NamedNode(source) = source else {
                     return Err(oxigraph_sparql_error(format!(
-                        "expected successor IRI, got {value}"
-                    )))
+                        "expected lifecycle source IRI, got {source}"
+                    )));
+                };
+                match enum_binding::<RelationType>(&solution, "relation")? {
+                    RelationType::Supersedes => state
+                        .2
+                        .push(super::shared::memory_id_from_resource(source.as_str())?),
+                    RelationType::Resolves | RelationType::FulfillsCommitment => state.3 = true,
+                    _ => unreachable!("query restricts lifecycle relations"),
                 }
-                None => None,
-            };
-            let reason = if enum_binding::<RetentionState>(&solution, "retention")?
-                == RetentionState::Suppressed
-                && !policy.include_suppressed
-            {
+            }
+        }
+        let mut ranked_ids = Vec::new();
+        let mut historical_ids = Vec::new();
+        let mut filtered = Vec::new();
+        for (id, retention, mut superseded_by, resolved) in states {
+            superseded_by.sort_unstable();
+            superseded_by.dedup();
+            let reason = if retention == RetentionState::Suppressed && !policy.include_suppressed {
                 Some(GraphExpansionFilteredReason::Suppressed)
-            } else if successor.is_some() && !policy.include_superseded {
+            } else if !superseded_by.is_empty() && !policy.include_superseded {
                 Some(GraphExpansionFilteredReason::Superseded)
+            } else if resolved {
+                Some(GraphExpansionFilteredReason::Resolved)
             } else {
                 None
             };
             if let Some(reason) = reason {
-                if filtered
-                    .last()
-                    .is_none_or(|entry| entry.object_ref.id != id)
-                {
-                    filtered.push(GraphExpansionFilteredNode {
-                        object_ref: MemoryObjectRef::new(ObjectType::DerivedMemory, id),
-                        reason,
-                        superseded_by: Vec::new(),
-                    });
-                }
-                if let Some(successor) = successor {
-                    let successors = &mut filtered.last_mut().unwrap().superseded_by;
-                    if successors.last() != Some(&successor) {
-                        successors.push(successor);
-                    }
-                }
-            } else if ranked_ids.last() != Some(&id) {
+                filtered.push(GraphExpansionFilteredNode {
+                    object_ref: MemoryObjectRef::new(ObjectType::DerivedMemory, id),
+                    reason,
+                    superseded_by,
+                });
+            } else if superseded_by.is_empty() {
                 ranked_ids.push(id);
+            } else {
+                historical_ids.push(id);
             }
         }
+        ranked_ids.extend(historical_ids);
         Ok((ranked_ids, filtered))
     }
 

@@ -255,7 +255,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn query_derived_memories_by_thread(
         &self,
         query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
+    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let selected_ids = SparqlGraphSelectors::new(&self.store)
             .select_derived_memories_by_thread(query)?
             .into_iter()

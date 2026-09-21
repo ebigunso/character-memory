@@ -346,6 +346,9 @@ pub struct IncludedDerivedMemory {
     pub memory: DerivedMemory,
     pub source_episode_ids: Vec<MemoryId>,
     pub source_observation_ids: Vec<MemoryId>,
+    /// Memories linked by Resolves or FulfillsCommitment; empty means unresolved.
+    #[serde(default)]
+    pub resolved_by: Vec<MemoryId>,
 }
 
 impl From<DerivedMemory> for IncludedDerivedMemory {
@@ -353,6 +356,7 @@ impl From<DerivedMemory> for IncludedDerivedMemory {
         Self {
             source_episode_ids: memory.derived_from_episode_ids.clone(),
             source_observation_ids: memory.derived_from_observation_ids.clone(),
+            resolved_by: Vec::new(),
             memory,
         }
     }
@@ -672,6 +676,7 @@ pub enum LifecycleFilterReason {
     SupersededOmitted,
     GraphObjectMissing,
     GraphExpansionBounded,
+    ResolvedOmitted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
