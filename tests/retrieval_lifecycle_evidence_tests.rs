@@ -115,10 +115,6 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
                 .graph_expansion
                 .expanded_relation_count,
         );
-        println!(
-            "TOPIC_BOUNDS_{relation:?}_{trace}={}",
-            serde_json::to_string(&result).unwrap()
-        );
     }
     memory.close().await.unwrap();
     root.close().unwrap();
