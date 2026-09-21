@@ -17,7 +17,7 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionFanoutUtilization, GraphExpansionQuery,
+    GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionQuery,
 };
 
 use super::rdf_mapping::{RdfObject, RdfTriple};
@@ -552,6 +552,7 @@ pub(super) struct BoundedGraphVisibility {
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
     pub(super) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
+    pub(super) filtered_nodes: Vec<GraphExpansionFilteredNode>,
     pub(super) bounded_failure: Option<GraphExpansionBoundedFailure>,
 }
 
@@ -573,6 +574,7 @@ pub(super) fn bounded_graph_visible_refs(
     let mut graph_refs = HashSet::from([root_ref]);
     let mut graph_link_ids = HashSet::new();
     let mut fanout_utilization = Vec::new();
+    let mut filtered_nodes = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
     let mut participant_occasions = ParticipantOccasions::new();
@@ -603,7 +605,7 @@ pub(super) fn bounded_graph_visible_refs(
                 .get(object_ref)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let (bounded_link_refs, utilization) = bounded_incident_link_refs(
+            let selection = bounded_incident_link_refs(
                 query,
                 root_ref,
                 *object_ref,
@@ -612,8 +614,9 @@ pub(super) fn bounded_graph_visible_refs(
                 &participant_occasions,
                 &mut bounded_failure,
             )?;
-            fanout_utilization.extend(utilization);
-            for link_ref in bounded_link_refs {
+            fanout_utilization.extend(selection.utilization);
+            filtered_nodes.extend(selection.filtered_nodes);
+            for link_ref in selection.links {
                 let neighbor = link_ref.other_endpoint(*object_ref);
                 insert_visible_ref(
                     query,
@@ -652,6 +655,7 @@ pub(super) fn bounded_graph_visible_refs(
         traversal_link_ids: graph_link_ids,
         lifecycle_link_ids,
         fanout_utilization,
+        filtered_nodes,
         bounded_failure,
     })
 }

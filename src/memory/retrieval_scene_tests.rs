@@ -595,6 +595,49 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
     let mut context = RetrievalContext::default().with_trace();
     context.scene.participants.push(keyed(100));
     context.graph_limits.max_depth = 1;
+    let first = memory.retrieve(context.clone()).await.unwrap();
+    let assert_lifecycle_evidence = |result: &RetrieveOutcome| {
+        assert_eq!(result.rationale.lifecycle_omission_count, 1);
+        let trace = result.trace.as_ref().unwrap();
+        assert_eq!(
+            trace
+                .lifecycle_filter_decisions
+                .iter()
+                .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
+                .map(|decision| decision.object.id)
+                .collect::<Vec<_>>(),
+            vec![latest_observation]
+        );
+        let utilization = trace
+            .fanout_utilization
+            .iter()
+            .find(|row| {
+                row.root.id == MemoryId::from_u128(100) && row.relation == RelationType::Mentions
+            })
+            .unwrap();
+        assert_eq!(utilization.retained_count, 1);
+        assert_eq!(
+            utilization.omitted_by_fanout_count,
+            8 + usize::from(active_sibling)
+        );
+    };
+    assert_lifecycle_evidence(&first);
+    // Suppression behind the admitted cut must not inflate lifecycle evidence.
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::observation(MemoryId::from_u128(50_001)),
+            "Forget an old remark",
+        ))
+        .await
+        .unwrap();
+    let after_older = memory.retrieve(context.clone()).await.unwrap();
+    assert_lifecycle_evidence(&after_older);
+    assert_eq!(first.pack, after_older.pack);
+    let mut untraced = context.clone();
+    untraced.include_trace = false;
+    let untraced = memory.retrieve(untraced).await.unwrap();
+    assert_eq!(untraced.pack, first.pack);
+    assert_eq!(untraced.rationale.lifecycle_omission_count, 1);
     let observation_ids = |result: RetrieveOutcome| {
         result
             .pack
@@ -612,10 +655,9 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
         }]
     );
     context.lifecycle_policy.include_suppressed = true;
-    assert_eq!(
-        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
-        vec![latest_observation]
-    );
+    let included = memory.retrieve(context.clone()).await.unwrap();
+    assert_eq!(included.rationale.lifecycle_omission_count, 0);
+    assert_eq!(observation_ids(included), vec![latest_observation]);
 
     // Parent retention also controls eligibility, even when an observation is active.
     memory
@@ -667,6 +709,62 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 MemoryId::from_u128(50_080)
             }]
         );
+    }
+    // Even when many excluded occasions precede the survivor (or none survives),
+    // evidence stays within each route's existing participant budget.
+    for index in 1..9 {
+        memory
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::episode(MemoryId::from_u128(50_000 + index * 10)),
+                "Forget another occasion",
+            ))
+            .await
+            .unwrap();
+    }
+    for forget_last in [false, true] {
+        if forget_last {
+            memory
+                .forget(ForgetMemoryDraft::suppress(
+                    LifecycleTargetRef::episode(MemoryId::from_u128(50_000)),
+                    "Forget the last occasion",
+                ))
+                .await
+                .unwrap();
+        }
+        let mut context = RetrievalContext::default().with_trace();
+        context.scene.participants.push(keyed(100));
+        context.graph_limits.max_depth = 1;
+        let result = memory.retrieve(context).await.unwrap();
+        assert_eq!(
+            result.pack.relevant_episodes.len(),
+            usize::from(!forget_last)
+        );
+        assert!(result.pack.salient_observations.is_empty());
+        assert_eq!(result.rationale.lifecycle_omission_count, 2);
+        let trace = result.trace.unwrap();
+        assert_eq!(
+            trace
+                .lifecycle_filter_decisions
+                .iter()
+                .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
+                .map(|decision| decision.object.id)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([latest_episode, latest_observation])
+        );
+        for row in trace.fanout_utilization {
+            if row.root.id != MemoryId::from_u128(100) {
+                continue;
+            }
+            assert_eq!(row.selected_cap, 1);
+            assert_eq!(
+                row.omitted_by_fanout_count,
+                if row.relation == RelationType::Involves {
+                    8 + usize::from(forget_last)
+                } else {
+                    9 + usize::from(active_sibling)
+                }
+            );
+        }
     }
     memory.close().await.unwrap();
 }

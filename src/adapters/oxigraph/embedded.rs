@@ -312,6 +312,15 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             &visibility.participant_occasions,
         )?;
         assign_expanded_fanout_utilization(&mut expansion, visibility.fanout_utilization);
+        if expansion.expanded_nodes.contains(&root_ref) {
+            expansion.filtered_nodes.extend(visibility.filtered_nodes);
+            expansion
+                .filtered_nodes
+                .sort_by_key(|filtered| filtered.object_ref.stable_order_key());
+            expansion
+                .filtered_nodes
+                .dedup_by_key(|filtered| filtered.object_ref);
+        }
         if expansion.bounded_failure.is_none() {
             expansion.bounded_failure = visibility.bounded_failure;
         }
