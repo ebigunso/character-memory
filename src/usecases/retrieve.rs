@@ -6,13 +6,14 @@ mod scene;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, CueKind, FanoutUtilizationTrace,
-    GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace, GraphRootSource,
-    IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision, LifecycleFilterReason,
-    LifecycleOmissionSummary, RetrievalContext, RetrievalRationale, RetrievalTelemetry,
-    RetrievalTrace, RetrieveOutcome, SectionAssignment, SectionAssignmentReason,
-    SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage, CueKind,
+    FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace,
+    GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision,
+    LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
+    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    VectorCandidateTrace,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
@@ -112,6 +113,7 @@ where
             &cues.kinds,
             &explicit_roots,
             context.candidate_limits.max_graph_roots,
+            context.candidate_limits.cue_floors,
         );
         let candidate_roots = root_selection.roots;
         let mut assembly = RetrieveAssembly::new(trace_mode);
@@ -210,12 +212,17 @@ where
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
             section_assignments: Vec::new(),
+            floor_admissions: cues.floor_admissions,
         };
+        details
+            .floor_admissions
+            .extend(root_selection.floor_admissions);
 
         let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
             context.section_limits,
+            context.candidate_limits.cue_floors,
             &mut details,
             &mut section_pressure,
         );
@@ -271,6 +278,7 @@ where
                     rank: index + 1,
                 })
                 .collect(),
+            floor_admissions: details.floor_admissions,
             graph_relations: assembly.graph_relations.unwrap_or_default(),
             graph_expansions: graph_expansion_traces.unwrap_or_default(),
             fanout_utilization: fanout_utilization_traces.unwrap_or_default(),
@@ -300,6 +308,7 @@ struct RetrievalDetails {
     lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     stale_candidate_omissions: Vec<StaleCandidateOmission>,
     section_assignments: Vec<SectionAssignment>,
+    floor_admissions: Vec<CueFloorAdmission>,
 }
 
 #[derive(Debug, Default)]
@@ -580,14 +589,107 @@ struct RankKey {
     object_id: MemoryId,
 }
 
+// Reserve in successive rounds, then return unused room to the original ranking.
+// An index outside the old prefix records the floor that changed its admission.
+fn select_with_cue_floors<'a>(
+    cue_kinds: impl IntoIterator<Item = &'a BTreeSet<CueKind>>,
+    limit: usize,
+    floors: RetrievalCueFloors,
+) -> Vec<(usize, Option<CueKind>)> {
+    let kinds = cue_kinds.into_iter().collect::<Vec<_>>();
+    if kinds.len() <= limit {
+        return (0..kinds.len()).map(|index| (index, None)).collect();
+    }
+    let ordered = [
+        (CueKind::Participant, floors.participant),
+        (CueKind::Place, floors.place),
+        (CueKind::Activity, floors.activity),
+        (CueKind::Topic, floors.topic),
+    ];
+    let mut selected = vec![false; kinds.len()];
+    let mut causes = vec![None; kinds.len()];
+    let mut counts = [0; 4];
+    let mut next = [0; 4];
+    let mut remaining = limit;
+    'rounds: for round in 1..=limit {
+        for (slot, &(kind, floor)) in ordered.iter().enumerate() {
+            if counts[slot] >= floor.min(round) {
+                continue;
+            }
+            while next[slot] < kinds.len()
+                && (selected[next[slot]] || !kinds[next[slot]].contains(&kind))
+            {
+                next[slot] += 1;
+            }
+            let index = next[slot];
+            if index == kinds.len() {
+                continue;
+            }
+            selected[index] = true;
+            causes[index] = (index >= limit).then_some(kind);
+            for (other, &(kind, _)) in ordered.iter().enumerate() {
+                counts[other] += usize::from(kinds[index].contains(&kind));
+            }
+            remaining -= 1;
+            if remaining == 0 {
+                break 'rounds;
+            }
+        }
+        if ordered
+            .iter()
+            .enumerate()
+            .all(|(slot, &(_, floor))| counts[slot] >= floor || next[slot] == kinds.len())
+        {
+            break;
+        }
+    }
+    for chosen in &mut selected {
+        if remaining == 0 {
+            break;
+        }
+        if !*chosen {
+            *chosen = true;
+            remaining -= 1;
+        }
+    }
+    selected
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, chosen)| chosen.then_some((index, causes[index])))
+        .collect()
+}
+
 fn build_pack(
     ranked_objects: Vec<RankedObject>,
     limits: crate::api::types::ContinuitySectionLimits,
+    floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
     section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
     let mut section_counts = SectionCounts::default();
+    let mut selected = HashSet::new();
+    for section in prompt_ready_sections() {
+        let candidates = ranked_objects
+            .iter()
+            .filter(|ranked| section_for_object(&ranked.object) == Some(section))
+            .collect::<Vec<_>>();
+        for (index, cause) in select_with_cue_floors(
+            candidates.iter().map(|ranked| &ranked.cue_kinds),
+            section_limit(section, limits),
+            floors,
+        ) {
+            let object = candidates[index].object.object_ref();
+            selected.insert(object);
+            if let Some(cue_kind) = cause {
+                details.floor_admissions.push(CueFloorAdmission {
+                    object,
+                    stage: CueFloorStage::Section { section },
+                    cue_kind,
+                });
+            }
+        }
+    }
 
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked.object) else {
@@ -602,7 +704,7 @@ fn build_pack(
         };
 
         let count = section_counts.count_mut(section);
-        if *count >= section_limit(section, limits) {
+        if !selected.contains(&ranked.object.object_ref()) {
             increment_section_omitted_by_limit(section_pressure, section);
             details
                 .stale_candidate_omissions
@@ -816,6 +918,7 @@ struct CandidateRootSelection {
     roots: Vec<CandidateRoot>,
     unique_count: usize,
     omitted: Vec<CandidateRoot>,
+    floor_admissions: Vec<CueFloorAdmission>,
 }
 
 fn select_candidate_roots(
@@ -823,6 +926,7 @@ fn select_candidate_roots(
     kinds: &HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
     explicit_roots: &[CandidateRoot],
     max_graph_roots: usize,
+    floors: RetrievalCueFloors,
 ) -> CandidateRootSelection {
     let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
@@ -887,13 +991,35 @@ fn select_candidate_roots(
             merged.push(root);
         }
     }
-    let mut roots = merged;
-    let unique_count = roots.len();
-    let omitted = roots.split_off(max_graph_roots.min(roots.len()));
+    let unique_count = merged.len();
+    let selection = select_with_cue_floors(
+        merged.iter().map(|root| &root.cue_kinds),
+        max_graph_roots,
+        floors,
+    );
+    let mut selection = selection.into_iter().peekable();
+    let mut roots = Vec::new();
+    let mut omitted = Vec::new();
+    let mut floor_admissions = Vec::new();
+    for (index, root) in merged.into_iter().enumerate() {
+        if selection.peek().is_some_and(|&(chosen, _)| chosen == index) {
+            if let Some((_, Some(cue_kind))) = selection.next() {
+                floor_admissions.push(CueFloorAdmission {
+                    object: MemoryObjectRef::new(root.object_type, root.object_id),
+                    stage: CueFloorStage::GraphRoots,
+                    cue_kind,
+                });
+            }
+            roots.push(root);
+        } else {
+            omitted.push(root);
+        }
+    }
     CandidateRootSelection {
         roots,
         unique_count,
         omitted,
+        floor_admissions,
     }
 }
 
@@ -1245,6 +1371,7 @@ mod tests {
             &HashMap::new(),
             &[],
             2,
+            RetrievalCueFloors::default(),
         );
 
         assert_eq!(

@@ -52,7 +52,11 @@ Retrieval is graph-authoritative and hybrid:
 
 Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place` and `Activity`.
 
-A thread with many members can take every root after the participants under the default root limit, so the topic may contribute nothing until cue floors are implemented; members are taken most recent first.
+Thread members are taken most recent first.
+
+Each cue kind has a floor at the merged candidate cap, the graph root cap and each section cap. The **provisional** defaults are one slot each for participant, place, activity and topic, configurable through `context.candidate_limits.cue_floors`. Slots are reserved in successive rounds in that order; a memory carrying several kinds counts toward each with its one slot. Unused room returns to the common pool, and selected memories keep their original order. A zero floor reserves nothing for that kind; a zero cap admits nothing. Topic-only and single-kind retrievals keep their selection. These provisional values await calibration in the public companion evaluation repository, whose tooling is a development aid, not core library functionality.
+
+With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a floor admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
 
 A participant present in most experiences brings fewer episodes and observations to mind. Frequency counts distinct episodes, so several observations or participants in one episode do not inflate its weight. This rule applies to every notion, including whichever one the application regards as the character; beliefs about a familiar participant keep their existing retrieval rule.
 

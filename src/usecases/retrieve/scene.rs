@@ -14,6 +14,7 @@ pub(super) struct RecallCues {
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
+    pub floor_admissions: Vec<CueFloorAdmission>,
 }
 
 impl<G, V, E> RetrievePipeline<'_, G, V, E>
@@ -150,15 +151,38 @@ where
                     candidate.object_id,
                 ))
             })
-            .cloned();
+            .cloned()
+            .collect::<Vec<_>>();
+        let selection = select_with_cue_floors(
+            candidates.iter().map(|candidate| {
+                &kinds[&MemoryObjectRef::new(candidate.object_type, candidate.object_id)]
+            }),
+            context.candidate_limits.max_vector_candidates,
+            context.candidate_limits.cue_floors,
+        );
+        let mut floor_admissions = Vec::new();
+        let selected = selection
+            .into_iter()
+            .map(|(index, cause)| {
+                let candidate = &candidates[index];
+                if let Some(cue_kind) = cause {
+                    floor_admissions.push(CueFloorAdmission {
+                        object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                        stage: CueFloorStage::CandidateMerge,
+                        cue_kind,
+                    });
+                }
+                candidate.clone()
+            })
+            .collect::<Vec<_>>();
         Ok(RecallCues {
-            candidates: CanonicalCandidates::new(candidates)
-                .truncated(context.candidate_limits.max_vector_candidates),
+            candidates: CanonicalCandidates::new(selected),
             kinds,
             participants,
             references,
             dimension,
             completeness,
+            floor_admissions,
         })
     }
 

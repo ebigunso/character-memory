@@ -91,6 +91,8 @@ pub fn default_retrieval_object_types() -> Vec<ObjectType> {
 pub struct RetrievalCandidateLimits {
     pub max_vector_candidates: usize,
     pub max_graph_roots: usize,
+    /// Minimum room per cue kind at candidate merge, root selection and each section.
+    pub cue_floors: RetrievalCueFloors,
 }
 
 impl Default for RetrievalCandidateLimits {
@@ -98,6 +100,30 @@ impl Default for RetrievalCandidateLimits {
         Self {
             max_vector_candidates: 48,
             max_graph_roots: 12,
+            cue_floors: RetrievalCueFloors::default(),
+        }
+    }
+}
+
+/// Provisional defaults: one slot per kind, pending calibration.
+///
+/// Unused room returns to the common pool. Zero disables that kind's floor;
+/// all floors remain subject to the existing hard caps.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetrievalCueFloors {
+    pub participant: usize,
+    pub place: usize,
+    pub activity: usize,
+    pub topic: usize,
+}
+
+impl Default for RetrievalCueFloors {
+    fn default() -> Self {
+        Self {
+            participant: 1,
+            place: 1,
+            activity: 1,
+            topic: 1,
         }
     }
 }
@@ -474,6 +500,7 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    pub floor_admissions: Vec<CueFloorAdmission>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
@@ -487,6 +514,7 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
+            floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
             fanout_utilization: Vec::new(),
@@ -502,6 +530,23 @@ impl Default for RetrievalTrace {
     fn default() -> Self {
         Self::empty()
     }
+}
+
+/// A floor admitted this object outside the stage's original capped prefix.
+/// Earlier-stage admissions remain here even if the object is omitted later.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CueFloorAdmission {
+    pub object: MemoryObjectRef,
+    pub stage: CueFloorStage,
+    pub cue_kind: CueKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CueFloorStage {
+    CandidateMerge,
+    GraphRoots,
+    Section { section: ContextPackSection },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
