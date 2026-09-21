@@ -1,0 +1,236 @@
+# Plan: where and with whom, given in words, reminds the character of the last times like this, and never crowds out what is being talked about
+
+- status: in-progress
+- generated: 2026-09-21
+- last_updated: 2026-09-21
+- work_type: code
+
+## Goal
+- A character told only in words where it is and who is there ("at my desk", "a man with a deep voice") is reminded of the last few times it was somewhere like this or with people like these, and of those only: a description brings its most recent few occasions and nothing else, and among everything brought, what comes to mind is decided by how well each thing actually matches. Nothing is admitted merely because its kind of cue was owed a turn.
+- Evidence this answers. The companion evaluation repository's calibration (a development aid, not core library functionality) ran a generated store of 48 experiences at the same workplace with the same described companion and 8 topic-only experiences graded 0.9 to 0.6, at default caps and default floors, against three library pins (merged score order; each kind's floor served from its own order; turns at all caps). On-topic memories surviving in the pack: 0 of 8, 1 of 8, 3 of 8, where the topic alone keeps 6 of 8. Share of pack slots taken by a cue that matches nothing lived: a described stranger 52, 52 and 73 percent; an unfamiliar place 8, 8 and 50 percent; an unlived topic 29, 29 and 35 percent. The state measurement at the final pin showed what turns do inside sections: meeting a keyed person while talking about something unrelated, five fitting beliefs (scores about 0.71) were displaced by topic-only entrants with near-zero similarity (0.12 to 0.30) admitted purely by the topic's turns, and 11 of 12 fitting fell to 7 of 12. The knowing road otherwise measured well: a keyed person with 300 beliefs brought 12 of 12 fitting memories and the topic kept 7 of 8.
+- Two causes. First, scene words are appended as labelled lines to every episode's one embedded text, so identical lines score about 0.99 for no reason of relevance: the scores were not honest, and they were merged with topic scores as if comparable. Second, turns were used to arbitrate where scores exist; a turn must be filled whether or not anything matches, so turns manufacture relevance.
+
+## Definition of Done
+- An episode's content text is byte-identical with and without scene words. Setting words and participants' words are embedded on their own surfaces of the episode, in the same embedding batch, before the write turn.
+- The topic searches content surfaces only. The setting description searches only the setting surface. All participants' words are joined into one cue, composed exactly as the recorded participants text is, and searched once on the participants surface. Forgetting an episode removes its scene surface points with its content point.
+- A description brings the most recent few occasions among its close matches: the count is its kind's existing floor value and never less than one, since a zero floor removes only the reservation and never the cue, chosen most-recent-first by recorded scene time from the scene search's closed pool. Only those occasions enter the candidate set, each with its honest scene-surface score; the rest of that cue's matches are not candidates at all, and the trace reports how many were left out by the cue's limit, as a count. The occasions hold the kind's floor where full-standing members have not filled it, and otherwise compete by score; at a floor of zero the latest occasion still enters and competes by its honest score with no reserved room. A description's occasion never evicts a full-standing member of the same kind that already holds the floor.
+- Turn-sharing at the candidate merge and at section caps is withdrawn: spare room there goes by the existing score. Turns among kinds stay only at root selection, where keyed roots carry no score. Each kind's floor is still served from the head of its own order, including when it is the only kind present.
+- No minimum similarity ships. The result still reports a description as a content cue, and the trace reports the best scene-surface score per description search.
+- Every test expectation changed by this slice is listed in the task report with its value before and after, from runs at the parent commit and at the task's tip, never guessed.
+- A retrieval that gives only a topic, against a store written without scene words, selects what it selects today.
+
+## Planner-added requirements
+- The pool the recent occasions are chosen from is named and carried: the full closed pool the tie closure fetched for a scene search, not only the returned list cut to the limit. Needed because: the closure extends a tie at the cutoff and then cuts to the limit in canonical order (score, type, id), so for a configured label repeated more often than the limit the returned list holds the lowest ids, not the latest times, and "the last time here" would be an arbitrary day. The vector port's promise of at most the limit is kept for the returned list; the pool travels beside it, crate-internal, for scene searches only, and an occasion chosen from outside the returned list enters the candidates (an order alone cannot restore an absent candidate).
+- The recorded scene times for that pool are read through a narrow selector on the graph port, never through by-refs hydration. Needed because: by-refs hydration reads every quad of the store into a subject map before selecting, so it is not a bounded read; a selector bounded by the given refs, returning ref, recorded scene time and retention, already exists privately for participant occasions and is reused.
+- The source distinction is carried beside the cue kind, crate-internal, and only as far as the one rule needs it. Needed because: reserved room is keyed by kind of cue and a described participant and a keyed participant are the same kind, so the kind set alone cannot protect the keyed member that holds the floor; the helper's single-kind shortcut must not bypass that protection just because every candidate is of the participant kind. A memory that a full-standing source also reached has full standing.
+- The search cache in `recall_cues` is keyed by text and surface scope; an identical query embedding may still be reused. Needed because: the same words given as the topic and as the setting must search different surfaces, and today one search result per distinct text is shared across kinds.
+- Both vector adapters take the surface scope in the same task, on nearest search, zero-norm scroll and the counts that completeness is computed from, and the stored surface field is marked for indexing in the shared payload schema. Needed because: completeness must be counted in the same scope as the search, and a filter present in one adapter only would pass tests and fail deployments.
+- A write's per-object outcome lists keep meaning one entry per object. Needed because: they are built today from one entry per vector record, and an episode now has up to three records.
+
+## Scope / Non-goals
+- Scope: the modules and test files each task's owns names; `README.md`; `docs/design/database/**`; this plan.
+- Non-goals: any minimum similarity or other bound on a description match; measured floor defaults; the unlived-topic share (no number-free test exists for whether a topic match is real; it must only not get worse than 29 percent); per-participant scene points or per-participant searches; making sense of who a description refers to (consolidation); recency, date matches and staleness (the time plan); a decision record (it follows the fourth-pin measurement, outside this slice); the historical question of whether physical point identity should include the object type; a migration of existing stores (there are no consumers and stores are rebuilt); any configuration or tunable; the companion repository's families and probes, which are referenced here and owned by its own plan.
+
+## Design
+- Principle (decider ruling, Option A, 2026-09-21): where scores are honest, score order arbitrates and weak matches lose by themselves. A key or a name is knowing: it says who or where this is and brings where things stand, and a keyed root carries no score, so turns among kinds remain at root selection and only there. A description and the topic are both bare similarity searches. The earlier framing of this slice, knowing against being reminded, wrongly promoted the topic to knowing; under Option A the topic needs no special standing and competes by its honest score, and so do the few occasions a description contributes. What made description scores dishonest was the index, not the ordering: ADR-D-0029 says a description is never an identity and is as changeable as the moment, the philosophy's section 7.2 says a shared context is a weak association, and a weak association recorded inside every episode's text scored as a near-certain match. The philosophy's passage on situated recall says what the conversation turns to should add to what the scene brings, never replace it; a description contributes only its few most recent occasions, the floor is what guarantees them room, and score decides among what was brought.
+- 1. What happened is indexed apart from where and with whom. Two scene surfaces per episode, one for the setting words and one for the participants' words (each participant's name and description as today, one line per participant, in scene order), each present only when its words exist, with no label prefix, since the surface says what the words are. Why two and not one: retrieval must tell the place kind from the participant kind, and on one combined surface every same-place episode shares half its text, so any description of a person scores uniformly high against all of them. Why not one point per participant: the physical point id is derived from the object id and the surface name, one point per object per surface, and delete is by object id; per-participant points need another identity component for a gain nobody has measured. Known ceiling: in a crowded scene one person's words are diluted by the others' on the shared surface, at write and at recall alike, which is why the recall cue is joined the same way. Cost: up to three embeddings per episode instead of one, in the one existing batch call before the write turn (an episode with both scene surfaces and one observation is four inputs where it was two; with no scene words nothing changes, byte for byte); up to three points per episode; the published per-type surface limit for an episode becomes three; at most three searches per retrieval however many people are present (topic, setting, joined participants). The content builder keeps its signature and a plural builder is added for the write path, so the callers that build one content record in tests and retrieval do not churn.
+- 2. Searches are bound to surfaces. The crate-internal search request gains a surface scope beside its object types. The topic searches the content surfaces (episode summary, observation text, interpreted text, thread summary). Scene surfaces exist on episodes only, so a description no longer reaches an interpreted memory directly; it reaches the episode, and graph expansion brings what rests on it, as for any root. Individual reference reporting is unchanged: each described participant is still reported as a content cue, each key and name resolves as today. Forget already deletes by object id, which covers every surface; Task_1 proves it for the new surfaces through the facade and changes nothing if it holds.
+- 3. The most recent few. For each description search, the floor occasions are chosen from the closed pool: every point the tie closure fetched for that search (the returned list plus the rest of a tie at the cutoff), most-recent-first by recorded scene time, then id, among experiences that may be recalled (rulings item 34), as many as the kind's existing floor value and never fewer than one. No exact-tie detection, no top-run, no new number. The fetch bound is the smaller of the backend's cap and the larger of sixteen times the limit and the limit plus 4096; when the closure stops there it already reports an open boundary, and the claim is then the latest among the fetched pool, never the latest overall. Only these occasions become candidates; every other match of that cue is not a candidate at all, and the trace reports the number left out by the cue's limit as one count per description search, not a row per memory. They are the head of their kind's order for the floor at every cap. A zero floor removes only the reservation, never the cue (rulings items 39 and 31, and the existing case that each zero floor removes only its own reservation): at zero the latest occasion still enters as a candidate and competes by its honest score with no reserved room. This removes crowd-out by construction: forty-eight days under one verbatim label contribute the last one, or as many as the floor says, and the topic competes only with those.
+- 4. Same-kind protection. The floor is one quota per kind, shared, not a second quota for descriptions. Within a kind, full-standing members (keyed or named roots, state) are served from the floor first; a description's occasion takes floor room only when full-standing members have not filled it, and never evicts one. Boundary example that is an acceptance case: keyed participants A and B fill a cap of two with a participant floor of one; a described stranger C does not evict B. C's contributed occasions then compete for spare room by their honest score, like any other candidate.
+- 5. How a scene-surface score enters ranking, and why that is honest now. It enters exactly where a topic cosine does: as the candidate's vector score, which becomes the cue component of the existing final score, the largest across the sources that reached the memory. It is honest because a description is now compared only with descriptions: a high score means the recorded words for the place or the people resemble the present ones, which is what the cue asks. Pack order, including for a scene given only in words, is by the existing final score; nothing special. A configured label repeated verbatim scores at the top for every episode recorded under it, honestly, and that cannot crowd graded topic matches, because only the cue's most recent few occasions are candidates. The one stop-and-report that remains: if on-topic survival under this rule is below the topic-alone level on the corrected overlap family, stop and report, and introduce no number.
+- 6. Turns are withdrawn outside roots. The one shared helper serves the candidate merge, root selection and the section caps; a stage distinction keeps spare turns at roots and returns spare fill at the other two to the caller's score order. A kind's floor is served from the head of its own order at all three, including when it is the only kind present (state Task_4 lands this for the single-kind case; this slice builds on it and does not redo it). On the state stack the state-scope priority inside the helper is preserved; only the withdrawn spare turns change. The approved time plan stays compatible: a candidate reached only through an ungiven time comes after every given kind at every cap with no floor, which the helper can tell from kind membership; the withdrawn description-after-everything idea is not recycled for it.
+- 7. "Reminds me of nothing" is measured, not guessed. The trace reports the best scene-surface score per description search: one for the setting, one for the joined participants, reported against the scene references that share that search, never presented as separate per-person searches. Trigger: a description given at recall with the trace on. Reader: the companion paraphrase family, which measures whether a separable band exists. Enabling a bound is a later decision carried by a record.
+- 8. Records. None is drafted in this slice. A proposed design record with one decision (a description never takes an identity's standing in recall) is drafted only after the fourth-pin measurement. ADR-D-0029 is not replaced: its phrase "indexed with the entry's text" is read as leaving the surface open, since rulings item 4 itself named a separate surface as the upgrade path, and its boundary leaves "how a description cue is matched, which is measured" uncovered.
+- Alternative: one combined scene surface. Rejected in item 1.
+- Alternative: turns among the topic and descriptions at every cap (Option B of the plan review). Rejected by the decider on the state measurement: turns admit near-zero matches.
+- Alternative: a description holds one slot and otherwise only unclaimed room, after everything else (this plan's first draft). Withdrawn: it starved descriptions under any topic in the keyless deployment ADR-D-0029 was written for, and gave the topic a standing it has not earned.
+- Alternative: exact-tie top-run detection for the slot. Deleted: recency over the closed pool needs no tie and no distinction between identical and reworded words.
+- Alternative: exact matching of recorded words; a score-comparison patch; no scene index. Rejected earlier (rulings items 44, 43, 41).
+- Why chosen: the smallest shape that makes the scores honest and then lets them arbitrate. Fit: ADR-D-0018, D-0022, D-0029, D-0034 (no notion is created or implied by a description), D-0038 (nothing here gates recall); philosophy section 7.2.
+
+## Compatibility stance (required if a contract/interface/persisted format is touched)
+- surface: the vector index (two new surface names, up to three points per episode, the episode content text without scene words, the surface field indexed); the published per-type surface limit; the retrieval trace (two added fields: the best scene-surface score and the count left out by the cue's limit, per description search); which memories a scene given in words selects; a description no longer reaches an interpreted memory directly.
+- stance: break
+- justification: no external consumers; the one locatable consumer is `CharacterMemoryEvals`, the public companion evaluation repository whose tooling is a development aid and not core library functionality, and its plan follows each library slice. No migration: stores are rebuilt, and a store indexed before this slice has no scene surfaces, so descriptions bring nothing there until it is rebuilt.
+
+## Context (workspace)
+- Related files/areas: `src/policy/embedding_surface.rs` (the labelled suffix; one optional record per object; the published limit); `src/usecases/remember.rs` (records built per vector target and embedded in one batch before the write-turn lock); `src/usecases/vector_indexing.rs` (records pair to embeddings by object type, id and surface; outcome lists come from one entry per record; delete by object id); `src/adapters/qdrant/payload.rs` (physical point id from object id and surface; surface stored and marked unindexed); `src/adapters/qdrant/store.rs` and `src/adapters/qdrant_edge/mod.rs` (nearest search, zero-norm scroll and scoped counts filter by object type only); `src/adapters/qdrant/tie_closure.rs` (closes the tie at the cutoff, then cuts to the limit on both return paths); `src/ports/vector_candidate.rs` (promises at most the limit); `src/adapters/oxigraph/sparql_selectors.rs` (`select_participant_occasions`: a refs-bounded read of scene time and retention, private to traversal); `src/adapters/oxigraph/shared.rs` and `embedded.rs` (by-refs hydration reads every quad); `src/policy/graph_expansion.rs` (`ParticipantOccasion` carries parsed time and retention); `src/usecases/retrieve/scene.rs` (`recall_cues`: search results cached by text alone); `src/usecases/retrieve.rs` (`select_with_cue_floors` and its three call sites; the single-kind shortcut; the vector score as cue component); `src/usecases/correct_forget.rs` (embeds interpreted replacements only; not an episode scene write path); `src/adapters/oxigraph/rdf_mapping.rs` (participants are one JSON literal, so nothing in the graph can answer a description).
+- Reviews: `.agent-work/reviewer/v0-2-scene-words-plan-review.md` (Tier D, with file and line facts and the affected-test inventory); rulings items 4, 25, 31, 34, 39, 40, 41, 43, 44, 45.
+- Design record consulted and deviations from its acceptance: ADR-D-0018, D-0022, D-0029, D-0034, D-0038; philosophy section 7.2 and the situated-recall passage. No deviation; the reading of one phrase of ADR-D-0029 is in Design item 8 and the Open Questions.
+
+## Integration
+- The library stack: the cues pull requests, then the fixes pull request 130 (tip 979643f), then the state plan 128, state Task_1 129, Task_2 131, Task_3, Task_4, then the time plan (an approved draft, not yet a pull request), prospective memory, write-path warnings, the renderer.
+- Base: the top of the state stack after state Task_4, which now also serves a single-kind floor from its own order. The actual tip is pinned at dispatch, and the affected state controls are re-run after the orchestrator's integration. Stacking on top, not underneath, avoids another forward-merge cascade, so this slice owns the expectations below. Actual before and after values come from runs, not from this list.
+- Migrated in Task_1 (fixtures and contracts the surface change breaks, floor witnesses kept): `src/memory/scene_tests.rs` (the round-trip case's labelled content assertions become separate content and scene surfaces, keeping round trip, replay and no inference; the wordless case stays exact; the setting-recall case and the override case's participant-line assertion move to surfaces, keeping object-count meaning and the involvement, thread and source assertions); `src/memory/retrieval_scene_tests.rs` (the case expecting a participant description to reach an interpreted memory directly, and the same words as topic and setting to give one memory all three kinds, changes by design; embedding reuse may stay, search-result reuse across scopes may not); `src/memory/retrieval_turn_tests.rs` (the embedder double that expects appended participant text); `src/memory/retrieval_floor_tests.rs` (its fixture indexes observations only and its mixed context uses descriptions, so after the filter those routes lose every witness: episodes gain scene surfaces); the unit tests in `src/policy/embedding_surface.rs` and the published-limit test.
+- Re-measured in Task_2 (turns withdrawn from 979643f), each with before and after: `retrieval_turn_tests.rs` `shared_scene_cohort_preserves_topic_turns_at_every_cap` (before: topic counts 8, 6 and 4, fixed pack ids, floor-admission counts 8, 6 and 2); `shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics`, `shared_scene_topic_only_keeps_original_bytes` and `shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admissions` keep their intent and change only scene setup and mixed allocations. `retrieval_floor_tests.rs`: the two overlap cases keep the strong-topic floor-head witness and only spare fill is audited; `floors_preserve_witnesses_lost_at_three_different_caps`, `short_caps_serve_successive_rounds_in_scene_order` (before: roots 2000, 3000, 5000, 1000, 2001; section 2000, 3000, 4000, 1000, 2001), `overlapping_kinds_share_one_slot_and_return_unused_room` and `each_zero_floor_removes_only_its_reservation` are re-checked; the three root-turn controls (`weak_topic_membership_does_not_spend_the_strong_topic_roots_turn`, `a_large_activity_shares_roots_with_the_topic`, `configured_root_floors_are_reserved_before_spare_slots_are_shared` with cap, activity and topic counts 6, 5, 1; 8, 6, 2; 4, 3, 1) must not change. On the state stack, `tests/retrieval_scope_tests.rs`: in `key_scopes_share_root_and_pack_caps_with_shared_members_and_activity` the tight-root assertion (301, 311, 321) is separated from the section-cap and mixed-participant expectations and stays; the dense-place case and its six-topic, six-place roots are all-full root controls and stay; scope priority, overlapping-root selector priority and shared explicit-state expansion order stay.
+- State Task_4 lands first; nothing else in the state stack waits on this slice.
+- The time plan's Task_1 must not start before this lands; its draft is amended, when it becomes a pull request, to say that its after-every-given-kind rule lives in the same helper.
+- Not to be built before this lands: measured floor defaults (the cues plan's Task_4); any similarity bound; the design record.
+- Companion repository, referenced and not owned by this plan; the orchestrator owns the fourth-pin handoff, collecting the artifacts and the explicit comparison with the topic-alone and keyless controls: the corrected generator with reworded descriptions; the keyless probe (topic plus descriptions, no keys); the paraphrase family reading the new trace field; the three unlived-cue probes and the topic-alone denominator at a fourth pin; the state measurement re-run (the keyed person with an unrelated topic).
+
+## Open Questions (max 3)
+- For the decider at the slice boundary, not blocking: ADR-D-0029's phrase "indexed with the entry's text" is read as leaving the surface open, because rulings item 4 named a separate surface as the upgrade path and the record's boundary leaves how a description is matched to measurement. No replacement of ADR-D-0029 is proposed.
+
+## Assumptions
+- A1: Delete by object id removes scene surface points with no change to forget. Source: both adapters delete by the object id field and existing tests cover every surface of an object. Checked by Task_1.
+- A2: Records for several surfaces of one episode pair with their embeddings with no change to the pairing. Source: pairing is keyed by object type, id and surface. Checked by Task_1.
+- A3: The stored surface field can be indexed and filtered in both adapters with the existing keyword-filter machinery and no new collection or dependency. Source: Tier D plan review. Checked by Task_1.
+- A4: The refs-bounded occasion selector can be offered on the graph port for a pool of a few thousand refs without reading the whole store. Source: Tier D plan review; the selector exists privately. Checked by Task_2.
+- A5: The source distinction can be carried into `select_with_cue_floors` without changing its rule for the other kinds, and a stage distinction can keep turns at roots only. Source: Tier D plan review. Checked by Task_2; if not, stop on that point and report.
+- A6: State Task_4 has landed the single-kind floor before Task_2 starts. Source: the coordinator. Checked at dispatch.
+
+## Tasks
+
+### Task_1: What happened is indexed apart from where and with whom
+- type: impl
+- owns:
+  - src/policy/embedding_surface.rs
+  - src/domain.rs
+  - src/lib.rs
+  - src/models/vector/**
+  - src/adapters/qdrant/**
+  - src/adapters/qdrant_edge/**
+  - src/usecases/remember.rs
+  - src/usecases/write_planning.rs
+  - src/usecases/vector_indexing.rs
+  - src/usecases/correct_forget.rs
+  - src/usecases/retrieve/scene.rs
+  - src/memory/scene_tests.rs
+  - src/memory/retrieval_scene_tests.rs
+  - src/memory/retrieval_turn_tests.rs
+  - src/memory/retrieval_floor_tests.rs
+  - tests/vector_port_contract_tests.rs
+  - tests/scene_surface_tests.rs
+- depends_on: []
+- description: |
+  First show, through the public facade on the real embedded stores at the parent commit, the case this task exists for: an episode written with scene words has a different content text from the same episode without them, and a topic made of its setting words is answered from its content text; shrink the task by whatever already passes. Then: the episode's content record no longer carries scene words; the content builder keeps its signature, and a plural builder returns the content record plus a record for each scene surface whose words exist, unlabelled, participants one line each in scene order with name and description as today. Remember and caller-built plans embed all of them in the existing batch before the write-turn lock; per-object outcome lists stay one entry per object. The published per-type surface limit follows the builders. The crate-internal search request gains a surface scope; both adapters apply it on nearest search, zero-norm scroll and the counts completeness is computed from, and the shared payload schema marks the surface field indexed. In `recall_cues` the topic searches content surfaces, the setting description the setting surface, and all participants' words, joined exactly as the write surface composes them, are searched once on the participants surface; the search cache is keyed by text and surface scope, and an identical embedding may be reused. Floors, turns and ordering are not touched here. Migrate the fixtures and contracts named under Integration, keeping each floor witness; allocation expectations stay for Task_2. Forget is changed only if its case fails. No configuration; no public type, field or error beyond the two surface names and the limit; no migration.
+- acceptance:
+  - An episode's content text is byte-identical with and without scene words; with no scene words an episode and its observation still produce exactly two inputs, unchanged.
+  - Matching is filtered by surface: with a competing content witness and a tight cap, a topic equal to an episode's setting words is answered from content surfaces only, the same words given as the setting are answered from the setting surface only, and a participants cue never matches a setting surface or the reverse. Equal text given as topic, setting and joined participants runs three scoped searches with honest kind membership and no result reuse across scopes. Whether a reworded description still reminds is measured by the companion paraphrase family, not asserted here.
+  - Six described participants cause one participants search.
+  - Remember and a caller-built plan write the same surfaces; all embeddings are produced before the write turn opens.
+  - After forgetting an episode, none of its points is returned by any search, through the facade on the embedded adapter.
+  - The report holds the baseline run at the parent commit for each case, and every changed expectation with before and after.
+- validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test; the acceptance cases run at the parent commit, with what each brought recorded in the report"
+  - kind: command
+    required: true
+    owner: orchestrator
+    detail: "Service adapter filtering and deletion against a live service with REQUIRE_QDRANT_TESTS set (the gated bodies in src/adapters/qdrant/store.rs and tests/vector_port_contract_tests.rs return early otherwise); record the endpoint and the pass and skip census; if no service is available, the acceptance is reported as unproven on the service adapter, not as passed"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review, reproducing the baseline evidence at the parent commit and checking both adapters' scope on search, scroll and counts; Tier A altitude review against the philosophy and ADR-D-0029"
+
+### Task_2: A description brings the most recent few occasions like this, score decides the rest, and turns stay only at roots
+- type: impl
+- owns:
+  - src/usecases/retrieve.rs
+  - src/usecases/retrieve/scene.rs
+  - src/api/types/retrieval.rs
+  - src/ports/graph_authority.rs
+  - src/ports/vector_candidate.rs
+  - src/adapters/oxigraph.rs
+  - src/adapters/oxigraph/sparql_selectors.rs
+  - src/adapters/oxigraph/embedded.rs
+  - src/adapters/oxigraph/tests.rs
+  - src/policy/graph_expansion.rs
+  - src/adapters/qdrant/tie_closure.rs
+  - src/adapters/qdrant/store.rs
+  - src/adapters/qdrant_edge/**
+  - src/models/vector/**
+  - src/memory/retrieval_floor_tests.rs
+  - src/memory/retrieval_turn_tests.rs
+  - src/memory/retrieval_scene_tests.rs
+  - tests/retrieval_scope_tests.rs
+  - tests/scene_reminder_tests.rs
+- depends_on: [Task_1]
+- description: |
+  First show, through the public facade on the real embedded stores at the parent commit (Task_1's tip), the three cases failing: the overlap case (many experiences at the same described place with the same described people, a few on-topic ones, default caps and floors); the keyless case; and the keyed person with many beliefs plus an unrelated topic, where near-zero topic matches displace fitting beliefs. Record what each brought; shrink the task by whatever already passes. Then: (a) the tie closure hands on, beside the returned list cut to the limit, the full closed pool it fetched, crate-internal, used by scene searches only; the port's promise for the returned list is unchanged. (b) The graph port gains one narrow read: for given episode refs, the recorded scene time and retention, served by the existing refs-bounded occasion selector and never by by-refs hydration. (c) For each description search the floor occasions are the most recent by recorded scene time, then id, among the pool's recallable experiences, as many as the kind's floor value and never fewer than one (at a floor of zero the latest occasion is still a candidate, with no reserved room); only they enter the candidate set, each with its honest scene-surface score and even from outside the returned list, and they head their kind's order at every cap; every other match of that cue is not a candidate, and the trace reports the number left out by the cue's limit as one count per description search. At the fetch bound the existing open-boundary completeness is reported and the claim is the latest among the fetched pool. (d) Within a kind, full-standing members are served from the floor first and a description's occasion never evicts one; the single-kind shortcut must not bypass this; a memory a full-standing source also reached has full standing; the distinction is carried through the merge and graph expansion in the smallest form the helper allows. (e) Spare turns stay at root selection only; at the candidate merge and the section caps spare fill returns to the caller's score order; each kind's floor is still served from the head of its own order; on the state stack the state-scope priority is preserved. (f) A scene-surface score enters ranking where a topic cosine does; nothing else about scoring changes. If on-topic survival under this rule is below the topic-alone level on the corrected overlap family, stop and report; introduce no number. If the helper cannot carry (d) or (e) without changing its rule for the other kinds, stop on that point and report. No configuration; no public type or error, and one public trace field, the left-out count per description search (trigger: a description given at recall with the trace on; reader: the companion probes).
+- acceptance:
+  - Keyless case (topic plus setting words plus participants' words, no keys): the result reports what the scene brought, the floor occasions of each description are the most recent by recorded scene time, and the rest of the pack is in final-score order.
+  - ADR-D-0029's own validation case: a deployment that supplies only the time, the entries and free descriptions writes through the facade, recalls the same day by those descriptions, and commits an interpreted memory resting on those experiences without the application supplying any identifier. The commit is a caller-built plan standing in for consolidation, which has no runner in this phase, and the report says so. Ambiguous and unknown references and the changed-name, same-key control behave as before.
+  - Regression case from the state measurement: a keyed person with many beliefs and an unrelated topic; fitting beliefs are not displaced by near-zero topic matches at any section cap.
+  - Same-kind boundary: keyed participants A and B fill a cap of two with a participant floor of one; a described stranger does not evict B.
+  - Floor values zero, one and more than one: that many most recent occasions hold the floor, shared with the kind's full-standing members and not added to them; at zero nothing is reserved, the description's latest occasion is still a candidate and competes by its honest score, and the trace count says how many were left out.
+  - The latest is chosen with time opposed to id and to salience; when the latest occasion is forgotten, the one before it comes; a pool larger than the limit brings an occasion from outside the returned list; a search that stops at the fetch bound reports the open boundary.
+  - An occasion's standing and kind survive default-depth graph expansion; overlapping sources give one memory one slot.
+  - Verbatim label case: 48 episodes with an identical setting label plus 8 graded topic episodes; the pack holds the most recent office occasions up to the floor value (one at a floor of zero, unreserved) and the on-topic memories at the topic-alone level, and the trace reports the rest of the label's matches as one left-out count.
+  - A scene given only in words, with no topic, brings each description's most recent occasions, as many as its floor value and never fewer than one, and what graph expansion brings from them, in final-score order, and nothing else from the descriptions' matches.
+  - The root-turn controls named under Integration select the same roots; every other changed expectation is listed with before and after from runs.
+- validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test; the three baseline cases run at the parent commit, with what each brought recorded in the report"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review, reproducing the baseline evidence, auditing each changed expectation against its stated reason and confirming the scene-time read does not hydrate the store; Tier A altitude review against the philosophy (section 7.2 and the situated-recall passage), ADR-D-0029 and ADR-D-0038"
+  - kind: manual
+    required: true
+    owner: orchestrator
+    detail: "Hand Task_2's commit to the companion repository as the fourth pin, collect its artifacts, and compare explicitly with the topic-alone and keyless controls; a missed target is reported, never answered with a threshold"
+
+### Task_3: The trace says how strongly each description search matched, and the documents say what a description brings
+- type: impl
+- owns:
+  - src/api/types/retrieval.rs
+  - src/usecases/retrieve.rs
+  - src/usecases/retrieve/scene.rs
+  - src/memory/retrieval_scene_tests.rs
+  - README.md
+  - docs/design/database/**
+- depends_on: [Task_2]
+- description: |
+  First show at the parent commit that nothing in the result or trace lets a reader learn how well a description matched, for the setting scope and the participants scope; shrink if it does. Then: the trace reports the best scene-surface score of each description search, or none when the surface held nothing: one value for the setting, one for the joined participants, reported against the scene references that share that search and labelled as shared, never as per-person scores. Trigger: a description given at recall with the trace on. Reader: the companion paraphrase family. Nothing is added with the trace off; no bound, threshold or configuration. README and the schema reference documents describe, in version-agnostic plain wording: the episode's content surface and its two scene surfaces; that scene words are not part of the content text; that a description brings the most recent few occasions like this, as many as its kind's floor and at least the latest one, and nothing else of what it matched, with the number left out reported in the trace; that what was brought then competes by how well it matches; that keys and names bring where things stand; that turns among kinds apply only where roots are chosen; and that whether a description reminds of nothing is not yet decided. No decision record is drafted in this slice.
+- acceptance:
+  - With the trace on, a setting description and a joined participants cue each report one best score; an identical recorded description reports the top score, a controlled reworded one a lower score, and a store with no scene surface reports none.
+  - With the trace off the result equals Task_2's tip.
+  - README and the schema reference describe the ruled behavior with no version numbers and no internal names a consumer cannot see.
+- validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review; Tier A altitude review of the documents against the philosophy and ADR-D-0029"
+
+## Task Waves (explicit parallel dispatch sets)
+
+- Wave 1: [Task_1]
+- Wave 2: [Task_2]
+- Wave 3: [Task_3]
+
+One crate, shared files: sequential, one worker at a time, about 10, 12 and 4 worker-hours, each a pull request stacked on the previous one, the first stacked on the state stack's top after state Task_4.
+
+## Rollback / Safety
+- Each task is one pull request and reverts on its own in reverse order. Reverting Task_1 requires rebuilding any store written after it, since content texts and surfaces differ. Once the companion repository has followed a pin, a revert is coordinated with it.
+
+## Progress Log (append-only)
+
+- (none yet)
+
+## Decision Log (append-only; re-plans and major discoveries)
+
+- 2026-09-21 Decision: scene words get their own search surfaces; this slice sits on top of the state stack, before the time plan.
+  - Trigger / new insight: the calibration numbers in the Goal; rulings item 43 (the decider ruled for the proper fix) and item 44 (exact matching withdrawn against ADR-D-0029 and philosophy 7.2).
+  - Plan delta (what changed): new plan. Rulings item 4 (scene words indexed with the episode text) is superseded in part: the words stay indexed with their episode and leave its content text, the upgrade path item 4 itself named. Rulings item 41 (turns at every cap) is superseded in part: turns remain at root selection only; item 40 stands.
+  - Tradeoffs considered: two scene surfaces against one; stacking on top of the state stack, which makes this slice own its pinned expectations, against stacking under it.
+  - User approval: direction approved by the decider; plan reviews are not skipped.
+  - Record proposed: one, in Task_3 (withdrawn by the next entry).
+- 2026-09-21 Decision: decider ruling, Option A (rulings item 45): where scores are honest, score order arbitrates and weak matches lose by themselves; the draft is revised under it and under its Tier D and Tier A reviews.
+  - Trigger / new insight: the Tier A review found that the knowing-against-reminded split had quietly promoted the topic to knowing, when a topic is also a bare similarity search, and that one slot plus unclaimed room starved descriptions under any topic in the keyless deployment ADR-D-0029 was written for; it proposed turns among the topic and descriptions. The same hour the state measurement showed what turns do inside sections: meeting a keyed person while talking about something unrelated, five fitting beliefs (about 0.71) were displaced by topic-only entrants with near-zero similarity (0.12 to 0.30) admitted purely by the topic's turns; 11 of 12 fitting fell to 7 of 12. A turn must be filled whether or not anything matches. Tier D found the scene-time read had no bounded, owned path (by-refs hydration reads every quad), the pool was unnamed (the closure cuts to the limit), and Task_1 could not keep the suite green within its owns.
+  - Plan delta (what changed): turns stay only at root selection; spare room at the candidate merge and section caps returns to the existing score; each kind's floor is served from the head of its own order, including as the only kind. A description brings the most recent few occasions from the closed pool, the count being its kind's existing floor value and, after the Tier A re-check, never less than one, because a zero floor removes only the reservation (rulings items 39 and 31); exact-tie detection, its assumption and the identical-against-reworded distinction are deleted; "reminder-only after everything at every cap" and "a scene score enters no ranking" are removed; a scene-surface score enters the final score where a topic cosine does; a description's occasion never evicts a full-standing member of its kind. One joined participants cue. The closed pool and the narrow scene-time read are owned by Task_2 with the graph port and the Oxigraph selector. Test files are enumerated per task. The keyless case, ADR-D-0029's validation case and the state regression case are acceptance cases; the rewording assertion moves to the companion paraphrase family. The base becomes the top of the state stack after state Task_4.
+  - Tradeoffs considered: the returned list as the pool (no port change) against the full fetched pool; the full pool was chosen because with a label repeated more often than the limit the returned list holds the lowest ids and "the last time here" would be arbitrary. Made precise by the decider the same day: a description cue contributes only its most recent few occasions as candidates, so verbatim labels cannot crowd graded topic matches by construction; the rest of its matches are counted in the trace as left out by the cue's limit. The only stop-and-report kept is on-topic survival below the topic-alone level on the corrected overlap family.
+  - User approval: ruled by the decider, 2026-09-21.
+  - Record proposed: none in this slice. One proposed design record with one decision (a description never takes an identity's standing in recall) is drafted only after the fourth-pin measurement.
+
+## Notes
+- Risks: a description brings only as many occasions as its floor value (one at a floor of zero), so in a keyless deployment with default floors the scene's share is small by design, and calibration of the floor values is what widens it; the closed pool for a label repeated for years is a few thousand refs and one bounded read, and if that read measures as costly the worker reports it and builds nothing else; tests that used appended words to make an episode findable by topic fail for a reason unrelated to their intent and are rewritten to say what they mean; embedding cost for a worded scene rises by up to two inputs per episode, not per observation.
+- Edge cases, with the expected result: a participant given by key and by description is knowing through the key, and its words still join the participants cue; a memory reached both ways has full standing. The same words as topic and as setting run two scoped searches. A name nobody bears activates nothing as a name, as today, and its words still join the participants cue. A scene with only a time writes exactly what it writes today. A store indexed before this slice has no scene surfaces: every description search reports no best score and brings nothing.
