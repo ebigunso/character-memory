@@ -507,7 +507,7 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
     };
     let result = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(counts(&result), (Some(1), Some(2)));
-    assert_eq!(result.pack.salient_observations.len(), 2);
+    assert_eq!(result.pack.salient_observations.len(), 1);
     memory
         .forget(ForgetMemoryDraft::suppress(
             LifecycleTargetRef::episode(episode),
@@ -525,6 +525,129 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
         (Some(1), Some(2))
     );
     memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and_paths() {
+    use crate::adapters::stats::InMemoryRetrievalStatsStore;
+
+    for route in 0..3 {
+        for reverse_ids in [false, true] {
+            let (mut memory, _) = scene_memory().await;
+            create_notion(&memory, 100, None).await;
+            let participant = MemoryId::from_u128(100);
+            let mut context = RetrievalContext::default().with_trace();
+            context.scene.participants.push(keyed(100));
+            context.graph_limits.max_depth = 1;
+            for count in 1..=10 {
+                let id = 40_000 + if reverse_ids { 11 - count } else { count } * 10;
+                let episode_id = MemoryId::from_u128(id);
+                let direct = route == 0 || (route == 2 && count % 3 != 1);
+                let mentions = route == 1 || (route == 2 && count % 3 != 0);
+                let mut occasion = scene();
+                occasion.time += chrono::Duration::hours(count as i64);
+                if direct {
+                    occasion.participants.push(keyed(100));
+                }
+                let mut episode = EpisodeDraft::new("The participant visited.");
+                episode.id = Some(episode_id);
+                // Authorship order deliberately disagrees with scene recency.
+                episode.created_at = Some(scene().time - chrono::Duration::hours(count as i64));
+                episode.scene = Some(occasion);
+                episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+                let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
+                    EpisodeCandidate::new(episode, CandidateProvenance::caller("occasion")),
+                ));
+                if mentions {
+                    for offset in 1..=3 {
+                        let mut observation = ObservationDraft::new(episode_id, "A remark.");
+                        observation.id = Some(MemoryId::from_u128(id + offset));
+                        observation.created_at = Some(scene().time);
+                        observation.observed_at = Some(scene().time);
+                        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+                        plan = plan.with_candidate(MemoryCandidate::Observation(
+                            ObservationCandidate::new(
+                                observation,
+                                CandidateProvenance::caller("remark"),
+                            ),
+                        ));
+                    }
+                }
+                memory.commit(plan, CommitOptions::default()).await.unwrap();
+                if mentions {
+                    for offset in 1..=3 {
+                        let observation = MemoryId::from_u128(id + offset);
+                        let link = if offset % 2 == 0 {
+                            MemoryLinkDraft::new(
+                                ObjectType::Entity,
+                                participant,
+                                RelationType::Mentions,
+                                ObjectType::Observation,
+                                observation,
+                            )
+                        } else {
+                            MemoryLinkDraft::new(
+                                ObjectType::Observation,
+                                observation,
+                                RelationType::Mentions,
+                                ObjectType::Entity,
+                                participant,
+                            )
+                        };
+                        memory.link(link).await.unwrap();
+                    }
+                }
+                let healthy = memory.retrieve(context.clone()).await.unwrap();
+                let healthy_stats = std::mem::replace(
+                    &mut memory.memory_composition.stats_store,
+                    Box::new(InMemoryRetrievalStatsStore::new()),
+                );
+                let missing = memory.retrieve(context.clone()).await.unwrap();
+                memory.memory_composition.stats_store = healthy_stats;
+                for result in [&healthy, &missing] {
+                    let occasions = result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .map(|episode| episode.id)
+                        .chain(
+                            result
+                                .pack
+                                .salient_observations
+                                .iter()
+                                .map(|observation| observation.episode_id),
+                        )
+                        .collect::<BTreeSet<_>>();
+                    assert_eq!(
+                        occasions,
+                        BTreeSet::from([episode_id]),
+                        "route={route}, reverse_ids={reverse_ids}, N={count}"
+                    );
+                    assert_eq!(result.pack.relevant_episodes.len(), usize::from(direct));
+                    assert_eq!(
+                        result.pack.salient_observations.len(),
+                        usize::from(mentions)
+                    );
+                }
+                for relation in [RelationType::Involves, RelationType::Mentions] {
+                    let decision = |result: &RetrieveOutcome| {
+                        let row = result
+                            .trace
+                            .as_ref()
+                            .unwrap()
+                            .selectivity_decisions
+                            .iter()
+                            .find(|row| row.root.id == participant && row.relation == relation)
+                            .unwrap();
+                        (row.chosen_fanout, row.fallback)
+                    };
+                    assert_eq!(decision(&healthy), (1, false));
+                    assert_eq!(decision(&missing), (1, true));
+                }
+            }
+            memory.close().await.unwrap();
+        }
+    }
 }
 
 #[tokio::test]
@@ -627,7 +750,7 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
         .flat_map(|caller_built| {
             [100, 101]
                 .into_iter()
-                .map(move |ubiquitous| (caller_built, ubiquitous, 0, 3, 1, 3, Some((24, 24))))
+                .map(move |ubiquitous| (caller_built, ubiquitous, 1, 3, 1, 4, Some((24, 24))))
         })
         .collect::<Vec<_>>();
     assert_eq!(observed, expected);

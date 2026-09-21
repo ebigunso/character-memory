@@ -12,7 +12,8 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
+    bounded_incident_link_refs, graph_expansion_bounded_error, is_participant_pair,
+    BoundedExpansionLinkRef, ParticipantOccasions,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -546,6 +547,7 @@ pub(super) fn rdf_parse_error(
 
 #[derive(Debug, Default)]
 pub(super) struct BoundedGraphVisibility {
+    pub(super) participant_occasions: ParticipantOccasions,
     pub(super) object_refs: HashSet<MemoryObjectRef>,
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
@@ -573,9 +575,27 @@ pub(super) fn bounded_graph_visible_refs(
     let mut fanout_utilization = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
+    let mut participant_occasions = ParticipantOccasions::new();
 
     for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
+        if depth == 0
+            && query
+                .fanout_overrides
+                .iter()
+                .any(|entry| is_participant_pair(entry.relation, entry.object_type))
+        {
+            let neighbors = link_refs
+                .iter()
+                .filter_map(|link| {
+                    let neighbor = link.other_endpoint(root_ref);
+                    is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+                })
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            participant_occasions = selectors.select_participant_occasions(&neighbors)?;
+        }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
         for object_ref in &frontier {
@@ -589,6 +609,7 @@ pub(super) fn bounded_graph_visible_refs(
                 *object_ref,
                 depth,
                 incident_link_refs,
+                &participant_occasions,
                 &mut bounded_failure,
             )?;
             fanout_utilization.extend(utilization);
@@ -626,6 +647,7 @@ pub(super) fn bounded_graph_visible_refs(
         .collect::<HashSet<_>>();
 
     Ok(BoundedGraphVisibility {
+        participant_occasions,
         object_refs: graph_refs,
         traversal_link_ids: graph_link_ids,
         lifecycle_link_ids,

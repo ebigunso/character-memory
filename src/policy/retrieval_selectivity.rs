@@ -478,7 +478,7 @@ const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
     FanoutSpec {
         relation: RelationType::Involves,
         object_type: ObjectType::Episode,
-        min_fanout: 0,
+        min_fanout: 1,
         max_fanout: 5,
     },
     FanoutSpec {

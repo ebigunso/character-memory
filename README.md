@@ -60,9 +60,9 @@ Each cue kind has a floor at the merged candidate cap, the graph root cap and ea
 
 With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a floor admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
 
-A participant present in most experiences brings fewer episodes and observations to mind. Frequency counts distinct episodes, so several observations or participants in one episode do not inflate its weight. This rule applies to every notion, including whichever one the application regards as the character; beliefs about a familiar participant keep their existing retrieval rule.
+A participant present in most experiences brings fewer occasions to mind, with a minimum of the latest one. Occasions are selected by recorded `Scene.time`, with one shared episode budget across direct episode links and observation links, and at most one observation per selected episode on the observation route. Frequency counts distinct episodes, so several observations or participants in one episode do not inflate its weight. This rule applies to every notion, including whichever one the application regards as the character; beliefs about a familiar participant keep their existing retrieval rule.
 
-Retrieval statistics are derived from writes. Missing or unhealthy statistics use conservative fanout, normally one neighbour per covered relation/object bucket, so a ubiquitous participant can still bring some memories. Statistics stores written before episode-frequency counting need a fresh statistics store; their participant statistics remain missing even after new writes. There is currently no graph-to-statistics rebuild.
+Retrieval statistics are derived from writes. Missing or unhealthy statistics use conservative fanout, normally one neighbour per covered relation/object bucket; the participant routes share the latest occasion, just as a ubiquitous participant does with healthy statistics. Statistics stores written before episode-frequency counting need a fresh statistics store; their participant statistics remain missing even after new writes. There is currently no graph-to-statistics rebuild.
 
 ## What this is not
 
