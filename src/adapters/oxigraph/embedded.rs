@@ -314,6 +314,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         )?;
 
         let mut hydrated_query = query.clone();
+        hydrated_query.traversal_link_ids = Some(visibility.traversal_link_ids);
         hydrated_query.trace_mode = crate::ports::graph_authority::TraceMode::Disabled;
         let mut expansion = bounded_expansion(
             &hydrated_query,

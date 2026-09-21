@@ -505,6 +505,12 @@ fn bounded_expansion_plan<'a>(
 
         let mut incident_links = links
             .iter()
+            .filter(|link| {
+                query
+                    .traversal_link_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&link.id))
+            })
             .filter(|link| relation_allowed(query, link.relation))
             .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
