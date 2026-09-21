@@ -134,10 +134,16 @@ impl SelectivityStatsContext {
         let mut global_counters = HashMap::new();
         if health.state == RetrievalStatsHealthState::Healthy {
             for spec in &specs {
-                let global_counter = match stats_store
-                    .global_counter(spec.relation, spec.object_type)
-                    .await
-                {
+                let bucket = spec.count_bucket();
+                if global_counters.contains_key(&bucket) {
+                    continue;
+                }
+                let counter = if bucket == (RelationType::Involves, ObjectType::Episode) {
+                    stats_store.global_episode_counter().await
+                } else {
+                    stats_store.global_counter(bucket.0, bucket.1).await
+                };
+                let global_counter = match counter {
                     Ok(counter) => counter,
                     Err(error) => {
                         let cause = RetrievalStatsHealthCause::GlobalCounterRead {
@@ -154,7 +160,7 @@ impl SelectivityStatsContext {
                         });
                     }
                 };
-                global_counters.insert((spec.relation, spec.object_type), global_counter);
+                global_counters.insert(bucket, global_counter);
             }
         }
         Ok(Self {
@@ -196,11 +202,12 @@ pub(crate) async fn selectivity_plan_for_entity(
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
+        let (count_relation, count_object_type) = spec.count_bucket();
         let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
             let key = RetrievalStatsCounterKey {
                 entity_id,
-                relation_kind: spec.relation,
-                object_type: spec.object_type,
+                relation_kind: count_relation,
+                object_type: count_object_type,
             };
             let entity = match stats_store.counter(&key).await {
                 Ok(counter) => counter,
@@ -212,7 +219,7 @@ pub(crate) async fn selectivity_plan_for_entity(
                     None
                 }
             };
-            let global = stats_context.global_counter(spec.relation, spec.object_type);
+            let global = stats_context.global_counter(count_relation, count_object_type);
             match (entity, global) {
                 (Some(entity), Some(global)) => {
                     let entity_count = count_scope.count(entity);
@@ -239,7 +246,7 @@ pub(crate) async fn selectivity_plan_for_entity(
         };
 
         let budget_spec = policy
-            .fanout_spec(spec.relation, spec.object_type)
+            .fanout_spec(count_relation, count_object_type)
             .unwrap_or(*spec);
         let max_fanout = budget_spec.max_fanout.min(static_max_fanout);
         let min_fanout = budget_spec.min_fanout.min(max_fanout);
@@ -436,8 +443,29 @@ struct FanoutSpec {
     max_fanout: usize,
 }
 
-fn fanout_specs() -> &'static [FanoutSpec] {
-    &DEFAULT_FANOUT_SPECS
+impl FanoutSpec {
+    fn count_bucket(self) -> (RelationType, ObjectType) {
+        match (self.relation, self.object_type) {
+            (RelationType::Mentions, ObjectType::Observation) => {
+                (RelationType::Involves, ObjectType::Episode)
+            }
+            bucket => bucket,
+        }
+    }
+}
+
+fn fanout_specs() -> [FanoutSpec; 4] {
+    let [about, participant, thread] = DEFAULT_FANOUT_SPECS;
+    [
+        about,
+        participant,
+        thread,
+        FanoutSpec {
+            relation: RelationType::Mentions,
+            object_type: ObjectType::Observation,
+            ..participant
+        },
+    ]
 }
 
 fn default_fanout_specs() -> [FanoutSpec; 3] {
@@ -914,6 +942,13 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for FailingRetrievalStatsStore {
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            self.global_counter(RelationType::Involves, ObjectType::Episode)
+                .await
+        }
+
         async fn record_edges(
             &self,
             _edges: &[RetrievalStatsEdge],
@@ -966,6 +1001,13 @@ mod tests {
 
     #[async_trait]
     impl RetrievalStatsStore for PartiallyFailingRetrievalStatsStore {
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            self.global_counter(RelationType::Involves, ObjectType::Episode)
+                .await
+        }
+
         async fn record_edges(
             &self,
             _edges: &[RetrievalStatsEdge],

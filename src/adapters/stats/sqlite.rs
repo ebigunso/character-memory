@@ -16,6 +16,7 @@ use crate::ports::retrieval_stats::{
 #[derive(Debug)]
 pub(crate) struct SqliteRetrievalStatsStore {
     connection: Mutex<Connection>,
+    has_episode_index: bool,
 }
 
 impl SqliteRetrievalStatsStore {
@@ -35,9 +36,28 @@ impl SqliteRetrievalStatsStore {
             }
         }
         let connection = Connection::open(path).map_err(sqlite_error)?;
+        let is_fresh = !table_exists(&connection, "entity_edge_index")?;
         initialize_schema(&connection)?;
+        if is_fresh {
+            connection
+                .execute_batch(
+                    "CREATE TABLE episode_state_index (
+                    episode_id TEXT PRIMARY KEY,
+                    retention_state TEXT NOT NULL
+                );
+                CREATE TABLE episode_counts (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    total_count INTEGER NOT NULL,
+                    active_count INTEGER NOT NULL
+                );
+                INSERT INTO episode_counts VALUES (1, 0, 0);",
+                )
+                .map_err(sqlite_error)?;
+        }
+        let has_episode_index = table_exists(&connection, "episode_state_index")?;
         Ok(Self {
             connection: Mutex::new(connection),
+            has_episode_index,
         })
     }
 }
@@ -63,6 +83,36 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for state in states {
+            if self.has_episode_index && state.object_type == ObjectType::Episode {
+                let previous = transaction
+                    .query_row(
+                        "SELECT retention_state FROM episode_state_index WHERE episode_id = ?1",
+                        [state.object_id.to_string()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?
+                    .map(|value| retention_from_key(&value))
+                    .transpose()?;
+                transaction.execute(
+                    "INSERT INTO episode_state_index (episode_id, retention_state) VALUES (?1, ?2)
+                     ON CONFLICT(episode_id) DO UPDATE SET retention_state = excluded.retention_state",
+                    params![state.object_id.to_string(), retention_state_key(state.retention_state)],
+                ).map_err(sqlite_error)?;
+                transaction
+                    .execute(
+                        "UPDATE episode_counts SET total_count = total_count + ?1,
+                        active_count = active_count + ?2 WHERE singleton = 1",
+                        params![
+                            i64::from(previous.is_none()),
+                            bool_delta(
+                                previous == Some(RetentionState::Active),
+                                state.retention_state == RetentionState::Active
+                            ),
+                        ],
+                    )
+                    .map_err(sqlite_error)?;
+            }
             update_object_state(&transaction, state)?;
         }
         transaction.commit().map_err(sqlite_error)
@@ -114,6 +164,24 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
             .transpose()
     }
 
+    async fn global_episode_counter(
+        &self,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        if !self.has_episode_index {
+            return Ok(None);
+        }
+        let connection = lock(&self.connection)?;
+        connection
+            .query_row(
+                "SELECT total_count, active_count, active_count FROM episode_counts WHERE singleton = 1",
+                [],
+                raw_counter_row,
+            )
+            .map_err(sqlite_error)
+            .and_then(counter_from_raw)
+            .map(Some)
+    }
+
     async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
         let state =
@@ -152,6 +220,16 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         )?;
         transaction.commit().map_err(sqlite_error)
     }
+}
+
+fn table_exists(connection: &Connection, name: &str) -> Result<bool, RetrievalStatsStoreError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [name],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)
 }
 
 fn initialize_schema(connection: &Connection) -> Result<(), RetrievalStatsStoreError> {
@@ -560,6 +638,31 @@ mod tests {
     use crate::domain::{MemoryId, ObjectType, RelationType};
 
     #[tokio::test]
+    async fn absent_episode_index_remains_missing_after_writes_and_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        initialize_schema(&connection).unwrap();
+        drop(connection);
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(store.global_episode_counter().await.unwrap(), None);
+        store
+            .record_object_states(&[RetrievalStatsObjectState {
+                object_id: crate::domain::MemoryId::from_u128(1),
+                object_type: ObjectType::Episode,
+                retention_state: RetentionState::Active,
+                is_current: true,
+                observed_at: timestamp(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(store.global_episode_counter().await.unwrap(), None);
+        drop(store);
+        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(reopened.global_episode_counter().await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn sqlite_store_persists_counters_across_reopen() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("stats.sqlite3");
@@ -571,6 +674,16 @@ mod tests {
             let store = SqliteRetrievalStatsStore::open(&path).unwrap();
             store
                 .record_edges(std::slice::from_ref(&edge))
+                .await
+                .unwrap();
+            store
+                .record_object_states(&[RetrievalStatsObjectState {
+                    object_id: episode_id,
+                    object_type: ObjectType::Episode,
+                    retention_state: RetentionState::Active,
+                    is_current: true,
+                    observed_at: timestamp(),
+                }])
                 .await
                 .unwrap();
         }
@@ -588,6 +701,10 @@ mod tests {
         assert_eq!(counter.total_count, 1);
         assert_eq!(counter.active_count, 1);
         assert_eq!(counter.current_count, 1);
+        assert_eq!(
+            reopened.global_episode_counter().await.unwrap(),
+            Some(counter)
+        );
         assert_eq!(
             reopened.health().await.unwrap(),
             RetrievalStatsHealth::default()

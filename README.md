@@ -54,6 +54,10 @@ Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(Activity
 
 A thread with many members can take every root after the participants under the default root limit, so the topic may contribute nothing until cue floors are implemented; members are taken most recent first.
 
+A participant present in most experiences brings fewer episodes and observations to mind. Frequency counts distinct episodes, so several observations or participants in one episode do not inflate its weight. This rule applies to every notion, including whichever one the application regards as the character; beliefs about a familiar participant keep their existing retrieval rule.
+
+Retrieval statistics are derived from writes. Missing or unhealthy statistics use conservative fanout, normally one neighbour per covered relation/object bucket, so a ubiquitous participant can still bring some memories. Statistics stores written before episode-frequency counting need a fresh statistics store; their participant statistics remain missing even after new writes. There is currently no graph-to-statistics rebuild.
+
 ## What this is not
 
 Character Memory is not:

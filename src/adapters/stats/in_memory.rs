@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use crate::domain::{ObjectType, RelationType};
+use crate::domain::{MemoryId, ObjectType, RelationType, RetentionState};
 use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
     insert_edge, recomputed_counters, recomputed_global_counters, RetrievalStatsCounter,
@@ -38,6 +38,8 @@ pub(crate) struct InMemoryState {
     pub(crate) edges: HashMap<String, RetrievalStatsEdge>,
     pub(crate) counters: HashMap<RetrievalStatsCounterKey, RetrievalStatsCounter>,
     pub(crate) global_counters: HashMap<(RelationType, ObjectType), RetrievalStatsCounter>,
+    pub(crate) episodes: HashMap<MemoryId, RetentionState>,
+    pub(crate) episode_counter: RetrievalStatsCounter,
     pub(crate) counters_dirty: bool,
     pub(crate) health: RetrievalStatsHealth,
 }
@@ -62,6 +64,11 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
     ) -> Result<(), RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
         for object_state in states {
+            if object_state.object_type == ObjectType::Episode {
+                state
+                    .episodes
+                    .insert(object_state.object_id, object_state.retention_state);
+            }
             for edge in state.edges.values_mut() {
                 if edge.object_id == object_state.object_id
                     && edge.object_type == object_state.object_type
@@ -98,6 +105,14 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
             .copied())
     }
 
+    async fn global_episode_counter(
+        &self,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        let mut state = self.state.lock().await;
+        state.refresh_counters_if_dirty();
+        Ok(Some(state.episode_counter))
+    }
+
     async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         Ok(self.state.lock().await.health.clone())
     }
@@ -123,6 +138,16 @@ impl InMemoryState {
 
         self.counters = recomputed_counters(&self.edges);
         self.global_counters = recomputed_global_counters(&self.edges);
+        let active_count = self
+            .episodes
+            .values()
+            .filter(|state| **state == RetentionState::Active)
+            .count() as u64;
+        self.episode_counter = RetrievalStatsCounter {
+            total_count: self.episodes.len() as u64,
+            active_count,
+            current_count: active_count,
+        };
         self.counters_dirty = false;
     }
 }

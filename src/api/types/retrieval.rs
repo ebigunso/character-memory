@@ -554,7 +554,11 @@ pub struct SelectivityTrace {
     pub object_type: ObjectType,
     pub count_scope: SelectivityCountScope,
     pub score: Option<f64>,
+    /// Distinct episodes involving the notion for Involves/Episode and Mentions/Observation;
+    /// otherwise the notion's relation/object edge count.
     pub entity_count: Option<u64>,
+    /// All episodes in the count scope for the two participant paths;
+    /// otherwise the global relation/object edge count.
     pub global_count: Option<u64>,
     pub support_factor: f64,
     pub chosen_fanout: usize,
