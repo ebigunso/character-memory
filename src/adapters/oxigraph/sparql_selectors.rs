@@ -13,9 +13,7 @@ use crate::domain::{
     graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType, RetentionState,
 };
 use crate::errors::CustomError;
-use crate::policy::graph_expansion::{
-    is_participant_pair, ParticipantOccasion, ParticipantOccasions,
-};
+use crate::policy::graph_expansion::{ParticipantOccasion, ParticipantOccasions};
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansionFilteredNode,
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectQuery,
@@ -419,30 +417,62 @@ impl<'a> SparqlGraphSelectors<'a> {
         reference_time: DateTime<Utc>,
         policy: GraphExpansionLifecyclePolicy,
     ) -> Result<Option<(MemoryId, DateTime<Utc>)>, CustomError> {
-        let root = MemoryObjectRef::new(ObjectType::Entity, participant);
-        let neighbors = self
-            .select_links_touching(&[root])?
+        let query_text = format!(
+            r#"
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT DISTINCT ?episodeId ?sceneTime ?time WHERE {{
+              GRAPH ?linkGraph {{
+                ?link a <{link_class}> .
+                {{ ?link <{from}> <{participant}> ; <{to}> ?neighbor . }}
+                UNION {{ ?link <{to}> <{participant}> ; <{from}> ?neighbor . }}
+              }}
+              {{
+                GRAPH ?linkGraph {{ ?link <{relation}> "involves" . }}
+                GRAPH ?neighbor {{ ?neighbor <{object_type}> "episode" ; <{retention}> ?retention . }}
+                BIND(?neighbor AS ?episode)
+              }} UNION {{
+                GRAPH ?linkGraph {{ ?link <{relation}> "mentions" . }}
+                GRAPH ?neighbor {{ ?neighbor <{object_type}> "observation" ; <{episode}> ?episode ; <{retention}> ?retention . }}
+              }}
+              GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+              BIND(xsd:dateTime(?sceneTime) AS ?time)
+              FILTER(?time <= {reference_time}^^xsd:dateTime)
+              {retention_filter}
+            }}
+            ORDER BY DESC(?time) ?episodeId
+            LIMIT 1
+            "#,
+            participant = graph_uri(ObjectType::Entity, participant),
+            link_class = vocab::CLASS_MEMORY_LINK,
+            from = vocab::FROM,
+            to = vocab::TO,
+            relation = vocab::RELATION,
+            object_type = vocab::OBJECT_TYPE,
+            object_id = vocab::OBJECT_ID,
+            scene_time = vocab::SCENE_TIME,
+            episode = vocab::EPISODE,
+            retention = vocab::RETENTION_STATE,
+            reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
+            retention_filter = if policy.include_suppressed {
+                ""
+            } else {
+                "FILTER(?retention = \"active\" && ?episodeRetention = \"active\")"
+            },
+        );
+        self.query_solutions(&query_text)?
             .into_iter()
-            .filter_map(|link| {
-                let neighbor = if link.from == root {
-                    link.to
-                } else {
-                    link.from
-                };
-                is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+            .next()
+            .map(|solution| {
+                let time = literal_binding(&solution, "sceneTime")?
+                    .parse()
+                    .map_err(|error| {
+                        CustomError::DatabaseError(format!(
+                            "Oxigraph SPARQL invalid Scene.time: {error}"
+                        ))
+                    })?;
+                Ok((memory_id_binding(&solution, "episodeId")?, time))
             })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let occasions = self.select_participant_occasions(&neighbors)?;
-        Ok(occasions
-            .iter()
-            .filter(|(neighbor, occasion)| {
-                occasion.time <= reference_time
-                    && occasion.filtered_reason(**neighbor, policy).is_none()
-            })
-            .min_by_key(|(_, occasion)| (std::cmp::Reverse(occasion.time), occasion.episode_id))
-            .map(|(_, occasion)| (occasion.episode_id, occasion.time)))
+            .transpose()
     }
 
     pub(crate) fn select_participant_occasions(
