@@ -232,7 +232,6 @@ impl<'a> SparqlGraphSelectors<'a> {
         &self,
         key: &crate::domain::ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
-        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let value = serde_json::to_string(key).expect("scope keys contain strings only");
         let predicate = format!(
@@ -240,9 +239,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             vocab::SCOPE_KEY,
             oxigraph::model::Literal::new_simple_literal(value)
         );
-        let (mut ids, filtered) = self.select_state(&predicate, policy)?;
-        ids.truncate(limit);
-        Ok((ids, filtered))
+        self.select_state(&predicate, policy)
     }
 
     fn select_state(

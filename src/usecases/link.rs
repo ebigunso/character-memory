@@ -142,6 +142,9 @@ pub(crate) fn admit_link(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
+    use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
@@ -625,17 +628,10 @@ mod tests {
 
         async fn query_scope_state(
             &self,
-            key: &crate::domain::ScopeKey,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<MemoryId>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (key, policy, limit);
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            let _ = (key, policy);
             unreachable!("scope selector is not used by this failure fixture")
         }
 

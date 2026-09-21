@@ -126,7 +126,6 @@ where
                             include_suppressed: context.lifecycle_policy.include_suppressed,
                             include_superseded: context.lifecycle_policy.include_superseded,
                         },
-                        context.candidate_limits.max_graph_roots,
                     )
                     .await?;
                 assembly
@@ -138,7 +137,12 @@ where
                             &entry.superseded_by,
                         )
                     }));
-                for (rank, id) in ids.into_iter().enumerate() {
+                // Lifecycle filtering and successor deduplication precede this cap.
+                for (rank, id) in ids
+                    .into_iter()
+                    .take(context.candidate_limits.max_graph_roots)
+                    .enumerate()
+                {
                     root_order.insert(
                         (
                             cues.participants.len() + offset,
@@ -1390,6 +1394,8 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
     use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -2943,17 +2949,10 @@ mod tests {
 
         async fn query_scope_state(
             &self,
-            key: &crate::domain::ScopeKey,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<MemoryId>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (key, policy, limit);
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            let _ = (key, policy);
             unreachable!("scope selector is not used by this failure fixture")
         }
 

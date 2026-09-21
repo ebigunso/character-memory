@@ -330,6 +330,9 @@ fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
+    use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -1268,17 +1271,10 @@ mod tests {
 
         async fn query_scope_state(
             &self,
-            key: &crate::domain::ScopeKey,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<MemoryId>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            self.store.query_scope_state(key, policy, limit).await
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            self.store.query_scope_state(key, policy).await
         }
 
         async fn expand_bounded(

@@ -306,10 +306,10 @@ pub enum ActivityResolution {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphRootSource {
-    Place,
     Vector,
     Participant,
     Activity,
+    Place,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
