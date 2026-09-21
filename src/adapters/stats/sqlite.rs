@@ -35,11 +35,12 @@ impl SqliteRetrievalStatsStore {
                 })?;
             }
         }
-        let connection = Connection::open(path).map_err(sqlite_error)?;
-        let is_fresh = !table_exists(&connection, "entity_edge_index")?;
-        initialize_schema(&connection)?;
+        let mut connection = Connection::open(path).map_err(sqlite_error)?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        let is_fresh = !table_exists(&transaction, "entity_edge_index")?;
+        initialize_schema(&transaction)?;
         if is_fresh {
-            connection
+            transaction
                 .execute_batch(
                     "CREATE TABLE episode_state_index (
                     episode_id TEXT PRIMARY KEY,
@@ -54,7 +55,8 @@ impl SqliteRetrievalStatsStore {
                 )
                 .map_err(sqlite_error)?;
         }
-        let has_episode_index = table_exists(&connection, "episode_state_index")?;
+        let has_episode_index = table_exists(&transaction, "episode_state_index")?;
+        transaction.commit().map_err(sqlite_error)?;
         Ok(Self {
             connection: Mutex::new(connection),
             has_episode_index,
@@ -636,6 +638,26 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::domain::{MemoryId, ObjectType, RelationType};
+
+    #[tokio::test]
+    async fn failed_schema_creation_does_not_leave_a_store_classified_as_old() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("CREATE TABLE episode_counts (conflict INTEGER);")
+            .unwrap();
+        assert!(SqliteRetrievalStatsStore::open(&path).is_err());
+        assert!(!table_exists(&connection, "entity_edge_index").unwrap());
+        connection
+            .execute_batch("DROP TABLE episode_counts;")
+            .unwrap();
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(
+            store.global_episode_counter().await.unwrap(),
+            Some(RetrievalStatsCounter::default())
+        );
+    }
 
     #[tokio::test]
     async fn absent_episode_index_remains_missing_after_writes_and_reopen() {
