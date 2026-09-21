@@ -408,8 +408,69 @@ async fn overlapping_root_scopes_preserve_each_selectors_priority() {
     let mut limited = context(scene(Some("place"), &[("project", "42")]));
     limited.candidate_limits.max_graph_roots = 2;
     assert_eq!(
-        ids(&memory.retrieve(limited).await.unwrap()),
+        ids(&memory.retrieve(limited.clone()).await.unwrap()),
         vec![id(301), id(303)]
+    );
+    let topic = "quasar telescope astronomy spectroscopy";
+    let mut topical = belief(901, 104);
+    topical.text = topic.into();
+    commit(
+        &memory,
+        RememberInput::new("separate topic")
+            .with_episode(episode(104, scene(None, &[])))
+            .with_derived_memory(topical),
+    )
+    .await;
+    limited.topic = Some(topic.into());
+    limited.candidate_limits.max_graph_roots = 3;
+    let result = memory.retrieve(limited).await.unwrap();
+    assert_eq!(ids(&result), vec![id(301), id(303), id(901)]);
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
+async fn shared_explicit_state_keeps_expansion_order_for_each_kind() {
+    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let mut thread = MemoryThreadDraft::new("work", "work");
+    thread.id = Some(id(600));
+    commit(
+        &memory,
+        RememberInput::new("thread").with_memory_thread(thread),
+    )
+    .await;
+    for (source, key, memory_id) in [(103, Some("place"), 321), (104, None, 322)] {
+        let mut draft = belief(memory_id, source);
+        draft.thread_ids.push(id(600));
+        commit(
+            &memory,
+            RememberInput::new(format!("scope {source}"))
+                .with_episode(episode(source, scene(key, &[])))
+                .with_derived_memory(draft)
+                .with_memory_link(character_memory::MemoryLinkDraft::new(
+                    ObjectType::DerivedMemory,
+                    id(memory_id),
+                    character_memory::RelationType::DerivedFrom,
+                    ObjectType::Episode,
+                    id(source),
+                )),
+        )
+        .await;
+    }
+    let mut request = context(scene(Some("place"), &[]));
+    request.activity = Some(ActivityRef::Thread(id(600)));
+    request.graph_limits.max_depth = 1;
+    request.section_limits.relevant_episodes = 1;
+    request.cue_floors.place = 0;
+    let result = memory.retrieve(request).await.unwrap();
+    assert_eq!(
+        result
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>(),
+        vec![id(103)]
     );
     memory.close().await.unwrap();
     root.close().unwrap();

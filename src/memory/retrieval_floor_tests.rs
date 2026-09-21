@@ -148,8 +148,7 @@ fn mixed_context() -> RetrievalContext {
     context
 }
 
-#[tokio::test]
-async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
         Box::new(TemporaryVectorCandidateStore::open(4).await),
@@ -178,6 +177,12 @@ async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
         .remember(input, RememberOptions::default())
         .await
         .unwrap();
+    (memory, strong_id)
+}
+
+#[tokio::test]
+async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
     let mut outcomes = Vec::new();
     let mut included = Vec::new();
     for place_cue in [false, true] {
@@ -222,6 +227,96 @@ async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
     }
     assert_eq!(outcomes, [GraphExpansionOutcome::Expanded; 2]);
     assert_eq!(included, [true; 2]);
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 12;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 48;
+    let mut topic_only = context.clone();
+    topic_only.scene.setting.words = None;
+    let topic_only = memory.retrieve(topic_only).await.unwrap();
+    let candidates = topic_only.trace.unwrap().vector_candidates;
+    assert_eq!(candidates[0].object.id, strong_id);
+    assert!((candidates[0].score - 0.89).abs() < 0.0001);
+    assert!(candidates[1..]
+        .iter()
+        .all(|candidate| (candidate.score - 0.2).abs() < 0.0001));
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert_eq!(trace.vector_candidates.len(), 12);
+    assert!(
+        trace
+            .vector_candidates
+            .iter()
+            .any(|row| row.object.id == strong_id),
+        "the strongest Topic hit was lost at candidate merge"
+    );
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::CandidateMerge,
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    assert!(result
+        .pack
+        .derived_memories
+        .iter()
+        .any(|row| row.memory.id == strong_id));
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 48;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 2;
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert!(trace
+        .vector_candidates
+        .iter()
+        .any(|row| row.object.id == strong_id));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    let assignment = trace
+        .section_assignments
+        .iter()
+        .find(|row| row.object.id == strong_id)
+        .unwrap();
+    assert_eq!(result.pack.derived_memories.len(), 2);
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::Section {
+            section: ContextPackSection::DerivedMemories,
+        },
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(
+        result
+            .pack
+            .derived_memories
+            .iter()
+            .any(|row| row.memory.id == strong_id),
+        "the strongest Topic hit was lost only at the section cap: {assignment:?}"
+    );
     memory.close().await.unwrap();
 }
 
@@ -359,11 +454,25 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
         (2000, CueFloorStage::CandidateMerge, CueKind::Participant),
         (2000, CueFloorStage::GraphRoots, CueKind::Participant),
         (3000, CueFloorStage::GraphRoots, CueKind::Place),
-        (2000, section, CueKind::Participant),
-        (3000, section, CueKind::Place),
+        (2001, section, CueKind::Participant),
+        (2002, section, CueKind::Participant),
         (4000, section, CueKind::Activity),
     ];
-    assert_eq!(trace.floor_admissions.len(), expected.len());
+    assert_eq!(trace.floor_admissions.len(), 42);
+    for (stage, count) in [
+        (CueFloorStage::CandidateMerge, 31),
+        (CueFloorStage::GraphRoots, 8),
+        (section, 3),
+    ] {
+        assert_eq!(
+            trace
+                .floor_admissions
+                .iter()
+                .filter(|row| row.stage == stage)
+                .count(),
+            count
+        );
+    }
     for (id, stage, cue_kind) in expected {
         assert!(trace.floor_admissions.contains(&CueFloorAdmission {
             object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
@@ -396,7 +505,7 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let no_section = memory.retrieve(no_section).await.unwrap();
     assert!(no_section.pack.salient_observations.is_empty());
     let admissions = no_section.trace.unwrap().floor_admissions;
-    assert_eq!(admissions.len(), 3);
+    assert_eq!(admissions.len(), 39);
     assert!(admissions
         .iter()
         .all(|row| !matches!(row.stage, CueFloorStage::Section { .. })));
@@ -534,24 +643,27 @@ async fn participant_and_place_keep_room_without_a_topic() {
     context.activity = None;
     context.candidate_limits.max_vector_candidates = 96;
     context.candidate_limits.max_graph_roots = 96;
-    context.section_limits.salient_observations = 2;
-    let result = memory.retrieve(context).await.unwrap();
+    context.section_limits.salient_observations = 6;
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    let repeated = memory.retrieve(context).await.unwrap();
+    assert_eq!(result.pack, repeated.pack);
+    assert_eq!(result.trace, repeated.trace);
     let selected = result
         .pack
         .salient_observations
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
-    assert_eq!(selected, [3000, 2000]);
+    assert_eq!(selected, [3000, 3001, 3002, 2000, 2001, 2002]);
     assert_eq!(
         result.trace.unwrap().floor_admissions,
-        [CueFloorAdmission {
-            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(2000)),
+        [2000, 2001, 2002].map(|id| CueFloorAdmission {
+            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
             stage: CueFloorStage::Section {
                 section: ContextPackSection::SalientObservations
             },
             cue_kind: CueKind::Participant,
-        }]
+        })
     );
     memory.close().await.unwrap();
 }
@@ -760,6 +872,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         (CueKind::Participant, 2000),
         (CueKind::Place, 3000),
         (CueKind::Activity, 4000),
+        (CueKind::Topic, 1000),
     ] {
         let mut context = mixed_context();
         let floors = &mut context.cue_floors;
@@ -767,9 +880,11 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Participant => floors.participant = 0,
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
-            CueKind::Topic => unreachable!(),
+            CueKind::Topic => floors.topic = 0,
         }
-        let result = memory.retrieve(context).await.unwrap();
+        // The other three reservations consume all room, so this kind waits.
+        context.candidate_limits.max_graph_roots = 3;
+        let result = memory.retrieve(context.clone()).await.unwrap();
         assert!(
             !result
                 .pack
@@ -783,40 +898,19 @@ async fn each_zero_floor_removes_only_its_reservation() {
             .unwrap()
             .floor_admissions
             .iter()
+            .filter(|row| row.stage == CueFloorStage::GraphRoots)
             .all(|row| row.cue_kind != kind));
+        // A zero reservation still participates when spare turns are available.
+        context.candidate_limits.max_graph_roots = 8;
+        let spare = memory.retrieve(context).await.unwrap();
+        assert!(
+            spare
+                .pack
+                .salient_observations
+                .iter()
+                .any(|object| object.id == MemoryId::from_u128(witness)),
+            "{kind:?}"
+        );
     }
-    // A long activity supplies enough explicit roots to crowd out the topic.
-    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
-    for id in 6000..6016 {
-        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
-        member.id = Some(MemoryId::from_u128(id));
-        member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
-        input = input.with_derived_memory(member);
-    }
-    memory
-        .remember(input, RememberOptions::default())
-        .await
-        .unwrap();
-    let protected = memory.retrieve(mixed_context()).await.unwrap();
-    assert!(protected
-        .trace
-        .unwrap()
-        .floor_admissions
-        .iter()
-        .any(|row| row.cue_kind == CueKind::Topic && row.stage == CueFloorStage::GraphRoots));
-    let mut context = mixed_context();
-    context.cue_floors.topic = 0;
-    let unprotected = memory.retrieve(context).await.unwrap();
-    let trace = unprotected.trace.unwrap();
-    assert!(trace
-        .floor_admissions
-        .iter()
-        .all(|row| row.cue_kind != CueKind::Topic));
-    assert!(trace
-        .graph_expansions
-        .iter()
-        .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
-        .all(|row| !(1000..1048).contains(&row.root.id.as_u128())));
     memory.close().await.unwrap();
 }

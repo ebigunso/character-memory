@@ -275,6 +275,8 @@ pub(crate) struct GraphExpansionRelation {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GraphExpansion {
     pub(crate) objects: Vec<MemoryObject>,
+    /// Admitted objects in traversal order, before stable output sorting.
+    pub(crate) selection_order: Vec<MemoryObjectRef>,
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
@@ -298,6 +300,7 @@ impl GraphExpansion {
     #[cfg(test)]
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self {
+            selection_order: objects.iter().map(MemoryObject::object_ref).collect(),
             objects,
             links,
             relations: Vec::new(),
@@ -305,26 +308,6 @@ impl GraphExpansion {
             expanded_nodes: std::collections::HashSet::new(),
             fanout_utilization: Vec::new(),
             bounded_failure: None,
-        }
-    }
-
-    pub(crate) fn from_plan(
-        objects: Vec<MemoryObject>,
-        links: Vec<MemoryLink>,
-        relations: Vec<GraphExpansionRelation>,
-        filtered_nodes: Vec<GraphExpansionFilteredNode>,
-        expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
-        fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
-        bounded_failure: Option<GraphExpansionBoundedFailure>,
-    ) -> Self {
-        Self {
-            objects,
-            links,
-            relations,
-            filtered_nodes,
-            expanded_nodes,
-            fanout_utilization,
-            bounded_failure,
         }
     }
 }
