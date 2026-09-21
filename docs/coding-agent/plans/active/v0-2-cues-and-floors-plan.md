@@ -174,6 +174,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 - 2026-09-21 Task_1 implemented (0da57d3) and approved at Tier D and Tier A: the activity beside the topic, typed and echoed as found or unknown, reaching what ordinary writes record with no new stored link; one set of cue kinds per admitted memory in the trace, replacing two older vocabularies (net about 200 lines removed). A thread's members enter most recent first. Until Task_3, a large thread can take every root after the participants; the README says so.
 - 2026-09-21 Task_2 implemented (16692bd) and approved at Tier D: a notion's share is its distinct episodes over all episodes, counted once per episode however the write linked it, on the two paths that lead to experiences; in a store of 24 occasions with five participants each, the notion present in all of them went from 15 admitted observation edges to none on the `remember` path and from 3 episode edges to none on a caller-built one, while a rare participant kept all of its three and the belief about the ubiquitous notion stayed.
+- 2026-09-21 Task_3 implemented (4eec349) and approved at Tier D and Tier A: floors per cue kind at the candidate merge, root selection and the section caps, served by one helper in successive rounds in the order participant, place, activity, topic, with unused room returned and original order kept. Three cue-only memories each lost at a different choke point before the change are admitted after it; topic-only and single-kind retrievals are unchanged. Values are 1 per kind and provisional, at `context.cue_floors`.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -196,6 +197,14 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - No statistics rebuild and no migration: a statistics store written before this change has no episode index, which means missing statistics and the conservative fallback, never zero counts, even after later writes. Known gap for a later plan: nothing rebuilds statistics from the graph.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
+
+- 2026-09-21 Decisions and known risks from Task_3, for the calibration in Task_4.
+  - Floors are served in successive rounds, one slot per kind per round: filling one kind's whole floor first would starve a kind that could have had a slot, and the short-room rule is the first round of the same loop.
+  - The floors value sits on the context, not on the candidate limits, because it governs the section caps too. It is the calibration knob and a measured default, not something an application is expected to set, and a floor is per cue kind, not per person or place.
+  - Known risk: there is no relevance threshold under an admission floor. A search for a description or for the setting's words always returns neighbours, so in a place the character has never been the place floor admits the least-bad place memory. The calibration measures pollution from floor admissions by score, not only starvation; the remedy may be a minimum score for floor eligibility.
+  - Known property: at the default expansion depth a memory from the same occasion inherits the participant kind, so a topic-found memory can satisfy the participant floor on its own. That is defensible behavior and it means a reserved kind does not imply independent direct recall. The trace does not distinguish a kind a memory was found by from one it inherited; the calibration derives that from the existing candidate, root and relation traces, and a field is added only if that proves impossible.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: the measured floors, at Task_4.
 
 ## Notes
 - Risks: admission changes move the pollution and context-size baselines of ADR-I-0022; the companion repository re-measures once, at its own closing task. A calibration corpus authored for other pressures may not isolate these three floors; Task_4 names the pressure it needs.
