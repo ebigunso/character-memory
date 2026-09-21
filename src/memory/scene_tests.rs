@@ -497,7 +497,7 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
 }
 
 #[tokio::test]
-async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_created_at() {
+async fn omitted_scene_time_uses_preparation_instant_instead_of_episode_creation_time() {
     let (memory, _) = memory().await;
     let before = Utc::now();
     let plan = memory
@@ -564,12 +564,7 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
         )
         .await
         .unwrap_err();
-    assert_issue(
-        error,
-        CandidateValidationIssue::MissingTimestamp {
-            field: CandidateTimestampField::SceneTime,
-        },
-    );
+    assert_issue(error, CandidateValidationIssue::MissingScene);
     // Missing scene is rejected while materializing request-owned values.
     assert!(inputs.lock().unwrap().is_empty());
     let unknown = MemoryId::from_u128(8499);

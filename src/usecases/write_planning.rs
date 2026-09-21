@@ -1217,7 +1217,7 @@ impl WritePlanCommitValues {
             };
             match candidate {
                 MemoryCandidate::Episode(candidate) => objects.push(MemoryObject::Episode(
-                    stable_episode_draft(candidate.draft)
+                    require_created_at(candidate.draft)
                         .map_err(timestamp_error)?
                         .into_domain_with_defaults(&mut defaults)?,
                 )),
@@ -1330,6 +1330,12 @@ trait CandidateUpdatedAt: CandidateCreatedAt {
     fn updated_at(&self) -> Option<chrono::DateTime<chrono::Utc>>;
 }
 
+impl CandidateCreatedAt for EpisodeDraft {
+    fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.created_at
+    }
+}
+
 impl CandidateCreatedAt for crate::api::types::ObservationDraft {
     fn created_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         self.created_at
@@ -1374,16 +1380,6 @@ where
         }
         Ok(draft)
     })
-}
-
-fn stable_episode_draft(draft: EpisodeDraft) -> Result<EpisodeDraft, CandidateTimestampField> {
-    if draft.created_at.is_none() {
-        return Err(CandidateTimestampField::CreatedAt);
-    }
-    if draft.scene.is_none() {
-        return Err(CandidateTimestampField::SceneTime);
-    }
-    Ok(draft)
 }
 
 fn stable_memory_thread_draft(
@@ -1552,9 +1548,7 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
             CandidateValidationIssue::AuthoredBeliefAboutLink
         }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
-        DomainValidationError::MissingScene => CandidateValidationIssue::MissingTimestamp {
-            field: CandidateTimestampField::SceneTime,
-        },
+        DomainValidationError::MissingScene => CandidateValidationIssue::MissingScene,
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }
