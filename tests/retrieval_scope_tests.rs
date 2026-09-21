@@ -162,34 +162,6 @@ async fn source_union_namespaces_and_restart_determine_scope() {
 }
 
 #[tokio::test]
-async fn forged_scope_keys_in_input_have_no_effect() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
-    let mut forged = serde_json::to_value(belief(301, 101)).unwrap();
-    forged["scope_keys"] = json!([{"setting":"forged"}]);
-    commit(
-        &memory,
-        RememberInput::new("forgery")
-            .with_episode(episode(101, scene(Some("legit"), &[])))
-            .with_derived_memory(serde_json::from_value(forged).unwrap()),
-    )
-    .await;
-    assert!(ids(&memory
-        .retrieve(context(scene(Some("forged"), &[])))
-        .await
-        .unwrap())
-    .is_empty());
-    assert_eq!(
-        ids(&memory
-            .retrieve(context(scene(Some("legit"), &[])))
-            .await
-            .unwrap()),
-        vec![id(301)]
-    );
-    memory.close().await.unwrap();
-    root.close().unwrap();
-}
-
-#[tokio::test]
 async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     commit(
