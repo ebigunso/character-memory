@@ -977,7 +977,8 @@ pub(crate) fn is_participant_pair(relation: RelationType, object_type: ObjectTyp
 
 #[derive(Default)]
 struct ParticipantExclusions {
-    candidates: Vec<(usize, RelationType, GraphExpansionFilteredNode)>,
+    // The excluded route's type can differ from its suppressed parent object's type.
+    candidates: Vec<(usize, RelationType, ObjectType, GraphExpansionFilteredNode)>,
     admitted_order: HashMap<MemoryObjectRef, usize>,
 }
 
@@ -996,13 +997,14 @@ impl ParticipantExclusions {
         if cut.is_none() && !self.admitted_order.is_empty() {
             return;
         }
-        for (rank, relation, filtered) in self.candidates {
+        for (rank, relation, object_type, filtered) in self.candidates {
             if cut.is_some_and(|cut| rank > *cut) {
                 continue;
             }
-            if let Some(row) = utilization.iter_mut().find(|row| {
-                row.relation == relation && row.object_type == filtered.object_ref.object_type
-            }) {
+            if let Some(row) = utilization
+                .iter_mut()
+                .find(|row| row.relation == relation && row.object_type == object_type)
+            {
                 row.omitted_by_fanout_count = row.omitted_by_fanout_count.saturating_sub(1);
             }
             filtered_nodes.push(filtered);
@@ -1077,10 +1079,19 @@ fn limit_participant_occasions<T: Copy>(
             .get(&neighbor)
             .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
-        if let Some(reason) = occasions.get(&neighbor).and_then(|occasion| {
-            [occasion.retention_state, occasion.episode_retention_state]
-                .into_iter()
-                .find_map(|state| retention_filter_reason(state, query.lifecycle_policy))
+        if let Some((object_ref, reason)) = occasions.get(&neighbor).and_then(|occasion| {
+            [
+                (neighbor, occasion.retention_state),
+                (
+                    MemoryObjectRef::new(ObjectType::Episode, episode),
+                    occasion.episode_retention_state,
+                ),
+            ]
+            .into_iter()
+            .find_map(|(object_ref, state)| {
+                retention_filter_reason(state, query.lifecycle_policy)
+                    .map(|reason| (object_ref, reason))
+            })
         }) {
             let count = excluded_counts
                 .entry((relation, neighbor.object_type))
@@ -1093,8 +1104,9 @@ fn limit_participant_occasions<T: Copy>(
                 exclusions.candidates.push((
                     item_rank,
                     relation,
+                    neighbor.object_type,
                     GraphExpansionFilteredNode {
-                        object_ref: neighbor,
+                        object_ref,
                         reason,
                         superseded_by: Vec::new(),
                     },

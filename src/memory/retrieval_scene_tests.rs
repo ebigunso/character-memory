@@ -528,6 +528,72 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
 }
 
 #[tokio::test]
+async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_topic() {
+    let (memory, _) = scene_memory().await;
+    create_notion(&memory, 100, None).await;
+    let episode = write_episode(&memory, 50_100, scene()).await;
+    let observation = MemoryId::from_u128(50_101);
+    memory
+        .link(MemoryLinkDraft::new(
+            ObjectType::Observation,
+            observation,
+            RelationType::Mentions,
+            ObjectType::Entity,
+            MemoryId::from_u128(100),
+        ))
+        .await
+        .unwrap();
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::episode(episode),
+            "Forget only the parent occasion",
+        ))
+        .await
+        .unwrap();
+    for topic in [Some("ordinary".to_owned()), None] {
+        let has_topic = topic.is_some();
+        let mut context = RetrievalContext::default().with_trace();
+        context.topic = topic;
+        context.scene.participants.push(keyed(100));
+        context.graph_limits.max_depth = 1;
+        let result = memory.retrieve(context).await.unwrap();
+        assert_eq!(
+            result.pack.salient_observations.len(),
+            usize::from(has_topic)
+        );
+        if has_topic {
+            assert_eq!(result.pack.salient_observations[0].id, observation);
+            assert_eq!(
+                result.pack.salient_observations[0].retention_state,
+                RetentionState::Active
+            );
+        }
+        let trace = result.trace.unwrap();
+        let omissions = trace
+            .lifecycle_filter_decisions
+            .iter()
+            .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
+            .collect::<Vec<_>>();
+        assert!(!omissions.is_empty());
+        assert!(omissions.iter().all(|decision| {
+            decision.object == MemoryObjectRef::new(ObjectType::Episode, episode)
+        }));
+        let utilization = trace
+            .fanout_utilization
+            .iter()
+            .find(|row| {
+                row.root.id == MemoryId::from_u128(100)
+                    && row.relation == RelationType::Mentions
+                    && row.object_type == ObjectType::Observation
+            })
+            .unwrap();
+        assert_eq!(utilization.retained_count, 0);
+        assert_eq!(utilization.omitted_by_fanout_count, 0);
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn suppressed_latest_observation_recalls_the_previous_participant_occasion() {
     assert_participant_recall_after_suppression(false).await;
 }
