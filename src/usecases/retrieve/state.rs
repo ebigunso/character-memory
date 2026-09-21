@@ -48,10 +48,7 @@ pub(super) fn order_section_state(
     order_state(
         objects,
         scopes,
-        |object| {
-            (section_for_object(&object.object) == Some(section))
-                .then(|| object.object.object_ref())
-        },
+        |object| (section_for_object(object) == Some(section)).then(|| object.object.object_ref()),
         |_, _| 0,
     );
 }

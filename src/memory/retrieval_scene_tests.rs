@@ -38,7 +38,7 @@ impl MemoryEmbedder for RecordingEmbedder {
 }
 
 #[tokio::test]
-async fn topic_only_preserves_task2_selection_sections_order_and_query_text() {
+async fn topic_only_applies_section_limits_and_preserves_query_text() {
     let fixtures = representative_fixtures();
     let graph = in_memory_graph_store();
     graph.upsert_objects(&fixtures.objects()).await.unwrap();
@@ -60,10 +60,10 @@ async fn topic_only_preserves_task2_selection_sections_order_and_query_text() {
         Box::new(vector),
         Box::new(RecordingEmbedder(inputs.clone())),
     );
-    // Captured through the unchanged retrieval pipeline at Task_2 tip 77cbd98.
+    // The fulfilled commitment shares the ordinary derived-memory section cap.
     let expected = [
         r#"{"active_threads":["550e8400-e29b-41d4-a716-446655440019"],"character_signals":[],"commitments":[],"derived_memories":[],"open_loops":[],"preferences":["550e8400-e29b-41d4-a716-44665544001f"],"relationship_notes":[],"relevant_episodes":[],"salient_observations":["550e8400-e29b-41d4-a716-446655440014"]}"#,
-        r#"{"active_threads":["550e8400-e29b-41d4-a716-446655440019"],"character_signals":[],"commitments":["550e8400-e29b-41d4-a716-446655440021"],"derived_memories":["550e8400-e29b-41d4-a716-446655440022","550e8400-e29b-41d4-a716-44665544001e"],"open_loops":["550e8400-e29b-41d4-a716-446655440020"],"preferences":["550e8400-e29b-41d4-a716-44665544001f"],"relationship_notes":[],"relevant_episodes":["550e8400-e29b-41d4-a716-44665544000a"],"salient_observations":["550e8400-e29b-41d4-a716-446655440014"]}"#,
+        r#"{"active_threads":["550e8400-e29b-41d4-a716-446655440019"],"character_signals":[],"commitments":[],"derived_memories":["550e8400-e29b-41d4-a716-446655440022","550e8400-e29b-41d4-a716-446655440021"],"open_loops":["550e8400-e29b-41d4-a716-446655440020"],"preferences":["550e8400-e29b-41d4-a716-44665544001f"],"relationship_notes":[],"relevant_episodes":["550e8400-e29b-41d4-a716-44665544000a"],"salient_observations":["550e8400-e29b-41d4-a716-446655440014"]}"#,
     ];
     for (case, (candidates, roots, derived_limit)) in
         [(6, 3, 1), (48, 12, 2)].into_iter().enumerate()

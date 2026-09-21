@@ -787,7 +787,7 @@ fn build_pack(
         state::order_section_state(&mut ranked_objects, section, state_scopes);
         let candidates = ranked_objects
             .iter()
-            .filter(|ranked| section_for_object(&ranked.object) == Some(section))
+            .filter(|ranked| section_for_object(ranked) == Some(section))
             .collect::<Vec<_>>();
         for (index, cause) in select_with_cue_floors(
             candidates.iter().map(|ranked| &ranked.cue_kinds),
@@ -812,7 +812,7 @@ fn build_pack(
     });
 
     for ranked in ranked_objects {
-        let Some(section) = section_for_object(&ranked.object) else {
+        let Some(section) = section_for_object(&ranked) else {
             details.section_assignments.push(SectionAssignment {
                 object: ranked.object.object_ref(),
                 section: ContextPackSection::Omitted,
@@ -864,7 +864,7 @@ fn build_pack(
             MemoryObject::Observation(object) => pack.salient_observations.push(object),
             MemoryObject::MemoryThread(object) => pack.active_threads.push(object),
             MemoryObject::DerivedMemory(object) => {
-                push_derived(&mut pack, object, ranked.resolved_by)
+                push_derived(&mut pack, section, object, ranked.resolved_by)
             }
             MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {}
         }
@@ -979,24 +979,20 @@ fn summarize_lifecycle_omissions(
 
 fn push_derived(
     pack: &mut ContinuityContextPack,
+    section: ContextPackSection,
     object: DerivedMemory,
     resolved_by: Vec<MemoryId>,
 ) {
-    let section = object.derived_type;
     let mut included = IncludedDerivedMemory::from(object);
     included.resolved_by = resolved_by;
     match section {
-        DerivedType::UserPreference | DerivedType::AssistantPreference => {
-            pack.preferences.push(included)
-        }
-        DerivedType::RelationshipNote => pack.relationship_notes.push(included),
-        DerivedType::OpenLoop => pack.open_loops.push(included),
-        DerivedType::Commitment => pack.commitments.push(included),
-        DerivedType::CharacterSignal => pack.character_signals.push(included),
-        DerivedType::Reflection
-        | DerivedType::ProjectNote
-        | DerivedType::Claim
-        | DerivedType::Correction => pack.derived_memories.push(included),
+        ContextPackSection::Preferences => pack.preferences.push(included),
+        ContextPackSection::RelationshipNotes => pack.relationship_notes.push(included),
+        ContextPackSection::OpenLoops => pack.open_loops.push(included),
+        ContextPackSection::Commitments => pack.commitments.push(included),
+        ContextPackSection::CharacterSignals => pack.character_signals.push(included),
+        ContextPackSection::DerivedMemories => pack.derived_memories.push(included),
+        _ => unreachable!("derived memories require a derived-memory pack section"),
     }
 }
 
@@ -1381,8 +1377,8 @@ fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCand
     }
 }
 
-fn section_for_object(object: &MemoryObject) -> Option<ContextPackSection> {
-    match object {
+fn section_for_object(ranked: &RankedObject) -> Option<ContextPackSection> {
+    match &ranked.object {
         MemoryObject::Episode(_) => Some(ContextPackSection::RelevantEpisodes),
         MemoryObject::Observation(_) => Some(ContextPackSection::SalientObservations),
         MemoryObject::MemoryThread(thread) if thread.status == ThreadStatus::Active => {
@@ -1390,6 +1386,9 @@ fn section_for_object(object: &MemoryObject) -> Option<ContextPackSection> {
         }
         MemoryObject::MemoryThread(_) => None,
         MemoryObject::DerivedMemory(memory) => match memory.derived_type {
+            DerivedType::OpenLoop | DerivedType::Commitment if !ranked.resolved_by.is_empty() => {
+                Some(ContextPackSection::DerivedMemories)
+            }
             DerivedType::UserPreference | DerivedType::AssistantPreference => {
                 Some(ContextPackSection::Preferences)
             }
