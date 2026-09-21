@@ -10,6 +10,7 @@ use crate::ports::graph_authority::GraphObjectQuery;
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
     pub kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
+    pub topic_order: Vec<MemoryObjectRef>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
@@ -95,6 +96,7 @@ where
         let mut searches = HashMap::new();
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
+        let mut topic_order = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| (None, text));
@@ -131,6 +133,9 @@ where
                 Some(SceneReference::SettingWords) => CueKind::Place,
                 Some(_) => CueKind::Participant,
             };
+            if kind == CueKind::Topic {
+                topic_order = searches[text].clone();
+            }
             for object in &searches[text] {
                 kinds.entry(*object).or_default().insert(kind);
             }
@@ -159,7 +164,6 @@ where
             }),
             context.candidate_limits.max_vector_candidates,
             context.cue_floors,
-            false,
         );
         let mut floor_admissions = Vec::new();
         let selected = selection
@@ -179,6 +183,7 @@ where
         Ok(RecallCues {
             candidates: CanonicalCandidates::new(selected),
             kinds,
+            topic_order,
             participants,
             references,
             dimension,
