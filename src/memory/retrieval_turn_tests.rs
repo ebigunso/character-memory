@@ -139,10 +139,11 @@ fn topic_count(ids: impl Iterator<Item = MemoryId>) -> usize {
 }
 
 #[tokio::test]
-async fn shared_scene_cohort_preserves_topic_turns_at_every_cap() {
+async fn shared_scene_cohort_keeps_the_latest_occasion_and_score_fills_the_pack() {
     let memory = cohort_memory().await;
     for descriptions in [1, 5] {
         let mut query = context();
+        query.scene.time += chrono::Duration::days(48);
         query.scene.participants = (0..descriptions)
             .map(|index| SceneParticipant {
                 description: Some(format!("botanist {index}")),
@@ -168,7 +169,7 @@ async fn shared_scene_cohort_preserves_topic_turns_at_every_cap() {
                     .map(|episode| episode.id),
             ),
         );
-        assert_eq!(counts, (8, 6, 4), "descriptions={descriptions}");
+        assert_eq!(counts, (8, 8, 7), "descriptions={descriptions}");
         // Admission changes, but output still follows the original final scores.
         assert_eq!(
             result
@@ -177,26 +178,11 @@ async fn shared_scene_cohort_preserves_topic_turns_at_every_cap() {
                 .iter()
                 .map(|episode| episode.id.as_u128())
                 .collect::<Vec<_>>(),
-            [1000, 1001, 1002, 1003, 2000, 2001, 2002, 2003]
+            [1047, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
         );
-        let admissions = &trace.floor_admissions;
-        for (stage, expected) in [
-            (CueFloorStage::CandidateMerge, 8),
-            (CueFloorStage::GraphRoots, 6),
-            (
-                CueFloorStage::Section {
-                    section: ContextPackSection::RelevantEpisodes,
-                },
-                2,
-            ),
-        ] {
-            let rows = admissions
-                .iter()
-                .filter(|row| row.stage == stage)
-                .collect::<Vec<_>>();
-            assert_eq!(rows.len(), expected, "{stage:?}");
-            assert!(rows.iter().all(|row| row.cue_kind == CueKind::Topic));
-        }
+        assert!(trace.floor_admissions.is_empty());
+        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Participant], 47);
+        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Place], 47);
     }
     memory.close().await.unwrap();
 }
@@ -301,11 +287,14 @@ async fn shared_scene_topic_only_keeps_original_bytes() {
 async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admissions() {
     let memory = cohort_memory().await;
     let mut plan = RememberWritePlan::new();
-    for candidate in episode(3000, "Orchid shared".to_owned(), context().scene) {
+    let mut latest = context().scene;
+    latest.time += chrono::Duration::days(49);
+    for candidate in episode(3000, "Orchid shared".to_owned(), latest.clone()) {
         plan = plan.with_candidate(candidate);
     }
     memory.commit(plan, CommitOptions::default()).await.unwrap();
     let mut query = context();
+    query.scene.time = latest.time;
     query.candidate_limits.max_vector_candidates = 64;
     let capped = memory.retrieve(query.clone()).await.unwrap();
     let trace = capped.trace.unwrap();

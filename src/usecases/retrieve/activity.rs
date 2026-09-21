@@ -59,6 +59,7 @@ where
             object_type: reference.object_type,
             score: 1.0,
             source: GraphRootSource::Activity,
+            reminder_only: false,
             vector_score: None,
             cue_kinds: BTreeSet::from([CueKind::Activity]),
         };

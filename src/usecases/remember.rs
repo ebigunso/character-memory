@@ -1169,6 +1169,13 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_episode_occasions(
+            &self,
+            episodes: &[crate::domain::MemoryObjectRef],
+        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+            self.store.query_episode_occasions(episodes).await
+        }
+
         async fn query_last_interaction(
             &self,
             participant: MemoryId,
@@ -1342,6 +1349,7 @@ mod tests {
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
             Ok(VectorCandidateRecall {
+                scene_pool: None,
                 candidates: CanonicalCandidates::new([]),
                 completeness: if query.limit == 0 || query.object_types.is_empty() {
                     crate::api::types::retrieval::VectorRecallCompleteness::NotRequested

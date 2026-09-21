@@ -155,6 +155,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) current_subject_state: bool,
+    pub(crate) reminder_only: bool,
     pub(crate) participant_reference_time: Option<DateTime<Utc>>,
     pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
@@ -189,6 +190,7 @@ impl GraphExpansionQuery {
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
             current_subject_state: false,
+            reminder_only: false,
             participant_reference_time: None,
             resolved_thread_members: std::collections::HashSet::new(),
             traversal_link_ids: None,
@@ -196,6 +198,11 @@ impl GraphExpansionQuery {
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
             failure_policy: GraphExpansionFailurePolicy::default(),
         }
+    }
+
+    // A notion or thread reached only by a reminder is visible, but is a leaf.
+    pub(crate) fn may_continue_from(&self, kind: ObjectType) -> bool {
+        !self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread)
     }
 
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
@@ -328,6 +335,12 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
+    /// Read only recorded time and retention for these episode references.
+    async fn query_episode_occasions(
+        &self,
+        episodes: &[MemoryObjectRef],
+    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError>;
+
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError>;
 
     async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError>;
@@ -393,6 +406,13 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_episode_occasions(
+        &self,
+        episodes: &[MemoryObjectRef],
+    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+        (**self).query_episode_occasions(episodes).await
+    }
+
     async fn query_last_interaction(
         &self,
         participant: MemoryId,

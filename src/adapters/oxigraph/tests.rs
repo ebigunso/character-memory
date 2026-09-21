@@ -67,6 +67,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn episode_occasion_read_is_refs_bounded_and_does_not_hydrate_content() {
+        use super::super::vocabulary as vocab;
+        use oxigraph::model::{Literal, Quad};
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut other = fixtures.episode.clone();
+        other.id = MemoryId::new_v4();
+        store
+            .upsert_objects(&[
+                MemoryObject::Episode(fixtures.episode.clone()),
+                MemoryObject::Episode(other.clone()),
+            ])
+            .await
+            .unwrap();
+        let quads = store.store.iter().map(Result::unwrap).collect::<Vec<_>>();
+        for quad in quads {
+            if quad.predicate.as_str() == vocab::SUMMARY {
+                store.store.remove(&quad).unwrap();
+            } else if quad.predicate.as_str() == vocab::SCENE_TIME
+                && quad.subject.to_string().contains(&other.id.to_string())
+            {
+                store.store.remove(&quad).unwrap();
+                store
+                    .store
+                    .insert(&Quad::new(
+                        quad.subject,
+                        quad.predicate,
+                        Literal::new_simple_literal("invalid time"),
+                        quad.graph_name,
+                    ))
+                    .unwrap();
+            }
+        }
+        let wanted = MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id);
+        let result = store.query_episode_occasions(&[wanted]).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[&wanted].time, fixtures.episode.scene.time);
+        assert_eq!(
+            result[&wanted].retention_state,
+            fixtures.episode.retention_state
+        );
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_refs(vec![wanted]))
+            .await
+            .is_err());
+        assert!(store.query_episode_occasions(&[]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn oxigraph_round_trips_subsecond_object_and_link_timestamps() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let mut fixtures = representative_fixtures();

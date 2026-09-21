@@ -345,7 +345,7 @@ pub(crate) fn bounded_expansion_node_set(
             continue;
         }
 
-        if depth >= query.max_depth {
+        if depth >= query.max_depth || !query.may_continue_from(object_type) {
             continue;
         }
 
@@ -523,7 +523,7 @@ fn bounded_expansion_plan<'a>(
         visited.insert(object_ref);
         selection_order.push(object_ref);
 
-        if depth >= query.max_depth {
+        if depth >= query.max_depth || !query.may_continue_from(object_ref.object_type) {
             continue;
         }
 

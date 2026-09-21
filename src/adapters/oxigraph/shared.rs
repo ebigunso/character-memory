@@ -603,6 +603,10 @@ pub(super) fn bounded_graph_visible_refs(
     let mut participant_occasions = ParticipantOccasions::new();
 
     for depth in 0..query.max_depth {
+        frontier.retain(|object| query.may_continue_from(object.object_type));
+        if frontier.is_empty() {
+            break;
+        }
         let link_refs = selectors.select_links_touching(&frontier)?;
         if depth == 0
             && query

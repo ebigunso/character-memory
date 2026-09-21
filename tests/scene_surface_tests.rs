@@ -278,7 +278,7 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         (
             None,
             scene(None, &["studio"]),
-            3,
+            1,
             VectorSurface::SceneParticipants,
             2,
         ),
@@ -296,10 +296,10 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         }
     }
     calls.queries.lock().unwrap().clear();
-    let result = memory
-        .retrieve(query(Some("studio"), scene(Some("studio"), &["studio"]), 3))
-        .await
-        .unwrap();
+    let mut both = query(Some("studio"), scene(Some("studio"), &["studio"]), 3);
+    both.cue_floors.participant = 2;
+    both.cue_floors.place = 2;
+    let result = memory.retrieve(both).await.unwrap();
     assert_eq!(*calls.queries.lock().unwrap(), ["studio"]);
     let trace = result.trace.unwrap();
     assert_eq!(
@@ -371,6 +371,8 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         ] {
             let mut context = query(topic, current, 20);
             context.lifecycle_policy.include_suppressed = true;
+            context.cue_floors.participant = 2;
+            context.cue_floors.place = 2;
             let result = memory.retrieve(context).await.unwrap();
             let trace = result.trace.unwrap();
             assert_eq!(

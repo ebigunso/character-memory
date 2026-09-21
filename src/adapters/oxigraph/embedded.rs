@@ -106,6 +106,13 @@ impl OxigraphGraphAuthorityStore {
 
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
+    async fn query_episode_occasions(
+        &self,
+        episodes: &[MemoryObjectRef],
+    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+        SparqlGraphSelectors::new(&self.store).select_participant_occasions(episodes)
+    }
+
     async fn query_last_interaction(
         &self,
         participant: MemoryId,

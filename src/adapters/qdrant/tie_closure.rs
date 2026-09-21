@@ -21,6 +21,7 @@ enum TieClosure {
 
 pub(crate) struct TieClosureResult {
     pub(crate) candidates: CanonicalCandidates,
+    pub(crate) pool: CanonicalCandidates,
     pub(crate) fetched: usize,
     fetch_bound: usize,
     closure: TieClosure,
@@ -70,7 +71,8 @@ where
             FetchDecision::Grow(next_limit) => fetch_limit = next_limit,
             FetchDecision::Return => {
                 return Ok(TieClosureResult {
-                    candidates: candidates.truncated(admitted_limit),
+                    candidates: candidates.clone().truncated(admitted_limit),
+                    pool: candidates,
                     fetched: fetched_count,
                     fetch_bound,
                     closure: TieClosure::Closed,
@@ -78,7 +80,8 @@ where
             }
             FetchDecision::ReturnAtBound => {
                 return Ok(TieClosureResult {
-                    candidates: candidates.truncated(admitted_limit),
+                    candidates: candidates.clone().truncated(admitted_limit),
+                    pool: candidates,
                     fetched: fetched_count,
                     fetch_bound,
                     closure: TieClosure::OpenAtBound,
@@ -153,7 +156,8 @@ mod tests {
             FetchDecision::Return
         );
         let result = TieClosureResult {
-            candidates: candidates.truncated(2),
+            candidates: candidates.clone().truncated(2),
+            pool: candidates,
             fetched: 3,
             fetch_bound: 10,
             closure: TieClosure::Closed,
@@ -173,7 +177,8 @@ mod tests {
             FetchDecision::ReturnAtBound
         );
         let result = TieClosureResult {
-            candidates: candidates.truncated(2),
+            candidates: candidates.clone().truncated(2),
+            pool: candidates,
             fetched: 6,
             fetch_bound: 6,
             closure: TieClosure::OpenAtBound,
@@ -206,6 +211,7 @@ mod tests {
         );
         let result = TieClosureResult {
             candidates: CanonicalCandidates::new([]),
+            pool: CanonicalCandidates::new([]),
             fetched: fetch_limit_cap,
             fetch_bound,
             closure: TieClosure::OpenAtBound,
@@ -238,6 +244,8 @@ mod tests {
         assert!(fetch_limits[0] > 1);
         assert!(fetch_limits.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.pool.len(), 3);
+        assert_eq!(result.pool[2].object_id, Uuid::from_u128(3));
         assert_eq!(result.candidates[0].object_id, Uuid::from_u128(1));
         assert_eq!(
             result.completeness(None),

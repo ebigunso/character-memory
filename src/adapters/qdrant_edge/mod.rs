@@ -233,6 +233,7 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         if query.limit == 0 || query.object_types.is_empty() || query.surfaces.is_empty() {
             return Ok(VectorCandidateRecall {
                 candidates: CanonicalCandidates::new([]),
+                scene_pool: None,
                 completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
             });
         }
@@ -260,6 +261,17 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         Ok(VectorCandidateRecall {
             completeness: closed.completeness(scanned),
             candidates: closed.candidates,
+            scene_pool: query
+                .surfaces
+                .iter()
+                .any(|surface| {
+                    matches!(
+                        surface,
+                        crate::domain::VectorSurface::SceneSetting
+                            | crate::domain::VectorSurface::SceneParticipants
+                    )
+                })
+                .then_some(closed.pool),
         })
     }
 
@@ -816,6 +828,38 @@ mod tests {
             limit,
             vec![ObjectType::Episode, ObjectType::Observation],
         )
+    }
+
+    #[tokio::test]
+    async fn scene_pool_at_fetch_bound_keeps_the_open_boundary_and_returned_limit() {
+        let temp = TempDir::new().unwrap();
+        let store = QdrantEdgeVectorCandidateStore::open(temp.path(), "scene_bound", 2)
+            .await
+            .unwrap();
+        let (mut records, embeddings) = records(4_098, &[1.0, 0.0]);
+        for record in &mut records {
+            record.surface = VectorSurface::SceneSetting;
+            record.object_type = ObjectType::Episode;
+        }
+        upsert(&store, &records, &embeddings).await;
+        let mut request = query(1);
+        request.surfaces = vec![VectorSurface::SceneSetting];
+        let result = store.search_candidates(&request).await.unwrap();
+        assert_eq!(result.candidates.len(), 1);
+        let pool = result.scene_pool.as_ref().unwrap();
+        assert_eq!(pool.len(), 4_097);
+        assert_eq!(result.candidates[0], pool[0]);
+        assert!(pool
+            .iter()
+            .all(|row| row.surface == VectorSurface::SceneSetting));
+        assert_eq!(
+            result.completeness,
+            VectorRecallCompleteness::BoundaryTieOpen {
+                fetched: 4_097,
+                fetch_bound: 4_097,
+            }
+        );
+        store.close().await.unwrap();
     }
 
     #[tokio::test]

@@ -105,6 +105,7 @@ where
                 source: GraphRootSource::Participant,
                 vector_score: None,
                 cue_kinds: BTreeSet::from([CueKind::Participant]),
+                reminder_only: false,
             })
             .collect::<Vec<_>>();
         let mut assembly = RetrieveAssembly::new(trace_mode);
@@ -165,6 +166,7 @@ where
                         source: GraphRootSource::Place,
                         vector_score: None,
                         cue_kinds: BTreeSet::from([CueKind::Place]),
+                        reminder_only: false,
                     });
                 }
             }
@@ -199,7 +201,7 @@ where
             &vector_candidates,
             &cues.kinds,
             &explicit_roots,
-            &cues.orders,
+            (&cues.orders, &cues.reminder_only),
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
             (&state_scopes, &root_order, &scope_kinds),
@@ -404,6 +406,7 @@ where
             section_pressure,
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
+            scene_cue_omitted_counts: cues.scene_cue_omitted_counts,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -531,6 +534,7 @@ impl RetrieveAssembly {
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
                     ranked.cue_kinds.extend(&candidate.cue_kinds);
+                    ranked.reminder_only &= candidate.reminder_only;
                     ranked.graph_component = ranked.graph_component.max(graph_component);
                     if let Some(candidate_score) = candidate_score {
                         ranked.vector_candidate_score = Some(
@@ -542,13 +546,15 @@ impl RetrieveAssembly {
                     }
                 })
                 .or_insert_with(|| {
-                    RankedObject::new(
+                    let mut ranked = RankedObject::new(
                         object,
                         inherited_cue,
                         candidate.cue_kinds.clone(),
                         graph_component,
                         candidate_score,
-                    )
+                    );
+                    ranked.reminder_only = candidate.reminder_only;
+                    ranked
                 });
             if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
                 ranked.resolved_by.extend(resolvers);
@@ -651,6 +657,7 @@ struct RankedObject {
     object: MemoryObject,
     cue_component: f32,
     cue_kinds: BTreeSet<CueKind>,
+    reminder_only: bool,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     salience_component: f32,
@@ -670,6 +677,7 @@ impl RankedObject {
             object,
             cue_component,
             cue_kinds,
+            reminder_only: false,
             vector_candidate_score,
             graph_component,
             salience_component,
@@ -735,19 +743,20 @@ struct RankKey {
 
 // Only a kind's own queue head credits its turn, even if already selected.
 // Direct selector/search order precedes inherited-only members in stage order.
-// Floors reserve the first turns; multiple kinds share the spare turns.
-// A single kind fills the rest from the final-ranked prefix.
+// Floors take full-standing members before reminders, in each kind's own order.
+// Only roots share spare turns; other stages fill from their ranked prefix.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
-    candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>)>,
+    candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>, bool)>,
     orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limit: usize,
     floors: RetrievalCueFloors,
+    stage: CueFloorStage,
 ) -> Vec<(usize, Option<CueKind>)> {
     let candidates = candidates.into_iter().collect::<Vec<_>>();
     let kinds = candidates
         .iter()
-        .flat_map(|(_, kinds)| kinds.iter().copied())
+        .flat_map(|(_, kinds, _)| kinds.iter().copied())
         .collect::<BTreeSet<_>>();
     if candidates.len() <= limit || kinds.is_empty() {
         return (0..candidates.len().min(limit))
@@ -768,19 +777,22 @@ fn select_with_cue_floors<'a>(
         let mut queue = candidates
             .iter()
             .enumerate()
-            .filter_map(|(index, (_, kinds))| kinds.contains(&kind).then_some(index))
+            .filter_map(|(index, (_, kinds, _))| kinds.contains(&kind).then_some(index))
             .collect::<Vec<_>>();
         queue.sort_by_key(|&index| {
-            ranks
-                .get(&candidates[index].0)
-                .copied()
-                .unwrap_or(usize::MAX)
+            (
+                candidates[index].2,
+                ranks
+                    .get(&candidates[index].0)
+                    .copied()
+                    .unwrap_or(usize::MAX),
+            )
         });
         (kind, floor, queue.into_iter())
     });
     let mut selected = BTreeMap::new();
     'selection: for reserve_floors in [true, false] {
-        if !reserve_floors && kinds.len() == 1 {
+        if !reserve_floors && (!matches!(stage, CueFloorStage::GraphRoots) || kinds.len() == 1) {
             break;
         }
         for round in 0..limit {
@@ -825,34 +837,33 @@ fn build_pack(
             .iter()
             .filter(|ranked| section_for_object(&ranked.object) == Some(section))
             .collect::<Vec<_>>();
+        // Section state already has its scope/score order; root recency must not
+        // become the section floor order. Reuse this prefix without re-sorting it.
         let mut orders = orders.clone();
-        // A named route takes its state scope rounds before other expansion results.
         for kind in [CueKind::Participant, CueKind::Place, CueKind::Activity] {
-            let scopes = state::scopes_for_kind(state_scopes, scope_kinds, kind);
-            let mut state_order = candidates
-                .iter()
-                .copied()
-                .filter(|ranked| scopes.contains_key(&ranked.object.object_ref()))
-                .collect::<Vec<_>>();
-            state_order.sort_by_key(|ranked| ranked.rank_key());
-            state::order_state(
-                &mut state_order,
-                &scopes,
-                |ranked| Some(ranked.object.object_ref()),
-                |_, _| 0,
-            );
-            orders.entry(kind).or_default().splice(
-                ..0,
-                state_order.iter().map(|ranked| ranked.object.object_ref()),
-            );
+            let state_order = candidates.iter().filter_map(|ranked| {
+                let object = ranked.object.object_ref();
+                state_scopes.get(&object).and_then(|scopes| {
+                    scopes
+                        .iter()
+                        .any(|&scope| scope_kinds[scope] == kind)
+                        .then_some(object)
+                })
+            });
+            orders.entry(kind).or_default().splice(..0, state_order);
         }
         for (index, cause) in select_with_cue_floors(
-            candidates
-                .iter()
-                .map(|ranked| (ranked.object.object_ref(), &ranked.cue_kinds)),
+            candidates.iter().map(|ranked| {
+                (
+                    ranked.object.object_ref(),
+                    &ranked.cue_kinds,
+                    ranked.reminder_only,
+                )
+            }),
             &orders,
             section_limit(section, limits),
             floors,
+            CueFloorStage::Section { section },
         ) {
             let object = candidates[index].object.object_ref();
             selected.insert(object);
@@ -1098,6 +1109,7 @@ struct CandidateRoot {
     source: GraphRootSource,
     vector_score: Option<f32>,
     cue_kinds: BTreeSet<CueKind>,
+    reminder_only: bool,
 }
 
 #[derive(Debug)]
@@ -1113,7 +1125,10 @@ fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
     kinds: &HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
     explicit_roots: &[CandidateRoot],
-    content_orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+    (content_orders, reminder_only): (
+        &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+        &HashSet<MemoryObjectRef>,
+    ),
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
     (scopes, root_order, scope_kinds): (
@@ -1165,6 +1180,10 @@ fn select_candidate_roots(
                 score: candidate.score,
                 source: GraphRootSource::Vector,
                 vector_score: Some(candidate.score),
+                reminder_only: reminder_only.contains(&MemoryObjectRef::new(
+                    candidate.object_type,
+                    candidate.object_id,
+                )),
                 cue_kinds: kinds
                     .get(&MemoryObjectRef::new(
                         candidate.object_type,
@@ -1182,6 +1201,7 @@ fn select_candidate_roots(
         if let Some(index) = indices.get(&object).copied() {
             let existing: &mut CandidateRoot = &mut merged[index];
             existing.cue_kinds.extend(root.cue_kinds);
+            existing.reminder_only &= root.reminder_only;
             if let Some(score) = root.vector_score {
                 existing.vector_score = Some(
                     existing
@@ -1238,11 +1258,13 @@ fn select_candidate_roots(
             (
                 MemoryObjectRef::new(root.object_type, root.object_id),
                 &root.cue_kinds,
+                root.reminder_only,
             )
         }),
         &orders,
         max_graph_roots,
         floors,
+        CueFloorStage::GraphRoots,
     );
     let mut selection = selection.into_iter().peekable();
     let mut roots = Vec::new();
@@ -1297,6 +1319,7 @@ fn graph_query_for_candidate(
     });
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
+    query.reminder_only = candidate.reminder_only;
     query.participant_reference_time = query.current_subject_state.then_some(context.scene.time);
     query
 }
@@ -1571,13 +1594,14 @@ mod tests {
             vec![objects[2], objects[1], objects[0]],
         )]);
         let selected = select_with_cue_floors(
-            objects.into_iter().map(|object| (object, &kinds)),
+            objects.into_iter().map(|object| (object, &kinds, false)),
             &orders,
             2,
             RetrievalCueFloors {
                 participant: 1,
                 ..Default::default()
             },
+            CueFloorStage::GraphRoots,
         );
         assert_eq!(selected, vec![(0, None), (2, Some(CueKind::Participant))]);
     }
@@ -1650,7 +1674,7 @@ mod tests {
             &[middle.clone(), low, high.clone()],
             &HashMap::new(),
             &[],
-            &BTreeMap::new(),
+            (&BTreeMap::new(), &HashSet::new()),
             2,
             RetrievalCueFloors::default(),
             (&state::StateScopes::new(), &HashMap::new(), &[]),
@@ -3053,6 +3077,14 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
+        async fn query_episode_occasions(
+            &self,
+            episodes: &[crate::domain::MemoryObjectRef],
+        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+            let _ = episodes;
+            unreachable!("this fixture never queries episode occasions")
+        }
+
         async fn query_last_interaction(
             &self,
             participant: MemoryId,
