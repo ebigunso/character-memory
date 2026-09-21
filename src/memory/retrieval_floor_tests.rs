@@ -17,12 +17,22 @@ impl MemoryEmbedder for FloorEmbedder {
         let (axis, score) = if input.surface == VectorSurface::Query {
             (
                 match input.text.as_str() {
-                    "topic" => 0,
+                    "topic" | "orchids" => 0,
                     "person" => 1,
                     "place" => 2,
+                    "work" => 3,
                     text => panic!("unexpected query {text}"),
                 },
                 1.0_f32,
+            )
+        } else if input.text.contains("orchids") {
+            (
+                0,
+                if input.text.contains("work") {
+                    0.2
+                } else {
+                    0.89
+                },
             )
         } else {
             match input.object_id.map(|id| id.as_u128()) {
@@ -136,6 +146,83 @@ fn mixed_context() -> RetrievalContext {
     context.graph_limits.max_depth = 1;
     context.section_limits.salient_observations = 8;
     context
+}
+
+#[tokio::test]
+async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    let mut thread = MemoryThreadDraft::new("Work in progress", "The current activity.");
+    thread.id = Some(MemoryId::from_u128(5000));
+    let mut input = RememberInput::new("Progress on the work.")
+        .with_scene(occasion())
+        .with_memory_thread(thread);
+    for id in 6000..6012 {
+        let mut member = DerivedMemoryDraft::new(
+            DerivedType::Claim,
+            "The work included a passing mention of orchids.",
+        );
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    let strong_id = MemoryId::from_u128(7000);
+    let mut strong = DerivedMemoryDraft::new(DerivedType::Claim, "orchids need careful watering.");
+    strong.id = Some(strong_id);
+    input = input.with_derived_memory(strong);
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    let mut outcomes = Vec::new();
+    let mut included = Vec::new();
+    for place_cue in [false, true] {
+        let mut context = RetrievalContext::new("orchids")
+            .with_scene(occasion())
+            .with_trace();
+        if place_cue {
+            context.scene.setting.words = Some("work".to_owned());
+        } else {
+            context.activity = Some(ActivityRef::Thread(MemoryId::from_u128(5000)));
+        }
+        context.graph_limits.max_depth = 0;
+        context.candidate_limits.max_graph_roots = 12;
+        context.section_limits.derived_memories = 12;
+        let result = memory.retrieve(context).await.unwrap();
+        let trace = result.trace.unwrap();
+        if !place_cue {
+            assert_eq!(trace.vector_candidates[0].object.id, strong_id);
+            assert!((trace.vector_candidates[0].score - 0.89).abs() < 0.0001);
+            for id in 6000..6012 {
+                let row = trace
+                    .vector_candidates
+                    .iter()
+                    .find(|row| row.object.id == MemoryId::from_u128(id))
+                    .unwrap();
+                assert!((row.score - 0.2).abs() < 0.0001);
+            }
+        }
+        let strong_root = trace
+            .graph_expansions
+            .iter()
+            .find(|row| row.root.id == strong_id)
+            .unwrap();
+        outcomes.push(strong_root.outcome);
+        included.push(
+            result
+                .pack
+                .derived_memories
+                .iter()
+                .any(|entry| entry.memory.id == strong_id),
+        );
+    }
+    assert_eq!(outcomes, [GraphExpansionOutcome::Expanded; 2]);
+    assert_eq!(included, [true; 2]);
+    memory.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -496,6 +583,19 @@ async fn single_kind_keeps_section_ids_and_order() {
             context.candidate_limits.max_graph_roots = roots;
             context.section_limits.salient_observations = section;
             let result = memory.retrieve(context.clone()).await.unwrap();
+            let mut prefix_context = context.clone();
+            prefix_context.cue_floors = RetrievalCueFloors {
+                participant: 0,
+                place: 0,
+                activity: 0,
+                topic: 0,
+            };
+            let prefix = memory.retrieve(prefix_context).await.unwrap();
+            assert_eq!(
+                serde_json::to_vec(&result).unwrap(),
+                serde_json::to_vec(&prefix).unwrap(),
+                "single-kind retrieval must preserve the original ranked prefix"
+            );
             // Exact section/id/order projections captured at 61fbb29.
             let first = match kind {
                 CueKind::Topic => 1000,
