@@ -86,6 +86,7 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `derivedFromEpisode`, `derivedFromObservation` | Experience provenance |
 | `partOfThread` | Thread membership |
 | `aboutEntity` | Notion subject from `entity_ids` |
+| `scopeKey` | Internal setting or named custom value shared by every source scene; derived inside the write turn, never authored |
 | `supersedes` | Predecessor reference from the memory's list |
 | `givenByApplication` | Source-free application grounding; requires a subject and excludes experience sources |
 | `assertion` | Reference to an ordinal assertion resource |

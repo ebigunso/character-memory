@@ -277,6 +277,21 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         ))
     }
 
+    async fn query_scope_state(
+        &self,
+        key: &crate::domain::ScopeKey,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<MemoryId>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        SparqlGraphSelectors::new(&self.store).select_scope_state(key, policy, limit)
+    }
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,

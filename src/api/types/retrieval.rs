@@ -306,6 +306,7 @@ pub enum ActivityResolution {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphRootSource {
+    Place,
     Vector,
     Participant,
     Activity,
@@ -810,6 +811,7 @@ mod tests {
 
     fn derived_memory(id: MemoryId, source_episode_id: MemoryId) -> DerivedMemory {
         DerivedMemory {
+            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             id,

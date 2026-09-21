@@ -49,6 +49,14 @@ An interpreted memory either cites at least one episode or observation, or decla
 
 The reference lists have set semantics: IDs are sorted and deduplicated at draft conversion for stable persistence and replay. This applies to the source, thread, subject and predecessor lists on ordinary and replacement interpreted-memory drafts. Scene participants retain authored order and repeated values; generated participant links and retrieval-stat edges count each keyed participant once.
 
+### Derived Context Keys
+
+An interpreted memory also stores zero or more internal `scopeKey` literals. Each literal is lossless JSON: `{"setting":"cafe"}` or `{"custom":{"name":"project","value":"42"}}`. Setting keys and custom keys occupy separate namespaces, and a custom key includes both its name and value. Strings match exactly, without normalization. Keys have set semantics and never appear as caller-discoverable scope identifiers or in serialized memory output.
+
+Commit derives the keys inside the write turn, after validation and before replay collision checks and graph persistence. It reads the recorded scenes of all source episodes, including the parent episode of each source observation, and retains their intersection. Sources in the write plan are read from that plan; missing sources and observation parents are looked up by object reference. A memory with no source experience has no context keys, and setting words create none. A correction derives keys from its replacement's final source list rather than copying its predecessor's keys. Notion and thread scopes remain the memory's own `entity_ids` and `thread_ids`; they are not stored again as context keys. Caller-authored context keys are rejected through draft validation. Existing records without the predicate have no keys; no backfill is performed.
+
+Scene-key retrieval uses the indexed predicate and scalar lifecycle/salience/creation metadata to select memory roots before hydrating payloads. It shares the subject-state selector's currentness checks and priority order and the existing root and section limits. Participant scopes precede setting, custom names in map key order, and activity. One memory shared by scopes uses one slot and credits each scope. The place cue kind also covers custom values pending the slice-boundary vocabulary decision.
+
 ### Assertions And Name Lookup
 
 Assertions record commitments the character holds about a memory's notion subjects. Reported claims and doubts can remain text without assertions. Every assertion subject must appear in the containing memory's `entity_ids`.
@@ -94,7 +102,7 @@ These graph checks remain decisive when vector deletion or indexing fails. A sta
 
 ## Retrieval And Derived Statistics
 
-Source lookup, thread lookup, name lookup and bounded expansion query the named graphs they need. Object hydration currently reads every stored quad into a subject map before picking the requested objects, so its cost grows with the store and not with the request; a targeted read is the known improvement. Expansion is bounded by depth, object and relation scope, lifecycle policy and fanout caps.
+Source lookup, thread lookup, name lookup, scope-key lookup and bounded expansion query the named graphs they need. Object hydration currently reads every stored quad into a subject map before picking the requested objects, so its cost grows with the store and not with the request; a targeted read is the known improvement. Expansion is bounded by depth, object and relation scope, lifecycle policy and fanout caps.
 
 The retrieval stats store maintains derived entity/relation/object and global counters. Its `total_count` includes all indexed edges, `active_count` restricts retention to active, and `current_count` additionally excludes superseded interpreted-memory endpoints. Its cached `is_current` value is a projection input rather than a persisted memory field or a source of graph authority.
 

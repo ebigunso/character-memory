@@ -42,6 +42,7 @@ pub(crate) const DERIVED_FROM_EPISODE: &str = "urn:cmem:vocab:derivedFromEpisode
 pub(crate) const DERIVED_FROM_OBSERVATION: &str = "urn:cmem:vocab:derivedFromObservation";
 pub(crate) const PART_OF_THREAD: &str = "urn:cmem:vocab:partOfThread";
 pub(crate) const ABOUT_ENTITY: &str = "urn:cmem:vocab:aboutEntity";
+pub(crate) const SCOPE_KEY: &str = "urn:cmem:vocab:scopeKey";
 pub(crate) const SUPERSEDES: &str = "urn:cmem:vocab:supersedes";
 
 pub(crate) const FROM: &str = "urn:cmem:vocab:from";

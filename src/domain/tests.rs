@@ -135,6 +135,7 @@ fn valid_observation() -> Observation {
 
 fn valid_derived_memory() -> DerivedMemory {
     DerivedMemory {
+        scope_keys: Vec::new(),
         assertions: Vec::new(),
         given_by_application: false,
         id: memory_id("550e8400-e29b-41d4-a716-446655440030"),

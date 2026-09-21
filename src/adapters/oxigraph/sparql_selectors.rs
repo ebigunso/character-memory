@@ -225,13 +225,38 @@ impl<'a> SparqlGraphSelectors<'a> {
         policy: GraphExpansionLifecyclePolicy,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let subject = graph_uri(ObjectType::Entity, subject_id);
+        self.select_state(&format!("<{}> <{subject}>", vocab::ABOUT_ENTITY), policy)
+    }
+
+    pub(crate) fn select_scope_state(
+        &self,
+        key: &crate::domain::ScopeKey,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        let value = serde_json::to_string(key).expect("scope keys contain strings only");
+        let predicate = format!(
+            "<{}> {}",
+            vocab::SCOPE_KEY,
+            oxigraph::model::Literal::new_simple_literal(value)
+        );
+        let (mut ids, filtered) = self.select_state(&predicate, policy)?;
+        ids.truncate(limit);
+        Ok((ids, filtered))
+    }
+
+    fn select_state(
+        &self,
+        scope_predicate: &str,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let query = format!(
             r#"
             PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
             SELECT ?id ?retention ?successor WHERE {{
               GRAPH ?g {{
                 ?memory a <{derived_class}> ; <{object_id}> ?id ;
-                  <{about}> <{subject}> ; <{salience}> ?salience ;
+                  {scope_predicate} ; <{salience}> ?salience ;
                   <{created}> ?created ; <{retention}> ?retention .
               }}
               OPTIONAL {{
@@ -246,7 +271,6 @@ impl<'a> SparqlGraphSelectors<'a> {
             "#,
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
-            about = vocab::ABOUT_ENTITY,
             salience = vocab::SALIENCE_SCORE,
             created = vocab::CREATED_AT,
             retention = vocab::RETENTION_STATE,

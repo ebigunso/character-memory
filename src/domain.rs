@@ -12,6 +12,7 @@ pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
 };
+pub(crate) use scene::ScopeKey;
 pub use scene::{Scene, SceneParticipant, SceneSetting};
 pub use write_validation::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
@@ -391,6 +392,8 @@ pub struct DerivedMemory {
     pub thread_ids: Vec<MemoryId>,
     /// The notions this interpreted memory is about (its subjects).
     pub entity_ids: Vec<MemoryId>,
+    #[serde(skip)]
+    pub(crate) scope_keys: Vec<ScopeKey>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
     /// Source-free grounding given by the application; requires at least one notion subject.

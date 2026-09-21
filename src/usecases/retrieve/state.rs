@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-// Membership is local to the scene-ordered notion scope, not inherited cue provenance.
+// Membership is local to a scene-ordered state scope, not inherited cue provenance.
 pub(super) type StateScopes = HashMap<MemoryObjectRef, Vec<usize>>;
 
 pub(super) fn record_subject_state(
@@ -45,18 +45,35 @@ pub(super) fn order_section_state(
     section: ContextPackSection,
     scopes: &StateScopes,
 ) {
+    order_state(
+        objects,
+        scopes,
+        |object| {
+            (section_for_object(&object.object) == Some(section))
+                .then(|| object.object.object_ref())
+        },
+        |_, _| 0,
+    );
+}
+
+pub(super) fn order_state<T: Clone>(
+    objects: &mut [T],
+    scopes: &StateScopes,
+    reference: impl Fn(&T) -> Option<MemoryObjectRef>,
+    priority: impl Fn(usize, &T) -> usize,
+) {
     let mut positions = Vec::new();
     let mut queues = BTreeMap::<usize, Vec<usize>>::new();
     for (index, object) in objects.iter().enumerate() {
-        if section_for_object(&object.object) != Some(section) {
-            continue;
-        }
-        if let Some(memberships) = scopes.get(&object.object.object_ref()) {
+        if let Some(memberships) = reference(object).and_then(|key| scopes.get(&key)) {
             positions.push(index);
             for &scope in memberships {
                 queues.entry(scope).or_default().push(index);
             }
         }
+    }
+    for (&scope, queue) in &mut queues {
+        queue.sort_by_key(|&index| priority(scope, &objects[index]));
     }
     if positions.len() < 2 {
         return;
@@ -80,7 +97,9 @@ pub(super) fn order_section_state(
             let index = queue[*cursor];
             chosen.insert(index);
             ordered.push(objects[index].clone());
-            for &credited_scope in &scopes[&objects[index].object.object_ref()] {
+            for &credited_scope in
+                &scopes[&reference(&objects[index]).expect("selected objects have a scope")]
+            {
                 *counts.entry(credited_scope).or_default() += 1;
             }
         }

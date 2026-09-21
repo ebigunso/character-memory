@@ -107,7 +107,78 @@ where
                 cue_kinds: BTreeSet::from([CueKind::Participant]),
             })
             .collect::<Vec<_>>();
+        let mut assembly = RetrieveAssembly::new(trace_mode);
+        let mut state_scopes = state::StateScopes::new();
+        let mut root_order = HashMap::new();
+        let keys = context.scene.scope_keys();
+        if context.graph_limits.allowed_object_types.is_empty()
+            || context
+                .graph_limits
+                .allowed_object_types
+                .contains(&ObjectType::DerivedMemory)
+        {
+            for (offset, key) in keys.iter().enumerate() {
+                let (ids, filtered) = self
+                    .graph_store
+                    .query_scope_state(
+                        key,
+                        GraphExpansionLifecyclePolicy {
+                            include_suppressed: context.lifecycle_policy.include_suppressed,
+                            include_superseded: context.lifecycle_policy.include_superseded,
+                        },
+                        context.candidate_limits.max_graph_roots,
+                    )
+                    .await?;
+                assembly
+                    .lifecycle_decisions
+                    .extend(filtered.into_iter().map(|entry| {
+                        filtered_lifecycle_decision(
+                            entry.object_ref,
+                            entry.reason,
+                            &entry.superseded_by,
+                        )
+                    }));
+                for (rank, id) in ids.into_iter().enumerate() {
+                    root_order.insert(
+                        (
+                            cues.participants.len() + offset,
+                            MemoryObjectRef::new(ObjectType::DerivedMemory, id),
+                        ),
+                        rank,
+                    );
+                    state_scopes
+                        .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, id))
+                        .or_default()
+                        .push(cues.participants.len() + offset);
+                    explicit_roots.push(CandidateRoot {
+                        object_id: id,
+                        object_type: ObjectType::DerivedMemory,
+                        score: 1.0,
+                        source: GraphRootSource::Place,
+                        vector_score: None,
+                        cue_kinds: BTreeSet::from([CueKind::Place]),
+                    });
+                }
+            }
+        }
         let (activity, activity_roots) = self.activity_roots(&context).await?;
+        if !keys.is_empty() {
+            for (rank, root) in activity_roots.iter().enumerate() {
+                if root.object_type == ObjectType::DerivedMemory {
+                    root_order.insert(
+                        (
+                            cues.participants.len() + keys.len(),
+                            MemoryObjectRef::new(root.object_type, root.object_id),
+                        ),
+                        rank,
+                    );
+                    state_scopes
+                        .entry(MemoryObjectRef::new(root.object_type, root.object_id))
+                        .or_default()
+                        .push(cues.participants.len() + keys.len());
+                }
+            }
+        }
         explicit_roots.extend(activity_roots);
         let root_selection = select_candidate_roots(
             &vector_candidates,
@@ -115,10 +186,10 @@ where
             &explicit_roots,
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
+            &state_scopes,
+            &root_order,
         );
         let candidate_roots = root_selection.roots;
-        let mut assembly = RetrieveAssembly::new(trace_mode);
-        let mut state_scopes = state::StateScopes::new();
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
@@ -946,6 +1017,8 @@ fn select_candidate_roots(
     explicit_roots: &[CandidateRoot],
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
+    scopes: &state::StateScopes,
+    root_order: &HashMap<(usize, MemoryObjectRef), usize>,
 ) -> CandidateRootSelection {
     let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
@@ -1010,6 +1083,19 @@ fn select_candidate_roots(
             merged.push(root);
         }
     }
+    // A shared root may first appear in another scope. Keep each selector's own
+    // order here; pack queues deliberately use only their final ranked indices.
+    state::order_state(
+        &mut merged,
+        scopes,
+        |root| Some(MemoryObjectRef::new(root.object_type, root.object_id)),
+        |scope, root| {
+            root_order[&(
+                scope,
+                MemoryObjectRef::new(root.object_type, root.object_id),
+            )]
+        },
+    );
     let unique_count = merged.len();
     let selection = select_with_cue_floors(
         merged.iter().map(|root| &root.cue_kinds),
@@ -1394,6 +1480,8 @@ mod tests {
             &[],
             2,
             RetrievalCueFloors::default(),
+            &state::StateScopes::new(),
+            &HashMap::new(),
         );
 
         assert_eq!(
@@ -2851,6 +2939,22 @@ mod tests {
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
+        }
+
+        async fn query_scope_state(
+            &self,
+            key: &crate::domain::ScopeKey,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+            limit: usize,
+        ) -> Result<
+            (
+                Vec<MemoryId>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            let _ = (key, policy, limit);
+            unreachable!("scope selector is not used by this failure fixture")
         }
 
         async fn expand_bounded(

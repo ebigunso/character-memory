@@ -375,6 +375,19 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError>;
 
+    async fn query_scope_state(
+        &self,
+        key: &crate::domain::ScopeKey,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<MemoryId>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    >;
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -438,6 +451,21 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
         (**self).query_derived_memories_by_thread(query).await
+    }
+
+    async fn query_scope_state(
+        &self,
+        key: &crate::domain::ScopeKey,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<MemoryId>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        (**self).query_scope_state(key, policy, limit).await
     }
 
     async fn expand_bounded(

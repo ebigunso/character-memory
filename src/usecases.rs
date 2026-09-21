@@ -2,6 +2,7 @@ pub(crate) mod correct_forget;
 pub(crate) mod link;
 pub(crate) mod remember;
 pub(crate) mod retrieve;
+mod scope;
 pub(crate) mod stats_projection;
 pub(crate) mod vector_indexing;
 pub(crate) mod write_planning;

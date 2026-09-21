@@ -623,6 +623,22 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn query_scope_state(
+            &self,
+            key: &crate::domain::ScopeKey,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+            limit: usize,
+        ) -> Result<
+            (
+                Vec<MemoryId>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            let _ = (key, policy, limit);
+            unreachable!("scope selector is not used by this failure fixture")
+        }
+
         async fn expand_bounded(
             &self,
             _query: &GraphExpansionQuery,

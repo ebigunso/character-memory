@@ -591,6 +591,21 @@ impl GraphAuthorityStore for GatedGraph {
     ) -> Result<Vec<DerivedMemory>, CustomError> {
         self.store.query_derived_memories_by_thread(query).await
     }
+    async fn query_scope_state(
+        &self,
+        key: &crate::domain::ScopeKey,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<MemoryId>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        self.store.query_scope_state(key, policy, limit).await
+    }
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
