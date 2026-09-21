@@ -166,6 +166,10 @@ where
             }
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
+        let resolved_thread_members = filtered
+            .iter()
+            .map(|entry| entry.object_ref.id)
+            .collect::<HashSet<_>>();
         assembly
             .lifecycle_decisions
             .extend(filtered.into_iter().map(|entry| {
@@ -242,9 +246,15 @@ where
             if let Some(traces) = &mut selectivity_traces {
                 traces.extend(selectivity_plan.traces);
             }
-            let query =
+            let mut query =
                 graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides)
                     .with_fanout_utilization_recording(trace_mode);
+            if context.activity == Some(crate::api::types::ActivityRef::Thread(candidate.object_id))
+                && candidate.object_type == ObjectType::MemoryThread
+            {
+                // Reuse the activity selector's omitted members; no second state read.
+                query.resolved_thread_members = resolved_thread_members.clone();
+            }
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
@@ -1235,11 +1245,8 @@ fn graph_query_for_candidate(
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,
     });
-    query.current_state = candidate.object_type == ObjectType::Entity
-        && candidate.source == GraphRootSource::Participant
-        || candidate.object_type == ObjectType::MemoryThread
-            && context.activity
-                == Some(crate::api::types::ActivityRef::Thread(candidate.object_id));
+    query.current_subject_state = candidate.object_type == ObjectType::Entity
+        && candidate.source == GraphRootSource::Participant;
     query
 }
 

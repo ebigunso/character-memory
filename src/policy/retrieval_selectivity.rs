@@ -202,14 +202,14 @@ pub(crate) async fn selectivity_plan_for_entity(
     stats_context: &SelectivityStatsContext,
     lifecycle_policy: RetrievalLifecyclePolicy,
     trace_mode: TraceMode,
-    current_state: bool,
+    current_subject_state: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
-        if current_state && spec.relation == RelationType::About {
+        if current_subject_state && spec.relation == RelationType::About {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
             let decision = SelectivityDecision::SkippedSceneNamedRoot;
             increment_telemetry(&mut plan.telemetry, decision);

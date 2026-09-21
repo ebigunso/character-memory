@@ -423,11 +423,6 @@ fn bounded_expansion_plan<'a>(
         &links,
         &[RelationType::Resolves, RelationType::FulfillsCommitment],
     );
-    let state_relation = if query.root_type == ObjectType::MemoryThread {
-        RelationType::PartOfThread
-    } else {
-        RelationType::About
-    };
     let object_lifecycle = objects
         .iter()
         .map(|object| {
@@ -438,30 +433,11 @@ fn bounded_expansion_plan<'a>(
             )
         })
         .collect::<std::collections::HashMap<_, _>>();
-    let resolved_thread_members = objects
-        .iter()
-        .filter_map(|object| match object {
-            MemoryObject::DerivedMemory(memory)
-                if memory.thread_ids.contains(&query.root_id)
-                    && resolved.contains_key(&memory.id)
-                    && derived_memory_lifecycle_filter_reason(
-                        memory,
-                        &superseded,
-                        query.lifecycle_policy,
-                    )
-                    .is_none() =>
-            {
-                Some(memory.id)
-            }
-            _ => None,
-        })
-        .collect::<HashSet<_>>();
     let mut state_memories = objects
         .iter()
         .filter_map(|object| match object {
             MemoryObject::DerivedMemory(memory)
-                if query.current_state
-                    && query.root_type == ObjectType::Entity
+                if query.current_subject_state
                     && memory.entity_ids.contains(&query.root_id)
                     && !resolved.contains_key(&memory.id)
                     && (query.lifecycle_policy.include_superseded
@@ -543,9 +519,15 @@ fn bounded_expansion_plan<'a>(
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
-        if depth == 0 && query.current_state {
+        if depth == 0 {
+            incident_links.retain(|(link, neighbor)| {
+                link.relation != RelationType::PartOfThread
+                    || !query.resolved_thread_members.contains(&neighbor.id)
+            });
+        }
+        if depth == 0 && query.current_subject_state {
             for (link, neighbor) in &incident_links {
-                if link.relation == state_relation {
+                if link.relation == RelationType::About {
                     let reason = object_lifecycle
                         .get(neighbor)
                         .copied()
@@ -555,31 +537,17 @@ fn bounded_expansion_plan<'a>(
                                 && resolved.contains_key(&neighbor.id))
                             .then_some(GraphExpansionFilteredReason::Resolved)
                         });
-                    if let Some(reason) = reason.filter(|_| {
-                        query.root_type == ObjectType::Entity
-                            || resolved_thread_members.contains(&neighbor.id)
-                    }) {
+                    if let Some(reason) = reason {
                         push_filtered_node(&mut filtered_nodes, *neighbor, reason, &superseded);
                     }
                 }
             }
-            if query.root_type == ObjectType::Entity {
-                incident_links = order_current_subject_links(
-                    incident_links,
-                    &state_ranks,
-                    |(link, neighbor)| {
-                        (link.relation == state_relation
-                            && neighbor.object_type == ObjectType::DerivedMemory)
-                            .then_some(neighbor.id)
-                    },
-                );
-            } else {
-                incident_links.retain(|(link, neighbor)| {
-                    link.relation != state_relation
-                        || neighbor.object_type != ObjectType::DerivedMemory
-                        || !resolved_thread_members.contains(&neighbor.id)
+            incident_links =
+                order_current_subject_links(incident_links, &state_ranks, |(link, neighbor)| {
+                    (link.relation == RelationType::About
+                        && neighbor.object_type == ObjectType::DerivedMemory)
+                        .then_some(neighbor.id)
                 });
-            }
         }
 
         let root_fanout_mode = RootFanoutMode::for_node(

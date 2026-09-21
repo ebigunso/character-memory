@@ -229,15 +229,6 @@ impl<'a> SparqlGraphSelectors<'a> {
         self.select_state(&format!("<{}> <{subject}>", vocab::ABOUT_ENTITY), policy)
     }
 
-    pub(crate) fn select_thread_state(
-        &self,
-        thread_id: MemoryId,
-        policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        let thread = graph_uri(ObjectType::MemoryThread, thread_id);
-        self.select_state(&format!("<{}> <{thread}>", vocab::PART_OF_THREAD), policy)
-    }
-
     pub(crate) fn select_scope_state(
         &self,
         key: &crate::domain::ScopeKey,
