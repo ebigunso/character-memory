@@ -3,6 +3,7 @@
 // Embedded persistent Oxigraph is the application default; the in-memory
 // store keeps tests and explicit fixture runs deterministic.
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 use crate::domain::{
     DerivedMemory, GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
@@ -154,6 +155,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) current_subject_state: bool,
+    pub(crate) participant_reference_time: Option<DateTime<Utc>>,
     pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
@@ -187,6 +189,7 @@ impl GraphExpansionQuery {
             allowed_relation_types: Vec::new(),
             fanout_overrides: Vec::new(),
             current_subject_state: false,
+            participant_reference_time: None,
             resolved_thread_members: std::collections::HashSet::new(),
             traversal_link_ids: None,
             trace_mode: TraceMode::Disabled,
@@ -284,6 +287,8 @@ pub(crate) struct GraphExpansionRelation {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GraphExpansion {
     pub(crate) objects: Vec<MemoryObject>,
+    /// Admitted objects in traversal order, before stable output sorting.
+    pub(crate) selection_order: Vec<MemoryObjectRef>,
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
@@ -308,6 +313,7 @@ impl GraphExpansion {
     #[cfg(test)]
     pub(crate) fn new(objects: Vec<MemoryObject>, links: Vec<MemoryLink>) -> Self {
         Self {
+            selection_order: objects.iter().map(MemoryObject::object_ref).collect(),
             objects,
             links,
             relations: Vec::new(),
@@ -372,6 +378,13 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         policy: GraphExpansionLifecyclePolicy,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError>;
 
+    async fn query_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: DateTime<Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, DateTime<Utc>)>, CustomError>;
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -380,6 +393,17 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: DateTime<Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, DateTime<Utc>)>, CustomError> {
+        (**self)
+            .query_last_interaction(participant, reference_time, policy)
+            .await
+    }
+
     async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
         (**self).query_notions_known_as(name).await
     }

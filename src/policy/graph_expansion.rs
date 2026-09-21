@@ -59,6 +59,7 @@ impl RootFanoutMode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<MemoryObjectRef>,
+    pub(crate) selection_order: Vec<MemoryObjectRef>,
     pub(crate) expanded_nodes: HashSet<MemoryObjectRef>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
@@ -76,6 +77,26 @@ pub(crate) struct ParticipantOccasion {
     pub(crate) time: DateTime<Utc>,
     pub(crate) retention_state: RetentionState,
     pub(crate) episode_retention_state: RetentionState,
+}
+
+impl ParticipantOccasion {
+    pub(crate) fn filtered_reason(
+        &self,
+        neighbor: MemoryObjectRef,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Option<(MemoryObjectRef, GraphExpansionFilteredReason)> {
+        [
+            (neighbor, self.retention_state),
+            (
+                MemoryObjectRef::new(ObjectType::Episode, self.episode_id),
+                self.episode_retention_state,
+            ),
+        ]
+        .into_iter()
+        .find_map(|(object, state)| {
+            retention_filter_reason(state, policy).map(|reason| (object, reason))
+        })
+    }
 }
 
 pub(crate) fn bounded_expansion(
@@ -124,6 +145,7 @@ pub(crate) fn bounded_expansion(
     Ok(GraphExpansion {
         objects: expanded_objects,
         links: expanded_links,
+        selection_order: plan.selection_order,
         relations: plan.relations,
         filtered_nodes: plan.filtered_nodes,
         resolved_by,
@@ -390,6 +412,7 @@ fn bounded_expansion_plan<'a>(
         if query.failure_policy.mode == GraphFailureMode::AllowPartialResults {
             return Ok(BoundedExpansionPlan {
                 visited: HashSet::new(),
+                selection_order: Vec::new(),
                 expanded_nodes: HashSet::new(),
                 relations: Vec::new(),
                 filtered_nodes: Vec::new(),
@@ -410,6 +433,7 @@ fn bounded_expansion_plan<'a>(
         }
         return Ok(BoundedExpansionPlan {
             visited: HashSet::new(),
+            selection_order: Vec::new(),
             expanded_nodes: HashSet::new(),
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
@@ -465,6 +489,7 @@ fn bounded_expansion_plan<'a>(
         .collect::<HashMap<_, _>>();
     let mut visited = HashSet::new();
     let mut expanded_nodes = HashSet::new();
+    let mut selection_order = Vec::new();
     let mut filtered_nodes = Vec::new();
     let mut relations = Vec::new();
     let mut fanout_utilization = Vec::new();
@@ -496,6 +521,7 @@ fn bounded_expansion_plan<'a>(
         }
 
         visited.insert(object_ref);
+        selection_order.push(object_ref);
 
         if depth >= query.max_depth {
             continue;
@@ -649,6 +675,7 @@ fn bounded_expansion_plan<'a>(
 
     Ok(BoundedExpansionPlan {
         visited,
+        selection_order,
         expanded_nodes,
         relations,
         filtered_nodes,
@@ -1179,20 +1206,20 @@ fn limit_participant_occasions<T: Copy>(
             .get(&neighbor)
             .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
-        if let Some((object_ref, reason)) = occasions.get(&neighbor).and_then(|occasion| {
-            [
-                (neighbor, occasion.retention_state),
-                (
-                    MemoryObjectRef::new(ObjectType::Episode, episode),
-                    occasion.episode_retention_state,
-                ),
-            ]
-            .into_iter()
-            .find_map(|(object_ref, state)| {
-                retention_filter_reason(state, query.lifecycle_policy)
-                    .map(|reason| (object_ref, reason))
+        if query
+            .participant_reference_time
+            .is_some_and(|reference_time| {
+                occasions
+                    .get(&neighbor)
+                    .is_some_and(|occasion| occasion.time > reference_time)
             })
-        }) {
+        {
+            return false;
+        }
+        if let Some((object_ref, reason)) = occasions
+            .get(&neighbor)
+            .and_then(|occasion| occasion.filtered_reason(neighbor, query.lifecycle_policy))
+        {
             let count = excluded_counts
                 .entry((relation, neighbor.object_type))
                 .or_default();

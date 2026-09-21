@@ -1612,7 +1612,8 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         &place_result.scene_references[0],
         SceneReferenceResult {
             reference: SceneReference::SettingWords,
-            resolution: SceneReferenceResolution::ContentCue
+            resolution: SceneReferenceResolution::ContentCue,
+            ..
         }
     ));
 }

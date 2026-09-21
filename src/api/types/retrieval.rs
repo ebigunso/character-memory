@@ -1,5 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
@@ -111,8 +112,8 @@ impl Default for RetrievalCandidateLimits {
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///
-/// Unused room returns to the common pool. Zero disables that kind's floor;
-/// all floors remain subject to the existing hard caps.
+/// After reservations, every present kind shares spare turns, including kinds
+/// with a zero floor. All turns remain subject to the existing hard caps.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
@@ -266,6 +267,17 @@ pub enum SceneReference {
 pub struct SceneReferenceResult {
     pub reference: SceneReference,
     pub resolution: SceneReferenceResolution,
+    /// One entry per resolved notion, independent of retrieval caps. `None` means
+    /// never met at or before the scene time; content cues and unknowns are empty.
+    pub last_interactions: BTreeMap<MemoryId, Option<LastInteraction>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LastInteraction {
+    pub episode_id: MemoryId,
+    pub scene_time: DateTime<Utc>,
+    /// Whole seconds from the recorded experience to the retrieval scene time.
+    pub seconds_since: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -540,7 +552,7 @@ impl Default for RetrievalTrace {
     }
 }
 
-/// A floor admitted this object outside the stage's original capped prefix.
+/// A reserved or spare cue turn admitted this object outside the stage's original capped prefix.
 /// Earlier-stage admissions remain here even if the object is omitted later.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CueFloorAdmission {

@@ -547,6 +547,17 @@ struct GatedGraph {
 
 #[async_trait]
 impl GraphAuthorityStore for GatedGraph {
+    async fn query_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: chrono::DateTime<chrono::Utc>,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+        self.store
+            .query_last_interaction(participant, reference_time, policy)
+            .await
+    }
+
     async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
         self.store.upsert_objects(objects).await
     }

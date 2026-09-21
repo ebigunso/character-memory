@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::types::{
-    MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult, SourceScene,
-    SourceSceneUnavailableReason, VectorRecallCompleteness,
+    LastInteraction, MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult,
+    SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
 };
 use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
@@ -10,7 +10,7 @@ use crate::ports::graph_authority::GraphObjectQuery;
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
     pub kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
-    pub topic_order: Vec<MemoryObjectRef>,
+    pub orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
@@ -55,6 +55,7 @@ where
                 references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantKey { index },
                     resolution,
+                    last_interactions: BTreeMap::new(),
                 });
             }
             if let Some(name) = nonblank(participant.name.as_deref()) {
@@ -79,6 +80,7 @@ where
                 references.push(SceneReferenceResult {
                     reference: SceneReference::ParticipantName { index },
                     resolution,
+                    last_interactions: BTreeMap::new(),
                 });
             }
             if let Some(description) = nonblank(participant.description.as_deref()) {
@@ -93,10 +95,43 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
+        let mut last_interactions = HashMap::new();
+        for &participant in &participants {
+            let last = self
+                .graph_store
+                .query_last_interaction(
+                    participant,
+                    context.scene.time,
+                    GraphExpansionLifecyclePolicy {
+                        include_suppressed: context.lifecycle_policy.include_suppressed,
+                        include_superseded: context.lifecycle_policy.include_superseded,
+                    },
+                )
+                .await?;
+            last_interactions.insert(
+                participant,
+                last.map(|(episode_id, scene_time)| LastInteraction {
+                    episode_id,
+                    scene_time,
+                    seconds_since: (context.scene.time - scene_time).num_seconds(),
+                }),
+            );
+        }
+        for reference in &mut references {
+            let ids = match &reference.resolution {
+                SceneReferenceResolution::Resolved { notion_id } => std::slice::from_ref(notion_id),
+                SceneReferenceResolution::Ambiguous { notion_ids } => notion_ids.as_slice(),
+                _ => &[],
+            };
+            reference.last_interactions = ids
+                .iter()
+                .map(|id| (*id, last_interactions[id].clone()))
+                .collect();
+        }
         let mut searches = HashMap::new();
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
-        let mut topic_order = Vec::new();
+        let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| (None, text));
@@ -116,33 +151,28 @@ where
                 );
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
-                searches.insert(
-                    text,
-                    recall
-                        .candidates
-                        .iter()
-                        .map(|candidate| {
-                            MemoryObjectRef::new(candidate.object_type, candidate.object_id)
-                        })
-                        .collect::<Vec<_>>(),
-                );
                 all_candidates.extend(recall.candidates.iter().cloned());
+                searches.insert(text, recall.candidates);
             }
             let kind = match &reference {
                 None => CueKind::Topic,
                 Some(SceneReference::SettingWords) => CueKind::Place,
                 Some(_) => CueKind::Participant,
             };
-            if kind == CueKind::Topic {
-                topic_order = searches[text].clone();
-            }
-            for object in &searches[text] {
-                kinds.entry(*object).or_default().insert(kind);
+            let search = &searches[text];
+            candidates_by_kind
+                .entry(kind)
+                .or_default()
+                .extend(search.iter().cloned());
+            for candidate in search.iter() {
+                let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                kinds.entry(object).or_default().insert(kind);
             }
             if let Some(reference) = reference {
                 references.push(SceneReferenceResult {
                     reference,
                     resolution: SceneReferenceResolution::ContentCue,
+                    last_interactions: BTreeMap::new(),
                 });
             }
         }
@@ -158,10 +188,27 @@ where
             })
             .cloned()
             .collect::<Vec<_>>();
+        let orders = candidates_by_kind
+            .into_iter()
+            .map(|(kind, candidates)| {
+                let ordered = CanonicalCandidates::new(candidates);
+                let mut seen = HashSet::new();
+                let order = ordered
+                    .iter()
+                    .map(|candidate| {
+                        MemoryObjectRef::new(candidate.object_type, candidate.object_id)
+                    })
+                    .filter(|object| seen.insert(*object))
+                    .collect();
+                (kind, order)
+            })
+            .collect();
         let selection = select_with_cue_floors(
             candidates.iter().map(|candidate| {
-                &kinds[&MemoryObjectRef::new(candidate.object_type, candidate.object_id)]
+                let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                (object, &kinds[&object])
             }),
+            &orders,
             context.candidate_limits.max_vector_candidates,
             context.cue_floors,
         );
@@ -183,7 +230,7 @@ where
         Ok(RecallCues {
             candidates: CanonicalCandidates::new(selected),
             kinds,
-            topic_order,
+            orders,
             participants,
             references,
             dimension,

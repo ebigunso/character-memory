@@ -3487,6 +3487,17 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_last_interaction(
+            &self,
+            participant: MemoryId,
+            reference_time: chrono::DateTime<chrono::Utc>,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+            self.store
+                .query_last_interaction(participant, reference_time, policy)
+                .await
+        }
+
         async fn query_notions_known_as(
             &self,
             name: &str,

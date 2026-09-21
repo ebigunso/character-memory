@@ -4,6 +4,24 @@ use std::collections::BTreeMap;
 // Membership is local to a scene-ordered state scope, not inherited cue provenance.
 pub(super) type StateScopes = HashMap<MemoryObjectRef, Vec<usize>>;
 
+pub(super) fn scopes_for_kind(
+    scopes: &StateScopes,
+    kinds: &[CueKind],
+    kind: CueKind,
+) -> StateScopes {
+    scopes
+        .iter()
+        .filter_map(|(&object, memberships)| {
+            let memberships = memberships
+                .iter()
+                .copied()
+                .filter(|&scope| kinds[scope] == kind)
+                .collect::<Vec<_>>();
+            (!memberships.is_empty()).then_some((object, memberships))
+        })
+        .collect()
+}
+
 pub(super) fn record_subject_state(
     scopes: &mut StateScopes,
     scope: usize,
