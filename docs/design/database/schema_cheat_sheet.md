@@ -7,7 +7,7 @@ Oxigraph holds memory truth. Qdrant recalls content candidates. Retrieval statis
 | Store | Responsibility |
 |---|---|
 | Oxigraph | Objects, links, provenance, suppression, supersession and expansion context |
-| Qdrant Edge or Qdrant service | Vector candidates and object-type prefiltering |
+| Qdrant Edge or Qdrant service | Vector candidates and object-type/surface prefiltering |
 | Retrieval stats | Derived entity/relation/object and global counters, health and fanout inputs |
 | Caller storage | Raw transcripts and other source content behind pointers |
 
@@ -23,18 +23,18 @@ Vector payload `object_id` joins the graph's UUID `objectId`. RDF resources also
 | `schema_version` | String | Write-side record compatibility marker |
 | `embedding_text` | Text | Exact embedding input for audit |
 
-These are the five emitted payload fields. The service indexes `object_id` and `object_type`. Returned candidates contain object identity, surface and score; content and lifecycle come from graph hydration. The [candidate reader (`payload.rs:115`)](../../../src/adapters/qdrant/payload.rs#L115) decodes identity/type/surface, and the [writer (`payload.rs:164`)](../../../src/adapters/qdrant/payload.rs#L164) checks the schema marker.
+These are the five emitted payload fields. Both adapters index `object_id`, `object_type` and `surface`. Returned candidates contain object identity, surface and score; content and lifecycle come from graph hydration. The [candidate reader and payload writer](../../../src/adapters/qdrant/payload.rs) decode identity/type/surface and check the write-side schema marker.
 
 | Object type | Surface | Text source | Maximum surfaces |
 |---|---|---|---|
-| `episode` | `summary` | Episode summary followed by labelled scene words; keys and custom values excluded | 1 |
+| `episode` | `summary`, `scene_setting`, `scene_participants` | Summary; optional setting words; optional joined participant names/descriptions. Keys and custom values excluded | 3 |
 | `observation` | `text` | Observation text | 1 |
 | `memory_thread` | `summary` | Thread title and summary | 1 |
 | `derived_memory` | `derived_text` | Interpreted-memory text | 1 |
 | `entity` | — | Graph notion identity | 0 |
 | `memory_link` | — | Graph relationship | 0 |
 
-The `query` surface represents search input. It is not emitted for a stored memory object. Names are recalled through belief content or looked up in graph assertions.
+The `query` surface represents search input. It is not emitted for a stored memory object. A topic searches content surfaces; scene words search their respective episode surfaces. Exact names also resolve through graph assertions.
 
 ## Graph Resources
 

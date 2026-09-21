@@ -1,52 +1,75 @@
 // Embedding-surface builders for graph objects that participate in vector
 // candidate recall.
 use crate::domain::{
-    DerivedMemory, Episode, MemoryObject, MemoryThread, ObjectType, Observation, VectorSurface,
+    DerivedMemory, Episode, MemoryObject, MemoryThread, ObjectType, Observation, Scene,
+    VectorSurface,
 };
 
 use crate::models::vector::VectorRecord;
 
 pub const fn max_embedding_surfaces(object_type: ObjectType) -> usize {
     match object_type {
-        ObjectType::Episode
-        | ObjectType::Observation
-        | ObjectType::MemoryThread
-        | ObjectType::DerivedMemory => 1,
+        ObjectType::Episode => 3,
+        ObjectType::Observation | ObjectType::MemoryThread | ObjectType::DerivedMemory => 1,
         ObjectType::Entity | ObjectType::MemoryLink => 0,
     }
 }
 
 pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
-    let mut text = prefixed_text("Episode summary", &episode.summary);
-    let setting = episode
-        .scene
-        .setting
-        .words
-        .as_deref()
-        .map(|words| ("Setting", clean_text(words)));
-    let participants = episode.scene.participants.iter().map(|participant| {
-        let words = [&participant.name, &participant.description]
-            .into_iter()
-            .flatten()
-            .map(|words| clean_text(words))
-            .filter(|words| !words.is_empty())
-            .collect::<Vec<_>>()
-            .join(", ");
-        ("With", words)
-    });
-    for (label, words) in setting.into_iter().chain(participants) {
-        if !words.is_empty() {
-            text.push('\n');
-            text.push_str(&prefixed_text(label, &words));
-        }
-    }
     VectorRecord::new(
         episode.id,
         ObjectType::Episode,
         VectorSurface::Summary,
         episode.schema_version.clone(),
-        text,
+        prefixed_text("Episode summary", &episode.summary),
     )
+}
+
+pub(crate) fn scene_surface_texts(scene: &Scene) -> [(VectorSurface, String); 2] {
+    let participants = scene
+        .participants
+        .iter()
+        .map(|participant| {
+            [&participant.name, &participant.description]
+                .into_iter()
+                .flatten()
+                .map(|words| clean_text(words))
+                .filter(|words| !words.is_empty())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|words| !words.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    [
+        (
+            VectorSurface::SceneSetting,
+            clean_text(scene.setting.words.as_deref().unwrap_or_default()),
+        ),
+        // ponytail: one shared surface dilutes a person's words in a crowded scene;
+        // per-person points need a measured gain before expanding point identity.
+        (VectorSurface::SceneParticipants, participants),
+    ]
+}
+
+pub(crate) fn memory_object_vector_records(object: &MemoryObject) -> Vec<VectorRecord> {
+    let mut records = memory_object_vector_record(object)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let MemoryObject::Episode(episode) = object {
+        for (surface, text) in scene_surface_texts(&episode.scene) {
+            if !text.is_empty() {
+                records.push(VectorRecord::new(
+                    episode.id,
+                    ObjectType::Episode,
+                    surface,
+                    episode.schema_version.clone(),
+                    text,
+                ));
+            }
+        }
+    }
+    records
 }
 
 pub(crate) fn observation_vector_record(observation: &Observation) -> VectorRecord {
@@ -221,8 +244,11 @@ mod tests {
 
     #[test]
     fn published_surface_limits_match_current_builders() {
+        let mut episode = episode_fixture();
+        episode.scene.setting.words = Some("room".to_owned());
+        episode.scene.participants[0].description = Some("visitor".to_owned());
         let objects = [
-            MemoryObject::Episode(episode_fixture()),
+            MemoryObject::Episode(episode),
             MemoryObject::Observation(observation_fixture()),
             MemoryObject::DerivedMemory(derived_memory_fixture()),
             MemoryObject::MemoryThread(thread_fixture()),
@@ -231,7 +257,7 @@ mod tests {
         ];
 
         for object in &objects {
-            let produced = usize::from(memory_object_vector_record(object).is_some());
+            let produced = memory_object_vector_records(object).len();
             assert_eq!(produced, max_embedding_surfaces(object.object_type()));
         }
     }

@@ -18,7 +18,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::adapters::qdrant::payload::{
     qdrant_payload_map, qdrant_point_id, read_candidate_match, QdrantPayloadKind,
-    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
+    QdrantPayloadSchema, OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD,
 };
 use crate::adapters::qdrant::tie_closure::close_tie_cohort;
 use crate::domain::{MemoryId, DEFAULT_SCHEMA_VERSION};
@@ -64,14 +64,14 @@ enum Command {
     },
     Search {
         query_embedding: Vec<f32>,
-        object_types: Vec<String>,
+        filter: Filter,
         limit: usize,
         exact: bool,
         zero_norm: bool,
         reply: Reply<Vec<VectorCandidateMatch>>,
     },
     Count {
-        object_types: Vec<String>,
+        filter: Filter,
         reply: Reply<usize>,
     },
     #[cfg(test)]
@@ -166,7 +166,7 @@ impl QdrantEdgeVectorCandidateStore {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Search {
             query_embedding: query.query_embedding.clone(),
-            object_types: object_type_tokens(query),
+            filter: candidate_filter(query),
             limit: fetch_limit,
             exact: self.exact_scan,
             zero_norm: query.is_zero_norm(),
@@ -184,7 +184,7 @@ impl QdrantEdgeVectorCandidateStore {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Search {
             query_embedding: query.query_embedding.clone(),
-            object_types: object_type_tokens(query),
+            filter: candidate_filter(query),
             limit: fetch_limit,
             exact: true,
             zero_norm: query.is_zero_norm(),
@@ -196,7 +196,7 @@ impl QdrantEdgeVectorCandidateStore {
     async fn scoped_count(&self, query: &VectorCandidateSearch) -> Result<usize, CustomError> {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Count {
-            object_types: object_type_tokens(query),
+            filter: candidate_filter(query),
             reply,
         })?;
         receive(receiver).await
@@ -230,7 +230,7 @@ impl VectorCandidateStore for QdrantEdgeVectorCandidateStore {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError> {
-        if query.limit == 0 || query.object_types.is_empty() {
+        if query.limit == 0 || query.object_types.is_empty() || query.surfaces.is_empty() {
             return Ok(VectorCandidateRecall {
                 candidates: CanonicalCandidates::new([]),
                 completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
@@ -331,29 +331,19 @@ fn owner_loop(shard: EdgeShard, commands: mpsc::Receiver<Command>) {
             }
             Command::Search {
                 query_embedding,
-                object_types,
+                filter,
                 limit,
                 exact,
                 zero_norm,
                 reply,
             } => {
-                let result = search_shard(
-                    &shard,
-                    query_embedding,
-                    object_types,
-                    limit,
-                    exact,
-                    zero_norm,
-                );
+                let result = search_shard(&shard, query_embedding, filter, limit, exact, zero_norm);
                 let _ = reply.send(result);
             }
-            Command::Count {
-                object_types,
-                reply,
-            } => {
+            Command::Count { filter, reply } => {
                 let result = shard
                     .count(CountRequest {
-                        filter: Some(string_filter(OBJECT_TYPE_FIELD, object_types)),
+                        filter: Some(filter),
                         exact: true,
                     })
                     .map_err(edge_error);
@@ -516,12 +506,11 @@ fn ensure_payload_indexes(shard: &EdgeShard) -> Result<(), CustomError> {
 fn search_shard(
     shard: &EdgeShard,
     query_embedding: Vec<f32>,
-    object_types: Vec<String>,
+    filter: Filter,
     limit: usize,
     exact: bool,
     zero_norm: bool,
 ) -> Result<Vec<VectorCandidateMatch>, CustomError> {
-    let filter = string_filter(OBJECT_TYPE_FIELD, object_types);
     if zero_norm {
         let (records, _) = shard
             .scroll(ScrollRequest {
@@ -603,8 +592,20 @@ fn string_filter(field: &str, values: Vec<String>) -> Filter {
     }
 }
 
-fn object_type_tokens(query: &VectorCandidateSearch) -> Vec<String> {
-    query.object_types.iter().map(ToString::to_string).collect()
+fn candidate_filter(query: &VectorCandidateSearch) -> Filter {
+    Filter {
+        must: Some(vec![
+            Condition::Filter(string_filter(
+                OBJECT_TYPE_FIELD,
+                query.object_types.iter().map(ToString::to_string).collect(),
+            )),
+            Condition::Filter(string_filter(
+                SURFACE_FIELD,
+                query.surfaces.iter().map(ToString::to_string).collect(),
+            )),
+        ]),
+        ..Filter::new()
+    }
 }
 
 fn validate_collection_name(name: &str) -> Result<(), CustomError> {

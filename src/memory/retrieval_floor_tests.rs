@@ -65,7 +65,7 @@ fn occasion() -> Scene {
     Scene::at("2026-09-21T00:00:00Z".parse().unwrap())
 }
 
-async fn floor_memory() -> CharacterMemory {
+async fn floor_memory(scene_surfaces: bool) -> CharacterMemory {
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
         Box::new(TemporaryVectorCandidateStore::open(4).await),
@@ -97,36 +97,69 @@ async fn floor_memory() -> CharacterMemory {
         .chain(3000..3048)
         .chain([4000])
     {
-        let mut observation =
-            ObservationDraft::new(MemoryId::from_u128(1), format!("Recollection {id}"));
-        observation.id = Some(MemoryId::from_u128(id));
-        observation.observed_at = Some(occasion().time);
-        observation.created_at = observation.observed_at;
-        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-        observation.salience_score = 0.0;
-        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
-            observation,
-            provenance(),
-        )));
+        let object_type = if scene_surfaces {
+            ObjectType::Episode
+        } else {
+            ObjectType::Observation
+        };
+        if scene_surfaces {
+            let mut scene = occasion();
+            scene.setting.words = Some("place".to_owned());
+            scene.participants.push(SceneParticipant {
+                description: Some("person".to_owned()),
+                ..Default::default()
+            });
+            let mut episode = EpisodeDraft::new(format!("Recollection {id}"));
+            episode.id = Some(MemoryId::from_u128(id));
+            episode.created_at = Some(scene.time);
+            episode.scene = Some(scene);
+            episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            episode.salience_score = 0.0;
+            plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+                episode,
+                provenance(),
+            )));
+        } else {
+            let mut observation =
+                ObservationDraft::new(MemoryId::from_u128(1), format!("Recollection {id}"));
+            observation.id = Some(MemoryId::from_u128(id));
+            observation.observed_at = Some(occasion().time);
+            observation.created_at = observation.observed_at;
+            observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            observation.salience_score = 0.0;
+            plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+                observation,
+                provenance(),
+            )));
+        }
         if id != 4000 {
             plan = plan.with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
-                MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
+                MemoryObjectRef::new(object_type, MemoryId::from_u128(id)),
                 provenance(),
             )));
         }
     }
     memory.commit(plan, CommitOptions::default()).await.unwrap();
-    link_activity(&memory, 4000).await;
+    link_activity(
+        &memory,
+        4000,
+        if scene_surfaces {
+            ObjectType::Episode
+        } else {
+            ObjectType::Observation
+        },
+    )
+    .await;
     memory
 }
 
-async fn link_activity(memory: &CharacterMemory, observation: u128) {
+async fn link_activity(memory: &CharacterMemory, observation: u128, object_type: ObjectType) {
     memory
         .link(MemoryLinkDraft::new(
             ObjectType::MemoryThread,
             MemoryId::from_u128(5000),
             RelationType::AssociatedWith,
-            ObjectType::Observation,
+            object_type,
             MemoryId::from_u128(observation),
         ))
         .await
@@ -180,6 +213,39 @@ async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
     (memory, strong_id)
 }
 
+async fn overlapping_scene_memory() -> (CharacterMemory, MemoryId) {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    for id in (6000..6012).chain([7000]) {
+        let text = if id == 7000 {
+            "orchids need careful watering."
+        } else {
+            "The work included a passing mention of orchids."
+        };
+        let mut scene = occasion();
+        scene.setting.words = Some(text.to_owned());
+        let mut episode = EpisodeDraft::new(text);
+        episode.id = Some(MemoryId::from_u128(id));
+        episode.created_at = Some(scene.time);
+        episode.scene = Some(scene);
+        episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let provenance = CandidateProvenance::caller("overlapping surfaces");
+        let plan = RememberWritePlan::new()
+            .with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+                episode,
+                provenance.clone(),
+            )))
+            .with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+                MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(id)),
+                provenance,
+            )));
+        memory.commit(plan, CommitOptions::default()).await.unwrap();
+    }
+    (memory, MemoryId::from_u128(7000))
+}
 #[tokio::test]
 async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
     let (memory, strong_id) = overlapping_cue_memory().await;
@@ -232,14 +298,14 @@ async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
 
 #[tokio::test]
 async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
-    let (memory, strong_id) = overlapping_cue_memory().await;
+    let (memory, strong_id) = overlapping_scene_memory().await;
     let mut context = RetrievalContext::new("orchids").with_trace();
-    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.object_type_defaults = vec![ObjectType::Episode];
     context.scene.setting.words = Some("work".to_owned());
     context.candidate_limits.max_vector_candidates = 12;
     context.candidate_limits.max_graph_roots = 48;
     context.graph_limits.max_depth = 0;
-    context.section_limits.derived_memories = 48;
+    context.section_limits.relevant_episodes = 48;
     let mut topic_only = context.clone();
     topic_only.scene.setting.words = None;
     let topic_only = memory.retrieve(topic_only).await.unwrap();
@@ -260,7 +326,7 @@ async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
         "the strongest Topic hit was lost at candidate merge"
     );
     assert!(trace.floor_admissions.contains(&CueFloorAdmission {
-        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        object: MemoryObjectRef::new(ObjectType::Episode, strong_id),
         stage: CueFloorStage::CandidateMerge,
         cue_kind: CueKind::Topic,
     }));
@@ -270,22 +336,22 @@ async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
         .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
     assert!(result
         .pack
-        .derived_memories
+        .relevant_episodes
         .iter()
-        .any(|row| row.memory.id == strong_id));
+        .any(|row| row.id == strong_id));
     memory.close().await.unwrap();
 }
 
 #[tokio::test]
 async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
-    let (memory, strong_id) = overlapping_cue_memory().await;
+    let (memory, strong_id) = overlapping_scene_memory().await;
     let mut context = RetrievalContext::new("orchids").with_trace();
-    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.object_type_defaults = vec![ObjectType::Episode];
     context.scene.setting.words = Some("work".to_owned());
     context.candidate_limits.max_vector_candidates = 48;
     context.candidate_limits.max_graph_roots = 48;
     context.graph_limits.max_depth = 0;
-    context.section_limits.derived_memories = 2;
+    context.section_limits.relevant_episodes = 2;
     let result = memory.retrieve(context).await.unwrap();
     let trace = result.trace.unwrap();
     assert!(trace
@@ -301,20 +367,20 @@ async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
         .iter()
         .find(|row| row.object.id == strong_id)
         .unwrap();
-    assert_eq!(result.pack.derived_memories.len(), 2);
+    assert_eq!(result.pack.relevant_episodes.len(), 2);
     assert!(trace.floor_admissions.contains(&CueFloorAdmission {
-        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        object: MemoryObjectRef::new(ObjectType::Episode, strong_id),
         stage: CueFloorStage::Section {
-            section: ContextPackSection::DerivedMemories,
+            section: ContextPackSection::RelevantEpisodes,
         },
         cue_kind: CueKind::Topic,
     }));
     assert!(
         result
             .pack
-            .derived_memories
+            .relevant_episodes
             .iter()
-            .any(|row| row.memory.id == strong_id),
+            .any(|row| row.id == strong_id),
         "the strongest Topic hit was lost only at the section cap: {assignment:?}"
     );
     memory.close().await.unwrap();
@@ -322,7 +388,7 @@ async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
 
 #[tokio::test]
 async fn a_large_activity_shares_roots_with_the_topic() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(false).await;
     let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
     for id in 6000..6016 {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
@@ -360,7 +426,7 @@ async fn a_large_activity_shares_roots_with_the_topic() {
 
 #[tokio::test]
 async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(false).await;
     let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
     for id in 6000..6016 {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
@@ -413,7 +479,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
 
 #[tokio::test]
 async fn floors_preserve_witnesses_lost_at_three_different_caps() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(true).await;
     let result = memory.retrieve(mixed_context()).await.unwrap();
     let trace = result.trace.as_ref().unwrap();
     let stages = [2000, 3000, 4000].map(|id| {
@@ -437,7 +503,7 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     });
     let selected = result
         .pack
-        .salient_observations
+        .relevant_episodes
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
@@ -448,7 +514,7 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     // At 61fbb29 these witnesses first disappeared at candidate merge, roots,
     // and the section respectively. Later caps can also need to protect them.
     let section = CueFloorStage::Section {
-        section: ContextPackSection::SalientObservations,
+        section: ContextPackSection::RelevantEpisodes,
     };
     let expected = [
         (2000, CueFloorStage::CandidateMerge, CueKind::Participant),
@@ -475,7 +541,7 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     }
     for (id, stage, cue_kind) in expected {
         assert!(trace.floor_admissions.contains(&CueFloorAdmission {
-            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
+            object: MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(id)),
             stage,
             cue_kind,
         }));
@@ -501,9 +567,9 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     assert_eq!(untraced.pack, result.pack);
     assert!(untraced.trace.is_none());
     let mut no_section = mixed_context();
-    no_section.section_limits.salient_observations = 0;
+    no_section.section_limits.relevant_episodes = 0;
     let no_section = memory.retrieve(no_section).await.unwrap();
-    assert!(no_section.pack.salient_observations.is_empty());
+    assert!(no_section.pack.relevant_episodes.is_empty());
     let admissions = no_section.trace.unwrap().floor_admissions;
     assert_eq!(admissions.len(), 39);
     assert!(admissions
@@ -637,20 +703,20 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
 
 #[tokio::test]
 async fn participant_and_place_keep_room_without_a_topic() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(true).await;
     let mut context = mixed_context();
     context.topic = None;
     context.activity = None;
     context.candidate_limits.max_vector_candidates = 96;
     context.candidate_limits.max_graph_roots = 96;
-    context.section_limits.salient_observations = 6;
+    context.section_limits.relevant_episodes = 6;
     let result = memory.retrieve(context.clone()).await.unwrap();
     let repeated = memory.retrieve(context).await.unwrap();
     assert_eq!(result.pack, repeated.pack);
     assert_eq!(result.trace, repeated.trace);
     let selected = result
         .pack
-        .salient_observations
+        .relevant_episodes
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
@@ -658,9 +724,9 @@ async fn participant_and_place_keep_room_without_a_topic() {
     assert_eq!(
         result.trace.unwrap().floor_admissions,
         [2000, 2001, 2002].map(|id| CueFloorAdmission {
-            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
+            object: MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(id)),
             stage: CueFloorStage::Section {
-                section: ContextPackSection::SalientObservations
+                section: ContextPackSection::RelevantEpisodes
             },
             cue_kind: CueKind::Participant,
         })
@@ -670,7 +736,7 @@ async fn participant_and_place_keep_room_without_a_topic() {
 
 #[tokio::test]
 async fn single_kind_keeps_section_ids_and_order() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(true).await;
     for kind in [
         CueKind::Topic,
         CueKind::Participant,
@@ -693,7 +759,7 @@ async fn single_kind_keeps_section_ids_and_order() {
         for (candidates, roots, section) in [(48, 12, 8), (3, 2, 1)] {
             context.candidate_limits.max_vector_candidates = candidates;
             context.candidate_limits.max_graph_roots = roots;
-            context.section_limits.salient_observations = section;
+            context.section_limits.relevant_episodes = section;
             let result = memory.retrieve(context.clone()).await.unwrap();
             let mut prefix_context = context.clone();
             prefix_context.cue_floors = RetrievalCueFloors {
@@ -722,7 +788,7 @@ async fn single_kind_keeps_section_ids_and_order() {
             };
             let pack = result.pack;
             assert_eq!(
-                pack.salient_observations
+                pack.relevant_episodes
                     .iter()
                     .map(|object| object.id.as_u128())
                     .collect::<Vec<_>>(),
@@ -740,7 +806,7 @@ async fn single_kind_keeps_section_ids_and_order() {
                     vec![]
                 }
             );
-            assert!(pack.relevant_episodes.is_empty());
+            assert!(pack.salient_observations.is_empty());
             assert!(pack.derived_memories.is_empty());
             assert!(pack.preferences.is_empty());
             assert!(pack.relationship_notes.is_empty());
@@ -755,7 +821,7 @@ async fn single_kind_keeps_section_ids_and_order() {
 
 #[tokio::test]
 async fn short_caps_serve_successive_rounds_in_scene_order() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(true).await;
     // The floor-two case alone observes a second round after all four kinds
     // have received their first slot.
     for (floor, cap) in (0..=4).map(|cap| (1, cap)).chain([(2, 5)]) {
@@ -791,11 +857,11 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             activity: floor,
             topic: floor,
         };
-        context.section_limits.salient_observations = cap;
+        context.section_limits.relevant_episodes = cap;
         let first = memory.retrieve(context).await.unwrap();
         let observations = first
             .pack
-            .salient_observations
+            .relevant_episodes
             .into_iter()
             .map(|object| object.id.as_u128())
             .collect::<BTreeSet<_>>();
@@ -817,7 +883,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
     assert_eq!(
         result
             .pack
-            .salient_observations
+            .relevant_episodes
             .iter()
             .map(|object| object.id.as_u128())
             .collect::<Vec<_>>(),
@@ -828,19 +894,19 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
 
 #[tokio::test]
 async fn overlapping_kinds_share_one_slot_and_return_unused_room() {
-    let memory = floor_memory().await;
-    link_activity(&memory, 1000).await;
+    let memory = floor_memory(true).await;
+    link_activity(&memory, 1000, ObjectType::Episode).await;
     let mut context = mixed_context();
     context.scene.participants[0].description = Some("topic".to_owned());
     context.scene.setting.words = Some("topic".to_owned());
     context.candidate_limits.max_vector_candidates = 2;
     context.candidate_limits.max_graph_roots = 3;
-    context.section_limits.salient_observations = 2;
+    context.section_limits.relevant_episodes = 2;
     let result = memory.retrieve(context).await.unwrap();
     assert_eq!(
         result
             .pack
-            .salient_observations
+            .relevant_episodes
             .iter()
             .map(|object| object.id.as_u128())
             .collect::<Vec<_>>(),
@@ -867,7 +933,7 @@ async fn overlapping_kinds_share_one_slot_and_return_unused_room() {
 
 #[tokio::test]
 async fn each_zero_floor_removes_only_its_reservation() {
-    let memory = floor_memory().await;
+    let memory = floor_memory(true).await;
     for (kind, witness) in [
         (CueKind::Participant, 2000),
         (CueKind::Place, 3000),
@@ -888,7 +954,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         assert!(
             !result
                 .pack
-                .salient_observations
+                .relevant_episodes
                 .iter()
                 .any(|object| object.id == MemoryId::from_u128(witness)),
             "{kind:?}"
@@ -906,7 +972,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         assert!(
             spare
                 .pack
-                .salient_observations
+                .relevant_episodes
                 .iter()
                 .any(|object| object.id == MemoryId::from_u128(witness)),
             "{kind:?}"

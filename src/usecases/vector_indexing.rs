@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::api::types::VectorIndexingFailure;
 use crate::domain::{MemoryObjectRef, ObjectType};
@@ -49,12 +49,7 @@ where
                 Ok(ids) => ids,
                 Err(error) => {
                     return Ok(failed(
-                        records
-                            .iter()
-                            .map(|record| {
-                                MemoryObjectRef::new(record.object_type, record.object_id)
-                            })
-                            .collect(),
+                        record_objects(&records),
                         VectorIndexingCause::GraphQuery(error),
                     ))
                 }
@@ -71,10 +66,7 @@ where
             });
         }
 
-        let objects = records
-            .iter()
-            .map(|record| MemoryObjectRef::new(record.object_type, record.object_id))
-            .collect::<Vec<_>>();
+        let objects = record_objects(&records);
         let embeddings = match embeddings {
             Ok(embeddings) => embeddings,
             Err(CustomError::Embedding(error)) => {
@@ -181,6 +173,15 @@ pub(crate) async fn delete_vectors<V: VectorCandidateStore + ?Sized>(
         }
         Err(error) => Err(error),
     }
+}
+
+fn record_objects(records: &[VectorRecord]) -> Vec<MemoryObjectRef> {
+    let mut seen = HashSet::new();
+    records
+        .iter()
+        .map(|record| MemoryObjectRef::new(record.object_type, record.object_id))
+        .filter(|object| seen.insert(*object))
+        .collect()
 }
 
 fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIndexingOutcome {

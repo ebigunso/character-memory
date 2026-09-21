@@ -1533,6 +1533,13 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     create_notion(&memory, 100, Some("Mira")).await;
     let mut past = scene();
     past.setting.words = Some("observatory".to_owned());
+    past.participants = vec![
+        SceneParticipant {
+            description: Some("astronomer".to_owned()),
+            ..Default::default()
+        };
+        2
+    ];
     let episode_id = write_episode(&memory, 5000, past).await;
     let mut present = scene();
     present.participants = vec![
@@ -1545,44 +1552,46 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     let mut context = RetrievalContext::default().with_scene(present).with_trace();
     context.candidate_limits.max_vector_candidates = 1;
     let description_only = memory.retrieve(context.clone()).await.unwrap();
-    let described = MemoryObjectRef::new(ObjectType::DerivedMemory, MemoryId::from_u128(1100));
+    let described = MemoryObjectRef::new(ObjectType::Episode, episode_id);
     assert_eq!(
         selected_cues(&description_only, described),
         &BTreeSet::from([CueKind::Participant])
     );
-    assert_eq!(*queries.lock().unwrap(), ["astronomer"]);
+    assert_eq!(*queries.lock().unwrap(), ["astronomer\nastronomer"]);
+    assert_eq!(description_only.pack.relevant_episodes[0].id, episode_id);
+    assert!(description_only.pack.derived_memories.is_empty());
     assert_eq!(
-        description_only.pack.derived_memories[0].memory.id,
-        MemoryId::from_u128(1100)
+        description_only.trace.as_ref().unwrap().vector_candidates[0].surface,
+        VectorSurface::SceneParticipants
     );
-    let trace = description_only.trace.as_ref().unwrap();
-    assert!(trace
-        .graph_relations
-        .iter()
-        .any(|link| link.to.id == MemoryId::from_u128(100)
-            || link.from.id == MemoryId::from_u128(100)));
     assert!(description_only
         .scene_references
         .iter()
         .all(|reference| reference.resolution == SceneReferenceResolution::ContentCue));
-    context.topic = Some("astronomer".to_owned());
-    queries.lock().unwrap().clear();
-    let merged = memory.retrieve(context.clone()).await.unwrap();
-    assert_eq!(*queries.lock().unwrap(), ["astronomer"]);
-    assert_eq!(merged.pack, description_only.pack);
-    assert_eq!(merged.rationale.vector_candidate_count, 1);
+
+    let named_belief = MemoryObjectRef::new(ObjectType::DerivedMemory, MemoryId::from_u128(1100));
+    let topic_only = memory
+        .retrieve(RetrievalContext::new("astronomer").with_trace())
+        .await
+        .unwrap();
     assert_eq!(
-        selected_cues(&merged, described),
-        &BTreeSet::from([CueKind::Topic, CueKind::Participant])
+        selected_cues(&topic_only, named_belief),
+        &BTreeSet::from([CueKind::Topic])
     );
+    context.topic = Some("astronomer".to_owned());
+    context.scene.participants.truncate(1);
     context.scene.setting.words = Some("astronomer".to_owned());
+    context.candidate_limits.max_vector_candidates = 48;
     queries.lock().unwrap().clear();
     let shared_text = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(*queries.lock().unwrap(), ["astronomer"]);
     assert_eq!(
-        selected_cues(&shared_text, described),
-        &BTreeSet::from([CueKind::Topic, CueKind::Participant, CueKind::Place])
+        selected_cues(&shared_text, named_belief),
+        &BTreeSet::from([CueKind::Topic])
     );
+    assert!(selected_cues(&shared_text, described).contains(&CueKind::Participant));
+    assert!(selected_cues(&shared_text, described).contains(&CueKind::Place));
+    context.candidate_limits.max_vector_candidates = 1;
     context.scene.setting.words = Some("observatory".to_owned());
     let budgeted = memory.retrieve(context).await.unwrap();
     assert_eq!(budgeted.trace.unwrap().vector_candidates.len(), 1);

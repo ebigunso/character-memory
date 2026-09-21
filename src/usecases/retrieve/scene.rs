@@ -83,15 +83,12 @@ where
                     last_interactions: BTreeMap::new(),
                 });
             }
-            if let Some(description) = nonblank(participant.description.as_deref()) {
-                descriptions.push((
-                    SceneReference::ParticipantDescription { index },
-                    description,
-                ));
+            if nonblank(participant.description.as_deref()).is_some() {
+                descriptions.push(SceneReference::ParticipantDescription { index });
             }
         }
-        if let Some(words) = nonblank(context.scene.setting.words.as_deref()) {
-            descriptions.push((SceneReference::SettingWords, words));
+        if nonblank(context.scene.setting.words.as_deref()).is_some() {
+            descriptions.push(SceneReference::SettingWords);
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
@@ -129,37 +126,58 @@ where
                 .collect();
         }
         let mut searches = HashMap::new();
+        let mut embeddings = HashMap::new();
         let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
         let mut all_candidates = Vec::new();
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
-        let topic = nonblank(context.topic.as_deref()).map(|text| (None, text));
-        for (reference, text) in topic.into_iter().chain(
-            descriptions
-                .into_iter()
-                .map(|(reference, text)| (Some(reference), text)),
-        ) {
-            if !searches.contains_key(text) {
-                let input = EmbeddingInput::new(None, None, VectorSurface::Query, text);
-                let embedding = self.embedder.embed(&input).await?;
+        let topic = nonblank(context.topic.as_deref()).map(|text| {
+            (
+                CueKind::Topic,
+                vec![
+                    VectorSurface::Summary,
+                    VectorSurface::Text,
+                    VectorSurface::DerivedText,
+                ],
+                text.to_owned(),
+            )
+        });
+        let scene_cues = crate::policy::embedding_surface::scene_surface_texts(&context.scene)
+            .into_iter()
+            .filter(|(_, text)| !text.is_empty())
+            .map(|(surface, text)| {
+                (
+                    if surface == VectorSurface::SceneSetting {
+                        CueKind::Place
+                    } else {
+                        CueKind::Participant
+                    },
+                    vec![surface],
+                    text,
+                )
+            });
+        for (kind, surfaces, text) in topic.into_iter().chain(scene_cues) {
+            let key = (text.clone(), surfaces.clone());
+            if !searches.contains_key(&key) {
+                if !embeddings.contains_key(&text) {
+                    let input = EmbeddingInput::new(None, None, VectorSurface::Query, &text);
+                    embeddings.insert(text.clone(), self.embedder.embed(&input).await?);
+                }
+                let embedding = embeddings[&text].clone();
                 dimension = embedding.len();
-                let query = VectorCandidateSearch::new(
+                let mut query = VectorCandidateSearch::new(
                     embedding,
                     context.candidate_limits.max_vector_candidates,
                     context.object_type_defaults.clone(),
                 );
+                query.surfaces = surfaces;
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
                 all_candidates.extend(recall.candidates.iter().cloned());
-                searches.insert(text, recall.candidates);
+                searches.insert(key.clone(), recall.candidates);
             }
-            let kind = match &reference {
-                None => CueKind::Topic,
-                Some(SceneReference::SettingWords) => CueKind::Place,
-                Some(_) => CueKind::Participant,
-            };
-            let search = &searches[text];
+            let search = &searches[&key];
             candidates_by_kind
                 .entry(kind)
                 .or_default()
@@ -168,14 +186,16 @@ where
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
                 kinds.entry(object).or_default().insert(kind);
             }
-            if let Some(reference) = reference {
-                references.push(SceneReferenceResult {
+        }
+        references.extend(
+            descriptions
+                .into_iter()
+                .map(|reference| SceneReferenceResult {
                     reference,
                     resolution: SceneReferenceResolution::ContentCue,
                     last_interactions: BTreeMap::new(),
-                });
-            }
-        }
+                }),
+        );
         let canonical = CanonicalCandidates::new(all_candidates);
         let mut seen = HashSet::new();
         let candidates = canonical
