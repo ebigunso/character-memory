@@ -117,6 +117,16 @@ where
             context.cue_floors,
         );
         let candidate_roots = root_selection.roots;
+        // Explicit roots and what they bring precede word matches at sections.
+        let mut section_orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
+        for root in &explicit_roots {
+            for kind in &root.cue_kinds {
+                section_orders
+                    .entry(*kind)
+                    .or_default()
+                    .push(MemoryObjectRef::new(root.object_type, root.object_id));
+            }
+        }
         let mut assembly = RetrieveAssembly::new(trace_mode);
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
@@ -181,6 +191,17 @@ where
                             return Err(bounded_failure_error(failure));
                         }
                     }
+                    let explicit_kind = match candidate.source {
+                        GraphRootSource::Participant => Some(CueKind::Participant),
+                        GraphRootSource::Activity => Some(CueKind::Activity),
+                        GraphRootSource::Vector => None,
+                    };
+                    if let Some(kind) = explicit_kind {
+                        section_orders
+                            .entry(kind)
+                            .or_default()
+                            .extend(&expansion.selection_order);
+                    }
                     assembly.absorb_expansion(candidate, expansion);
                 }
                 Err(CustomError::GraphExpansionRootNotFound { .. }) => {
@@ -209,6 +230,9 @@ where
         }
 
         let ranked_objects = assembly.ranked_objects();
+        for (kind, order) in root_selection.orders {
+            section_orders.entry(kind).or_default().extend(order);
+        }
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -222,7 +246,7 @@ where
         let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
-            &root_selection.orders,
+            &section_orders,
             context.section_limits,
             context.cue_floors,
             &mut details,
@@ -592,14 +616,14 @@ struct RankKey {
 }
 
 // Only a kind's own queue head credits its turn, even if already selected.
-// Direct search/selector order precedes inherited-only members in stage order.
+// Direct selector/search order precedes inherited-only members in stage order.
+// Floors reserve the first turns; every present kind shares the spare turns.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
     candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>)>,
     orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limit: usize,
     floors: RetrievalCueFloors,
-    share_remaining_by_kind: bool,
 ) -> Vec<(usize, Option<CueKind>)> {
     let candidates = candidates.into_iter().collect::<Vec<_>>();
     let kinds = candidates
@@ -637,15 +661,12 @@ fn select_with_cue_floors<'a>(
     });
     let mut selected = BTreeMap::new();
     'selection: for reserve_floors in [true, false] {
-        if !reserve_floors && !share_remaining_by_kind {
-            break;
-        }
         for round in 0..limit {
             for (kind, floor, queue) in &mut queues {
                 if selected.len() == limit {
                     break 'selection;
                 }
-                if *floor == 0 || (reserve_floors && round >= *floor) {
+                if reserve_floors && round >= *floor {
                     continue;
                 }
                 let Some(index) = queue.next() else { continue };
@@ -687,7 +708,6 @@ fn build_pack(
             orders,
             section_limit(section, limits),
             floors,
-            false,
         ) {
             let object = candidates[index].object.object_ref();
             selected.insert(object);
@@ -1026,7 +1046,6 @@ fn select_candidate_roots(
         &orders,
         max_graph_roots,
         floors,
-        true,
     );
     let mut selection = selection.into_iter().peekable();
     let mut roots = Vec::new();

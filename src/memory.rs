@@ -17,6 +17,8 @@ mod retrieval_floor_tests;
 #[cfg(test)]
 mod retrieval_scene_tests;
 #[cfg(test)]
+mod retrieval_turn_tests;
+#[cfg(test)]
 mod scene_tests;
 #[cfg(test)]
 mod write_turn_tests;
