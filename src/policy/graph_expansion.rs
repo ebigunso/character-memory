@@ -68,7 +68,15 @@ pub(crate) struct BoundedExpansionPlan {
 
 // Only participant neighbor metadata, including observations' parent episodes;
 // adapters can obtain this before choosing which objects to hydrate.
-pub(crate) type ParticipantOccasions = HashMap<MemoryObjectRef, (MemoryId, DateTime<Utc>)>;
+pub(crate) type ParticipantOccasions = HashMap<MemoryObjectRef, ParticipantOccasion>;
+
+#[derive(Debug)]
+pub(crate) struct ParticipantOccasion {
+    pub(crate) episode_id: MemoryId,
+    pub(crate) time: DateTime<Utc>,
+    pub(crate) retention_state: RetentionState,
+    pub(crate) episode_retention_state: RetentionState,
+}
 
 pub(crate) fn bounded_expansion(
     query: &GraphExpansionQuery,
@@ -978,8 +986,10 @@ fn limit_participant_occasions<T: Copy>(
         let (_, neighbor) = neighbor_for_item(item);
         let occasion = occasions.get(&neighbor);
         (
-            std::cmp::Reverse(occasion.map(|(_, time)| *time)),
-            occasion.map(|(episode, _)| *episode).unwrap_or(neighbor.id),
+            std::cmp::Reverse(occasion.map(|occasion| occasion.time)),
+            occasion
+                .map(|occasion| occasion.episode_id)
+                .unwrap_or(neighbor.id),
         )
     });
     let mut participants = participants.into_iter();
@@ -996,9 +1006,18 @@ fn limit_participant_occasions<T: Copy>(
         if fanout_limit_for_pair(query, relation, neighbor.object_type) == 0 {
             return false;
         }
+        // Suppression must not consume either the occasion budget or the
+        // episode's single observation slot. Both expansion stages use this.
+        if occasions.get(&neighbor).is_some_and(|occasion| {
+            [occasion.retention_state, occasion.episode_retention_state]
+                .into_iter()
+                .any(|state| retention_filter_reason(state, query.lifecycle_policy).is_some())
+        }) {
+            return false;
+        }
         let episode = occasions
             .get(&neighbor)
-            .map(|(episode, _)| *episode)
+            .map(|occasion| occasion.episode_id)
             .unwrap_or(neighbor.id);
         if !selected_episodes.contains(&episode) && selected_episodes.len() >= budget {
             return false;

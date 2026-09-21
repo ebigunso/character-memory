@@ -528,6 +528,150 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
 }
 
 #[tokio::test]
+async fn suppressed_latest_observation_recalls_the_previous_participant_occasion() {
+    assert_participant_recall_after_suppression(false).await;
+}
+
+#[tokio::test]
+async fn suppressed_latest_observation_leaves_its_active_sibling_eligible() {
+    assert_participant_recall_after_suppression(true).await;
+}
+
+async fn assert_participant_recall_after_suppression(active_sibling: bool) {
+    let (memory, _) = scene_memory().await;
+    create_notion(&memory, 100, None).await;
+    for index in 0..10 {
+        let mut occasion = scene();
+        occasion.time += chrono::Duration::hours(index as i64);
+        let id = 50_000 + index * 10;
+        write_episode(&memory, id, occasion).await;
+        memory
+            .link(MemoryLinkDraft::new(
+                ObjectType::Observation,
+                MemoryId::from_u128(id + 1),
+                RelationType::Mentions,
+                ObjectType::Entity,
+                MemoryId::from_u128(100),
+            ))
+            .await
+            .unwrap();
+    }
+    let latest_episode = MemoryId::from_u128(50_090);
+    let latest_observation = MemoryId::from_u128(50_091);
+    let sibling = MemoryId::from_u128(50_092);
+    if active_sibling {
+        let mut observation = ObservationDraft::new(latest_episode, "Another active remark.");
+        observation.id = Some(sibling);
+        observation.created_at = Some(scene().time);
+        observation.observed_at = Some(scene().time);
+        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        memory
+            .commit(
+                RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
+                    ObservationCandidate::new(observation, CandidateProvenance::caller("remark")),
+                )),
+                CommitOptions::default(),
+            )
+            .await
+            .unwrap();
+        memory
+            .link(MemoryLinkDraft::new(
+                ObjectType::Entity,
+                MemoryId::from_u128(100),
+                RelationType::Mentions,
+                ObjectType::Observation,
+                sibling,
+            ))
+            .await
+            .unwrap();
+    }
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::observation(latest_observation),
+            "Forget the latest remark",
+        ))
+        .await
+        .unwrap();
+    let mut context = RetrievalContext::default().with_trace();
+    context.scene.participants.push(keyed(100));
+    context.graph_limits.max_depth = 1;
+    let observation_ids = |result: RetrieveOutcome| {
+        result
+            .pack
+            .salient_observations
+            .into_iter()
+            .map(|observation| observation.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
+        vec![if active_sibling {
+            sibling
+        } else {
+            MemoryId::from_u128(50_081)
+        }]
+    );
+    context.lifecycle_policy.include_suppressed = true;
+    assert_eq!(
+        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
+        vec![latest_observation]
+    );
+
+    // Parent retention also controls eligibility, even when an observation is active.
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::episode(latest_episode),
+            "Forget the latest occasion",
+        ))
+        .await
+        .unwrap();
+    context.lifecycle_policy.include_suppressed = false;
+    assert_eq!(
+        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
+        vec![MemoryId::from_u128(50_081)]
+    );
+    context.lifecycle_policy.include_suppressed = true;
+    assert_eq!(
+        observation_ids(memory.retrieve(context).await.unwrap()),
+        vec![latest_observation]
+    );
+    // Direct and observation routes must also agree on the same eligible occasion.
+    for index in 0..10 {
+        memory
+            .link(MemoryLinkDraft::new(
+                ObjectType::Episode,
+                MemoryId::from_u128(50_000 + index * 10),
+                RelationType::Involves,
+                ObjectType::Entity,
+                MemoryId::from_u128(100),
+            ))
+            .await
+            .unwrap();
+    }
+    for include_suppressed in [false, true] {
+        let mut context = RetrievalContext::default();
+        context.scene.participants.push(keyed(100));
+        context.graph_limits.max_depth = 1;
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let result = memory.retrieve(context).await.unwrap();
+        assert_eq!(
+            result
+                .pack
+                .relevant_episodes
+                .iter()
+                .map(|episode| episode.id)
+                .collect::<Vec<_>>(),
+            vec![if include_suppressed {
+                latest_episode
+            } else {
+                MemoryId::from_u128(50_080)
+            }]
+        );
+    }
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and_paths() {
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
 

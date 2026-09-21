@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::domain::{graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
-use crate::policy::graph_expansion::ParticipantOccasions;
+use crate::policy::graph_expansion::{ParticipantOccasion, ParticipantOccasions};
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
 };
@@ -300,14 +300,14 @@ impl<'a> SparqlGraphSelectors<'a> {
         let node_values = sparql_node_iri_values("node", neighbors);
         let query_text = format!(
             r#"
-            SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime WHERE {{
+            SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{
               {node_values}
-              GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType . }}
+              GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
               {{
-                GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime . }}
+                GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
               }} UNION {{
                 GRAPH ?node {{ ?node <{episode}> ?episode . }}
-                GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime . }}
+                GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
               }}
             }}
         "#,
@@ -315,6 +315,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             object_type = vocab::OBJECT_TYPE,
             scene_time = vocab::SCENE_TIME,
             episode = vocab::EPISODE,
+            retention = vocab::RETENTION_STATE,
         );
         let mut occasions = ParticipantOccasions::new();
         for solution in self.query_solutions(&query_text)? {
@@ -329,7 +330,15 @@ impl<'a> SparqlGraphSelectors<'a> {
                         "Oxigraph SPARQL invalid Scene.time: {error}"
                     ))
                 })?;
-            occasions.insert(neighbor, (memory_id_binding(&solution, "episodeId")?, time));
+            occasions.insert(
+                neighbor,
+                ParticipantOccasion {
+                    episode_id: memory_id_binding(&solution, "episodeId")?,
+                    time,
+                    retention_state: enum_binding(&solution, "retention")?,
+                    episode_retention_state: enum_binding(&solution, "episodeRetention")?,
+                },
+            );
         }
         Ok(occasions)
     }
