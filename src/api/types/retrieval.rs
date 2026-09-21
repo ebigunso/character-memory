@@ -18,6 +18,10 @@ pub struct RetrievalContext {
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
+    /// Per-kind room at candidate, root and section caps. A calibration knob for
+    /// measured defaults; applications are not expected to set it. Five people
+    /// share one participant floor, rather than receiving one floor each.
+    pub cue_floors: RetrievalCueFloors,
     pub lifecycle_policy: RetrievalLifecyclePolicy,
     pub include_trace: bool,
     /// Object types admitted by vector candidate recall. Graph traversal has its own limits.
@@ -71,6 +75,7 @@ impl Default for RetrievalContext {
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
+            cue_floors: RetrievalCueFloors::default(),
             lifecycle_policy: RetrievalLifecyclePolicy::default(),
             include_trace: false,
             object_type_defaults: default_retrieval_object_types(),
@@ -91,8 +96,6 @@ pub fn default_retrieval_object_types() -> Vec<ObjectType> {
 pub struct RetrievalCandidateLimits {
     pub max_vector_candidates: usize,
     pub max_graph_roots: usize,
-    /// Minimum room per cue kind at candidate merge, root selection and each section.
-    pub cue_floors: RetrievalCueFloors,
 }
 
 impl Default for RetrievalCandidateLimits {
@@ -100,12 +103,13 @@ impl Default for RetrievalCandidateLimits {
         Self {
             max_vector_candidates: 48,
             max_graph_roots: 12,
-            cue_floors: RetrievalCueFloors::default(),
         }
     }
 }
 
-/// Provisional defaults: one slot per kind, pending calibration.
+/// Calibration values for measured defaults, provisionally one slot per cue kind.
+/// Applications are not expected to set these. Floors apply per kind, not per
+/// person or place: five people share the participant floor.
 ///
 /// Unused room returns to the common pool. Zero disables that kind's floor;
 /// all floors remain subject to the existing hard caps.

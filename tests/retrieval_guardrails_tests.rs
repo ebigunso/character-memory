@@ -340,7 +340,6 @@ fn belief_root_context(query: &str) -> RetrievalContext {
     context.candidate_limits = RetrievalCandidateLimits {
         max_vector_candidates: 32,
         max_graph_roots: 1,
-        ..Default::default()
     };
     context.graph_limits = RetrievalGraphLimits {
         max_depth: 2,

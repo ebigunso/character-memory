@@ -113,7 +113,7 @@ where
             &cues.kinds,
             &explicit_roots,
             context.candidate_limits.max_graph_roots,
-            context.candidate_limits.cue_floors,
+            context.cue_floors,
         );
         let candidate_roots = root_selection.roots;
         let mut assembly = RetrieveAssembly::new(trace_mode);
@@ -222,7 +222,7 @@ where
         let pack = build_pack(
             ranked_objects,
             context.section_limits,
-            context.candidate_limits.cue_floors,
+            context.cue_floors,
             &mut details,
             &mut section_pressure,
         );

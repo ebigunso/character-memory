@@ -158,7 +158,7 @@ where
                 &kinds[&MemoryObjectRef::new(candidate.object_type, candidate.object_id)]
             }),
             context.candidate_limits.max_vector_candidates,
-            context.candidate_limits.cue_floors,
+            context.cue_floors,
         );
         let mut floor_admissions = Vec::new();
         let selected = selection

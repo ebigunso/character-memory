@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 
@@ -138,34 +138,6 @@ fn mixed_context() -> RetrievalContext {
     context
 }
 
-fn pack_ids(result: &RetrieveOutcome) -> BTreeMap<String, Vec<String>> {
-    serde_json::to_value(&result.pack)
-        .unwrap()
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(section, objects)| {
-            (
-                section.clone(),
-                objects
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|object| {
-                        object
-                            .get("id")
-                            .or_else(|| object.get("memory").and_then(|memory| memory.get("id")))
-                            .unwrap()
-                            .as_str()
-                            .unwrap()
-                            .to_owned()
-                    })
-                    .collect(),
-            )
-        })
-        .collect()
-}
-
 #[tokio::test]
 async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let memory = floor_memory().await;
@@ -254,6 +226,129 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
 }
 
 #[tokio::test]
+async fn default_depth_credits_participant_inherited_through_the_episode() {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    let provenance = || CandidateProvenance::caller("shared occasion");
+    let mut person = EntityDraft::new();
+    person.id = Some(MemoryId::from_u128(7));
+    person.created_at = Some(occasion().time);
+    person.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
+        EntityCandidate::new(person, provenance()),
+    ));
+    let mut shared_scene = occasion();
+    shared_scene.participants.push(SceneParticipant {
+        key: Some(MemoryId::from_u128(7)),
+        ..Default::default()
+    });
+    for (id, scene) in [(1, occasion()), (2, shared_scene.clone())] {
+        let mut episode = EpisodeDraft::new("An occasion.");
+        episode.id = Some(MemoryId::from_u128(id));
+        episode.created_at = Some(scene.time);
+        episode.scene = Some(scene);
+        episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            episode,
+            provenance(),
+        )));
+    }
+    // The topic finds 1000 and 1001 directly. Participant 7 reaches 1001 and
+    // its sibling 4000 only through episode 2; neither observation mentions 7.
+    for (id, episode) in [(1000, 1), (1001, 2), (4000, 2)] {
+        let mut observation =
+            ObservationDraft::new(MemoryId::from_u128(episode), format!("Recollection {id}"));
+        observation.id = Some(MemoryId::from_u128(id));
+        observation.observed_at = Some(occasion().time);
+        observation.created_at = observation.observed_at;
+        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        observation.salience_score = 0.0;
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            observation,
+            provenance(),
+        )));
+        if id != 4000 {
+            plan = plan.with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+                MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
+                provenance(),
+            )));
+        }
+    }
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    for (id, episode) in [(1000, 1), (1001, 2), (4000, 2)] {
+        memory
+            .link(MemoryLinkDraft::new(
+                ObjectType::Observation,
+                MemoryId::from_u128(id),
+                RelationType::ObservedIn,
+                ObjectType::Episode,
+                MemoryId::from_u128(episode),
+            ))
+            .await
+            .unwrap();
+    }
+    let mut context = RetrievalContext::new("topic")
+        .with_scene(shared_scene)
+        .with_trace();
+    context.section_limits.salient_observations = 1;
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert_eq!(result.pack.salient_observations.len(), 1);
+    assert_eq!(
+        result.pack.salient_observations[0].id,
+        MemoryId::from_u128(1001)
+    );
+    assert_eq!(
+        trace
+            .vector_candidates
+            .iter()
+            .map(|row| row.object.id.as_u128())
+            .collect::<Vec<_>>(),
+        [1000, 1001]
+    );
+    assert_eq!(
+        trace.floor_admissions,
+        [CueFloorAdmission {
+            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(1001)),
+            stage: CueFloorStage::Section {
+                section: ContextPackSection::SalientObservations
+            },
+            cue_kind: CueKind::Participant,
+        }]
+    );
+    for id in [1001, 4000] {
+        let row = trace
+            .section_assignments
+            .iter()
+            .find(|row| row.object.id == MemoryId::from_u128(id))
+            .unwrap();
+        assert_eq!(
+            row.cue_kinds,
+            BTreeSet::from([CueKind::Topic, CueKind::Participant])
+        );
+    }
+    assert!(trace.graph_relations.iter().any(|row| {
+        row.from.id == MemoryId::from_u128(2)
+            && row.to.id == MemoryId::from_u128(7)
+            && row.relation == RelationType::Involves
+    }));
+    // The floor row identifies the credited kind, not its direct/inherited
+    // origin. Here only Topic searched content, so Participant was inherited.
+    context.cue_floors.participant = 0;
+    let unprotected = memory.retrieve(context).await.unwrap();
+    assert_eq!(unprotected.pack.salient_observations.len(), 1);
+    assert_eq!(
+        unprotected.pack.salient_observations[0].id,
+        MemoryId::from_u128(1000)
+    );
+    assert!(unprotected.trace.unwrap().floor_admissions.is_empty());
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn participant_and_place_keep_room_without_a_topic() {
     let memory = floor_memory().await;
     let mut context = mixed_context();
@@ -311,20 +406,6 @@ async fn single_kind_keeps_section_ids_and_order() {
             context.section_limits.salient_observations = section;
             let result = memory.retrieve(context.clone()).await.unwrap();
             // Exact section/id/order projections captured at 61fbb29.
-            let mut expected = [
-                "active_threads",
-                "character_signals",
-                "commitments",
-                "derived_memories",
-                "open_loops",
-                "preferences",
-                "relationship_notes",
-                "relevant_episodes",
-                "salient_observations",
-            ]
-            .into_iter()
-            .map(|section| (section.to_owned(), Vec::new()))
-            .collect::<BTreeMap<_, _>>();
             let first = match kind {
                 CueKind::Topic => 1000,
                 CueKind::Participant => 2000,
@@ -336,23 +417,33 @@ async fn single_kind_keeps_section_ids_and_order() {
             } else {
                 section
             };
-            expected.insert(
-                "salient_observations".to_owned(),
-                (first..first + count as u128)
-                    .map(|id| MemoryId::from_u128(id).to_string())
-                    .collect(),
-            );
-            if kind == CueKind::Activity {
-                expected.insert(
-                    "active_threads".to_owned(),
-                    vec![MemoryId::from_u128(5000).to_string()],
-                );
-            }
+            let pack = result.pack;
             assert_eq!(
-                pack_ids(&result),
-                expected,
+                pack.salient_observations
+                    .iter()
+                    .map(|object| object.id.as_u128())
+                    .collect::<Vec<_>>(),
+                (first..first + count as u128).collect::<Vec<_>>(),
                 "{kind:?} {candidates}/{roots}/{section}"
             );
+            assert_eq!(
+                pack.active_threads
+                    .iter()
+                    .map(|object| object.id.as_u128())
+                    .collect::<Vec<_>>(),
+                if kind == CueKind::Activity {
+                    vec![5000]
+                } else {
+                    vec![]
+                }
+            );
+            assert!(pack.relevant_episodes.is_empty());
+            assert!(pack.derived_memories.is_empty());
+            assert!(pack.preferences.is_empty());
+            assert!(pack.relationship_notes.is_empty());
+            assert!(pack.open_loops.is_empty());
+            assert!(pack.commitments.is_empty());
+            assert!(pack.character_signals.is_empty());
             assert!(result.trace.unwrap().floor_admissions.is_empty());
         }
     }
@@ -362,61 +453,60 @@ async fn single_kind_keeps_section_ids_and_order() {
 #[tokio::test]
 async fn short_caps_serve_successive_rounds_in_scene_order() {
     let memory = floor_memory().await;
-    for (floor, largest_cap) in [(1, 4), (2, 5)] {
-        for cap in 0..=largest_cap {
-            let mut context = mixed_context();
-            context.candidate_limits.cue_floors = RetrievalCueFloors {
-                participant: floor,
-                place: floor,
-                activity: floor,
-                topic: floor,
-            };
-            context.candidate_limits.max_graph_roots = cap;
-            let first = memory.retrieve(context.clone()).await.unwrap();
-            let second = memory.retrieve(context).await.unwrap();
-            assert_eq!(first.trace, second.trace);
-            let roots = first
-                .trace
-                .unwrap()
-                .graph_expansions
-                .into_iter()
-                .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
-                .map(|row| row.root.id.as_u128())
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                roots,
-                [2000, 3000, 5000, 1000, 2001][..cap]
-                    .iter()
-                    .copied()
-                    .collect()
-            );
+    // The floor-two case alone observes a second round after all four kinds
+    // have received their first slot.
+    for (floor, cap) in (0..=4).map(|cap| (1, cap)).chain([(2, 5)]) {
+        let mut context = mixed_context();
+        context.cue_floors = RetrievalCueFloors {
+            participant: floor,
+            place: floor,
+            activity: floor,
+            topic: floor,
+        };
+        context.candidate_limits.max_graph_roots = cap;
+        let first = memory.retrieve(context).await.unwrap();
+        let roots = first
+            .trace
+            .unwrap()
+            .graph_expansions
+            .into_iter()
+            .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+            .map(|row| row.root.id.as_u128())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            roots,
+            [2000, 3000, 5000, 1000, 2001][..cap]
+                .iter()
+                .copied()
+                .collect()
+        );
 
-            let mut context = mixed_context();
-            context.candidate_limits.cue_floors = RetrievalCueFloors {
-                participant: floor,
-                place: floor,
-                activity: floor,
-                topic: floor,
-            };
-            context.section_limits.salient_observations = cap;
-            let first = memory.retrieve(context.clone()).await.unwrap();
-            let second = memory.retrieve(context).await.unwrap();
-            assert_eq!(first.trace, second.trace);
-            let observations = first
-                .pack
-                .salient_observations
-                .into_iter()
-                .map(|object| object.id.as_u128())
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                observations,
-                [2000, 3000, 4000, 1000, 2001][..cap]
-                    .iter()
-                    .copied()
-                    .collect()
-            );
-        }
+        let mut context = mixed_context();
+        context.cue_floors = RetrievalCueFloors {
+            participant: floor,
+            place: floor,
+            activity: floor,
+            topic: floor,
+        };
+        context.section_limits.salient_observations = cap;
+        let first = memory.retrieve(context).await.unwrap();
+        let observations = first
+            .pack
+            .salient_observations
+            .into_iter()
+            .map(|object| object.id.as_u128())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            observations,
+            [2000, 3000, 4000, 1000, 2001][..cap]
+                .iter()
+                .copied()
+                .collect()
+        );
     }
+    let first = memory.retrieve(mixed_context()).await.unwrap();
+    let second = memory.retrieve(mixed_context()).await.unwrap();
+    assert_eq!(first.trace, second.trace);
     let mut context = mixed_context();
     context.candidate_limits.max_vector_candidates = 0;
     let result = memory.retrieve(context).await.unwrap();
@@ -481,7 +571,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         (CueKind::Activity, 4000),
     ] {
         let mut context = mixed_context();
-        let floors = &mut context.candidate_limits.cue_floors;
+        let floors = &mut context.cue_floors;
         match kind {
             CueKind::Participant => floors.participant = 0,
             CueKind::Place => floors.place = 0,
@@ -525,7 +615,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         .iter()
         .any(|row| row.cue_kind == CueKind::Topic && row.stage == CueFloorStage::GraphRoots));
     let mut context = mixed_context();
-    context.candidate_limits.cue_floors.topic = 0;
+    context.cue_floors.topic = 0;
     let unprotected = memory.retrieve(context).await.unwrap();
     let trace = unprotected.trace.unwrap();
     assert!(trace

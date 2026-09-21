@@ -591,7 +591,6 @@ fn episode_query() -> RetrievalContext {
     context.candidate_limits = RetrievalCandidateLimits {
         max_vector_candidates: 2,
         max_graph_roots: 2,
-        ..Default::default()
     };
     context
 }
