@@ -172,7 +172,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-21 Task_1 implemented (0da57d3) and approved at Tier D and Tier A: the activity beside the topic, typed and echoed as found or unknown, reaching what ordinary writes record with no new stored link; one set of cue kinds per admitted memory in the trace, replacing two older vocabularies (net about 200 lines removed). A thread's members enter most recent first. Until Task_3, a large thread can take every root after the participants; the README says so.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
