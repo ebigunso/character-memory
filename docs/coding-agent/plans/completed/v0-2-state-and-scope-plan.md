@@ -1,6 +1,6 @@
 # Plan: arriving somewhere brings what the character currently holds about who and what is there
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-21
 - last_updated: 2026-09-21
 - work_type: code
