@@ -32,6 +32,7 @@ pub(crate) struct VectorCandidateSearch {
     pub(crate) query_embedding: Vec<f32>,
     pub(crate) limit: usize,
     pub(crate) object_types: Vec<ObjectType>,
+    pub(crate) surfaces: Vec<VectorSurface>,
 }
 
 impl VectorCandidateSearch {
@@ -44,6 +45,11 @@ impl VectorCandidateSearch {
             query_embedding,
             limit,
             object_types,
+            surfaces: vec![
+                VectorSurface::Summary,
+                VectorSurface::Text,
+                VectorSurface::DerivedText,
+            ],
         }
     }
 
@@ -146,6 +152,8 @@ fn vector_surface_rank(surface: VectorSurface) -> u8 {
         VectorSurface::Text => 1,
         VectorSurface::DerivedText => 3,
         VectorSurface::Query => 4,
+        VectorSurface::SceneSetting => 5,
+        VectorSurface::SceneParticipants => 6,
     }
 }
 

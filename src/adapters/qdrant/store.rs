@@ -22,7 +22,7 @@ use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore
 
 use super::payload::{
     qdrant_payload_map, qdrant_point_id, read_candidate_match, QdrantPayloadSchema,
-    OBJECT_ID_FIELD, OBJECT_TYPE_FIELD,
+    OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD,
 };
 use super::tie_closure::close_tie_cohort;
 
@@ -274,7 +274,7 @@ impl VectorCandidateStore for QdrantVectorCandidateStore {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError> {
-        if query.limit == 0 || query.object_types.is_empty() {
+        if query.limit == 0 || query.object_types.is_empty() || query.surfaces.is_empty() {
             return Ok(VectorCandidateRecall {
                 candidates: crate::models::vector::CanonicalCandidates::new([]),
                 completeness: crate::api::types::retrieval::VectorRecallCompleteness::NotRequested,
@@ -511,10 +511,16 @@ fn qdrant_scroll_fetch_limit(fetch_limit: usize) -> Result<u32, CustomError> {
 }
 
 fn qdrant_candidate_filter(query: &VectorCandidateSearch) -> Filter {
-    Filter::must([any_field_matches(
-        OBJECT_TYPE_FIELD,
-        query.object_types.iter().map(ToString::to_string),
-    )])
+    Filter::must([
+        any_field_matches(
+            OBJECT_TYPE_FIELD,
+            query.object_types.iter().map(ToString::to_string),
+        ),
+        any_field_matches(
+            SURFACE_FIELD,
+            query.surfaces.iter().map(ToString::to_string),
+        ),
+    ])
 }
 
 fn any_field_matches(

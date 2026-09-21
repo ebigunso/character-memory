@@ -77,6 +77,8 @@ pub enum VectorSurface {
     Summary,
     Text,
     DerivedText,
+    SceneSetting,
+    SceneParticipants,
     Query,
 }
 
@@ -86,6 +88,8 @@ impl fmt::Display for VectorSurface {
             Self::Summary => "summary",
             Self::Text => "text",
             Self::DerivedText => "derived_text",
+            Self::SceneSetting => "scene_setting",
+            Self::SceneParticipants => "scene_participants",
             Self::Query => "query",
         })
     }
@@ -99,6 +103,8 @@ impl FromStr for VectorSurface {
             "summary" => Ok(Self::Summary),
             "text" => Ok(Self::Text),
             "derived_text" => Ok(Self::DerivedText),
+            "scene_setting" => Ok(Self::SceneSetting),
+            "scene_participants" => Ok(Self::SceneParticipants),
             "query" => Ok(Self::Query),
             _ => Err(format!("unknown vector surface token: {value}")),
         }
@@ -557,6 +563,8 @@ mod token_tests {
             VectorSurface::Summary,
             VectorSurface::Text,
             VectorSurface::DerivedText,
+            VectorSurface::SceneSetting,
+            VectorSurface::SceneParticipants,
             VectorSurface::Query,
         ] {
             assert_eq!(surface.to_string().parse(), Ok(surface));

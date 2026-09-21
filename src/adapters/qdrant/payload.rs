@@ -67,7 +67,7 @@ impl QdrantPayloadSchema {
         schema(
             QdrantPayloadField::Surface,
             QdrantPayloadKind::Keyword,
-            false,
+            true,
         ),
         schema(
             QdrantPayloadField::SchemaVersion,
@@ -107,6 +107,7 @@ const fn schema(
 
 pub(crate) const OBJECT_ID_FIELD: &str = QdrantPayloadField::ObjectId.name();
 pub(crate) const OBJECT_TYPE_FIELD: &str = QdrantPayloadField::ObjectType.name();
+pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
 
 pub(crate) fn qdrant_point_id(record: &VectorRecord) -> MemoryId {
     MemoryId::new_v5(&record.object_id, record.surface.to_string().as_bytes())
@@ -275,7 +276,7 @@ mod tests {
             QdrantPayloadSchema::indexed_fields()
                 .map(|schema| schema.field.name())
                 .collect::<Vec<_>>(),
-            vec![OBJECT_ID_FIELD, OBJECT_TYPE_FIELD]
+            vec![OBJECT_ID_FIELD, OBJECT_TYPE_FIELD, SURFACE_FIELD]
         );
     }
 

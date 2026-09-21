@@ -169,13 +169,15 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
             if direct { 1 } else { 2 }
         );
         let recorded = inputs.lock().unwrap().clone();
-        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded.len(), if direct { 6 } else { 4 });
         for input in recorded {
             assert_eq!(
                 input.text,
-                match input.object_type.unwrap() {
-                    ObjectType::Episode => "Episode summary: An experience\nSetting: 窓のそば quiet café\nWith: Alice\nWith: a visitor in blue\nWith: Alice",
-                    ObjectType::Observation => "Observation excerpt: An experience",
+                match input.surface {
+                    VectorSurface::Summary => "Episode summary: An experience",
+                    VectorSurface::SceneSetting => "窓のそば quiet café",
+                    VectorSurface::SceneParticipants => "Alice\na visitor in blue\nAlice",
+                    VectorSurface::Text => "Observation excerpt: An experience",
                     other => panic!("unexpected embedding: {other:?}"),
                 }
             );
@@ -359,7 +361,8 @@ async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_pla
             .unwrap();
         assert_eq!(outcome.vector_indexed_object_ids.len(), 2);
     }
-    let mut query = RetrievalContext::new("observatory");
+    let mut query = RetrievalContext::default();
+    query.scene.setting.words = Some("observatory".to_owned());
     query.object_type_defaults = vec![ObjectType::Episode];
     query.candidate_limits.max_vector_candidates = 1;
     query.candidate_limits.max_graph_roots = 1;
@@ -447,7 +450,8 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         .unwrap()
         .iter()
         .any(|input| input.object_id == Some(episode_id)
-            && input.text.ends_with("\nWith: Mira, the host")));
+            && input.surface == VectorSurface::SceneParticipants
+            && input.text.ends_with("\nMira, the host")));
 
     let graph = &memory.memory_composition.graph_store;
     let saved = graph

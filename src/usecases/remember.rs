@@ -7,7 +7,7 @@ use crate::api::types::{
 use crate::domain::{CandidateValidationStatus, MemoryLink, MemoryObject, MemoryObjectRef};
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorRecord};
-use crate::policy::memory_object_vector_record;
+use crate::policy::embedding_surface::memory_object_vector_records;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 use crate::ports::retrieval_stats::RetrievalStatsStore;
@@ -305,13 +305,8 @@ fn vector_records_for_targets(
 ) -> Vec<VectorRecord> {
     vector_targets
         .iter()
-        .filter_map(|target| {
-            objects.iter().find_map(|object| {
-                (object.id() == target.id && object.object_type() == target.object_type)
-                    .then(|| memory_object_vector_record(object))
-                    .flatten()
-            })
-        })
+        .filter_map(|target| objects.iter().find(|object| object.object_ref() == *target))
+        .flat_map(memory_object_vector_records)
         .collect()
 }
 

@@ -16,7 +16,7 @@ Each emitted point has exactly five payload fields:
 | `schema_version` | String | Write-side record compatibility marker |
 | `embedding_text` | Text | Exact input used to create the vector |
 
-The service indexes `object_id` and `object_type`. The remaining fields describe the record; they are not prefilter columns. Readable result content, graph URIs, assertion and grounding data, relationships, lifecycle values, timestamps and raw references are hydrated from Oxigraph.
+Both adapters index `object_id`, `object_type` and `surface`. The remaining fields describe the record; they are not prefilter columns. Readable result content, graph URIs, assertion and grounding data, relationships, lifecycle values, timestamps and raw references are hydrated from Oxigraph.
 
 The [payload writer](../../../src/adapters/qdrant/payload.rs) enforces the supported schema marker and emits the five fields. The [candidate reader](../../../src/adapters/qdrant/payload.rs) reads `object_id`, `object_type` and `surface`, then combines them with the vector score. It does not read `schema_version`, `embedding_text` or extra payload fields to construct a candidate. Unknown type/surface tokens and malformed IDs fail decoding.
 
@@ -24,16 +24,20 @@ The [payload writer](../../../src/adapters/qdrant/payload.rs) enforces the suppo
 
 | Object type | Surface | Embedding text |
 |---|---|---|
-| `episode` | `summary` | `Episode summary: ` followed by the summary, then labelled scene words when supplied |
+| `episode` | `summary` | `Episode summary: ` followed by the summary |
+| `episode` | `scene_setting` | Nonblank setting words, without a label |
+| `episode` | `scene_participants` | Nonblank participant names and descriptions, one participant per line |
 | `observation` | `text` | `Observation excerpt: ` followed by observation text |
 | `memory_thread` | `summary` | `Thread summary: ` followed by title and summary |
 | `derived_memory` | `derived_text` | A category label followed by interpreted-memory text |
 
-Each indexed object has at most one surface. `max_embedding_surfaces` returns zero for `entity` and `memory_link`; neither has an object vector builder. The [embedding builders](../../../src/policy/embedding_surface.rs) define these limits and fold whitespace in the natural-language input. The `query` surface identifies query embeddings rather than stored memory content.
+An episode has up to three surfaces; each other indexed object has one. `max_embedding_surfaces` returns zero for `entity` and `memory_link`; neither has an object vector builder. The [embedding builders](../../../src/policy/embedding_surface.rs) define these limits and fold whitespace in the natural-language input. The `query` surface identifies query embeddings rather than stored memory content.
 
-The [episode builder](../../../src/policy/embedding_surface.rs) appends nonblank setting words on a new `Setting:` line, followed by one `With:` line per participant joining its nonblank name and description with a comma, in authored order, even when the participant also has an identity key. It folds whitespace just as it does for the summary, while Oxigraph retains the original scene values. Keys and custom values are excluded. With no scene words the embedding text is byte-identical to the summary-only form. These words share the episode's existing `summary` surface; there is no second vector or scene surface.
+The [plural builder](../../../src/policy/embedding_surface.rs) emits the unchanged summary record and a record for each nonempty scene surface. Participants retain authored order, joining each nonblank name and description with a comma even when a key is present. Fields have whitespace folded; participant lines are joined with newlines, without labels. Oxigraph retains the original scene values. Keys and custom values are excluded. Summary bytes are identical with and without scene words. All records are embedded in one batch before the write turn; outcome lists still contain one entry per object. Deletion by object id removes all its surfaces.
 
-The closed surface tokens are `summary`, `text`, `derived_text` and `query`. The domain enums own their persisted spelling and parsing. Graph object kinds still include notions and links even though those kinds have no emitted embedding surface.
+The closed surface tokens are `summary`, `text`, `derived_text`, `scene_setting`, `scene_participants` and `query`. The domain enums own their persisted spelling and parsing. Graph object kinds still include notions and links even though those kinds have no emitted embedding surface.
+
+Topic searches use only the three content surfaces. Setting words search `scene_setting`; participant words are joined with the same composition as the write surface and searched once on `scene_participants`. Query embeddings may be reused for equal text, but results are cached by text and surface scope. Nearest search, zero-norm scroll and completeness counts share that scope in both adapters. Existing indexes must be rebuilt to add scene surfaces; no migration is provided.
 
 ## Belief Content And Graph Authority
 

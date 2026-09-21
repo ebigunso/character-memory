@@ -22,8 +22,13 @@ impl MemoryEmbedder for CohortEmbedder {
                 text if text.starts_with("botanist") => (0.0, 1.0, 0.0),
                 text => panic!("unexpected query {text}"),
             }
-        } else if input.text.contains("Setting: studio") {
-            assert!(input.text.contains("With: botanist"));
+        } else if input.object_id == Some(MemoryId::from_u128(3000)) {
+            (0.8, 0.6, 0.0)
+        } else if matches!(
+            input.surface,
+            VectorSurface::SceneSetting | VectorSurface::SceneParticipants
+        ) || input.text == "Episode summary: Another ordinary day."
+        {
             (0.1, 0.99, 0.0)
         } else if input.text.contains("Orchid shared") {
             (0.8, 0.6, 0.0)
@@ -296,11 +301,7 @@ async fn shared_scene_topic_only_keeps_original_bytes() {
 async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admissions() {
     let memory = cohort_memory().await;
     let mut plan = RememberWritePlan::new();
-    for candidate in episode(
-        3000,
-        "Orchid shared".to_owned(),
-        Scene::at(context().scene.time),
-    ) {
+    for candidate in episode(3000, "Orchid shared".to_owned(), context().scene) {
         plan = plan.with_candidate(candidate);
     }
     memory.commit(plan, CommitOptions::default()).await.unwrap();
