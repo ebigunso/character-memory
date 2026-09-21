@@ -1092,6 +1092,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     assert!(queries.lock().unwrap().is_empty());
     let mut mixed = context.clone();
     mixed.topic = Some("lens".to_owned());
+    // Leave room for the topic head as well as the thread and its newest member.
+    mixed.candidate_limits.max_graph_roots = 3;
     mixed.section_limits.derived_memories = 0;
     let mixed = memory.retrieve(mixed).await.unwrap();
     let trace = mixed.trace.unwrap();
