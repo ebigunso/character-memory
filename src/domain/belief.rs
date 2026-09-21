@@ -23,8 +23,6 @@ pub enum BeliefPredicate {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BeliefValidationError {
-    #[error("scope keys are derived from source scenes and cannot be authored")]
-    AuthoredScopeKeys,
     #[error("a belief given by the application cannot also cite source experiences")]
     GivenWithSources,
     #[error("a belief given by the application must have a notion subject")]

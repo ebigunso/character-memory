@@ -814,7 +814,6 @@ fn replacement_drafts_or_default(
 ) -> Result<Vec<ReplacementDerivedMemoryDraft>, CustomError> {
     let mut replacements = if draft.replacement_derived_memories.is_empty() {
         vec![ReplacementDerivedMemoryDraft {
-            scope_keys: Vec::new(),
             id: None,
             derived_type: DerivedType::Correction,
             text: draft.rationale.clone(),

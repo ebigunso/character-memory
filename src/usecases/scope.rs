@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::domain::{MemoryObject, MemoryObjectRef, ObjectType, ScopeKey};
+use crate::domain::{MemoryObject, MemoryObjectRef, ObjectType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
 
@@ -29,9 +29,6 @@ pub(crate) async fn derive_scope_keys(
                 )
         })
         .collect::<HashSet<_>>();
-    if refs.is_empty() {
-        return Ok(());
-    }
     let mut sources = objects
         .iter()
         .filter(|object| {
@@ -90,21 +87,18 @@ pub(crate) async fn derive_scope_keys(
                     _ => None,
                 }
             }));
-        let mut common: Option<Vec<ScopeKey>> = None;
-        for id in episode_ids {
-            let keys = match id
-                .and_then(|id| sources.get(&MemoryObjectRef::new(ObjectType::Episode, id)))
-            {
-                Some(MemoryObject::Episode(episode)) => episode.scene.scope_keys(),
-                _ => Vec::new(),
-            };
-            if let Some(common) = &mut common {
-                common.retain(|key| keys.contains(key));
-            } else {
-                common = Some(keys);
-            }
-        }
-        memory.scope_keys = common.unwrap_or_default();
+        memory.scope_keys = episode_ids
+            .filter_map(|id| {
+                id.and_then(|id| sources.get(&MemoryObjectRef::new(ObjectType::Episode, id)))
+            })
+            .filter_map(|object| match object {
+                MemoryObject::Episode(episode) => Some(&episode.scene),
+                _ => None,
+            })
+            .flat_map(|scene| scene.scope_keys())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
     }
     Ok(())
 }

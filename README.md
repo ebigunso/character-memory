@@ -244,7 +244,7 @@ let outcome = memory.correct(correction).await?;
 
 Notions have no vector surface. Recall starts from belief content and follows derived `About` links to its notions; commit creates one for every notion in the memory's `entity_ids`, and validates that every subject exists. Callers author that subject list and do not need to author the same `About` links. `RetrievalContext::object_type_defaults` scopes vector candidates, while `graph_limits.allowed_object_types` separately scopes traversal and includes entities by default.
 
-A scene setting key or custom value can recall current beliefs formed in that context without a topic or participant. For beliefs grounded in several experiences, only the setting key and named custom values shared by every source scene supply those cues.
+A scene setting key or custom value can recall current beliefs formed in that context without a topic or participant. Beliefs grounded in several experiences can return in any of their recorded places or named contexts.
 
 Names retain their original spelling and match ignoring case, width and spacing; `Straße` with sharp s and `STRASSE` with double s still differ. There is no lookup by name; retain ids across restarts as described below.
 

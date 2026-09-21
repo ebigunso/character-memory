@@ -204,8 +204,6 @@ pub struct ReplacementDerivedMemoryDraft {
     pub thread_ids: Vec<MemoryId>,
     /// The notions this interpreted memory is about (its subjects).
     pub entity_ids: Vec<MemoryId>,
-    #[serde(default, skip_serializing)]
-    pub(crate) scope_keys: Vec<crate::domain::ScopeKey>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
     /// Source-free grounding given by the application; requires at least one notion subject.
@@ -226,7 +224,6 @@ impl ReplacementDerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             salience_score: 0.5,
@@ -260,9 +257,6 @@ impl ReplacementDerivedMemoryDraft {
     }
 
     pub fn validate(&self) -> Result<(), LifecycleDtoValidationError> {
-        if !self.scope_keys.is_empty() {
-            return Err(crate::domain::BeliefValidationError::AuthoredScopeKeys.into());
-        }
         if self.text.trim().is_empty() {
             return Err(LifecycleDtoValidationError::EmptyReplacementText);
         }

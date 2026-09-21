@@ -1,11 +1,9 @@
 use character_memory::{
-    ActivityRef, BeliefValidationError, CandidateValidationIssue, CharacterMemory, CommitOptions,
-    CorrectMemoryDraft, CorrectionTarget, CustomError, DerivedMemoryDraft, DerivedType,
-    EntityDraft, EpisodeDraft, ForgetMemoryDraft, GraphRootSource, LifecycleDtoValidationError,
+    ActivityRef, CharacterMemory, CommitOptions, CorrectMemoryDraft, CorrectionTarget,
+    DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft, GraphRootSource,
     LifecycleFilterReason, LifecycleTargetRef, MemoryId, MemoryThreadDraft, ObjectType,
-    ObservationDraft, RememberInput, RememberOptions, RememberPlanDefaults,
-    ReplacementDerivedMemoryDraft, RetrievalContext, Scene, SceneParticipant,
-    SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
+    ObservationDraft, RememberInput, RememberPlanDefaults, ReplacementDerivedMemoryDraft,
+    RetrievalContext, Scene, SceneParticipant, SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -75,7 +73,7 @@ fn ids(result: &character_memory::RetrieveOutcome) -> Vec<MemoryId> {
 }
 
 #[tokio::test]
-async fn source_intersection_namespaces_and_restart_determine_scope() {
+async fn source_union_namespaces_and_restart_determine_scope() {
     let root = tempfile::tempdir().unwrap();
     let collection = test_support::unique_collection_name();
     let memory =
@@ -94,8 +92,8 @@ async fn source_intersection_namespaces_and_restart_determine_scope() {
             .with_observation(observation),
     )
     .await;
-    let mut intersection = belief(301, 101).with_source_observation(id(201));
-    intersection.salience_score = 0.9;
+    let mut combined = belief(301, 101).with_source_observation(id(201));
+    combined.salience_score = 0.9;
     let mut notion = EntityDraft::new();
     notion.id = Some(id(500));
     let mut given = belief(303, 0);
@@ -115,7 +113,7 @@ async fn source_intersection_namespaces_and_restart_determine_scope() {
         .with_observation(local_observation)
         .with_derived_memory(belief(305, 0).with_source_observation(id(202)))
         .with_entity(notion)
-        .with_derived_memory(intersection)
+        .with_derived_memory(combined)
         .with_derived_memory(belief(302, 101))
         .with_derived_memory(given)
         .with_derived_memory(belief(304, 103));
@@ -132,14 +130,18 @@ async fn source_intersection_namespaces_and_restart_determine_scope() {
     // Rehydrated internal keys must preserve equality for exact plan replay.
     memory.commit(plan, CommitOptions::default()).await.unwrap();
     for (scene, expected) in [
-        (scene(Some("cafe"), &[]), vec![id(302), id(305)]),
+        (scene(Some("cafe"), &[]), vec![id(301), id(302), id(305)]),
         (
             scene(None, &[("project", common)]),
             vec![id(301), id(302), id(305)],
         ),
-        (scene(None, &[("zone", "42")]), vec![id(302), id(305)]),
+        (
+            scene(None, &[("zone", "42")]),
+            vec![id(301), id(302), id(305)],
+        ),
         (scene(None, &[("project", "42")]), vec![]),
-        (scene(Some("library"), &[]), vec![]),
+        (scene(Some("library"), &[]), vec![id(301)]),
+        (scene(None, &[("zone", "43")]), vec![id(301)]),
     ] {
         let result = memory.retrieve(context(scene)).await.unwrap();
         assert_eq!(ids(&result), expected);
@@ -159,59 +161,29 @@ async fn source_intersection_namespaces_and_restart_determine_scope() {
 }
 
 #[tokio::test]
-async fn authored_scope_keys_are_rejected_on_write_paths() {
+async fn forged_scope_keys_in_input_have_no_effect() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     let mut forged = serde_json::to_value(belief(301, 101)).unwrap();
     forged["scope_keys"] = json!([{"setting":"forged"}]);
-    let forged: DerivedMemoryDraft = serde_json::from_value(forged).unwrap();
-    let input = RememberInput::new("forgery")
-        .with_episode(episode(101, scene(Some("legit"), &[])))
-        .with_derived_memory(forged);
-    let defaults = RememberPlanDefaults::fixed(&input.content, at(0));
-    let plan = input.clone().prepare_write_plan(&defaults);
-    let rejected = |validations: &[character_memory::CandidateValidation]| {
-        validations.iter().any(|row| {
-            row.errors
-                .contains(&CandidateValidationIssue::InvalidBelief {
-                    reason: BeliefValidationError::AuthoredScopeKeys,
-                })
-        })
-    };
-    assert!(rejected(&memory.validate_plan(&plan).await.unwrap()));
-    for result in [
-        memory.commit(plan, CommitOptions::default()).await,
-        memory.remember(input, RememberOptions::default()).await,
-    ] {
-        match result {
-            Err(CustomError::WritePlanValidationRejected { validations }) => {
-                assert!(rejected(&validations))
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-    let origin = SourceProvenanceReference::episode(id(101));
-    let mut replacement = ReplacementDerivedMemoryDraft::new(DerivedType::Claim, "replacement")
-        .with_source_episode(id(101));
-    replacement.correction_origin_provenance = origin.clone();
-    let mut value = serde_json::to_value(replacement).unwrap();
-    value["scope_keys"] = json!([{"custom":{"name":"zone","value":"42"}}]);
-    let mut correction =
-        CorrectMemoryDraft::new(CorrectionTarget::derived_memory(id(301)), "correction")
-            .with_replacement(serde_json::from_value(value).unwrap());
-    correction.correction_origin = origin;
-    assert!(matches!(
-        memory.correct(correction).await,
-        Err(CustomError::LifecycleDraftInvalid(
-            LifecycleDtoValidationError::InvalidBelief(BeliefValidationError::AuthoredScopeKeys)
-        ))
-    ));
-    for key in ["forged", "legit"] {
-        assert!(ids(&memory
-            .retrieve(context(scene(Some(key), &[])))
+    commit(
+        &memory,
+        RememberInput::new("forgery")
+            .with_episode(episode(101, scene(Some("legit"), &[])))
+            .with_derived_memory(serde_json::from_value(forged).unwrap()),
+    )
+    .await;
+    assert!(ids(&memory
+        .retrieve(context(scene(Some("forged"), &[])))
+        .await
+        .unwrap())
+    .is_empty());
+    assert_eq!(
+        ids(&memory
+            .retrieve(context(scene(Some("legit"), &[])))
             .await
-            .unwrap())
-        .is_empty());
-    }
+            .unwrap()),
+        vec![id(301)]
+    );
     memory.close().await.unwrap();
     root.close().unwrap();
 }
@@ -233,7 +205,7 @@ async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
     .await;
     let origin = SourceProvenanceReference::episode(id(102));
     let mut replacement = ReplacementDerivedMemoryDraft::new(DerivedType::Claim, "new state")
-        .with_source_episode(id(102));
+        .with_source_episode(id(101));
     replacement.id = Some(id(302));
     replacement.salience_score = 1.0;
     replacement.correction_origin_provenance = origin.clone();
@@ -246,7 +218,7 @@ async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
         .retrieve(context(scene(Some("old"), &[])))
         .await
         .unwrap();
-    assert!(ids(&old).is_empty());
+    assert_eq!(ids(&old), vec![id(302)]);
     assert!(old
         .trace
         .unwrap()

@@ -335,8 +335,6 @@ pub struct DerivedMemoryDraft {
     pub thread_ids: Vec<MemoryId>,
     /// The notions this interpreted memory is about (its subjects).
     pub entity_ids: Vec<MemoryId>,
-    #[serde(default, skip_serializing)]
-    pub(crate) scope_keys: Vec<crate::domain::ScopeKey>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
     /// Source-free grounding given by the application; requires at least one notion subject.
@@ -359,7 +357,6 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: Vec::new(),
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
-            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             salience_score: 0.5,
@@ -390,9 +387,6 @@ impl DerivedMemoryDraft {
         self,
         defaults: &mut DraftDefaults,
     ) -> Result<DerivedMemory, DomainValidationError> {
-        if !self.scope_keys.is_empty() {
-            return Err(crate::domain::BeliefValidationError::AuthoredScopeKeys.into());
-        }
         let created_at = defaults.timestamp(self.created_at);
         let mut derived = DerivedMemory {
             id: defaults.id(self.id),
