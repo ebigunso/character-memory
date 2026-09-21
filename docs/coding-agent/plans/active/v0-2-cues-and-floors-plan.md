@@ -173,6 +173,7 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 ## Progress Log (append-only)
 
 - 2026-09-21 Task_1 implemented (0da57d3) and approved at Tier D and Tier A: the activity beside the topic, typed and echoed as found or unknown, reaching what ordinary writes record with no new stored link; one set of cue kinds per admitted memory in the trace, replacing two older vocabularies (net about 200 lines removed). A thread's members enter most recent first. Until Task_3, a large thread can take every root after the participants; the README says so.
+- 2026-09-21 Task_2 implemented (16692bd) and approved at Tier D: a notion's share is its distinct episodes over all episodes, counted once per episode however the write linked it, on the two paths that lead to experiences; in a store of 24 occasions with five participants each, the notion present in all of them went from 15 admitted observation edges to none on the `remember` path and from 3 episode edges to none on a caller-built one, while a rare participant kept all of its three and the belief about the ubiquitous notion stayed.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -188,6 +189,13 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Tradeoffs considered: deriving thread-membership links at commit was rejected because it moves every measured baseline for a reach the existing query already gives.
   - User approval: not required; decided under the standing instruction and logged for presentation.
   - Record proposed: unchanged.
+
+- 2026-09-21 Decisions taken inside Task_2, judged by character behavior.
+  - One experience is one distinct episode: someone who spoke ten times in one conversation was present on one occasion, and an observation-level unit would measure verbosity.
+  - The unit follows what a bucket admits. The share of experiences replaces the share of links only on the paths from a notion to experiences. Beliefs about a notion and thread memberships keep their measured rule: being always there must not silence what the character knows about someone, and bringing the current state about who is present is the state route of the next plan.
+  - No statistics rebuild and no migration: a statistics store written before this change has no episode index, which means missing statistics and the conservative fallback, never zero counts, even after later writes. Known gap for a later plan: nothing rebuilds statistics from the graph.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
 
 ## Notes
 - Risks: admission changes move the pollution and context-size baselines of ADR-I-0022; the companion repository re-measures once, at its own closing task. A calibration corpus authored for other pressures may not isolate these three floors; Task_4 names the pressure it needs.
