@@ -406,3 +406,62 @@ async fn overlapping_root_scopes_preserve_each_selectors_priority() {
     memory.close().await.unwrap();
     root.close().unwrap();
 }
+
+#[tokio::test]
+async fn dense_place_records_topic_admission_at_root_cap() {
+    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let mut input =
+        RememberInput::new("place state").with_episode(episode(101, scene(Some("place"), &[])));
+    for n in 301..314 {
+        input = input.with_derived_memory(belief(n, 101));
+    }
+    commit(&memory, input).await;
+    let topic = "quasar telescope astronomy spectroscopy";
+    let mut topical = belief(901, 102);
+    topical.text = topic.into();
+    commit(
+        &memory,
+        RememberInput::new("separate note")
+            .with_episode(episode(102, scene(None, &[])))
+            .with_derived_memory(topical),
+    )
+    .await;
+    let mut request = context(scene(Some("place"), &[]));
+    request.topic = Some(topic.into());
+    assert_eq!(request.candidate_limits.max_graph_roots, 12);
+    let result = memory.retrieve(request).await.unwrap();
+    let trace = result.trace.as_ref().unwrap();
+    let recalled = trace
+        .vector_candidates
+        .iter()
+        .find(|row| row.object.id == id(901))
+        .unwrap();
+    assert!(recalled.score > 0.99);
+    assert_eq!(
+        result
+            .rationale
+            .telemetry
+            .graph_expansion
+            .attempted_root_count,
+        12
+    );
+    let root_trace = trace
+        .graph_expansions
+        .iter()
+        .find(|row| row.root.id == id(901))
+        .unwrap();
+    // Record allocation without making topic starvation a permanent contract.
+    println!(
+        "DENSE_PLACE_TOPIC={}",
+        json!({
+            "topic_score": recalled.score,
+            "topic_rank": recalled.rank,
+            "topic_root_outcome": root_trace.outcome,
+            "topic_in_pack": ids(&result).contains(&id(901)),
+            "place_beliefs_in_pack": ids(&result).iter().filter(|key| (301..314).contains(&key.as_u128())).count(),
+            "attempted_roots": result.rationale.telemetry.graph_expansion.attempted_root_count,
+        })
+    );
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
