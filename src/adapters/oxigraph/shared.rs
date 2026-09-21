@@ -12,7 +12,8 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, BoundedExpansionLinkRef,
+    bounded_incident_link_refs, graph_expansion_bounded_error, order_current_subject_links,
+    BoundedExpansionLinkRef,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -573,6 +574,16 @@ pub(super) fn bounded_graph_visible_refs(
     let mut fanout_utilization = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
+    let state_ranks = if query.current_subject_state {
+        selectors
+            .select_current_subject_state(query.root_id, query.lifecycle_policy.include_suppressed)?
+            .into_iter()
+            .enumerate()
+            .map(|(rank, id)| (id, rank))
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
@@ -583,6 +594,22 @@ pub(super) fn bounded_graph_visible_refs(
                 .get(object_ref)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
+            let ordered;
+            let incident_link_refs = if depth == 0 && query.current_subject_state {
+                ordered = order_current_subject_links(
+                    incident_link_refs.to_vec(),
+                    &state_ranks,
+                    |link| {
+                        let neighbor = link.other_endpoint(*object_ref);
+                        (link.relation == RelationType::About
+                            && neighbor.object_type == ObjectType::DerivedMemory)
+                            .then_some(neighbor.id)
+                    },
+                );
+                &ordered
+            } else {
+                incident_link_refs
+            };
             let (bounded_link_refs, utilization) = bounded_incident_link_refs(
                 query,
                 root_ref,

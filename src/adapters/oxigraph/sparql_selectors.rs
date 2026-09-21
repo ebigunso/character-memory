@@ -214,6 +214,54 @@ impl<'a> SparqlGraphSelectors<'a> {
         )
     }
 
+    pub(crate) fn select_current_subject_state(
+        &self,
+        subject_id: MemoryId,
+        include_suppressed: bool,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        let subject = graph_uri(ObjectType::Entity, subject_id);
+        let retention_filter = if include_suppressed {
+            ""
+        } else {
+            "FILTER (?retention != \"suppressed\")"
+        };
+        let query = format!(
+            r#"
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT ?id WHERE {{
+              GRAPH ?g {{
+                ?memory a <{derived_class}> ; <{object_id}> ?id ;
+                  <{about}> <{subject}> ; <{salience}> ?salience ;
+                  <{created}> ?created ; <{retention}> ?retention .
+              }}
+              {retention_filter}
+              FILTER NOT EXISTS {{
+                GRAPH ?linkGraph {{
+                  ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
+                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ; <{to}> ?memory .
+                }}
+              }}
+            }}
+            ORDER BY DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id
+            "#,
+            derived_class = vocab::CLASS_DERIVED_MEMORY,
+            object_id = vocab::OBJECT_ID,
+            about = vocab::ABOUT_ENTITY,
+            salience = vocab::SALIENCE_SCORE,
+            created = vocab::CREATED_AT,
+            retention = vocab::RETENTION_STATE,
+            link_class = vocab::CLASS_MEMORY_LINK,
+            from_type = vocab::FROM_TYPE,
+            to_type = vocab::TO_TYPE,
+            relation = vocab::RELATION,
+            to = vocab::TO,
+        );
+        self.query_solutions(&query)?
+            .iter()
+            .map(|solution| memory_id_binding(solution, "id"))
+            .collect()
+    }
+
     pub(crate) fn select_links_touching(
         &self,
         object_refs: &[MemoryObjectRef],

@@ -68,6 +68,12 @@ impl RetrievalSelectivityPolicy {
         })
     }
 
+    pub(crate) fn state_scope_limit(&self) -> usize {
+        self.fanout_spec(RelationType::About, ObjectType::DerivedMemory)
+            .expect("the About bucket is always configured")
+            .max_fanout
+    }
+
     fn fanout_spec(&self, relation: RelationType, object_type: ObjectType) -> Option<FanoutSpec> {
         self.fanout_specs
             .iter()
@@ -196,12 +202,21 @@ pub(crate) async fn selectivity_plan_for_entity(
     stats_context: &SelectivityStatsContext,
     lifecycle_policy: RetrievalLifecyclePolicy,
     trace_mode: TraceMode,
+    current_subject_state: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
+        if current_subject_state && spec.relation == RelationType::About {
+            plan.fanout_overrides.push(GraphExpansionFanoutOverride {
+                relation: RelationType::About,
+                object_type: ObjectType::DerivedMemory,
+                max_fanout: policy.state_scope_limit(),
+            });
+            continue;
+        }
         let (count_relation, count_object_type) = spec.count_bucket();
         let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
             let key = RetrievalStatsCounterKey {
@@ -552,6 +567,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Disabled,
+            false,
         )
         .await
         .unwrap();
@@ -564,6 +580,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -591,6 +608,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -645,6 +663,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -691,6 +710,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -721,6 +741,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -757,6 +778,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -794,6 +816,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -863,6 +886,7 @@ mod tests {
                 ..RetrievalLifecyclePolicy::default()
             },
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -875,6 +899,7 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -890,6 +915,7 @@ mod tests {
                 ..RetrievalLifecyclePolicy::default()
             },
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
