@@ -168,7 +168,7 @@ where
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
         let resolved_thread_members = filtered
             .iter()
-            .map(|entry| entry.object_ref.id)
+            .map(|entry| entry.object_ref)
             .collect::<HashSet<_>>();
         assembly
             .lifecycle_decisions

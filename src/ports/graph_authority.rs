@@ -154,7 +154,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) allowed_relation_types: Vec<RelationType>,
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) current_subject_state: bool,
-    pub(crate) resolved_thread_members: std::collections::HashSet<MemoryId>,
+    pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
     pub(crate) trace_mode: TraceMode,

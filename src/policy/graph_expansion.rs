@@ -528,7 +528,7 @@ fn bounded_expansion_plan<'a>(
         if depth == 0 {
             incident_links.retain(|(link, neighbor)| {
                 link.relation != RelationType::PartOfThread
-                    || !query.resolved_thread_members.contains(&neighbor.id)
+                    || !query.resolved_thread_members.contains(neighbor)
             });
         }
         if depth == 0 && query.current_subject_state {

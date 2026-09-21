@@ -667,7 +667,7 @@ pub(super) fn bounded_graph_visible_refs(
                         link.relation != RelationType::PartOfThread
                             || !query
                                 .resolved_thread_members
-                                .contains(&link.other_endpoint(*object_ref).id)
+                                .contains(&link.other_endpoint(*object_ref))
                     })
                     .copied()
                     .collect();

@@ -211,6 +211,46 @@ async fn resolution_leaves_all_state_routes_before_their_caps() {
 }
 
 #[tokio::test]
+async fn thread_resolution_preserves_other_object_types_with_the_same_id() {
+    let (memory, root) = fixture(false).await;
+    let mut observation =
+        character_memory::ObservationDraft::new(id(101), "independent observed fact");
+    observation.id = Some(id(301));
+    observation.created_at = Some(at(11));
+    commit(
+        &memory,
+        RememberInput::new("observation thread membership")
+            .with_thread_id(id(601))
+            .with_observation(observation),
+    )
+    .await;
+    for include_trace in [false, true] {
+        let mut context = request("thread_expansion");
+        context.include_trace = include_trace;
+        context.graph_limits.allowed_relation_types = vec![RelationType::PartOfThread];
+        let result = memory.retrieve(context).await.unwrap();
+        assert!(
+            result
+                .pack
+                .salient_observations
+                .iter()
+                .any(|item| item.id == id(301)),
+            "resolution of DerivedMemory 301 must not suppress Observation 301"
+        );
+        assert!(result.pack.open_loops.is_empty());
+        if let Some(trace) = result.trace {
+            assert!(trace.lifecycle_filter_decisions.iter().any(|entry| {
+                entry.object.object_type == ObjectType::DerivedMemory
+                    && entry.object.id == id(301)
+                    && entry.reason == LifecycleFilterReason::ResolvedOmitted
+            }));
+        }
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+}
+
+#[tokio::test]
 async fn recall_names_resolvers_without_trace_even_after_resolvers_are_suppressed() {
     let (memory, root) = fixture(false).await;
     for suppress_resolvers in [false, true] {
