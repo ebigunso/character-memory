@@ -12,8 +12,8 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, order_current_subject_links,
-    BoundedExpansionLinkRef,
+    bounded_incident_link_refs, graph_expansion_bounded_error, is_participant_pair,
+    order_current_subject_links, BoundedExpansionLinkRef, ParticipantOccasions,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -547,6 +547,7 @@ pub(super) fn rdf_parse_error(
 
 #[derive(Debug, Default)]
 pub(super) struct BoundedGraphVisibility {
+    pub(super) participant_occasions: ParticipantOccasions,
     pub(super) object_refs: HashSet<MemoryObjectRef>,
     pub(super) traversal_link_ids: HashSet<MemoryId>,
     pub(super) lifecycle_link_ids: HashSet<MemoryId>,
@@ -573,6 +574,7 @@ pub(super) fn bounded_graph_visible_refs(
     let mut graph_refs = HashSet::from([root_ref]);
     let mut graph_link_ids = HashSet::new();
     let mut fanout_utilization = Vec::new();
+    let mut filtered_nodes = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
     let (state_ids, state_filtered) = if query.current_subject_state {
@@ -585,10 +587,27 @@ pub(super) fn bounded_graph_visible_refs(
         .enumerate()
         .map(|(rank, id)| (id, rank))
         .collect();
-    let mut filtered_nodes = Vec::new();
+    let mut participant_occasions = ParticipantOccasions::new();
 
     for depth in 0..query.max_depth {
         let link_refs = selectors.select_links_touching(&frontier)?;
+        if depth == 0
+            && query
+                .fanout_overrides
+                .iter()
+                .any(|entry| is_participant_pair(entry.relation, entry.object_type))
+        {
+            let neighbors = link_refs
+                .iter()
+                .filter_map(|link| {
+                    let neighbor = link.other_endpoint(root_ref);
+                    is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+                })
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            participant_occasions = selectors.select_participant_occasions(&neighbors)?;
+        }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
         for object_ref in &frontier {
@@ -631,16 +650,18 @@ pub(super) fn bounded_graph_visible_refs(
             } else {
                 incident_link_refs
             };
-            let (bounded_link_refs, utilization) = bounded_incident_link_refs(
+            let selection = bounded_incident_link_refs(
                 query,
                 root_ref,
                 *object_ref,
                 depth,
                 incident_link_refs,
+                &participant_occasions,
                 &mut bounded_failure,
             )?;
-            fanout_utilization.extend(utilization);
-            for link_ref in bounded_link_refs {
+            fanout_utilization.extend(selection.utilization);
+            filtered_nodes.extend(selection.filtered_nodes);
+            for link_ref in selection.links {
                 let neighbor = link_ref.other_endpoint(*object_ref);
                 insert_visible_ref(
                     query,
@@ -674,6 +695,7 @@ pub(super) fn bounded_graph_visible_refs(
         .collect::<HashSet<_>>();
 
     Ok(BoundedGraphVisibility {
+        participant_occasions,
         object_refs: graph_refs,
         traversal_link_ids: graph_link_ids,
         lifecycle_link_ids,

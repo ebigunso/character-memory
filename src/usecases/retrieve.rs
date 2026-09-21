@@ -606,12 +606,14 @@ struct RankKey {
     object_id: MemoryId,
 }
 
-// Reserve in successive rounds, then return unused room to the original ranking.
+// Reserve configured floors first. Roots share the remainder in new rounds;
+// other stages return unused room to the original ranking.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
     cue_kinds: impl IntoIterator<Item = &'a BTreeSet<CueKind>>,
     limit: usize,
     floors: RetrievalCueFloors,
+    share_remaining_by_kind: bool,
 ) -> Vec<(usize, Option<CueKind>)> {
     let kinds = cue_kinds.into_iter().collect::<Vec<_>>();
     if kinds.len() <= limit {
@@ -625,39 +627,46 @@ fn select_with_cue_floors<'a>(
     ];
     let mut selected = vec![false; kinds.len()];
     let mut causes = vec![None; kinds.len()];
-    let mut counts = [0; 4];
     let mut next = [0; 4];
     let mut remaining = limit;
-    'rounds: for round in 1..=limit {
-        for (slot, &(kind, floor)) in ordered.iter().enumerate() {
-            if counts[slot] >= floor.min(round) {
-                continue;
-            }
-            while next[slot] < kinds.len()
-                && (selected[next[slot]] || !kinds[next[slot]].contains(&kind))
-            {
-                next[slot] += 1;
-            }
-            let index = next[slot];
-            if index == kinds.len() {
-                continue;
-            }
-            selected[index] = true;
-            causes[index] = (index >= limit).then_some(kind);
-            for (other, &(kind, _)) in ordered.iter().enumerate() {
-                counts[other] += usize::from(kinds[index].contains(&kind));
-            }
-            remaining -= 1;
-            if remaining == 0 {
-                break 'rounds;
-            }
-        }
-        if ordered
-            .iter()
-            .enumerate()
-            .all(|(slot, &(_, floor))| counts[slot] >= floor || next[slot] == kinds.len())
-        {
+    let remainder = share_remaining_by_kind
+        .then(|| ordered.map(|(kind, floor)| (kind, if floor == 0 { 0 } else { limit })));
+    for targets in std::iter::once(ordered).chain(remainder) {
+        if remaining == 0 {
             break;
+        }
+        let mut counts = [0; 4];
+        'rounds: for round in 1..=limit {
+            for (slot, &(kind, floor)) in targets.iter().enumerate() {
+                if counts[slot] >= floor.min(round) {
+                    continue;
+                }
+                while next[slot] < kinds.len()
+                    && (selected[next[slot]] || !kinds[next[slot]].contains(&kind))
+                {
+                    next[slot] += 1;
+                }
+                let index = next[slot];
+                if index == kinds.len() {
+                    continue;
+                }
+                selected[index] = true;
+                causes[index] = (index >= limit).then_some(kind);
+                for (other, &(kind, _)) in targets.iter().enumerate() {
+                    counts[other] += usize::from(kinds[index].contains(&kind));
+                }
+                remaining -= 1;
+                if remaining == 0 {
+                    break 'rounds;
+                }
+            }
+            if targets
+                .iter()
+                .enumerate()
+                .all(|(slot, &(_, floor))| counts[slot] >= floor || next[slot] == kinds.len())
+            {
+                break;
+            }
         }
     }
     for chosen in &mut selected {
@@ -697,6 +706,7 @@ fn build_pack(
             candidates.iter().map(|ranked| &ranked.cue_kinds),
             section_limit(section, limits),
             floors,
+            false,
         ) {
             let object = candidates[index].object.object_ref();
             selected.insert(object);
@@ -1011,10 +1021,12 @@ fn select_candidate_roots(
         }
     }
     let unique_count = merged.len();
+    // Honor calibrated floor amounts before sharing spare root slots in rounds.
     let selection = select_with_cue_floors(
         merged.iter().map(|root| &root.cue_kinds),
         max_graph_roots,
         floors,
+        true,
     );
     let mut selection = selection.into_iter().peekable();
     let mut roots = Vec::new();
@@ -2696,6 +2708,7 @@ mod tests {
             is_current: true,
             first_seen_at: observed_at,
             last_seen_at: observed_at,
+            source_observation: None,
         }
     }
 

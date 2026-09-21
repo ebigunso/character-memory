@@ -1004,8 +1004,13 @@ mod tests {
         assert!(expansion
             .objects
             .contains(&MemoryObject::DerivedMemory(linked)));
-        let policy_expansion =
-            crate::policy::graph_expansion::bounded_expansion(&query, objects, [about]).unwrap();
+        let policy_expansion = crate::policy::graph_expansion::bounded_expansion(
+            &query,
+            objects,
+            [about],
+            &crate::policy::graph_expansion::ParticipantOccasions::new(),
+        )
+        .unwrap();
         assert_eq!(expansion.objects, policy_expansion.objects);
     }
 
