@@ -436,7 +436,10 @@ async fn dense_place_records_topic_admission_at_root_cap() {
         .iter()
         .find(|row| row.object.id == id(901))
         .unwrap();
-    assert!(recalled.score > 0.99);
+    assert_eq!(
+        recalled.rank, 1,
+        "topic should be the strongest vector match: {recalled:?}"
+    );
     assert_eq!(
         result
             .rationale
