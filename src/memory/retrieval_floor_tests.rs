@@ -139,6 +139,44 @@ fn mixed_context() -> RetrievalContext {
 }
 
 #[tokio::test]
+async fn a_large_activity_shares_roots_with_the_topic() {
+    let memory = floor_memory().await;
+    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
+    for id in 6000..6016 {
+        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    let mut context = RetrievalContext::new("topic")
+        .with_activity(ActivityRef::Thread(MemoryId::from_u128(5000)))
+        .with_scene(occasion())
+        .with_trace();
+    context.graph_limits.max_depth = 1;
+    let first = memory.retrieve(context.clone()).await.unwrap();
+    let second = memory.retrieve(context).await.unwrap();
+    assert_eq!(first.pack, second.pack);
+    assert_eq!(first.trace, second.trace);
+    let topic_memories = first
+        .pack
+        .salient_observations
+        .iter()
+        .filter(|memory| (1000..1048).contains(&memory.id.as_u128()))
+        .count();
+    assert!(
+        topic_memories >= 3,
+        "topic brought only {topic_memories} memories"
+    );
+    assert!(first.pack.derived_memories.len() >= 3);
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let memory = floor_memory().await;
     let result = memory.retrieve(mixed_context()).await.unwrap();

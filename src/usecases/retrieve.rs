@@ -992,10 +992,18 @@ fn select_candidate_roots(
         }
     }
     let unique_count = merged.len();
+    // Root order prioritizes cue kinds, not scores. Share all remaining root
+    // slots in rounds; candidate and section selection retain score order.
+    let root_floor = |floor| if floor == 0 { 0 } else { max_graph_roots };
     let selection = select_with_cue_floors(
         merged.iter().map(|root| &root.cue_kinds),
         max_graph_roots,
-        floors,
+        RetrievalCueFloors {
+            participant: root_floor(floors.participant),
+            place: root_floor(floors.place),
+            activity: root_floor(floors.activity),
+            topic: root_floor(floors.topic),
+        },
     );
     let mut selection = selection.into_iter().peekable();
     let mut roots = Vec::new();
