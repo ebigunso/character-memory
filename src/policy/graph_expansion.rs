@@ -59,6 +59,7 @@ impl RootFanoutMode {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<MemoryObjectRef>,
+    pub(crate) selection_order: Vec<MemoryObjectRef>,
     pub(crate) expanded_nodes: HashSet<MemoryObjectRef>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
@@ -113,15 +114,16 @@ pub(crate) fn bounded_expansion(
         .collect();
     expanded_links.sort_by_key(|link| link.id);
 
-    Ok(GraphExpansion::from_plan(
-        expanded_objects,
-        expanded_links,
-        plan.relations,
-        plan.filtered_nodes,
-        plan.expanded_nodes,
-        plan.fanout_utilization,
-        plan.bounded_failure,
-    ))
+    Ok(GraphExpansion {
+        objects: expanded_objects,
+        links: expanded_links,
+        selection_order: plan.selection_order,
+        relations: plan.relations,
+        filtered_nodes: plan.filtered_nodes,
+        expanded_nodes: plan.expanded_nodes,
+        fanout_utilization: plan.fanout_utilization,
+        bounded_failure: plan.bounded_failure,
+    })
 }
 
 pub(crate) fn derived_memories_by_provenance(
@@ -362,6 +364,7 @@ fn bounded_expansion_plan<'a>(
         if query.failure_policy.mode == GraphFailureMode::AllowPartialResults {
             return Ok(BoundedExpansionPlan {
                 visited: HashSet::new(),
+                selection_order: Vec::new(),
                 expanded_nodes: HashSet::new(),
                 relations: Vec::new(),
                 filtered_nodes: Vec::new(),
@@ -382,6 +385,7 @@ fn bounded_expansion_plan<'a>(
         }
         return Ok(BoundedExpansionPlan {
             visited: HashSet::new(),
+            selection_order: Vec::new(),
             expanded_nodes: HashSet::new(),
             relations: Vec::new(),
             filtered_nodes: Vec::new(),
@@ -403,6 +407,7 @@ fn bounded_expansion_plan<'a>(
         .collect::<std::collections::HashMap<_, _>>();
     let mut visited = HashSet::new();
     let mut expanded_nodes = HashSet::new();
+    let mut selection_order = Vec::new();
     let mut filtered_nodes = Vec::new();
     let mut relations = Vec::new();
     let mut fanout_utilization = Vec::new();
@@ -434,6 +439,7 @@ fn bounded_expansion_plan<'a>(
         }
 
         visited.insert(object_ref);
+        selection_order.push(object_ref);
 
         if depth >= query.max_depth {
             continue;
@@ -551,6 +557,7 @@ fn bounded_expansion_plan<'a>(
 
     Ok(BoundedExpansionPlan {
         visited,
+        selection_order,
         expanded_nodes,
         relations,
         filtered_nodes,

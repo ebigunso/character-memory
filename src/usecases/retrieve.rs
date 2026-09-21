@@ -112,11 +112,21 @@ where
             &vector_candidates,
             &cues.kinds,
             &explicit_roots,
-            &cues.topic_order,
+            &cues.orders,
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
         );
         let candidate_roots = root_selection.roots;
+        // Explicit roots and what they bring precede word matches at sections.
+        let mut section_orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
+        for root in &explicit_roots {
+            for kind in &root.cue_kinds {
+                section_orders
+                    .entry(*kind)
+                    .or_default()
+                    .push(MemoryObjectRef::new(root.object_type, root.object_id));
+            }
+        }
         let mut assembly = RetrieveAssembly::new(trace_mode);
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
@@ -181,6 +191,17 @@ where
                             return Err(bounded_failure_error(failure));
                         }
                     }
+                    let explicit_kind = match candidate.source {
+                        GraphRootSource::Participant => Some(CueKind::Participant),
+                        GraphRootSource::Activity => Some(CueKind::Activity),
+                        GraphRootSource::Vector => None,
+                    };
+                    if let Some(kind) = explicit_kind {
+                        section_orders
+                            .entry(kind)
+                            .or_default()
+                            .extend(&expansion.selection_order);
+                    }
                     assembly.absorb_expansion(candidate, expansion);
                 }
                 Err(CustomError::GraphExpansionRootNotFound { .. }) => {
@@ -209,6 +230,9 @@ where
         }
 
         let ranked_objects = assembly.ranked_objects();
+        for (kind, order) in root_selection.orders {
+            section_orders.entry(kind).or_default().extend(order);
+        }
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -222,6 +246,7 @@ where
         let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
+            &section_orders,
             context.section_limits,
             context.cue_floors,
             &mut details,
@@ -590,78 +615,79 @@ struct RankKey {
     object_id: MemoryId,
 }
 
-// Candidate and section floors share membership credit, then refill by rank.
+// Only a kind's own queue head credits its turn, even if already selected.
+// Direct selector/search order precedes inherited-only members in stage order.
+// Floors reserve the first turns; every present kind shares the spare turns.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
-    cue_kinds: impl IntoIterator<Item = &'a BTreeSet<CueKind>>,
+    candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>)>,
+    orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limit: usize,
     floors: RetrievalCueFloors,
 ) -> Vec<(usize, Option<CueKind>)> {
-    let kinds = cue_kinds.into_iter().collect::<Vec<_>>();
-    if kinds.len() <= limit {
-        return (0..kinds.len()).map(|index| (index, None)).collect();
+    let candidates = candidates.into_iter().collect::<Vec<_>>();
+    let kinds = candidates
+        .iter()
+        .flat_map(|(_, kinds)| kinds.iter().copied())
+        .collect::<BTreeSet<_>>();
+    if candidates.len() <= limit || kinds.len() <= 1 {
+        return (0..candidates.len().min(limit))
+            .map(|index| (index, None))
+            .collect();
     }
-    let ordered = [
+    let mut queues = [
         (CueKind::Participant, floors.participant),
         (CueKind::Place, floors.place),
         (CueKind::Activity, floors.activity),
         (CueKind::Topic, floors.topic),
-    ];
-    let mut selected = vec![false; kinds.len()];
-    let mut causes = vec![None; kinds.len()];
-    let mut next = [0; 4];
-    let mut remaining = limit;
-    let mut counts = [0; 4];
-    'rounds: for round in 1..=limit {
-        for (slot, &(kind, floor)) in ordered.iter().enumerate() {
-            if counts[slot] >= floor.min(round) {
-                continue;
-            }
-            while next[slot] < kinds.len()
-                && (selected[next[slot]] || !kinds[next[slot]].contains(&kind))
-            {
-                next[slot] += 1;
-            }
-            let index = next[slot];
-            if index == kinds.len() {
-                continue;
-            }
-            selected[index] = true;
-            causes[index] = (index >= limit).then_some(kind);
-            for (other, &(kind, _)) in ordered.iter().enumerate() {
-                counts[other] += usize::from(kinds[index].contains(&kind));
-            }
-            remaining -= 1;
-            if remaining == 0 {
-                break 'rounds;
-            }
+    ]
+    .map(|(kind, floor)| {
+        let mut ranks = HashMap::new();
+        for (rank, object) in orders.get(&kind).into_iter().flatten().enumerate() {
+            ranks.entry(*object).or_insert(rank);
         }
-        if ordered
+        let mut queue = candidates
             .iter()
             .enumerate()
-            .all(|(slot, &(_, floor))| counts[slot] >= floor || next[slot] == kinds.len())
-        {
-            break;
+            .filter_map(|(index, (_, kinds))| kinds.contains(&kind).then_some(index))
+            .collect::<Vec<_>>();
+        queue.sort_by_key(|&index| {
+            ranks
+                .get(&candidates[index].0)
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+        (kind, floor, queue.into_iter())
+    });
+    let mut selected = BTreeMap::new();
+    'selection: for reserve_floors in [true, false] {
+        for round in 0..limit {
+            for (kind, floor, queue) in &mut queues {
+                if selected.len() == limit {
+                    break 'selection;
+                }
+                if reserve_floors && round >= *floor {
+                    continue;
+                }
+                let Some(index) = queue.next() else { continue };
+                selected
+                    .entry(index)
+                    .or_insert((index >= limit).then_some(*kind));
+            }
         }
     }
-    for chosen in &mut selected {
-        if remaining == 0 {
+    for index in 0..candidates.len() {
+        if selected.len() == limit {
             break;
         }
-        if !*chosen {
-            *chosen = true;
-            remaining -= 1;
-        }
+        selected.entry(index).or_insert(None);
     }
-    selected
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, chosen)| chosen.then_some((index, causes[index])))
-        .collect()
+    selected.into_iter().collect()
 }
 
 fn build_pack(
     ranked_objects: Vec<RankedObject>,
+    orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
@@ -676,7 +702,10 @@ fn build_pack(
             .filter(|ranked| section_for_object(&ranked.object) == Some(section))
             .collect::<Vec<_>>();
         for (index, cause) in select_with_cue_floors(
-            candidates.iter().map(|ranked| &ranked.cue_kinds),
+            candidates
+                .iter()
+                .map(|ranked| (ranked.object.object_ref(), &ranked.cue_kinds)),
+            orders,
             section_limit(section, limits),
             floors,
         ) {
@@ -920,78 +949,29 @@ struct CandidateRootSelection {
     unique_count: usize,
     omitted: Vec<CandidateRoot>,
     floor_admissions: Vec<CueFloorAdmission>,
-}
-
-// Each kind consumes only its own queue head per turn, including an already
-// selected head. Reserve numeric floors, then use the same turns for spare room.
-fn select_root_queues(
-    roots: &[CandidateRoot],
-    topic_order: &[MemoryObjectRef],
-    limit: usize,
-    floors: RetrievalCueFloors,
-) -> Vec<(usize, Option<CueKind>)> {
-    if roots.len() <= limit {
-        return (0..roots.len()).map(|index| (index, None)).collect();
-    }
-    let mut topic_ranks = HashMap::new();
-    for (rank, object) in topic_order.iter().enumerate() {
-        topic_ranks.entry(*object).or_insert(rank);
-    }
-    let mut queues = [
-        (CueKind::Participant, floors.participant),
-        (CueKind::Place, floors.place),
-        (CueKind::Activity, floors.activity),
-        (CueKind::Topic, floors.topic),
-    ]
-    .map(|(kind, floor)| {
-        let mut queue = (0..roots.len())
-            .filter(|&index| roots[index].cue_kinds.contains(&kind))
-            .collect::<Vec<_>>();
-        if kind == CueKind::Topic {
-            queue.sort_by_key(|&index| {
-                let root = &roots[index];
-                topic_ranks
-                    .get(&MemoryObjectRef::new(root.object_type, root.object_id))
-                    .copied()
-                    .unwrap_or(usize::MAX)
-            });
-        }
-        (kind, floor, queue.into_iter())
-    });
-    let mut selected = BTreeMap::new();
-    'selection: for reserve_floors in [true, false] {
-        for round in 0..limit {
-            for (kind, floor, queue) in &mut queues {
-                if selected.len() == limit {
-                    break 'selection;
-                }
-                if *floor == 0 || (reserve_floors && round >= *floor) {
-                    continue;
-                }
-                let Some(index) = queue.next() else { continue };
-                selected
-                    .entry(index)
-                    .or_insert((index >= limit).then_some(*kind));
-            }
-        }
-    }
-    for index in 0..roots.len() {
-        if selected.len() == limit {
-            break;
-        }
-        selected.entry(index).or_insert(None);
-    }
-    selected.into_iter().collect()
+    orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
 }
 
 fn select_candidate_roots(
     candidates: &[VectorCandidateMatch],
     kinds: &HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
     explicit_roots: &[CandidateRoot],
-    topic_order: &[MemoryObjectRef],
+    content_orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
 ) -> CandidateRootSelection {
+    let mut orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
+    for root in explicit_roots {
+        for kind in &root.cue_kinds {
+            orders
+                .entry(*kind)
+                .or_default()
+                .push(MemoryObjectRef::new(root.object_type, root.object_id));
+        }
+    }
+    for (kind, order) in content_orders {
+        orders.entry(*kind).or_default().extend(order);
+    }
     let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
         let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
@@ -1056,7 +1036,17 @@ fn select_candidate_roots(
         }
     }
     let unique_count = merged.len();
-    let selection = select_root_queues(&merged, topic_order, max_graph_roots, floors);
+    let selection = select_with_cue_floors(
+        merged.iter().map(|root| {
+            (
+                MemoryObjectRef::new(root.object_type, root.object_id),
+                &root.cue_kinds,
+            )
+        }),
+        &orders,
+        max_graph_roots,
+        floors,
+    );
     let mut selection = selection.into_iter().peekable();
     let mut roots = Vec::new();
     let mut omitted = Vec::new();
@@ -1080,6 +1070,7 @@ fn select_candidate_roots(
         unique_count,
         omitted,
         floor_admissions,
+        orders,
     }
 }
 
@@ -1430,7 +1421,7 @@ mod tests {
             &[middle.clone(), low, high.clone()],
             &HashMap::new(),
             &[],
-            &[],
+            &BTreeMap::new(),
             2,
             RetrievalCueFloors::default(),
         );
