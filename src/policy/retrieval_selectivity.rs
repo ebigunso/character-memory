@@ -21,7 +21,7 @@ use crate::ports::retrieval_stats::{
 pub(crate) struct RetrievalSelectivityPolicy {
     smoothing_alpha: f64,
     gamma: f64,
-    fanout_specs: [FanoutSpec; 3],
+    fanout_budgets: [FanoutSpec; 3],
 }
 
 impl RetrievalSelectivityPolicy {
@@ -41,10 +41,10 @@ impl RetrievalSelectivityPolicy {
     ) -> Result<Self, CustomError> {
         validate_positive_f64("selectivity_smoothing_alpha", smoothing_alpha)?;
         validate_positive_f64("selectivity_gamma", gamma)?;
-        let mut fanout_specs = default_fanout_specs();
+        let mut configured_budgets = DEFAULT_FANOUT_SPECS;
         for (relation, object_type, min_fanout, max_fanout) in fanout_budgets {
             validate_fanout_budget(relation, object_type, min_fanout, max_fanout)?;
-            if let Some(spec) = fanout_specs
+            if let Some(spec) = configured_budgets
                 .iter_mut()
                 .find(|spec| spec.relation == relation && spec.object_type == object_type)
             {
@@ -64,15 +64,16 @@ impl RetrievalSelectivityPolicy {
         Ok(Self {
             smoothing_alpha,
             gamma,
-            fanout_specs,
+            fanout_budgets: configured_budgets,
         })
     }
 
-    fn fanout_spec(&self, relation: RelationType, object_type: ObjectType) -> Option<FanoutSpec> {
-        self.fanout_specs
+    fn fanout_budget(&self, relation: RelationType, object_type: ObjectType) -> FanoutSpec {
+        self.fanout_budgets
             .iter()
             .copied()
             .find(|spec| spec.relation == relation && spec.object_type == object_type)
+            .expect("every selectivity route maps to a configured fanout budget")
     }
 }
 
@@ -107,7 +108,7 @@ impl SelectivityStatsContext {
         allowed_object_types: &[ObjectType],
         allowed_relation_types: &[RelationType],
     ) -> Result<Self, CustomError> {
-        let specs = fanout_specs()
+        let specs = fanout_routes()
             .iter()
             .copied()
             .filter(|spec| {
@@ -245,9 +246,7 @@ pub(crate) async fn selectivity_plan_for_entity(
             (None, None, None, true)
         };
 
-        let budget_spec = policy
-            .fanout_spec(count_relation, count_object_type)
-            .unwrap_or(*spec);
+        let budget_spec = policy.fanout_budget(count_relation, count_object_type);
         let max_fanout = budget_spec.max_fanout.min(static_max_fanout);
         let min_fanout = budget_spec.min_fanout.min(max_fanout);
         let chosen_fanout = match score {
@@ -454,7 +453,8 @@ impl FanoutSpec {
     }
 }
 
-fn fanout_specs() -> [FanoutSpec; 4] {
+fn fanout_routes() -> [FanoutSpec; 4] {
+    // Both participant routes count episodes and share the Involves budget.
     let [about, participant, thread] = DEFAULT_FANOUT_SPECS;
     [
         about,
@@ -466,10 +466,6 @@ fn fanout_specs() -> [FanoutSpec; 4] {
             ..participant
         },
     ]
-}
-
-fn default_fanout_specs() -> [FanoutSpec; 3] {
-    DEFAULT_FANOUT_SPECS
 }
 
 const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
@@ -568,9 +564,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(without_trace.telemetry.decision_count, fanout_specs().len());
+        assert_eq!(
+            without_trace.telemetry.decision_count,
+            fanout_routes().len()
+        );
         assert!(without_trace.traces.is_empty());
-        assert_eq!(with_trace.traces.len(), fanout_specs().len());
+        assert_eq!(with_trace.traces.len(), fanout_routes().len());
     }
 
     #[tokio::test]
@@ -595,7 +594,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
         assert!(plan
             .fanout_overrides
             .iter()
@@ -696,7 +695,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
@@ -726,7 +725,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_specs().len());
+        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
