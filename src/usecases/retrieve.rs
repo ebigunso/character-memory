@@ -1293,7 +1293,7 @@ fn graph_query_for_candidate(
     });
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
-    query.participant_reference_time = query.current_subject_state.then_some(context.scene.time);
+    query.participant_reference_time = context.scene.time;
     query
 }
 
