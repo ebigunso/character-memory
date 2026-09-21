@@ -302,26 +302,34 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     let (memory, queries) = scene_memory().await;
     let thread_id = MemoryId::from_u128(9000);
     let member_id = MemoryId::from_u128(9001);
+    let older_member_id = MemoryId::from_u128(8999);
     let mut thread = MemoryThreadDraft::new("The telescope repair", "A completed piece of work");
     thread.id = Some(thread_id);
     thread.status = ThreadStatus::Resolved;
     let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens needs cleaning.");
     member.id = Some(member_id);
+    member.created_at = Some(scene().time);
     member.thread_ids = vec![thread_id];
+    let mut older_member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens was installed.");
+    older_member.id = Some(older_member_id);
+    older_member.created_at = Some(scene().time - chrono::Duration::days(1));
+    older_member.thread_ids = vec![thread_id];
     memory
         .remember(
             RememberInput::new("We inspected the lens.")
                 .with_scene(scene())
                 .with_memory_thread(thread)
-                .with_derived_memory(member),
+                .with_derived_memory(member)
+                .with_derived_memory(older_member),
             RememberOptions::default(),
         )
         .await
         .unwrap();
     let activity = ActivityRef::Thread(thread_id);
-    let context = RetrievalContext::default()
+    let mut context = RetrievalContext::default()
         .with_activity(activity)
         .with_trace();
+    context.candidate_limits.max_graph_roots = 2;
     let found = memory.retrieve(context.clone()).await.unwrap();
     let wrong_kind = ActivityRef::OpenLoop(member_id);
     let unknown = memory
@@ -387,13 +395,15 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     assert!(bounded.trace.unwrap().graph_expansions.iter().any(|root| {
         root.root.id == member_id && root.outcome == GraphExpansionOutcome::RootLimit
     }));
-    memory
-        .forget(ForgetMemoryDraft::suppress(
-            LifecycleTargetRef::derived_memory(member_id),
-            "No longer useful",
-        ))
-        .await
-        .unwrap();
+    for id in [member_id, older_member_id] {
+        memory
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::derived_memory(id),
+                "No longer useful",
+            ))
+            .await
+            .unwrap();
+    }
     let mut untraced = context;
     untraced.include_trace = false;
     let empty = memory.retrieve(untraced.clone()).await.unwrap();

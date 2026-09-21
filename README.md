@@ -52,6 +52,8 @@ Retrieval is graph-authoritative and hybrid:
 
 Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place` and `Activity`.
 
+A thread with many members can take every root after the participants under the default root limit, so the topic may contribute nothing until cue floors are implemented; members are taken most recent first.
+
 ## What this is not
 
 Character Memory is not:

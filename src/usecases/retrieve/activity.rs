@@ -70,10 +70,18 @@ where
                         include_suppressed: context.lifecycle_policy.include_suppressed,
                         include_superseded: context.lifecycle_policy.include_superseded,
                     });
+                let mut memories = self
+                    .graph_store
+                    .query_derived_memories_by_thread(&query)
+                    .await?;
+                memories.sort_by(|left, right| {
+                    right
+                        .created_at
+                        .cmp(&left.created_at)
+                        .then_with(|| left.id.cmp(&right.id))
+                });
                 members.extend(
-                    self.graph_store
-                        .query_derived_memories_by_thread(&query)
-                        .await?
+                    memories
                         .into_iter()
                         .map(|memory| MemoryObjectRef::new(ObjectType::DerivedMemory, memory.id)),
                 );
@@ -108,10 +116,11 @@ where
                         .into_iter()
                         .map(|id| MemoryObjectRef::new(ObjectType::Observation, id)),
                 );
+                members
+                    .sort_by_key(|reference| (reference.object_type.stable_rank(), reference.id));
             }
-            _ => unreachable!("activity kind was checked before resolution"),
+            _ => return Ok((result, roots)),
         }
-        members.sort_by_key(|reference| (reference.object_type.stable_rank(), reference.id));
         members.dedup();
         roots.extend(members.into_iter().map(root));
         Ok((result, roots))
