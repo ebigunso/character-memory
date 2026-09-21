@@ -232,6 +232,52 @@ fn keyed(key: u128) -> SceneParticipant {
     }
 }
 
+#[tokio::test]
+async fn retrieve_with_scene_and_activity_fits_a_one_mib_thread_stack() {
+    let (memory, _) = scene_memory().await;
+    create_notion(&memory, 100, Some("Alice")).await;
+    let mut present = scene();
+    present.participants.push(keyed(100));
+    present.setting.words = Some("observatory".to_owned());
+    write_episode(&memory, 30_000, present.clone()).await;
+    let mut open_loop = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Ask the astronomer.");
+    open_loop.id = Some(MemoryId::from_u128(40_000));
+    memory
+        .remember(
+            RememberInput::new("Plan the next visit.").with_derived_memory(open_loop),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    let context = RetrievalContext::new("astronomer")
+        .with_scene(present)
+        .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(40_000)))
+        .with_trace();
+    // Keep fixture setup off this stack: exercise the library call as a
+    // consumer using Windows' usual 1 MiB main-thread stack would.
+    let result = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let result = runtime.block_on(memory.retrieve(context)).unwrap();
+            runtime.block_on(memory.close()).unwrap();
+            result
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(result
+        .trace
+        .unwrap()
+        .graph_expansions
+        .iter()
+        .any(|row| row.outcome == GraphExpansionOutcome::Expanded));
+    assert!(!result.pack.open_loops.is_empty());
+}
+
 fn selected_cues(result: &RetrieveOutcome, object: MemoryObjectRef) -> &BTreeSet<CueKind> {
     &result
         .trace
