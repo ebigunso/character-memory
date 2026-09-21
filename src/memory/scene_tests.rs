@@ -547,13 +547,19 @@ async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_creat
 #[tokio::test]
 async fn writes_reject_missing_scene_and_unknown_keys() {
     let (memory, inputs) = memory().await;
+    let with_vector = |draft| {
+        episode_plan(draft).with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+            MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(8401)),
+            CandidateProvenance::caller("summary"),
+        )))
+    };
     assert_eq!(
         episode_draft(8401, None).into_domain(),
         Err(DomainValidationError::MissingScene)
     );
     let error = memory
         .commit(
-            episode_plan(episode_draft(8401, None)),
+            with_vector(episode_draft(8401, None)),
             CommitOptions::default(),
         )
         .await
@@ -564,6 +570,8 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
             field: CandidateTimestampField::SceneTime,
         },
     );
+    // Missing scene is rejected while materializing request-owned values.
+    assert!(inputs.lock().unwrap().is_empty());
     let unknown = MemoryId::from_u128(8499);
     let mut scene = Scene::at(time());
     scene.participants.push(SceneParticipant {
@@ -572,7 +580,7 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
     });
     let error = memory
         .commit(
-            episode_plan(episode_draft(8401, Some(scene))),
+            with_vector(episode_draft(8401, Some(scene))),
             CommitOptions::default(),
         )
         .await
@@ -584,7 +592,13 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
             referenced: MemoryObjectRef::new(ObjectType::Entity, unknown),
         },
     );
-    assert!(inputs.lock().unwrap().is_empty());
+    // Key validation needs the graph inside the write turn, after embedding.
+    assert_eq!(inputs.lock().unwrap().len(), 1);
+    let recalled = memory
+        .retrieve(RetrievalContext::new("An experience").with_trace())
+        .await
+        .unwrap();
+    assert!(recalled.trace.unwrap().vector_candidates.is_empty());
     assert!(objects(
         &memory,
         vec![
