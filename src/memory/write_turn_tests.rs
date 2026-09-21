@@ -599,7 +599,7 @@ impl GraphAuthorityStore for GatedGraph {
     async fn query_derived_memories_by_thread(
         &self,
         query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
+    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         self.store.query_derived_memories_by_thread(query).await
     }
     async fn query_scope_state(

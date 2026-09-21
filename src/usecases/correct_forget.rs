@@ -504,7 +504,7 @@ where
         thread_id: MemoryId,
         cascade_warning_ids: &mut Vec<MemoryId>,
     ) -> Result<(), CustomError> {
-        let matches = self
+        let (matches, _) = self
             .graph_store
             .query_derived_memories_by_thread(
                 &GraphDerivedMemoryThreadQuery::by_threads(vec![thread_id])
@@ -3592,7 +3592,7 @@ mod tests {
         async fn query_derived_memories_by_thread(
             &self,
             query: &GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<DerivedMemory>, CustomError> {
+        ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
             lock(&self.calls).push(StoreCall::GraphThreadQuery(query.thread_ids.clone()));
             self.store.query_derived_memories_by_thread(query).await
         }

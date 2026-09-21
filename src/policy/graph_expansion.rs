@@ -115,6 +115,14 @@ pub(crate) fn bounded_expansion(
         .collect();
     sort_objects(&mut expanded_objects);
 
+    let mut resolved_by = incoming_derived_memory_ids(
+        &links.iter().collect::<Vec<_>>(),
+        &[RelationType::Resolves, RelationType::FulfillsCommitment],
+    );
+    resolved_by.retain(|id, _| {
+        plan.visited
+            .contains(&MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+    });
     let traversed_link_ids = plan
         .relations
         .iter()
@@ -140,6 +148,7 @@ pub(crate) fn bounded_expansion(
         selection_order: plan.selection_order,
         relations: plan.relations,
         filtered_nodes: plan.filtered_nodes,
+        resolved_by,
         expanded_nodes: plan.expanded_nodes,
         fanout_utilization: plan.fanout_utilization,
         bounded_failure: plan.bounded_failure,
@@ -159,7 +168,7 @@ pub(crate) fn derived_memories_by_provenance(
         .collect::<HashSet<_>>();
     let links = links.into_iter().collect::<Vec<_>>();
     let link_refs = links.iter().collect::<Vec<_>>();
-    let superseded = superseding_derived_memory_ids(&link_refs);
+    let superseded = incoming_derived_memory_ids(&link_refs, &[RelationType::Supersedes]);
     let provenance_linked =
         provenance_linked_derived_memory_ids(&episode_ids, &observation_ids, &links);
     let mut memories = objects
@@ -190,11 +199,16 @@ pub(crate) fn derived_memories_by_thread(
     query: &GraphDerivedMemoryThreadQuery,
     objects: impl IntoIterator<Item = MemoryObject>,
     links: impl IntoIterator<Item = MemoryLink>,
-) -> Vec<DerivedMemory> {
+) -> (Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>) {
     let thread_ids = query.thread_ids.iter().copied().collect::<HashSet<_>>();
     let links = links.into_iter().collect::<Vec<_>>();
     let link_refs = links.iter().collect::<Vec<_>>();
-    let superseded = superseding_derived_memory_ids(&link_refs);
+    let superseded = incoming_derived_memory_ids(&link_refs, &[RelationType::Supersedes]);
+    let resolved = incoming_derived_memory_ids(
+        &link_refs,
+        &[RelationType::Resolves, RelationType::FulfillsCommitment],
+    );
+    let mut filtered = Vec::new();
     let mut memories = objects
         .into_iter()
         .filter_map(|object| match object {
@@ -212,10 +226,24 @@ pub(crate) fn derived_memories_by_thread(
             derived_memory_lifecycle_filter_reason(memory, &superseded, query.lifecycle_policy)
                 .is_none()
         })
+        .filter(|memory| {
+            if query.current_state && resolved.contains_key(&memory.id) {
+                push_filtered_node(
+                    &mut filtered,
+                    MemoryObjectRef::new(ObjectType::DerivedMemory, memory.id),
+                    GraphExpansionFilteredReason::Resolved,
+                    &superseded,
+                );
+                false
+            } else {
+                true
+            }
+        })
         .collect::<Vec<_>>();
 
     memories.sort_by_key(|memory| memory.id);
-    memories
+    filtered.sort_by_key(|entry| entry.object_ref.id);
+    (memories, filtered)
 }
 
 fn derived_memory_matches_provenance(
@@ -414,7 +442,11 @@ fn bounded_expansion_plan<'a>(
         });
     }
 
-    let superseded = superseding_derived_memory_ids(&links);
+    let superseded = incoming_derived_memory_ids(&links, &[RelationType::Supersedes]);
+    let resolved = incoming_derived_memory_ids(
+        &links,
+        &[RelationType::Resolves, RelationType::FulfillsCommitment],
+    );
     let object_lifecycle = objects
         .iter()
         .map(|object| {
@@ -431,6 +463,7 @@ fn bounded_expansion_plan<'a>(
             MemoryObject::DerivedMemory(memory)
                 if query.current_subject_state
                     && memory.entity_ids.contains(&query.root_id)
+                    && !resolved.contains_key(&memory.id)
                     && (query.lifecycle_policy.include_superseded
                         || !superseded.contains_key(&memory.id))
                     && (query.lifecycle_policy.include_suppressed
@@ -498,6 +531,12 @@ fn bounded_expansion_plan<'a>(
 
         let mut incident_links = links
             .iter()
+            .filter(|link| {
+                query
+                    .traversal_link_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&link.id))
+            })
             .filter(|link| relation_allowed(query, link.relation))
             .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
@@ -512,10 +551,25 @@ fn bounded_expansion_plan<'a>(
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
+        if depth == 0 {
+            incident_links.retain(|(link, neighbor)| {
+                link.relation != RelationType::PartOfThread
+                    || !query.resolved_thread_members.contains(neighbor)
+            });
+        }
         if depth == 0 && query.current_subject_state {
             for (link, neighbor) in &incident_links {
                 if link.relation == RelationType::About {
-                    if let Some(reason) = object_lifecycle.get(neighbor).copied().flatten() {
+                    let reason = object_lifecycle
+                        .get(neighbor)
+                        .copied()
+                        .flatten()
+                        .or_else(|| {
+                            (neighbor.object_type == ObjectType::DerivedMemory
+                                && resolved.contains_key(&neighbor.id))
+                            .then_some(GraphExpansionFilteredReason::Resolved)
+                        });
+                    if let Some(reason) = reason {
                         push_filtered_node(&mut filtered_nodes, *neighbor, reason, &superseded);
                     }
                 }
@@ -903,10 +957,13 @@ fn retention_filter_reason(
     }
 }
 
-fn superseding_derived_memory_ids(links: &[&MemoryLink]) -> HashMap<MemoryId, Vec<MemoryId>> {
+fn incoming_derived_memory_ids(
+    links: &[&MemoryLink],
+    relations: &[RelationType],
+) -> HashMap<MemoryId, Vec<MemoryId>> {
     let mut successors = HashMap::<MemoryId, Vec<MemoryId>>::new();
     for link in links.iter().filter(|link| {
-        link.relation == RelationType::Supersedes
+        relations.contains(&link.relation)
             && link.from_type == ObjectType::DerivedMemory
             && link.to_type == ObjectType::DerivedMemory
     }) {

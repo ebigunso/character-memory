@@ -660,6 +660,18 @@ pub(super) fn bounded_graph_visible_refs(
                     },
                 );
                 &ordered
+            } else if depth == 0 && !query.resolved_thread_members.is_empty() {
+                ordered = incident_link_refs
+                    .iter()
+                    .filter(|link| {
+                        link.relation != RelationType::PartOfThread
+                            || !query
+                                .resolved_thread_members
+                                .contains(&link.other_endpoint(*object_ref))
+                    })
+                    .copied()
+                    .collect();
+                &ordered
             } else {
                 incident_link_refs
             };
@@ -700,8 +712,12 @@ pub(super) fn bounded_graph_visible_refs(
         .select_links_touching(&candidate_refs)?
         .into_iter()
         .filter(|link_ref| {
-            link_ref.relation == RelationType::Supersedes
-                && link_ref.to.object_type == ObjectType::DerivedMemory
+            matches!(
+                link_ref.relation,
+                RelationType::Supersedes
+                    | RelationType::Resolves
+                    | RelationType::FulfillsCommitment
+            ) && link_ref.to.object_type == ObjectType::DerivedMemory
                 && graph_refs.contains(&link_ref.to)
         })
         .map(|link_ref| link_ref.link_id)

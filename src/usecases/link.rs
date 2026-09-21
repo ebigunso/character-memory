@@ -632,8 +632,8 @@ mod tests {
         async fn query_derived_memories_by_thread(
             &self,
             _query: &GraphDerivedMemoryThreadQuery,
-        ) -> Result<Vec<DerivedMemory>, CustomError> {
-            Ok(Vec::new())
+        ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            Ok((Vec::new(), Vec::new()))
         }
 
         async fn query_scope_state(

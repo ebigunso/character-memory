@@ -268,7 +268,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
     async fn query_derived_memories_by_thread(
         &self,
         query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
+    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let selected_ids = SparqlGraphSelectors::new(&self.store)
             .select_derived_memories_by_thread(query)?
             .into_iter()
@@ -327,6 +327,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         )?;
 
         let mut hydrated_query = query.clone();
+        hydrated_query.traversal_link_ids = Some(visibility.traversal_link_ids);
         hydrated_query.trace_mode = crate::ports::graph_authority::TraceMode::Disabled;
         let mut expansion = bounded_expansion(
             &hydrated_query,

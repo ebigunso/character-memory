@@ -1336,7 +1336,7 @@ mod tests {
             .objects
             .contains(&MemoryObject::MemoryThread(dormant_thread.clone())));
 
-        let default_thread_matches = store
+        let (default_thread_matches, _) = store
             .query_derived_memories_by_thread(&GraphDerivedMemoryThreadQuery::by_threads(vec![
                 fixtures.soft_thread.id,
             ]))
