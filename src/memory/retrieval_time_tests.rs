@@ -1193,6 +1193,36 @@ fn date_match_episodes(result: &RetrieveOutcome) -> Vec<u128> {
 }
 
 #[tokio::test]
+async fn time_range_fills_unclaimed_room_before_recency() {
+    let mut rows = Vec::new();
+    let mut selected = Vec::new();
+    for reverse in [false, true] {
+        let (memory, temp) = open().await;
+        commit(&memory, range_fixture(reverse)).await;
+        let start = time() - Duration::days(6) - Duration::hours(18);
+        let context = query(false, false).with_time_range(start, start + Duration::hours(23));
+        let result = record(
+            &mut rows,
+            &format!("requested-tuesday-reverse={reverse}"),
+            &memory,
+            context,
+        )
+        .await;
+        selected.push(episodes(&result));
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!("TIME_RANGE_ROOM={}", serde_json::to_string(&rows).unwrap());
+    assert_eq!(
+        selected,
+        [
+            vec![104, 103, 102, 101, 100, 504, 503, 502],
+            vec![200, 201, 202, 203, 204, 600, 601, 602],
+        ]
+    );
+}
+
+#[tokio::test]
 async fn time_range_reserves_the_requested_day_under_topic_pressure() {
     let mut rows = Vec::new();
     for reverse in [false, true] {
@@ -1241,7 +1271,7 @@ async fn time_range_reserves_the_requested_day_under_topic_pressure() {
             );
             assert_eq!(
                 result.trace.as_ref().unwrap().time_range_has_more,
-                Some(true)
+                Some(false)
             );
             for n in expected {
                 assert!(roots(&result).contains(&n));
@@ -1288,14 +1318,36 @@ async fn time_range_preserves_other_cues_when_there_is_room() {
             context,
         )
         .await;
-        assert_eq!(with.pack, without.pack);
+        let dates = if reverse {
+            [200, 201, 202, 203, 204]
+        } else {
+            [104, 103, 102, 101, 100]
+        };
+        let recent = if reverse {
+            [600, 601, 602, 603, 604]
+        } else {
+            [504, 503, 502, 501, 500]
+        };
+        assert_eq!(
+            episodes(&with),
+            (2000..2002)
+                .chain(dates)
+                .chain(recent)
+                .chain(2002..2014)
+                .collect::<Vec<_>>()
+        );
+        let mut reordered = without.pack.clone();
+        reordered.relevant_episodes.sort_by_key(|episode| {
+            episodes(&with)
+                .iter()
+                .position(|&n| n == episode.id.as_u128())
+                .unwrap()
+        });
+        assert_eq!(with.pack, reordered);
         for n in episodes(&without) {
             assert_eq!(scores(&with, n), scores(&without, n));
         }
-        assert_eq!(
-            date_match_episodes(&with),
-            if reverse { [200, 201] } else { [104, 103] }
-        );
+        assert_eq!(date_match_episodes(&with), dates);
         memory.close().await.unwrap();
         temp.close().unwrap();
     }
@@ -1403,7 +1455,7 @@ async fn time_range_uses_both_ends_without_the_scene_reference_cut() {
 }
 
 #[tokio::test]
-async fn time_range_floor_bounds_contribution_after_lifecycle_filtering() {
+async fn time_range_section_cap_bounds_contribution_after_lifecycle_filtering() {
     let (memory, temp) = open().await;
     let start = time() + Duration::days(1);
     let end = start + Duration::hours(2);
@@ -1423,12 +1475,53 @@ async fn time_range_floor_bounds_contribution_after_lifecycle_filtering() {
             context,
         )
         .await;
-        let count = floor.clamp(1, 3);
-        assert_eq!(episodes(&result), [100, 200, 300][..count]);
-        assert_eq!(date_match_episodes(&result), [100, 200, 300][..count]);
+        assert_eq!(episodes(&result), [100, 200, 300]);
+        assert_eq!(date_match_episodes(&result), [100, 200, 300]);
         assert_eq!(
             result.trace.as_ref().unwrap().time_range_has_more,
-            Some(floor < 3)
+            Some(false)
+        );
+    }
+    for floor in [0, 1, 7] {
+        let mut context = query(false, false).with_time_range(start, end);
+        context.section_limits = room(2);
+        context.cue_floors.date_match = floor;
+        let result = record(
+            &mut rows,
+            &format!("cap-two-floor-{floor}"),
+            &memory,
+            context,
+        )
+        .await;
+        assert_eq!(roots(&result), [100, 200]);
+        assert_eq!(episodes(&result), [100, 200]);
+        assert_eq!(date_match_episodes(&result), [100, 200]);
+        assert_eq!(
+            result.trace.as_ref().unwrap().time_range_has_more,
+            Some(true)
+        );
+    }
+    for (case, limits, expected_roots, expected_pack, more) in [
+        ("all-zero-caps", room(0), vec![], vec![], true),
+        (
+            "largest-cap-three-episode-cap-one",
+            ContinuitySectionLimits {
+                relevant_episodes: 1,
+                ..room(3)
+            },
+            vec![100, 200, 300],
+            vec![100],
+            false,
+        ),
+    ] {
+        let mut context = query(false, false).with_time_range(start, end);
+        context.section_limits = limits;
+        let result = record(&mut rows, case, &memory, context).await;
+        assert_eq!(roots(&result), expected_roots);
+        assert_eq!(episodes(&result), expected_pack);
+        assert_eq!(
+            result.trace.as_ref().unwrap().time_range_has_more,
+            Some(more)
         );
     }
     memory
@@ -1438,13 +1531,16 @@ async fn time_range_floor_bounds_contribution_after_lifecycle_filtering() {
         ))
         .await
         .unwrap();
-    for include_suppressed in [false, true] {
+    for (cap, include_suppressed) in [(16, false), (16, true), (2, false), (2, true)] {
         let mut context = query(false, false).with_time_range(start, end);
+        if cap == 2 {
+            context.section_limits = room(cap);
+        }
         context.cue_floors.date_match = 2;
         context.lifecycle_policy.include_suppressed = include_suppressed;
         let result = record(
             &mut rows,
-            &format!("range-include-suppressed-{include_suppressed}"),
+            &format!("range-cap-{cap}-include-suppressed-{include_suppressed}"),
             &memory,
             context,
         )
@@ -1452,14 +1548,14 @@ async fn time_range_floor_bounds_contribution_after_lifecycle_filtering() {
         assert_eq!(
             episodes(&result),
             if include_suppressed {
-                [100, 200]
+                vec![100, 200, 300][..cap.min(3)].to_vec()
             } else {
-                [200, 300]
+                vec![200, 300]
             }
         );
         assert_eq!(
             result.trace.as_ref().unwrap().time_range_has_more,
-            Some(include_suppressed)
+            Some(include_suppressed && cap == 2)
         );
     }
     memory.close().await.unwrap();

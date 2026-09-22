@@ -199,48 +199,47 @@ where
             }
         }
         explicit_roots.extend(activity_roots);
-        let time_range_has_more =
-            if let Some(range) = context.time_range {
-                let limit = context.cue_floors.date_match.max(1);
-                let matches = self
-                    .graph_store
-                    .query_episodes_by_time(
-                        Some(range.start),
-                        range.end,
-                        limit.saturating_add(1),
-                        GraphExpansionLifecyclePolicy {
-                            include_suppressed: context.lifecycle_policy.include_suppressed,
-                            include_superseded: context.lifecycle_policy.include_superseded,
-                        },
-                    )
-                    .await?;
-                let has_more = matches.len() > limit;
-                explicit_roots.extend(matches.into_iter().take(limit).map(|object_id| {
-                    CandidateRoot {
-                        object_id,
-                        object_type: ObjectType::Episode,
-                        score: 0.0,
-                        source: GraphRootSource::DateMatch,
-                        vector_score: None,
-                        cue_kinds: BTreeSet::from([CueKind::DateMatch]),
-                        full_standing_score: None,
-                        full_standing_kinds: BTreeSet::new(),
-                    }
-                }));
-                Some(has_more)
-            } else {
-                None
-            };
+        let time_limit = prompt_ready_sections()
+            .into_iter()
+            .map(|section| section_limit(section, context.section_limits))
+            .max()
+            .unwrap_or(0);
+        let time_range_has_more = if let Some(range) = context.time_range {
+            let matches = self
+                .graph_store
+                .query_episodes_by_time(
+                    Some(range.start),
+                    range.end,
+                    time_limit.saturating_add(1),
+                    GraphExpansionLifecyclePolicy {
+                        include_suppressed: context.lifecycle_policy.include_suppressed,
+                        include_superseded: context.lifecycle_policy.include_superseded,
+                    },
+                )
+                .await?;
+            let has_more = matches.len() > time_limit;
+            explicit_roots.extend(matches.into_iter().take(time_limit).map(|object_id| {
+                CandidateRoot {
+                    object_id,
+                    object_type: ObjectType::Episode,
+                    score: 0.0,
+                    source: GraphRootSource::DateMatch,
+                    vector_score: None,
+                    cue_kinds: BTreeSet::from([CueKind::DateMatch]),
+                    full_standing_score: None,
+                    full_standing_kinds: BTreeSet::new(),
+                }
+            }));
+            Some(has_more)
+        } else {
+            None
+        };
         let recent = self
             .graph_store
             .query_episodes_by_time(
                 None,
                 context.scene.time,
-                prompt_ready_sections()
-                    .into_iter()
-                    .map(|section| section_limit(section, context.section_limits))
-                    .max()
-                    .unwrap_or(0),
+                time_limit,
                 GraphExpansionLifecyclePolicy {
                     include_suppressed: context.lifecycle_policy.include_suppressed,
                     include_superseded: context.lifecycle_policy.include_superseded,
@@ -742,7 +741,8 @@ impl RetrieveAssembly {
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
         // Reorder only contributed-occasion slots within an equal-score/type
-        // tie. Other objects retain the general ID order and their positions.
+        // tie: the given range precedes recency. Other objects retain the
+        // general ID order and their positions.
         for tied in ranked_objects.chunk_by_mut(|left, right| {
             left.rank_key().score == right.rank_key().score
                 && left.object.object_type() == right.object.object_type()
@@ -752,7 +752,8 @@ impl RetrieveAssembly {
                 .enumerate()
                 .filter_map(|(index, ranked)| {
                     (matches!(ranked.object, MemoryObject::Episode(_))
-                        && ranked.cue_kinds.contains(&CueKind::Recency))
+                        && (ranked.cue_kinds.contains(&CueKind::DateMatch)
+                            || ranked.cue_kinds.contains(&CueKind::Recency)))
                     .then_some(index)
                 })
                 .collect::<Vec<_>>();
@@ -764,9 +765,11 @@ impl RetrieveAssembly {
                 .map(|&index| tied[index].clone())
                 .collect::<Vec<_>>();
             recent.sort_by_key(|ranked| match &ranked.object {
-                MemoryObject::Episode(episode) => {
-                    (std::cmp::Reverse(episode.scene.time), episode.id)
-                }
+                MemoryObject::Episode(episode) => (
+                    !ranked.cue_kinds.contains(&CueKind::DateMatch),
+                    std::cmp::Reverse(episode.scene.time),
+                    episode.id,
+                ),
                 _ => unreachable!("only contributed episodes occupy these slots"),
             });
             for (position, ranked) in positions.into_iter().zip(recent) {
@@ -1822,6 +1825,41 @@ mod tests {
                 .map(|ranked| ranked.object.id().as_u128())
                 .collect::<Vec<_>>(),
             [3, 2, 1]
+        );
+    }
+
+    #[test]
+    fn date_ties_keep_other_positions_and_distinct_scores() {
+        let fixtures = representative_fixtures();
+        let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
+        for n in 1..=6 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(n);
+            episode.salience_score = 0.0;
+            episode.scene.time += chrono::Duration::days(n as i64);
+            let kind = match n {
+                1 | 6 => CueKind::Recency,
+                3 | 5 => CueKind::DateMatch,
+                _ => CueKind::Topic,
+            };
+            assembly.objects.insert(
+                MemoryObjectRef::new(ObjectType::Episode, episode.id),
+                RankedObject::new(
+                    MemoryObject::Episode(episode),
+                    if n == 6 { 1.0 } else { 0.0 },
+                    BTreeSet::from([kind]),
+                    1.0,
+                    None,
+                ),
+            );
+        }
+        assert_eq!(
+            assembly
+                .ranked_objects()
+                .iter()
+                .map(|ranked| ranked.object.id().as_u128())
+                .collect::<Vec<_>>(),
+            [6, 5, 2, 3, 4, 1]
         );
     }
 
