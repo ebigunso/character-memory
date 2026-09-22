@@ -2,6 +2,8 @@
 
 Character Memory is a Rust library for giving LLM assistants memory that shapes behavior over time.
 
+A recognized key or name brings back where things stand with that person or in that place. A description such as "a man with a deep voice" or "at my desk" brings recent occasions like this to mind, without deciding who the person is or treating the description as a place's identity.
+
 It is built for persistent AI assistants and companions that should remember past interactions, recognize recurring entities, and maintain character continuity across sessions.
 
 Instead of treating memory as a chat log or simple vector search, Character Memory stores episodic memories with temporal and relational structure.
@@ -48,7 +50,9 @@ Retrieval is graph-authoritative and hybrid:
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
-`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions. The topic searches content surfaces; setting words search episode setting surfaces, and all participants' names and descriptions join into one search of episode participant surfaces. Scene words are indexed separately from the episode summary, with up to three embeddings per episode in the existing write batch. A setting key or custom value recalls current beliefs grounded in experiences with that context; beliefs with several sources can return in any of their recorded places or named contexts. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
+`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. The topic recalls what happened or was learned, while descriptions recall occasions with similar surroundings or people. A setting key or custom value recalls current beliefs grounded in experiences with that context; beliefs with several sources can return in any of their recorded places or named contexts. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
+
+An episode has a content search surface for its summary and up to two separate scene surfaces: the setting words and the participants' words. Scene words are not appended to the content text. All participants' names and descriptions are searched together, as they were recorded, so any similarity score for them belongs to that shared search. See the [vector design](docs/design/database/vector_payload_design.md#indexed-objects-and-surfaces) for the stored forms.
 
 For each recognized participant, `last_interactions` says when the character last met them and how much time has passed. If a name could mean several participants, each has its own answer. No eligible encounter at or before the scene time means never met. These facts remain available even when no memories fit the requested amount. Forgotten encounters count only when `include_suppressed` is enabled.
 
@@ -60,11 +64,15 @@ Once a recent occasion has root room, section selection uses the ordinary score:
 
 Thread members are taken most recent first.
 
-Candidate, graph root and section selection serve each cue kind's floor from its own order. Keyed and named routes take their kind's floor before reminders. Descriptions contribute their most recent recallable occasions at or before the scene time, as many as the kind's floor and at least one. Spare room follows score order at candidate and section caps; only root selection shares spare turns among kinds. A reminder can bring memories resting on its occasion. A person or thread reached only through that reminder is a leaf: it can be included, but recall does not continue through it. When a topic, key or name also reaches the occasion, linked history inherits that route’s score; the occasion itself keeps its best matching score. The pack keeps its final score order.
+A description brings the most recent few recallable occasions among its fetched matches, at or before the scene time: as many as its cue kind's reserved amount, called its floor, and at least the latest one. Its other matches contribute nothing; the trace counts those left out by this limit. What was brought then competes by relevance. Keys and names take their kind's reserved room first, so adding a description does not displace what is already known merely to fill that reservation. Turns among cue kinds apply only where the memories to expand from are chosen; everywhere else, spare room goes by score.
+
+An occasion recalled by a description can bring what was observed and concluded there. It does not by itself bring the whole history of a person or thread mentioned there. A topic, key or name can still recall that history on its own strength.
 
 Each cue kind has a floor at the merged candidate cap, the graph root cap and each section cap. The **provisional** defaults are one slot each for participant, place, activity and topic. Floors apply per kind, not per person or place: five people share one participant floor. `context.cue_floors` is a calibration knob for measured defaults; applications are not expected to set it. Slots are reserved in successive rounds in that order. Unused room returns to the common pool, and selected memories keep their original order. A zero floor reserves nothing for that kind; a zero cap admits nothing. A single kind also receives its floor from its own queue, then fills remaining room in final-ranked order. Topic-only retrieval keeps its selection. Calibration uses the public companion evaluation repository, a development aid outside the core library.
 
 With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a reserved or spare turn admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
+
+The trace's `scene_cue_searches` reports the best similarity found for the setting and for the joined participant words, with the references sharing each search; a search with no matches has no score. Each entry identifies its cue kind and counts recallable matches left out by the description's occasion limit in `omitted_count`. There is no minimum similarity: whether a description is too weak to remind the character of anything remains a question for measurement, not a decision made by this score.
 
 A participant present in most experiences brings fewer past encounters to mind, while retaining the latest eligible one within the requested limits. A participant recognized by key or name brings only encounters at or before the scene time. Several remarks or participants in one encounter do not make it count more than once. Familiarity limits recalled encounters, not beliefs about that participant. This applies to every notion, including whichever one the application regards as the character.
 

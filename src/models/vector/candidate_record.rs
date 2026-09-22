@@ -90,6 +90,7 @@ impl CanonicalCandidates {
         Self(canonicalize_vector_candidates(candidates))
     }
 
+    #[cfg(test)]
     pub(crate) fn truncated(mut self, limit: usize) -> Self {
         self.0.truncate(limit);
         self

@@ -37,7 +37,7 @@ pub use crate::api::types::{
     RememberOptions, RememberOutcome, RememberWritePlan, RepairMarker,
     ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
     RetrievalGraphLimits, RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry,
-    RetrievalTrace, RetrieveOutcome, SceneReference, SceneReferenceResolution,
+    RetrievalTrace, RetrieveOutcome, SceneCueSearchTrace, SceneReference, SceneReferenceResolution,
     SceneReferenceResult, SectionAssignment, SectionAssignmentReason, SectionPressureSummary,
     SectionScoreComponents, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
     SelectivityTrace, SourceObjectCorrectionTarget, SourceProvenance, SourceProvenanceReference,

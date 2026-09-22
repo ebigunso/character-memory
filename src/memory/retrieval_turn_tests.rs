@@ -181,8 +181,14 @@ async fn shared_scene_cohort_keeps_the_latest_occasion_and_score_fills_the_pack(
             [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
         );
         assert!(trace.floor_admissions.is_empty());
-        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Participant], 47);
-        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Place], 47);
+        assert_eq!(
+            trace
+                .scene_cue_searches
+                .iter()
+                .map(|search| (search.cue_kind, search.omitted_count))
+                .collect::<Vec<_>>(),
+            [(CueKind::Place, 47), (CueKind::Participant, 47)]
+        );
     }
     memory.close().await.unwrap();
 }
