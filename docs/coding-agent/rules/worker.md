@@ -13,7 +13,7 @@ last_updated: "2026-09-22"
 - Qdrant client deadlines must be configured through `QdrantConfig::timeout`; per-request builder `.timeout()` may be used only for an intentionally server-side operation limit verified by a live probe (lesson 2026-07-03: 2.41s -> 0.048s).
 - Diagnostics over generated plans must trace every compared field through the production-default constructor and include a negative regression using production-default options (lesson 2026-07-18).
 - New validators and admission checks classify their failures with an owned structured error type AT INTRODUCTION (typed variants/fields per the design's error conventions), with tests asserting variants and fields; anyhow/prose belongs only at outer boundaries. Three same-phase recurrences of retrofitting prose validators forced this rule (2026-07-23).
-- A task with a measurement validation item is reported with the before and after numbers the evaluation side produced on the same instrument and inputs, both runs; a report that says the measurement is pending, or carries one run, is not done (decider ruling 2026-09-22).
+- A task whose plan names a measurement checkpoint at its tip is reported with the before and after numbers the evaluation side produced on the same instrument and inputs, both runs; a task measured only at slice end says so and is done on its tests and reviews (decider ruling 2026-09-22, refined the same day).
 
 ## Repo CI / Checks Mapping
 
