@@ -310,14 +310,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
                     .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, id))
                     .collect::<Vec<_>>(),
             )?;
-            let mut memories = objects
+            let memories = objects
                 .into_iter()
                 .filter_map(|object| match object {
                     MemoryObject::DerivedMemory(memory) => Some(memory),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
-            memories.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
             return Ok((memories, filtered));
         }
         let selected_ids = SparqlGraphSelectors::new(&self.store)
