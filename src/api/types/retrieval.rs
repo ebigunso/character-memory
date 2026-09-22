@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
@@ -12,6 +14,7 @@ pub struct RetrievalContext {
     #[serde(default = "Scene::now")]
     pub scene: Scene,
     pub topic: Option<String>,
+    pub activity: Option<ActivityRef>,
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
@@ -39,6 +42,11 @@ impl RetrievalContext {
         self
     }
 
+    pub fn with_activity(mut self, activity: ActivityRef) -> Self {
+        self.activity = Some(activity);
+        self
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.object_type_defaults.is_empty() {
             return Err(ConfigValidationError {
@@ -59,6 +67,7 @@ impl Default for RetrievalContext {
         Self {
             scene: Scene::now(),
             topic: None,
+            activity: None,
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
@@ -179,6 +188,7 @@ pub struct RetrieveOutcome {
     /// An unset or empty part means not given. A scene is never complete: people
     /// can be present and unperceived.
     pub scene: Scene,
+    pub activity: Option<ActivityResult>,
     pub scene_references: Vec<SceneReferenceResult>,
     pub memory_scenes: Vec<MemoryScenes>,
     pub pack: ContinuityContextPack,
@@ -244,10 +254,31 @@ pub enum SceneReferenceResolution {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ActivityRef {
+    Thread(MemoryId),
+    OpenLoop(MemoryId),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActivityResult {
+    pub activity: ActivityRef,
+    pub resolution: ActivityResolution,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityResolution {
+    Found,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphRootSource {
     Vector,
     Participant,
+    Activity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -592,7 +623,6 @@ pub struct StaleCandidateOmission {
     pub candidate: MemoryObjectRef,
     pub vector_score: Option<f32>,
     pub reason: StaleCandidateReason,
-    pub rationale_categories: Vec<RationaleCategory>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -611,7 +641,7 @@ pub struct SectionAssignment {
     pub section: ContextPackSection,
     pub rank: Option<usize>,
     pub reason: SectionAssignmentReason,
-    pub rationale_categories: Vec<RationaleCategory>,
+    pub cue_kinds: BTreeSet<CueKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -636,30 +666,17 @@ pub enum SectionAssignmentReason {
 pub struct SectionScoreComponents {
     pub final_score: f32,
     pub cue_score: Option<f32>,
-    pub cue_score_source: Option<SectionCueScoreSource>,
     pub graph_score: Option<f32>,
     pub salience_score: Option<f32>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SectionCueScoreSource {
-    Participant { root: MemoryId },
-    DirectMatch,
-    DerivedFromRoot { root_score: f32 },
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
-pub enum RationaleCategory {
-    Semantic,
-    Entity,
-    Thread,
-    Temporal,
-    Salience,
-    Scope,
-    Lifecycle,
-    GraphBound,
+pub enum CueKind {
+    Topic,
+    Participant,
+    Place,
+    Activity,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -797,12 +814,11 @@ mod tests {
                 scores: SectionScoreComponents {
                     final_score: 0.75,
                     cue_score: Some(0.8),
-                    cue_score_source: Some(SectionCueScoreSource::DirectMatch),
                     graph_score: Some(0.5),
                     salience_score: None,
                 },
             },
-            rationale_categories: vec![RationaleCategory::Scope],
+            cue_kinds: BTreeSet::from([CueKind::Place, CueKind::Topic, CueKind::Participant]),
         };
 
         let encoded = serde_json::to_value(&assignment).unwrap();
@@ -812,10 +828,9 @@ mod tests {
         assert_eq!(encoded["reason"]["kind"], "selected");
         assert_eq!(encoded["reason"]["scores"]["final_score"], 0.75);
         assert_eq!(
-            encoded["reason"]["scores"]["cue_score_source"]["kind"],
-            "direct_match"
+            encoded["cue_kinds"],
+            serde_json::json!(["topic", "participant", "place"])
         );
-        assert_eq!(encoded["rationale_categories"][0], "scope");
     }
 
     #[test]

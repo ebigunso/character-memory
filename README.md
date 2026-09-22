@@ -50,6 +50,10 @@ Retrieval is graph-authoritative and hybrid:
 
 `RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. Participant keys and exact names cue notions, while participant descriptions and setting words search memory content. The setting key and custom values cue nothing yet. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
 
+Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place` and `Activity`.
+
+A thread with many members can take every root after the participants under the default root limit, so the topic may contribute nothing until cue floors are implemented; members are taken most recent first.
+
 ## What this is not
 
 Character Memory is not:
