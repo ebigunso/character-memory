@@ -38,6 +38,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn by_refs_hydration_reads_only_requested_graphs_in_a_large_store() {
+        use super::super::shared::RDF_QUADS_READ;
+        use crate::domain::graph_uri;
+        use oxigraph::model::{GraphNameRef, NamedNode};
+
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let mut fixtures = representative_fixtures();
+        fixtures.user_preference.entity_ids = vec![fixtures.user_entity.id];
+        fixtures.user_preference.assertions = vec![crate::domain::BeliefAssertion {
+            subject: fixtures.user_entity.id,
+            predicate: crate::domain::BeliefPredicate::KnownAs {
+                name: "A reader".to_owned(),
+            },
+        }];
+        let expected = fixtures.objects();
+        store.upsert_objects(&expected).await.unwrap();
+        let refs = expected
+            .iter()
+            .map(MemoryObject::object_ref)
+            .collect::<Vec<_>>();
+        let budget = refs
+            .iter()
+            .map(|object| {
+                let graph = NamedNode::new(graph_uri(object.object_type, object.id)).unwrap();
+                store
+                    .store
+                    .quads_for_pattern(
+                        None,
+                        None,
+                        None,
+                        Some(GraphNameRef::NamedNode(graph.as_ref())),
+                    )
+                    .count()
+            })
+            .sum::<usize>();
+        for unrelated in [0, 2000] {
+            let extras = (0..unrelated)
+                .map(|index| {
+                    let mut entity = fixtures.user_entity.clone();
+                    entity.id = MemoryId::from_u128(100_000 + index);
+                    MemoryObject::Entity(entity)
+                })
+                .collect::<Vec<_>>();
+            store.upsert_objects(&extras).await.unwrap();
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let objects = store
+                .query_objects(&GraphObjectQuery::by_refs(refs.clone()))
+                .await
+                .unwrap();
+            let read = RDF_QUADS_READ.with(|count| count.get());
+            assert_eq!(objects.len(), expected.len());
+            for object in &expected {
+                assert!(objects.contains(object));
+            }
+            assert_eq!(
+                read, budget,
+                "unrelated={unrelated}, read={read}, budget={budget}"
+            );
+        }
+        RDF_QUADS_READ.with(|count| count.set(0));
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_refs(Vec::new()))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
     async fn oxigraph_store_upserts_and_queries_canonical_objects() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

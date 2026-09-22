@@ -142,7 +142,20 @@ pub(super) fn hydrate_objects_by_refs_from_store(
     store: &Store,
     refs: &[MemoryObjectRef],
 ) -> Result<Vec<MemoryObject>, CustomError> {
-    let subjects = rdf_subject_values(store)?;
+    let graphs = refs
+        .iter()
+        .filter(|object| object.object_type != ObjectType::MemoryLink)
+        .map(|object| NamedNode::new(graph_uri(object.object_type, object.id)))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Include assertion subjects owned by each graph, not just its root subject.
+    let subjects = rdf_subject_values_from_quads(graphs.iter().flat_map(|graph| {
+        store.quads_for_pattern(
+            None,
+            None,
+            None,
+            Some(GraphNameRef::NamedNode(graph.as_ref())),
+        )
+    }))?;
     let mut objects = Vec::new();
     for object_ref in refs {
         if object_ref.object_type == ObjectType::MemoryLink {
@@ -221,8 +234,16 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
 pub(super) fn rdf_subject_values(
     store: &Store,
 ) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
+    rdf_subject_values_from_quads(store.iter())
+}
+
+fn rdf_subject_values_from_quads(
+    quads: impl IntoIterator<Item = Result<Quad, oxigraph::store::StorageError>>,
+) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
     let mut subjects = HashMap::<String, RdfSubjectValues>::new();
-    for quad in store.iter() {
+    for quad in quads {
+        #[cfg(test)]
+        RDF_QUADS_READ.with(|count| count.set(count.get() + 1));
         let quad = quad.map_err(oxigraph_error)?;
         if !matches!(quad.graph_name, GraphName::NamedNode(_)) {
             continue;
@@ -243,6 +264,11 @@ pub(super) fn rdf_subject_values(
         }
     }
     Ok(subjects)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static RDF_QUADS_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn rdf_subject_values_for_named_graph(
