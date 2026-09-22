@@ -76,6 +76,7 @@ fn canonical_identity_and_order_ranks_are_stable() {
 
 fn representative_episode() -> Episode {
     Episode {
+        scene_local_date: None,
         id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
@@ -88,7 +89,7 @@ fn representative_episode() -> Episode {
                 key: Some(memory_id("550e8400-e29b-41d4-a716-446655440001")),
                 ..Default::default()
             }],
-            ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
+            ..crate::domain::Scene::at((timestamp("2026-04-27T10:00:00Z")).fixed_offset())
         },
         ended_at: Some(timestamp("2026-04-27T10:05:00Z")),
         summary: "Discussed the episodic memory domain model.".to_owned(),

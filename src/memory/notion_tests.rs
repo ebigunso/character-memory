@@ -640,7 +640,7 @@ async fn repeated_episode_and_belief_id_sets_commit_and_replay_canonically() {
         .unwrap();
     let mut episode = EpisodeDraft::new("An experience with two notions.");
     episode.id = Some(episode_id);
-    let mut scene = crate::Scene::at(belief.created_at.unwrap());
+    let mut scene = crate::Scene::at((belief.created_at.unwrap()).fixed_offset());
     scene.participants = [subjects[1], subjects[0], subjects[0]]
         .into_iter()
         .map(|key| crate::SceneParticipant {

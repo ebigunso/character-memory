@@ -17,6 +17,8 @@ mod retrieval_floor_tests;
 #[cfg(test)]
 mod retrieval_scene_tests;
 #[cfg(test)]
+mod retrieval_time_tests;
+#[cfg(test)]
 mod retrieval_turn_tests;
 #[cfg(test)]
 mod scene_tests;
@@ -739,7 +741,7 @@ mod tests {
             fixtures.user_preference.id
         );
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
-        assert_eq!(outcome.rationale.graph_verified_count, 1);
+        assert_eq!(outcome.rationale.graph_verified_count, 2);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
         memory.close().await.unwrap();
     }
@@ -1048,6 +1050,458 @@ mod tests {
             .active_threads
             .iter()
             .any(|thread| thread.id == fixtures.soft_thread.id));
+    }
+
+    fn warning_time() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-09-20T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    fn warning_input(offset: u128) -> RememberInput {
+        let mut episode = EpisodeDraft::new("A recorded occasion");
+        episode.id = Some(Uuid::from_u128(offset));
+        episode.scene = Some(Scene::at(warning_time().fixed_offset()));
+        episode.created_at = Some(warning_time());
+        let mut observation =
+            ObservationDraft::new(Uuid::from_u128(offset), "The observed details");
+        observation.id = Some(Uuid::from_u128(offset + 1));
+        observation.created_at = Some(warning_time());
+        RememberInput::new("The observed details")
+            .with_episode(episode)
+            .with_observation(observation)
+    }
+
+    fn warning_entity() -> EntityDraft {
+        let mut draft = EntityDraft::new();
+        draft.id = Some(Uuid::from_u128(10));
+        draft.created_at = Some(warning_time());
+        draft
+    }
+
+    fn warning_memory(
+        id: u128,
+        kind: DerivedType,
+        text: &str,
+        subjects: Vec<MemoryId>,
+    ) -> DerivedMemoryDraft {
+        let mut draft = DerivedMemoryDraft::new(kind, text);
+        draft.id = Some(Uuid::from_u128(id));
+        draft.entity_ids = subjects;
+        draft.created_at = Some(warning_time());
+        draft.updated_at = Some(warning_time());
+        draft
+    }
+
+    fn warning_link() -> MemoryLinkDraft {
+        let mut draft = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            Uuid::from_u128(40),
+            RelationType::Resolves,
+            ObjectType::DerivedMemory,
+            Uuid::from_u128(30),
+        );
+        draft.id = Some(Uuid::from_u128(50));
+        draft.created_at = Some(warning_time());
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        draft
+    }
+
+    #[tokio::test]
+    async fn resolver_warnings_use_plan_and_stored_subjects_and_threads() {
+        for stored in ["neither", "target", "resolver", "both"] {
+            for shared in ["none", "subject", "thread"] {
+                let memory = injected_memory().await;
+                let mut target = warning_memory(
+                    30,
+                    DerivedType::OpenLoop,
+                    "A matter for Alice",
+                    vec![Uuid::from_u128(10)],
+                );
+                let mut resolver = warning_memory(
+                    40,
+                    DerivedType::Claim,
+                    "The matter was settled",
+                    if shared == "subject" {
+                        vec![Uuid::from_u128(10)]
+                    } else {
+                        vec![]
+                    },
+                );
+                if shared == "thread" {
+                    target.thread_ids.push(Uuid::from_u128(60));
+                    resolver.thread_ids.push(Uuid::from_u128(60));
+                }
+                let mut thread = MemoryThreadDraft::new("A shared matter", "The conversation");
+                thread.id = Some(Uuid::from_u128(60));
+                thread.created_at = Some(warning_time());
+                thread.updated_at = Some(warning_time());
+                thread.last_touched_at = Some(warning_time());
+                let input = warning_input(100)
+                    .with_entity(warning_entity())
+                    .with_memory_thread(thread)
+                    .with_derived_memory(target)
+                    .with_derived_memory(resolver)
+                    .with_memory_link(warning_link());
+                let mut plan = input.prepare_write_plan(&RememberPlanDefaults::fixed(
+                    "resolver-warning",
+                    warning_time(),
+                ));
+                if stored != "neither" {
+                    let stored_ids = match stored {
+                        "target" => vec![Uuid::from_u128(30)],
+                        "resolver" => vec![Uuid::from_u128(40)],
+                        _ => vec![Uuid::from_u128(30), Uuid::from_u128(40)],
+                    };
+                    let mut seed = plan.clone();
+                    seed.candidates.retain(|candidate| match candidate {
+                        MemoryCandidate::DerivedMemory(c) => {
+                            stored_ids.contains(&c.draft.id.unwrap())
+                        }
+                        MemoryCandidate::MemoryLink(_)
+                        | MemoryCandidate::VectorIndex(_)
+                        | MemoryCandidate::StatsUpdate(_) => false,
+                        _ => true,
+                    });
+                    memory.commit(seed, CommitOptions::default()).await.unwrap();
+                    plan.candidates.retain(|candidate| match candidate {
+                        MemoryCandidate::DerivedMemory(c) => {
+                            !stored_ids.contains(&c.draft.id.unwrap())
+                        }
+                        MemoryCandidate::VectorIndex(c) => !stored_ids.contains(&c.target.id),
+                        MemoryCandidate::StatsUpdate(c) => !stored_ids.contains(&c.subject.id),
+                        _ => true,
+                    });
+                    if stored == "both" {
+                        plan.candidates
+                            .retain(|c| matches!(c, MemoryCandidate::MemoryLink(_)));
+                    }
+                }
+                // Endpoints need not precede their link in a caller-built plan.
+                plan.candidates.reverse();
+                let expected = if shared == "none" {
+                    vec![
+                        CandidateValidationIssue::ResolverWithoutSharedSubjectOrThread {
+                            resolver_id: Uuid::from_u128(40),
+                            target_id: Uuid::from_u128(30),
+                        },
+                    ]
+                } else {
+                    vec![]
+                };
+                let validations = memory.validate_plan(&plan).await.unwrap();
+                assert!(validations
+                    .iter()
+                    .all(|v| v.status == CandidateValidationStatus::Valid && v.errors.is_empty()));
+                let index = plan
+                    .candidates
+                    .iter()
+                    .position(|c| matches!(c, MemoryCandidate::MemoryLink(_)))
+                    .unwrap();
+                assert_eq!(validations[index].candidate_index, index);
+                assert_eq!(
+                    validations[index].candidate_kind,
+                    MemoryCandidateKind::MemoryLink
+                );
+                assert_eq!(validations[index].warnings, expected, "{stored}/{shared}");
+                let outcome = memory
+                    .commit(plan.clone(), CommitOptions::default())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    memory.commit(plan, CommitOptions::default()).await.unwrap(),
+                    outcome
+                );
+                assert_eq!(
+                    outcome
+                        .diagnostics
+                        .validations
+                        .iter()
+                        .flat_map(|v| &v.warnings)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_warning_projection(&outcome, &expected);
+                if stored == "neither" {
+                    let remembered = injected_memory().await;
+                    let outcome = remembered
+                        .remember(input, RememberOptions::default())
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        outcome
+                            .diagnostics
+                            .validations
+                            .iter()
+                            .flat_map(|v| &v.warnings)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        expected
+                    );
+                    assert_warning_projection(&outcome, &expected);
+                    remembered.close().await.unwrap();
+                }
+                memory.close().await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn resolver_warnings_ignore_other_relations_and_unavailable_or_ineligible_endpoints() {
+        let memory = injected_memory().await;
+        let input = warning_input(100)
+            .with_entity(warning_entity())
+            .with_derived_memory(warning_memory(
+                30,
+                DerivedType::Commitment,
+                "A promise for Alice",
+                vec![Uuid::from_u128(10)],
+            ))
+            .with_derived_memory(warning_memory(
+                40,
+                DerivedType::Claim,
+                "The promise was fulfilled",
+                vec![],
+            ))
+            .with_memory_link(warning_link());
+        let base = input.prepare_write_plan(&RememberPlanDefaults::fixed(
+            "resolver-edges",
+            warning_time(),
+        ));
+        for case in [
+            "fulfills",
+            "other",
+            "self",
+            "missing_target",
+            "missing_resolver",
+            "episode_target",
+            "episode_resolver",
+        ] {
+            let mut plan = base.clone();
+            let index = plan
+                .candidates
+                .iter()
+                .position(|c| matches!(c, MemoryCandidate::MemoryLink(_)))
+                .unwrap();
+            let MemoryCandidate::MemoryLink(candidate) = &mut plan.candidates[index] else {
+                unreachable!()
+            };
+            match case {
+                "fulfills" => candidate.draft.relation = RelationType::FulfillsCommitment,
+                "other" => candidate.draft.relation = RelationType::AssociatedWith,
+                "self" => candidate.draft.to_id = candidate.draft.from_id,
+                "missing_target" => candidate.draft.to_id = Uuid::from_u128(999),
+                "missing_resolver" => candidate.draft.from_id = Uuid::from_u128(999),
+                "episode_target" => {
+                    candidate.draft.to_type = ObjectType::Episode;
+                    candidate.draft.to_id = Uuid::from_u128(100);
+                }
+                "episode_resolver" => {
+                    candidate.draft.from_type = ObjectType::Episode;
+                    candidate.draft.from_id = Uuid::from_u128(100);
+                }
+                _ => unreachable!(),
+            }
+            let validations = memory.validate_plan(&plan).await.unwrap();
+            let validation = &validations[index];
+            if case == "fulfills" {
+                assert_eq!(
+                    validation.warnings,
+                    vec![
+                        CandidateValidationIssue::ResolverWithoutSharedSubjectOrThread {
+                            resolver_id: Uuid::from_u128(40),
+                            target_id: Uuid::from_u128(30)
+                        }
+                    ]
+                );
+                let issue = serde_json::to_value(&validation.warnings[0]).unwrap();
+                assert_eq!(issue["kind"], "resolver_without_shared_subject_or_thread");
+                assert_eq!(issue["resolver_id"], Uuid::from_u128(40).to_string());
+                assert_eq!(issue["target_id"], Uuid::from_u128(30).to_string());
+                let mut fulfilled = input.clone();
+                fulfilled.memory_link_drafts[0].relation = RelationType::FulfillsCommitment;
+                let outcome = memory
+                    .remember(fulfilled, RememberOptions::default())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    outcome
+                        .diagnostics
+                        .validations
+                        .iter()
+                        .flat_map(|v| &v.warnings)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    validation.warnings
+                );
+                assert_warning_projection(&outcome, &validation.warnings);
+            } else {
+                assert!(validation.warnings.is_empty(), "{case}");
+            }
+            match case {
+                "self" => assert!(matches!(
+                    validation.errors.as_slice(),
+                    [CandidateValidationIssue::SelfLink { .. }]
+                )),
+                "missing_target" | "missing_resolver" => assert!(matches!(
+                    validation.errors.as_slice(),
+                    [CandidateValidationIssue::UnknownObjectRef { .. }]
+                )),
+                _ => assert_eq!(
+                    validation.status,
+                    CandidateValidationStatus::Valid,
+                    "{case}"
+                ),
+            }
+        }
+        memory.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn repeated_participant_warnings_preserve_scenes_links_and_replays() {
+        let cases = [
+            (vec![Some(10), Some(10)], vec![10]),
+            (vec![Some(10), Some(10), Some(10)], vec![10]),
+            (vec![Some(20), Some(10), Some(20), Some(10)], vec![20, 10]),
+            (vec![Some(10), None], vec![]),
+            (vec![None, None], vec![]),
+            (vec![], vec![]),
+        ];
+        for episode_only in [false, true] {
+            for (keys, repeated) in &cases {
+                let memory = injected_memory().await;
+                let mut other = warning_entity();
+                other.id = Some(Uuid::from_u128(20));
+                memory
+                    .remember(
+                        warning_input(100)
+                            .with_entity(warning_entity())
+                            .with_entity(other),
+                        RememberOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                let mut input = warning_input(300);
+                let mut scene = Scene::at(warning_time().fixed_offset());
+                scene.participants = keys
+                    .iter()
+                    .map(|key| SceneParticipant {
+                        key: key.map(Uuid::from_u128),
+                        name: None,
+                        description: Some("A familiar face".to_owned()),
+                    })
+                    .collect();
+                input.episode_drafts[0].scene = Some(scene.clone());
+                let mut plan = input.prepare_write_plan(&RememberPlanDefaults::fixed(
+                    "participant-warning",
+                    warning_time(),
+                ));
+                if episode_only {
+                    plan.candidates
+                        .retain(|c| matches!(c, MemoryCandidate::Episode(_)));
+                }
+                let expected = repeated
+                    .iter()
+                    .map(|id| CandidateValidationIssue::RepeatedSceneParticipant {
+                        participant_id: Uuid::from_u128(*id),
+                    })
+                    .collect::<Vec<_>>();
+                let validations = memory.validate_plan(&plan).await.unwrap();
+                assert_eq!(validations[0].candidate_kind, MemoryCandidateKind::Episode);
+                assert_eq!(validations[0].candidate_index, 0);
+                assert_eq!(validations[0].warnings, expected);
+                assert!(validations
+                    .iter()
+                    .all(|v| v.status == CandidateValidationStatus::Valid));
+                let outcome = if episode_only {
+                    memory
+                        .commit(plan.clone(), CommitOptions::default())
+                        .await
+                        .unwrap()
+                } else {
+                    memory
+                        .remember(input, RememberOptions::default())
+                        .await
+                        .unwrap()
+                };
+                assert_eq!(
+                    outcome
+                        .diagnostics
+                        .validations
+                        .iter()
+                        .flat_map(|v| &v.warnings)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_warning_projection(&outcome, &expected);
+                for (warning, id) in expected.iter().zip(repeated) {
+                    assert_eq!(
+                        serde_json::to_value(warning).unwrap(),
+                        serde_json::json!({"kind":"repeated_scene_participant","participant_id":Uuid::from_u128(*id)})
+                    );
+                }
+                let graph = memory.memory_composition.graph_store.as_ref();
+                let objects = graph
+                    .query_objects(&GraphObjectQuery::by_types(vec![ObjectType::Episode], None))
+                    .await
+                    .unwrap();
+                let episode = objects
+                    .iter()
+                    .find_map(|o| match o {
+                        MemoryObject::Episode(e) if e.id == Uuid::from_u128(300) => Some(e),
+                        _ => None,
+                    })
+                    .unwrap();
+                assert_eq!(episode.scene, scene);
+                let links = graph
+                    .query_links_by_ids(&outcome.persisted_link_ids)
+                    .await
+                    .unwrap();
+                let mut distinct = keys.iter().flatten().copied().collect::<Vec<_>>();
+                distinct.sort_unstable();
+                distinct.dedup();
+                assert_eq!(links.len(), distinct.len());
+                for key in distinct {
+                    assert_eq!(
+                        links
+                            .iter()
+                            .filter(|l| l.to_id == Uuid::from_u128(key)
+                                && l.to_type == ObjectType::Entity
+                                && l.relation
+                                    == if episode_only {
+                                        RelationType::Involves
+                                    } else {
+                                        RelationType::Mentions
+                                    })
+                            .count(),
+                        1
+                    );
+                }
+                if episode_only {
+                    assert_eq!(
+                        memory.commit(plan, CommitOptions::default()).await.unwrap(),
+                        outcome
+                    );
+                }
+                memory.close().await.unwrap();
+            }
+        }
+    }
+
+    fn assert_warning_projection(outcome: &RememberOutcome, expected: &[CandidateValidationIssue]) {
+        let messages = outcome
+            .diagnostics
+            .messages
+            .iter()
+            .filter(|m| m.code == RememberDiagnosticCode::WritePlanValidationWarning)
+            .collect::<Vec<_>>();
+        assert_eq!(messages.len(), expected.len());
+        for (message, warning) in messages.into_iter().zip(expected) {
+            assert_eq!(message.severity, DiagnosticSeverity::Warning);
+            assert_eq!(message.message, warning.to_string());
+        }
     }
 
     async fn injected_memory() -> CharacterMemory {

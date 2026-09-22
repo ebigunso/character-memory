@@ -169,7 +169,7 @@ async fn commit(memory: &CharacterMemory, plan: RememberWritePlan) {
     assert!(outcome.vector_indexing_failure.is_none(), "{outcome:?}");
 }
 fn scene() -> Scene {
-    let mut scene = Scene::at(time());
+    let mut scene = Scene::at((time()).fixed_offset());
     scene.setting.words = Some("studio".to_owned());
     scene.participants.push(described("botanist"));
     scene
@@ -210,7 +210,7 @@ fn snapshot(case: &str, outcome: &RetrieveOutcome) -> Value {
         "floor_admissions": trace.floor_admissions,
         "scene_references": outcome.scene_references,
         "completeness": outcome.rationale.telemetry.vector_recall_completeness,
-        "scene_cue_omitted_counts": trace.scene_cue_omitted_counts,
+        "scene_cue_searches": trace.scene_cue_searches,
     })
 }
 
@@ -230,12 +230,16 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
             plan,
             2000 + index,
             &format!("Orchid lesson {index}"),
-            Scene::at(time() - Duration::days(1)),
+            Scene::at((time() - Duration::days(1)).fixed_offset()),
         );
     }
     commit(&memory, plan).await;
     for (case, current, topic) in [
-        ("topic-alone", Scene::at(time()), Some("orchids")),
+        (
+            "topic-alone",
+            Scene::at((time()).fixed_offset()),
+            Some("orchids"),
+        ),
         ("keyless-topic-and-descriptions", scene(), Some("orchids")),
         ("descriptions-only", scene(), None),
     ] {
@@ -274,7 +278,7 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
         plan = add_belief(plan, n, None, true);
     }
     commit(&memory, plan).await;
-    let mut current = Scene::at(time());
+    let mut current = Scene::at((time()).fixed_offset());
     current.participants.push(keyed(7));
     for topic in [None, Some("unrelated")] {
         for cap in [2, 6, 12] {
@@ -293,12 +297,12 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
     let mut plan = add_entity(add_entity(RememberWritePlan::new(), 7), 8);
     plan = add_belief(plan, 3000, Some(7), false);
     plan = add_belief(plan, 3001, Some(8), false);
-    let mut past = Scene::at(time() - Duration::days(1));
+    let mut past = Scene::at((time() - Duration::days(1)).fixed_offset());
     past.participants.push(described("stranger"));
     plan = add_episode(plan, 9000, "Encounter", past);
     commit(&memory, plan).await;
     for description in [false, true] {
-        let mut current = Scene::at(time());
+        let mut current = Scene::at((time()).fixed_offset());
         current.participants = vec![keyed(7), keyed(8)];
         if description {
             current.participants.push(described("stranger"));
@@ -329,16 +333,34 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
             );
         } else if case.starts_with("descriptions-only") {
             let expected = if case.ends_with("floor-3") {
-                vec![id(1000), id(1001), id(1002)]
+                [1000, 1001, 1002, 2000, 2001, 2002, 2003, 2004]
             } else {
-                vec![id(1000)]
-            };
+                [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
+            }
+            .map(id);
             assert_eq!(row["episode_ids"], json!(expected), "{case}");
-            let omitted = 48 - expected.len();
-            assert_eq!(
-                row["scene_cue_omitted_counts"],
-                json!({"participant": omitted, "place": omitted})
-            );
+            for episode in expected {
+                let assignment = row["assignments"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|entry| entry["object"]["id"] == json!(episode))
+                    .unwrap();
+                assert!(assignment["cue_kinds"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("recency")));
+            }
+            let omitted = if case.ends_with("floor-3") { 45 } else { 47 };
+            let searches = row["scene_cue_searches"].as_array().unwrap();
+            assert_eq!(searches.len(), 2);
+            for kind in ["participant", "place"] {
+                let search = searches
+                    .iter()
+                    .find(|search| search["cue_kind"] == kind)
+                    .unwrap();
+                assert_eq!(search["omitted_count"], json!(omitted));
+            }
         } else if case.starts_with("keyed-state") {
             let cap: usize = case.rsplit('=').next().unwrap().parse().unwrap();
             let topic_floor = usize::from(case.contains("Some"));
@@ -354,7 +376,7 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
     let (memory, root) = open().await;
     let mut plan = RememberWritePlan::new();
     for (n, days) in [(30, -3), (20, -2), (90, -1), (10, 1)] {
-        let mut past = Scene::at(time() + Duration::days(days));
+        let mut past = Scene::at((time() + Duration::days(days)).fixed_offset());
         past.setting.words = Some("studio".to_owned());
         plan = add_episode(plan, n, "Encounter", past);
     }
@@ -368,7 +390,7 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
         }
     }
     commit(&memory, plan).await;
-    let mut current = Scene::at(time());
+    let mut current = Scene::at((time()).fixed_offset());
     current.setting.words = Some("studio".to_owned());
     for floor in [0, 1, 3] {
         let mut context = query(None, current.clone());
@@ -377,7 +399,7 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
         let result = memory.retrieve(context).await.unwrap();
         let trace = result.trace.unwrap();
         let expected = if floor < 2 {
-            vec![id(90)]
+            vec![id(90), id(20), id(30)]
         } else {
             vec![id(20), id(30), id(90)]
         };
@@ -391,7 +413,12 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
             expected
         );
         assert_eq!(
-            trace.scene_cue_omitted_counts[&CueKind::Place],
+            trace
+                .scene_cue_searches
+                .iter()
+                .find(|search| search.cue_kind == CueKind::Place)
+                .unwrap()
+                .omitted_count,
             3 - floor.max(1)
         );
         assert!(trace
@@ -413,11 +440,18 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
     let result = memory.retrieve(query(None, current)).await.unwrap();
     assert_eq!(result.pack.relevant_episodes[0].id, id(20));
     assert_eq!(
-        result.trace.unwrap().scene_cue_omitted_counts[&CueKind::Place],
+        result
+            .trace
+            .unwrap()
+            .scene_cue_searches
+            .iter()
+            .find(|search| search.cue_kind == CueKind::Place)
+            .unwrap()
+            .omitted_count,
         1
     );
     let topic = memory
-        .retrieve(query(Some("Encounter"), Scene::at(time())))
+        .retrieve(query(Some("Encounter"), Scene::at((time()).fixed_offset())))
         .await
         .unwrap();
     assert!(
@@ -445,7 +479,7 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
         MemoryThreadCandidate::new(thread, provenance()),
     ));
     for n in [10, 11] {
-        let mut past = Scene::at(time() - Duration::days(n as i64 - 9));
+        let mut past = Scene::at((time() - Duration::days(n as i64 - 9)).fixed_offset());
         past.setting.words = Some("studio".to_owned());
         plan = add_episode(plan, n, "Another ordinary day", past);
     }
@@ -483,7 +517,7 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .await
             .unwrap();
     }
-    let mut current = Scene::at(time());
+    let mut current = Scene::at((time()).fixed_offset());
     current.setting.words = Some("studio".to_owned());
     let result = memory.retrieve(query(None, current.clone())).await.unwrap();
     assert_eq!(
@@ -493,7 +527,7 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .iter()
             .map(|e| e.id)
             .collect::<Vec<_>>(),
-        [id(10)]
+        [id(10), id(11)]
     );
     assert_eq!(
         result
@@ -503,6 +537,27 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .map(|t| t.id)
             .collect::<Vec<_>>(),
         [id(7)]
+    );
+    let history = result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .find(|row| row.object == MemoryObjectRef::new(ObjectType::Episode, id(11)))
+        .unwrap();
+    assert_eq!(history.cue_kinds, [CueKind::Recency].into_iter().collect());
+    let mut bounded = query(None, current.clone());
+    bounded.candidate_limits.max_graph_roots = 1;
+    let bounded = memory.retrieve(bounded).await.unwrap();
+    assert_eq!(
+        bounded
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>(),
+        [id(10)]
     );
     // In this small store every topic returns both episodes; membership alone
     // must not let the high reminder score travel through the thread.
@@ -569,7 +624,7 @@ async fn descriptions_support_write_recall_and_interpretation_without_applicatio
     assert!(interpretation.id.is_none());
     // The caller-built plan stands in for consolidation; source ids come only from recall.
     let input = RememberInput::new("Reflection on the visit.")
-        .with_scene(Scene::at(time() - Duration::hours(1)))
+        .with_scene(Scene::at((time() - Duration::hours(1)).fixed_offset()))
         .with_derived_memory(interpretation);
     let defaults = RememberPlanDefaults::generated();
     let interpreted_id = input
