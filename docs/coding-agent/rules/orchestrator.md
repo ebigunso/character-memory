@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "orchestrator"
-last_updated: "2026-09-14"
+last_updated: "2026-09-22"
 ---
 
 # Orchestrator Repository Rules
@@ -33,6 +33,15 @@ last_updated: "2026-09-14"
 ## Value-Audit Triggers (design-value review scheduling)
 
 - Design-value audit verdict mechanics and triggers are harness-owned (long-horizon-audit appendix; third-bounce and pre-merge-churn triggers). Repo policy retained: the audit is judged against this repo's roadmap deliverables and philosophy — does it serve a meaningful purpose NOW — and is assigned to a Claude Tier A agent.
+
+## Measurement Of Behavior Changes (plan and task requirements)
+
+- Every implemented improvement or feature that changes behavior is measured, so the design and its assumptions are confirmed or corrected; a design that ships unmeasured is unfinished (decider ruling 2026-09-22, after a measurement forced a large design change).
+- A plan's `Design` section names the measurement instrument, an existing generated family in the companion evaluation repository or the family it needs, and the number that would falsify the design; a plan that cannot say what would falsify it is a plan-review finding, not a wording nit.
+- Measurement runs at checkpoints where the character's behavior can shift materially, not at every step (decider refinement 2026-09-22): once when a slice completes, against the falsifiers its plan names; once at the final reviewed tip of a task that introduces a new road or a new design rule the plan flags as high-risk; and when a review changes a design rule rather than fixing a bug. Each run is before and after on the same instrument and the same inputs, with identifiers ordered against time, run twice. Intermediate fix tips, bug fixes proven by red and green tests, docs, trace fields and cleanups are not measured.
+- The plan validator has no measurement kind and no evaluation-side owner, so the item is carried as `kind: command`, `owner: orchestrator`, with `detail` naming the evaluation worker who runs it, the family, and the falsifying number; the orchestrator dispatches it and is accountable for its evidence.
+- The before and after numbers go into the plan's Decision Log and into the report of the task or slice they measure; a plan is not complete until its slice-end numbers exist.
+- Numbers are never relayed bare: every after-numbers report carries a paragraph on what the result means for the character against the behaviors the philosophy illustrates and an explicit verdict, direction confirmed or direction questioned; a result that contradicts the intended behavior reopens the design, not the acceptance line (decider instruction 2026-09-22).
 
 ## Design-Consult Threshold (coordination/advice separation)
 
