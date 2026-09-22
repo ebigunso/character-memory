@@ -1,6 +1,6 @@
 # Plan: the moment itself brings memories to mind: what just happened, the dates a question names, and this day in earlier years
 
-- status: in-progress
+- status: complete
 - generated: 2026-09-21
 - last_updated: 2026-09-22
 - work_type: code
@@ -267,8 +267,9 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 ## Progress Log (append-only)
 
 - 2026-09-23 Tasks 1 to 4 implemented and approved by both review tiers: Task_1 recency (PR 145), Task_2 the caller's range and Task_3 the anniversary (PR 146, final tip `d36d96d` after the rulings on the range's contribution and the unshared anniversary's order), Task_4 the time since a belief was last supported (PR 147, final tip `0ce2f35` after the Tier A contract fix: the age follows `include_suppressed` and is named `seconds_since_support`).
-- 2026-09-23 Slice measurement at `d36d96d` against `f174f1b`, run by the companion's evaluation worker on its frozen instrument `f3ebb4b` (367 daily occasions over a year, identifiers opposed to time in both orders, each run twice and byte-identical, zero bounded failures). Reading: `CharacterMemoryEvals/.agent-work/worker2/task9-time-checkpoint/time-d36d96d.md` on the calibration branch, to be kept as a recoverable reading under the companion's evidence rule.
+- 2026-09-23 Slice measurement at `d36d96d` against `f174f1b`, run by the companion's evaluation worker on its frozen instrument `f3ebb4b` (367 daily occasions over a year, identifiers opposed to time in both orders, each run twice and byte-identical, zero bounded failures). Reading: `CharacterMemoryEvals/docs/evidence/calibration/time-checkpoint-2026-09-22/time-d36d96d.md`, with raw measurements recoverable at `CharacterMemoryEvals@3506bc8090244e55ec6b12fef1b671ca40897fc5`.
 - 2026-09-23 Completion value audit (design altitude): everything the slice added earns its place or is already scheduled for deletion or rewrite by the consolidation plan (Tasks 1, 5, 6, 7), so no cleanup commit here; the unearned remainder (the anniversary's more-exist marker, three README sentences, a test that states the falsified claim under a small cap, and review-evidence dumps in tests) is folded into consolidation tasks. Closing record: Definition of Done line on the date-match floor and Design line on one left-out count per time source are met as amended by the rulings on the range's contribution and on recency's count; Tasks 2 and 3 were measured once at the PR 146 tip under the checkpoint rule; no record was proposed for the stored offset, because consolidation Task_6 replaces the stored shape (rulings log item 64). The plan closes once the measurement reading is kept at a tracked location (the companion's evidence plan, Task_3).
+- 2026-09-23 Plan complete. The measurement reading is kept at `CharacterMemoryEvals/docs/evidence/calibration/time-checkpoint-2026-09-22/time-d36d96d.md` with its raw measurements at `CharacterMemoryEvals@3506bc8090244e55ec6b12fef1b671ca40897fc5`. All four tasks are approved by both review tiers; the salient-anniversary acceptance line is moved to the consolidation plan, not met here.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
