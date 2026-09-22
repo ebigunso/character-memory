@@ -1561,6 +1561,13 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     assert_eq!(description_only.pack.relevant_episodes[0].id, episode_id);
     assert!(description_only.pack.derived_memories.is_empty());
     assert_eq!(
+        description_only.trace.as_ref().unwrap().scene_cue_searches[0].references,
+        [
+            SceneReference::ParticipantDescription { index: 0 },
+            SceneReference::ParticipantDescription { index: 1 },
+        ]
+    );
+    assert_eq!(
         description_only.trace.as_ref().unwrap().vector_candidates[0].surface,
         VectorSurface::SceneParticipants
     );
@@ -1625,6 +1632,91 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn description_search_scores_are_shared_and_precede_occasion_selection() {
+    let (memory, _) = scene_memory().await;
+    let mut present = scene();
+    present.setting.words = Some("observatory".to_owned());
+    present.participants = vec![
+        SceneParticipant {
+            name: Some("astronomer".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            description: Some("navigator".to_owned()),
+            ..Default::default()
+        },
+    ];
+    let mut past = present.clone();
+    past.time -= chrono::Duration::days(1);
+    write_episode(&memory, 9000, past).await;
+    let context = RetrievalContext::default()
+        .with_scene(present.clone())
+        .with_trace();
+    let identical = memory.retrieve(context.clone()).await.unwrap();
+    let searches = &identical.trace.as_ref().unwrap().scene_cue_searches;
+    assert_eq!(searches.len(), 2);
+    assert_eq!(
+        (searches[0].cue_kind, searches[1].cue_kind),
+        (crate::CueKind::Place, crate::CueKind::Participant)
+    );
+    assert!(searches.iter().all(|search| search.omitted_count == 0));
+    assert_eq!(searches[0].references, [SceneReference::SettingWords]);
+    assert_eq!(
+        searches[1].references,
+        [
+            SceneReference::ParticipantName { index: 0 },
+            SceneReference::ParticipantDescription { index: 1 },
+        ]
+    );
+    assert!(searches
+        .iter()
+        .all(|search| (search.best_score.unwrap() - 1.0).abs() < 1e-6));
+
+    let mut reworded = context.clone();
+    reworded.scene.setting.words = Some("astronomer observatory".to_owned());
+    reworded.scene.participants[0].name = Some("stargazer".to_owned());
+    let reworded = memory.retrieve(reworded).await.unwrap();
+    let searches = &reworded.trace.unwrap().scene_cue_searches;
+    assert!((searches[0].best_score.unwrap() - 0.70886356).abs() < 1e-6);
+    assert!((searches[1].best_score.unwrap() - 0.09950372).abs() < 1e-6);
+
+    // Oppose IDs to time; the selected latest occasion is not the best match.
+    let mut latest = present;
+    latest.setting.words = Some("planetarium".to_owned());
+    latest.participants[0].name = Some("stargazer".to_owned());
+    write_episode(&memory, 8000, latest).await;
+    let recent = memory.retrieve(context.clone()).await.unwrap();
+    let trace = recent.trace.as_ref().unwrap();
+    assert_eq!(trace.vector_candidates.len(), 1);
+    assert_eq!(
+        trace.vector_candidates[0].object.id,
+        MemoryId::from_u128(8000)
+    );
+    assert!((trace.vector_candidates[0].score - 0.09950372).abs() < 1e-6);
+    assert!(trace
+        .scene_cue_searches
+        .iter()
+        .all(|search| (search.best_score.unwrap() - 1.0).abs() < 1e-6));
+    assert!(trace
+        .scene_cue_searches
+        .iter()
+        .all(|search| search.omitted_count == 1));
+    let mut untraced_context = context.clone();
+    untraced_context.include_trace = false;
+    let untraced = memory.retrieve(untraced_context).await.unwrap();
+    let mut expected = recent;
+    expected.trace = None;
+    assert_eq!(untraced, expected);
+
+    let (without_surfaces, _) = scene_memory().await;
+    write_episode(&without_surfaces, 7000, scene()).await;
+    let empty = without_surfaces.retrieve(context).await.unwrap();
+    let searches = empty.trace.unwrap().scene_cue_searches;
+    assert_eq!(searches.len(), 2);
+    assert!(searches.iter().all(|search| search.best_score.is_none()));
 }
 
 #[tokio::test]
