@@ -71,7 +71,9 @@ where
             FetchDecision::Grow(next_limit) => fetch_limit = next_limit,
             FetchDecision::Return => {
                 return Ok(TieClosureResult {
-                    candidates: candidates.clone().truncated(admitted_limit),
+                    candidates: CanonicalCandidates::new(
+                        candidates.iter().take(admitted_limit).cloned(),
+                    ),
                     pool: candidates,
                     fetched: fetched_count,
                     fetch_bound,
@@ -80,7 +82,9 @@ where
             }
             FetchDecision::ReturnAtBound => {
                 return Ok(TieClosureResult {
-                    candidates: candidates.clone().truncated(admitted_limit),
+                    candidates: CanonicalCandidates::new(
+                        candidates.iter().take(admitted_limit).cloned(),
+                    ),
                     pool: candidates,
                     fetched: fetched_count,
                     fetch_bound,

@@ -210,7 +210,7 @@ fn snapshot(case: &str, outcome: &RetrieveOutcome) -> Value {
         "floor_admissions": trace.floor_admissions,
         "scene_references": outcome.scene_references,
         "completeness": outcome.rationale.telemetry.vector_recall_completeness,
-        "scene_cue_omitted_counts": trace.scene_cue_omitted_counts,
+        "scene_cue_searches": trace.scene_cue_searches,
     })
 }
 
@@ -335,10 +335,15 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
             };
             assert_eq!(row["episode_ids"], json!(expected), "{case}");
             let omitted = 48 - expected.len();
-            assert_eq!(
-                row["scene_cue_omitted_counts"],
-                json!({"participant": omitted, "place": omitted})
-            );
+            let searches = row["scene_cue_searches"].as_array().unwrap();
+            assert_eq!(searches.len(), 2);
+            for kind in ["participant", "place"] {
+                let search = searches
+                    .iter()
+                    .find(|search| search["cue_kind"] == kind)
+                    .unwrap();
+                assert_eq!(search["omitted_count"], json!(omitted));
+            }
         } else if case.starts_with("keyed-state") {
             let cap: usize = case.rsplit('=').next().unwrap().parse().unwrap();
             let topic_floor = usize::from(case.contains("Some"));
@@ -391,7 +396,12 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
             expected
         );
         assert_eq!(
-            trace.scene_cue_omitted_counts[&CueKind::Place],
+            trace
+                .scene_cue_searches
+                .iter()
+                .find(|search| search.cue_kind == CueKind::Place)
+                .unwrap()
+                .omitted_count,
             3 - floor.max(1)
         );
         assert!(trace
@@ -413,7 +423,14 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
     let result = memory.retrieve(query(None, current)).await.unwrap();
     assert_eq!(result.pack.relevant_episodes[0].id, id(20));
     assert_eq!(
-        result.trace.unwrap().scene_cue_omitted_counts[&CueKind::Place],
+        result
+            .trace
+            .unwrap()
+            .scene_cue_searches
+            .iter()
+            .find(|search| search.cue_kind == CueKind::Place)
+            .unwrap()
+            .omitted_count,
         1
     );
     let topic = memory
