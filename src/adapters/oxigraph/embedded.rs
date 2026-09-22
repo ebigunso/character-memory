@@ -106,6 +106,16 @@ impl OxigraphGraphAuthorityStore {
 
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
+    async fn query_episodes_by_time(
+        &self,
+        start: Option<chrono::DateTime<chrono::Utc>>,
+        end: chrono::DateTime<chrono::Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        SparqlGraphSelectors::new(&self.store).select_episodes_by_time(start, end, limit, policy)
+    }
+
     async fn query_episode_occasions(
         &self,
         episodes: &[MemoryObjectRef],

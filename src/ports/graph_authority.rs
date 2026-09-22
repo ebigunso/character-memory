@@ -200,9 +200,22 @@ impl GraphExpansionQuery {
         }
     }
 
-    // A notion or thread reached only by a reminder is visible, but is a leaf.
+    // Every reminder stays on its occasion; notions, threads and interpreted
+    // work are visible leaves, never routes into their other occasions.
     pub(crate) fn may_continue_from(&self, kind: ObjectType) -> bool {
-        !self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread)
+        !self.reminder_only
+            || !matches!(
+                kind,
+                ObjectType::Entity | ObjectType::MemoryThread | ObjectType::DerivedMemory
+            )
+    }
+
+    pub(crate) fn allows_object(&self, object: MemoryObjectRef) -> bool {
+        (self.allowed_object_types.is_empty()
+            || self.allowed_object_types.contains(&object.object_type))
+            && (!self.reminder_only
+                || object.object_type != ObjectType::Episode
+                || object.id == self.root_id)
     }
 
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
@@ -335,6 +348,16 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
+    /// Return bounded eligible episode IDs, newest recorded time then ID.
+    /// Both time bounds are inclusive; an absent start leaves that end open.
+    async fn query_episodes_by_time(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError>;
+
     /// Read recorded occasion time and retention for episode or observation references.
     async fn query_episode_occasions(
         &self,
@@ -406,6 +429,18 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_episodes_by_time(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        (**self)
+            .query_episodes_by_time(start, end, limit, policy)
+            .await
+    }
+
     async fn query_episode_occasions(
         &self,
         episodes: &[MemoryObjectRef],

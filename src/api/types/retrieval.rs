@@ -16,6 +16,8 @@ pub struct RetrievalContext {
     pub scene: Scene,
     pub topic: Option<String>,
     pub activity: Option<ActivityRef>,
+    /// An application-supplied cue, never a filter on other recall roads.
+    pub time_range: Option<TimeRange>,
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
@@ -52,6 +54,11 @@ impl RetrievalContext {
         self
     }
 
+    pub fn with_time_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
+        self.time_range = Some(TimeRange { start, end });
+        self
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.object_type_defaults.is_empty() {
             return Err(ConfigValidationError {
@@ -73,6 +80,7 @@ impl Default for RetrievalContext {
             scene: Scene::now(),
             topic: None,
             activity: None,
+            time_range: None,
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
@@ -108,18 +116,23 @@ impl Default for RetrievalCandidateLimits {
     }
 }
 
-/// Measured defaults reserve one slot per cue kind.
+/// Given cues reserve one slot per kind; date match is provisional until measured.
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///
 /// After reservations, spare room follows score order except at root selection,
-/// where present kinds share turns. A zero floor removes only the reservation.
+/// where given non-time kinds share turns. Time kinds then take remaining room.
+/// A zero floor removes the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
     pub place: usize,
     pub activity: usize,
+    /// Provisional reservation for an application-supplied time range.
+    pub date_match: usize,
     pub topic: usize,
+    /// Recent occasions take only spare root room until a reservation is measured.
+    pub recency: usize,
 }
 
 impl Default for RetrievalCueFloors {
@@ -128,7 +141,9 @@ impl Default for RetrievalCueFloors {
             participant: 1,
             place: 1,
             activity: 1,
+            date_match: 1,
             topic: 1,
+            recency: 0,
         }
     }
 }
@@ -220,6 +235,8 @@ pub struct RetrieveOutcome {
     /// can be present and unperceived.
     pub scene: Scene,
     pub activity: Option<ActivityResult>,
+    /// Echoes the supplied span, including an inverted span that matches nothing.
+    pub time_range: Option<TimeRange>,
     pub scene_references: Vec<SceneReferenceResult>,
     pub memory_scenes: Vec<MemoryScenes>,
     pub pack: ContinuityContextPack,
@@ -302,6 +319,13 @@ pub enum ActivityRef {
     OpenLoop(MemoryId),
 }
 
+/// Both endpoints are included. An end before its start matches no occasions.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeRange {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActivityResult {
     pub activity: ActivityRef,
@@ -322,6 +346,8 @@ pub enum GraphRootSource {
     Participant,
     Activity,
     Place,
+    Recency,
+    DateMatch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -520,6 +546,10 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    /// Whether eligible occasions inside the supplied range exceeded its contribution.
+    /// `None` means no range was supplied. Determined by one extra bounded ID read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_range_has_more: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     pub floor_admissions: Vec<CueFloorAdmission>,
@@ -536,6 +566,7 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
+            time_range_has_more: None,
             scene_cue_searches: Vec::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
@@ -763,6 +794,8 @@ pub enum CueKind {
     Participant,
     Place,
     Activity,
+    Recency,
+    DateMatch,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -321,7 +321,7 @@ async fn check_scoped_recall_and_deletion(service: bool) {
             .find(|row| row.object.id == id(2))
             .unwrap()
             .cue_kinds,
-        BTreeSet::from([CueKind::Topic])
+        BTreeSet::from([CueKind::Topic, CueKind::Recency])
     );
     calls.queries.lock().unwrap().clear();
     let result = memory

@@ -44,7 +44,7 @@ pub use crate::api::types::{
     SourceScene, SourceSceneUnavailableReason, SourceSpan, SourceSpanRange,
     SourceSpanValidationError, StaleCandidateOmission, StaleCandidateOmissionSummary,
     StaleCandidateReason, StatsUpdateCandidate, StatsUpdateFailure, StatsUpdateStatus,
-    SupersededByEvidence, SuppressionPolicy, VectorCandidateTrace, VectorIndexCandidate,
+    SupersededByEvidence, SuppressionPolicy, TimeRange, VectorCandidateTrace, VectorIndexCandidate,
     VectorIndexingFailure, VectorMaintenanceFailure, VectorMaintenanceFailureItem,
     VectorMaintenanceOperation, VectorRecallCompleteness,
 };

@@ -250,14 +250,22 @@ async fn scene_boundary_and_whole_seconds_distinguish_zero_from_never_met() {
     let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
     assert_eq!(last(&result), Some(&fact(400, earlier)));
     assert_eq!(last(&result).unwrap().seconds_since, 1);
-    assert_eq!(occasions(&result), BTreeSet::from([id(400)]));
+    let notion_episode =
+        RememberPlanDefaults::fixed("notion 100", reference_time()).stable_id("episode:0");
+    assert_eq!(
+        occasions(&result),
+        BTreeSet::from([id(400), notion_episode])
+    );
     for n in [403, 402] {
         experience(&memory, n, reference_time(), true).await;
     }
     let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
     assert_eq!(last(&result), Some(&fact(402, reference_time())));
     assert_eq!(last(&result).unwrap().seconds_since, 0);
-    assert_eq!(occasions(&result), BTreeSet::from([id(402)]));
+    assert_eq!(
+        occasions(&result),
+        BTreeSet::from([id(400), id(402), id(403), notion_episode])
+    );
     let mut before = request(vec![keyed(100)]);
     before.scene.time = earlier - Duration::milliseconds(1);
     let result = memory.retrieve(before).await.unwrap();
@@ -381,5 +389,15 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         memory.close().await.unwrap();
         root.close().unwrap();
     }
-    assert_eq!(tight_occasions, vec![BTreeSet::from([id(401)]); 4]);
+    let notion_episode =
+        RememberPlanDefaults::fixed("notion 100", reference_time()).stable_id("episode:0");
+    assert_eq!(
+        tight_occasions,
+        vec![
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401), notion_episode]),
+            BTreeSet::from([id(401), notion_episode]),
+        ]
+    );
 }
