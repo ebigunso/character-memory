@@ -263,6 +263,7 @@ async fn shared_scene_topic_only_keeps_original_bytes() {
         place: 0,
         activity: 0,
         topic: 0,
+        recency: 0,
     };
     let zero_floors = memory.retrieve(query).await.unwrap();
     assert_eq!(
@@ -331,7 +332,12 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
         .unwrap();
     assert_eq!(
         shared.cue_kinds,
-        BTreeSet::from([CueKind::Participant, CueKind::Place, CueKind::Topic])
+        BTreeSet::from([
+            CueKind::Participant,
+            CueKind::Place,
+            CueKind::Topic,
+            CueKind::Recency
+        ])
     );
     query.candidate_limits.max_graph_roots = 64;
     query.section_limits.relevant_episodes = 64;

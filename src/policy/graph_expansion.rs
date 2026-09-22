@@ -360,10 +360,7 @@ pub(crate) fn bounded_expansion_node_set(
                     None
                 }
             })
-            .filter(|(_, neighbor_type)| {
-                query.allowed_object_types.is_empty()
-                    || query.allowed_object_types.contains(neighbor_type)
-            })
+            .filter(|(id, kind)| query.allows_object(MemoryObjectRef::new(*kind, *id)))
             .collect();
         neighbors
             .sort_by_key(|node| MemoryObjectRef::from_id_type(node.0, node.1).stable_order_key());
@@ -541,9 +538,7 @@ fn bounded_expansion_plan<'a>(
             .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
                 let neighbor = other_endpoint(link, object_ref);
-                if object_refs.contains(&neighbor)
-                    && object_type_allowed(query, neighbor.object_type)
-                {
+                if object_refs.contains(&neighbor) && query.allows_object(neighbor) {
                     Some((*link, neighbor))
                 } else {
                     None
@@ -980,10 +975,6 @@ fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool
     query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
 }
 
-fn object_type_allowed(query: &GraphExpansionQuery, object_type: ObjectType) -> bool {
-    query.allowed_object_types.is_empty() || query.allowed_object_types.contains(&object_type)
-}
-
 fn link_touches_ref(link: &MemoryLink, object_ref: MemoryObjectRef) -> bool {
     (link.from_id == object_ref.id && link.from_type == object_ref.object_type)
         || (link.to_id == object_ref.id && link.to_type == object_ref.object_type)
@@ -1049,9 +1040,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         .iter()
         .copied()
         .filter(|link_ref| relation_allowed(query, link_ref.relation()))
-        .filter(|link_ref| {
-            object_type_allowed(query, link_ref.other_endpoint(object_ref).object_type)
-        })
+        .filter(|link_ref| query.allows_object(link_ref.other_endpoint(object_ref)))
         .collect::<Vec<_>>();
 
     let root_fanout_mode = RootFanoutMode::for_node(depth == 0 && object_ref == root_ref);

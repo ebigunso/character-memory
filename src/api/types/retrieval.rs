@@ -113,13 +113,16 @@ impl Default for RetrievalCandidateLimits {
 /// person or place: five people share the participant floor.
 ///
 /// After reservations, spare room follows score order except at root selection,
-/// where present kinds share turns. A zero floor removes only the reservation.
+/// where given kinds share turns. Recency takes only room left after those kinds.
+/// A zero floor removes the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
     pub place: usize,
     pub activity: usize,
     pub topic: usize,
+    /// Recent occasions take only spare root room until a reservation is measured.
+    pub recency: usize,
 }
 
 impl Default for RetrievalCueFloors {
@@ -129,6 +132,7 @@ impl Default for RetrievalCueFloors {
             place: 1,
             activity: 1,
             topic: 1,
+            recency: 0,
         }
     }
 }
@@ -322,6 +326,7 @@ pub enum GraphRootSource {
     Participant,
     Activity,
     Place,
+    Recency,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -752,6 +757,7 @@ pub enum CueKind {
     Participant,
     Place,
     Activity,
+    Recency,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -156,6 +156,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) current_subject_state: bool,
     pub(crate) reminder_only: bool,
+    pub(crate) single_occasion: bool,
     pub(crate) participant_reference_time: DateTime<Utc>,
     pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
@@ -191,6 +192,7 @@ impl GraphExpansionQuery {
             fanout_overrides: Vec::new(),
             current_subject_state: false,
             reminder_only: false,
+            single_occasion: false,
             participant_reference_time: DateTime::<Utc>::MAX_UTC,
             resolved_thread_members: std::collections::HashSet::new(),
             traversal_link_ids: None,
@@ -203,6 +205,14 @@ impl GraphExpansionQuery {
     // A notion or thread reached only by a reminder is visible, but is a leaf.
     pub(crate) fn may_continue_from(&self, kind: ObjectType) -> bool {
         !self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread)
+    }
+
+    pub(crate) fn allows_object(&self, object: MemoryObjectRef) -> bool {
+        (self.allowed_object_types.is_empty()
+            || self.allowed_object_types.contains(&object.object_type))
+            && (!self.single_occasion
+                || object.object_type != ObjectType::Episode
+                || object.id == self.root_id)
     }
 
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
@@ -335,6 +345,14 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
+    /// Return bounded eligible episode IDs in recorded-time order.
+    async fn query_recent_episodes(
+        &self,
+        reference_time: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError>;
+
     /// Read only recorded time and retention for these episode references.
     async fn query_episode_occasions(
         &self,
@@ -406,6 +424,17 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_recent_episodes(
+        &self,
+        reference_time: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        (**self)
+            .query_recent_episodes(reference_time, limit, policy)
+            .await
+    }
+
     async fn query_episode_occasions(
         &self,
         episodes: &[MemoryObjectRef],

@@ -152,7 +152,10 @@ async fn source_union_namespaces_and_restart_determine_scope() {
             .unwrap()
             .graph_expansions
             .iter()
-            .all(|row| row.source == GraphRootSource::Place));
+            .all(|row| matches!(
+                row.source,
+                GraphRootSource::Place | GraphRootSource::Recency
+            )));
         assert!(!serde_json::to_string(&result)
             .unwrap()
             .contains("scope_keys"));

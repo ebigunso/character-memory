@@ -17,6 +17,8 @@ mod retrieval_floor_tests;
 #[cfg(test)]
 mod retrieval_scene_tests;
 #[cfg(test)]
+mod retrieval_time_tests;
+#[cfg(test)]
 mod retrieval_turn_tests;
 #[cfg(test)]
 mod scene_tests;
@@ -739,7 +741,7 @@ mod tests {
             fixtures.user_preference.id
         );
         assert_eq!(outcome.rationale.vector_candidate_count, 1);
-        assert_eq!(outcome.rationale.graph_verified_count, 1);
+        assert_eq!(outcome.rationale.graph_verified_count, 2);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
         memory.close().await.unwrap();
     }

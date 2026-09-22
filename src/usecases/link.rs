@@ -565,6 +565,16 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for QueryObjectsFailingGraph {
+        async fn query_recent_episodes(
+            &self,
+            reference_time: chrono::DateTime<chrono::Utc>,
+            limit: usize,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+            let _ = (reference_time, limit, policy);
+            Ok(Vec::new())
+        }
+
         async fn query_episode_occasions(
             &self,
             episodes: &[crate::domain::MemoryObjectRef],

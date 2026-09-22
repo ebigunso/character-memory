@@ -457,6 +457,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
             place: 0,
             activity: 5,
             topic: 1,
+            recency: 0,
         };
         let result = memory.retrieve(context.clone()).await.unwrap();
         let repeat = memory.retrieve(context).await.unwrap();
@@ -562,8 +563,17 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
             .iter()
             .find(|row| row.object.id == MemoryId::from_u128(id))
             .unwrap();
-        assert_eq!(row.cue_kinds, BTreeSet::from([kind]));
+        let mut expected = BTreeSet::from([kind]);
+        if id != 4000 {
+            expected.insert(CueKind::Recency);
+        }
+        assert_eq!(row.cue_kinds, expected);
     }
+    assert!(trace.graph_expansions.iter().any(|root| {
+        root.root == MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(4000))
+            && root.source == GraphRootSource::Recency
+            && root.outcome == GraphExpansionOutcome::RootLimit
+    }));
     let encoded = serde_json::to_value(trace).unwrap();
     let decoded: RetrievalTrace = serde_json::from_value(encoded).unwrap();
     assert_eq!(decoded.floor_admissions, trace.floor_admissions);
@@ -686,7 +696,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
             .unwrap();
         assert_eq!(
             row.cue_kinds,
-            BTreeSet::from([CueKind::Topic, CueKind::Participant])
+            BTreeSet::from([CueKind::Topic, CueKind::Participant, CueKind::Recency])
         );
     }
     assert!(trace.graph_relations.iter().any(|row| {
@@ -726,7 +736,7 @@ async fn participant_and_place_keep_room_without_a_topic() {
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
-    assert_eq!(selected, [3000, 2000]);
+    assert_eq!(selected, [3000, 2000, 1, 1000, 1001, 1002]);
     assert!(result.trace.unwrap().floor_admissions.is_empty());
     memory.close().await.unwrap();
 }
@@ -764,6 +774,7 @@ async fn single_kind_keeps_section_ids_and_order() {
                 place: 0,
                 activity: 0,
                 topic: 0,
+                recency: 0,
             };
             let prefix = memory.retrieve(prefix_context).await.unwrap();
             assert_eq!(
@@ -771,21 +782,35 @@ async fn single_kind_keeps_section_ids_and_order() {
                 serde_json::to_vec(&prefix).unwrap(),
                 "single-kind retrieval must preserve the original ranked prefix"
             );
-            // Exact section/id/order projections captured at 61fbb29.
+            // The original given-cue prefix remains; recency uses spare root and section room.
             let first = match kind {
                 CueKind::Topic => 1000,
                 CueKind::Participant => 2000,
                 CueKind::Place => 3000,
                 CueKind::Activity => 4000,
+                CueKind::Recency => unreachable!("fixture uses only given cues"),
             };
-            let count = if kind != CueKind::Topic { 1 } else { section };
+            let expected = if kind == CueKind::Topic {
+                (first..first + section as u128).collect::<Vec<_>>()
+            } else {
+                [first]
+                    .into_iter()
+                    .chain(
+                        [1, 1000, 1001, 1002, 1003, 2000, 2001, 2002]
+                            .into_iter()
+                            // The explicit activity thread spends one root slot of its own.
+                            .filter(|&id| id != first && (kind != CueKind::Activity || id != 1003)),
+                    )
+                    .take(section)
+                    .collect()
+            };
             let pack = result.pack;
             assert_eq!(
                 pack.relevant_episodes
                     .iter()
                     .map(|object| object.id.as_u128())
                     .collect::<Vec<_>>(),
-                (first..first + count as u128).collect::<Vec<_>>(),
+                expected,
                 "{kind:?} {candidates}/{roots}/{section}"
             );
             assert_eq!(
@@ -793,12 +818,30 @@ async fn single_kind_keeps_section_ids_and_order() {
                     .iter()
                     .map(|object| object.id.as_u128())
                     .collect::<Vec<_>>(),
-                if kind == CueKind::Activity {
+                if kind == CueKind::Activity || (kind != CueKind::Topic && section > 1) {
                     vec![5000]
                 } else {
                     vec![]
-                }
+                },
+                "{kind:?} {candidates}/{roots}/{section}"
             );
+            if !matches!(kind, CueKind::Topic | CueKind::Activity) && section > 1 {
+                let thread = result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .section_assignments
+                    .iter()
+                    .find(|row| {
+                        row.object
+                            == MemoryObjectRef::new(
+                                ObjectType::MemoryThread,
+                                MemoryId::from_u128(5000),
+                            )
+                    })
+                    .unwrap();
+                assert_eq!(thread.cue_kinds, BTreeSet::from([CueKind::Recency]));
+            }
             assert!(pack.salient_observations.is_empty());
             assert!(pack.derived_memories.is_empty());
             assert!(pack.preferences.is_empty());
@@ -824,6 +867,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             place: floor,
             activity: floor,
             topic: floor,
+            recency: 0,
         };
         context.candidate_limits.max_graph_roots = cap;
         let first = memory.retrieve(context).await.unwrap();
@@ -849,6 +893,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             place: floor,
             activity: floor,
             topic: floor,
+            recency: 0,
         };
         context.section_limits.relevant_episodes = cap;
         let first = memory.retrieve(context).await.unwrap();
@@ -880,7 +925,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             .iter()
             .map(|object| object.id.as_u128())
             .collect::<Vec<_>>(),
-        [4000]
+        [4000, 1, 1000, 1001, 1002, 2000, 2001, 2002]
     );
     memory.close().await.unwrap();
 }
@@ -918,7 +963,8 @@ async fn overlapping_kinds_share_one_slot_and_return_unused_room() {
             CueKind::Topic,
             CueKind::Participant,
             CueKind::Place,
-            CueKind::Activity
+            CueKind::Activity,
+            CueKind::Recency
         ])
     );
     memory.close().await.unwrap();
@@ -942,6 +988,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
             CueKind::Topic => floors.topic = 0,
+            CueKind::Recency => unreachable!("fixture uses only given cues"),
         }
         // The other three reservations consume all room, so this kind waits.
         context.candidate_limits.max_graph_roots = 3;

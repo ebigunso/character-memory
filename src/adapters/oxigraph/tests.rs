@@ -113,6 +113,59 @@ mod tests {
             .await
             .is_err());
         assert!(store.query_episode_occasions(&[]).await.unwrap().is_empty());
+        let recent = store
+            .query_recent_episodes(
+                fixtures.episode.scene.time,
+                1,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent, [fixtures.episode.id]);
+    }
+
+    #[tokio::test]
+    async fn recency_store_cut_uses_eligible_metadata() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let source = representative_fixtures().episode;
+        let reference = source.scene.time;
+        let objects = (0..1001)
+            .map(|index| {
+                let mut episode = source.clone();
+                episode.id = MemoryId::from_u128(2000 - index);
+                episode.scene.time = reference - chrono::Duration::milliseconds(index as i64);
+                if index == 0 {
+                    episode.retention_state = RetentionState::Suppressed;
+                }
+                if index == 1000 {
+                    episode.scene.time = reference + chrono::Duration::seconds(1);
+                }
+                MemoryObject::Episode(episode)
+            })
+            .collect::<Vec<_>>();
+        store.upsert_objects(&objects).await.unwrap();
+        let ids = store
+            .query_recent_episodes(reference, 3, GraphExpansionLifecyclePolicy::default())
+            .await
+            .unwrap();
+        assert_eq!(ids, [1999, 1998, 1997].map(MemoryId::from_u128));
+        let ids = store
+            .query_recent_episodes(reference, 0, GraphExpansionLifecyclePolicy::default())
+            .await
+            .unwrap();
+        assert!(ids.is_empty());
+        let ids = store
+            .query_recent_episodes(
+                reference,
+                1,
+                GraphExpansionLifecyclePolicy {
+                    include_suppressed: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, [MemoryId::from_u128(2000)]);
     }
 
     #[tokio::test]

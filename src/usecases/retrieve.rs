@@ -199,6 +199,31 @@ where
             }
         }
         explicit_roots.extend(activity_roots);
+        let recent = self
+            .graph_store
+            .query_recent_episodes(
+                context.scene.time,
+                prompt_ready_sections()
+                    .into_iter()
+                    .map(|section| section_limit(section, context.section_limits))
+                    .max()
+                    .unwrap_or(0),
+                GraphExpansionLifecyclePolicy {
+                    include_suppressed: context.lifecycle_policy.include_suppressed,
+                    include_superseded: context.lifecycle_policy.include_superseded,
+                },
+            )
+            .await?;
+        explicit_roots.extend(recent.into_iter().map(|object_id| CandidateRoot {
+            object_id,
+            object_type: ObjectType::Episode,
+            score: 0.0,
+            source: GraphRootSource::Recency,
+            vector_score: None,
+            cue_kinds: BTreeSet::from([CueKind::Recency]),
+            full_standing_score: None,
+            full_standing_kinds: BTreeSet::new(),
+        }));
         let root_selection = select_candidate_roots(
             &vector_candidates,
             &cues.kinds,
@@ -346,6 +371,8 @@ where
         for (kind, order) in root_selection.orders {
             section_orders.entry(kind).or_default().extend(order);
         }
+        // Recency limits which occasions contribute; their sections keep score order.
+        section_orders.remove(&CueKind::Recency);
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -504,6 +531,34 @@ impl RetrieveAssembly {
             HashSet::new()
         };
 
+        // On a shared root, time provenance stops where the time-only expansion
+        // would stop, even though another road may continue through older sources.
+        let recency_reached = if candidate.cue_kinds.contains(&CueKind::Recency)
+            && !query.single_occasion
+            && expansion
+                .objects
+                .iter()
+                .any(|object| object.object_ref() == candidate_ref)
+        {
+            let mut recency_query = query.clone();
+            recency_query.reminder_only = true;
+            recency_query.single_occasion = true;
+            Some(
+                crate::policy::graph_expansion::bounded_expansion(
+                    &recency_query,
+                    expansion.objects.clone(),
+                    expansion.links.clone(),
+                    &crate::policy::graph_expansion::ParticipantOccasions::new(),
+                )?
+                .objects
+                .into_iter()
+                .map(|object| object.object_ref())
+                .collect::<HashSet<_>>(),
+            )
+        } else {
+            None
+        };
+
         for relation in &expansion.relations {
             if relation.relation == RelationType::Supersedes
                 && relation.from.object_type == ObjectType::DerivedMemory
@@ -565,6 +620,13 @@ impl RetrieveAssembly {
             } else {
                 score * 0.75
             };
+            let mut kinds = kinds.clone();
+            if recency_reached
+                .as_ref()
+                .is_some_and(|reached| !reached.contains(&object_ref))
+            {
+                kinds.remove(&CueKind::Recency);
+            }
             let reminder_only = candidate.full_standing_score.is_none();
             let candidate_score = candidate
                 .vector_score
@@ -574,9 +636,13 @@ impl RetrieveAssembly {
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
-                    ranked.cue_kinds.extend(kinds);
+                    ranked.cue_kinds.extend(&kinds);
+                    if ranked.reminder_only == reminder_only {
+                        ranked.graph_component = ranked.graph_component.max(graph_component);
+                    } else if ranked.reminder_only {
+                        ranked.graph_component = graph_component;
+                    }
                     ranked.reminder_only &= reminder_only;
-                    ranked.graph_component = ranked.graph_component.max(graph_component);
                     if let Some(candidate_score) = candidate_score {
                         ranked.vector_candidate_score = Some(
                             ranked
@@ -810,6 +876,7 @@ fn select_with_cue_floors<'a>(
         (CueKind::Place, floors.place),
         (CueKind::Activity, floors.activity),
         (CueKind::Topic, floors.topic),
+        (CueKind::Recency, floors.recency),
     ]
     .map(|(kind, floor)| {
         let mut ranks = HashMap::new();
@@ -834,7 +901,14 @@ fn select_with_cue_floors<'a>(
     });
     let mut selected = BTreeMap::new();
     'selection: for reserve_floors in [true, false] {
-        if !reserve_floors && (!matches!(stage, CueFloorStage::GraphRoots) || kinds.len() == 1) {
+        if !reserve_floors
+            && (!matches!(stage, CueFloorStage::GraphRoots)
+                || kinds
+                    .iter()
+                    .filter(|&&kind| kind != CueKind::Recency)
+                    .count()
+                    <= 1)
+        {
             break;
         }
         for round in 0..limit {
@@ -842,7 +916,9 @@ fn select_with_cue_floors<'a>(
                 if selected.len() == limit {
                     break 'selection;
                 }
-                if reserve_floors && round >= *floor {
+                if (reserve_floors && round >= *floor)
+                    || (!reserve_floors && *kind == CueKind::Recency)
+                {
                     continue;
                 }
                 let Some(index) = queue.next() else { continue };
@@ -1211,6 +1287,7 @@ fn select_candidate_roots(
     });
     let roots = explicit_roots
         .iter()
+        .filter(|root| root.source != GraphRootSource::Recency)
         .cloned()
         .chain(content.into_iter().map(|candidate| {
             CandidateRoot {
@@ -1244,6 +1321,13 @@ fn select_candidate_roots(
                     .unwrap_or_default(),
             }
         }))
+        // Ungiven recency has no position ahead of the existing root prefix.
+        .chain(
+            explicit_roots
+                .iter()
+                .filter(|root| root.source == GraphRootSource::Recency)
+                .cloned(),
+        )
         .collect::<Vec<_>>();
     let mut indices = HashMap::new();
     let mut merged: Vec<CandidateRoot> = Vec::new();
@@ -1381,6 +1465,7 @@ fn graph_query_for_candidate(
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
     query.reminder_only = candidate.full_standing_score.is_none();
+    query.single_occasion = candidate.cue_kinds == BTreeSet::from([CueKind::Recency]);
     query.participant_reference_time = context.scene.time;
     query
 }
@@ -1670,6 +1755,72 @@ mod tests {
         assert_eq!(selected, vec![(0, None), (2, Some(CueKind::Participant))]);
     }
 
+    #[test]
+    fn full_standing_proximity_wins_in_either_expansion_order() {
+        let fixtures = representative_fixtures();
+        let mut episode = fixtures.episode.clone();
+        episode.salience_score = 0.0;
+        let person = fixtures.hub_entity.clone();
+        let link = crate::api::types::MemoryLinkDraft::new(
+            ObjectType::Entity,
+            person.id,
+            RelationType::Involves,
+            ObjectType::Episode,
+            episode.id,
+        )
+        .into_domain()
+        .unwrap();
+        let full = CandidateRoot {
+            object_id: person.id,
+            object_type: ObjectType::Entity,
+            score: 1.0,
+            source: GraphRootSource::Participant,
+            vector_score: None,
+            cue_kinds: BTreeSet::from([CueKind::Participant]),
+            full_standing_score: Some(1.0),
+            full_standing_kinds: BTreeSet::from([CueKind::Participant]),
+        };
+        let recent = CandidateRoot {
+            object_id: episode.id,
+            object_type: ObjectType::Episode,
+            score: 0.0,
+            source: GraphRootSource::Recency,
+            vector_score: None,
+            cue_kinds: BTreeSet::from([CueKind::Recency]),
+            full_standing_score: None,
+            full_standing_kinds: BTreeSet::new(),
+        };
+        for roots in [[&full, &recent], [&recent, &full]] {
+            let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
+            for root in roots {
+                let query = graph_query_for_candidate(
+                    root,
+                    &RetrievalContext::default().with_scene(episode.scene.clone()),
+                    Vec::new(),
+                );
+                let expansion = crate::policy::graph_expansion::bounded_expansion(
+                    &query,
+                    [
+                        MemoryObject::Episode(episode.clone()),
+                        MemoryObject::Entity(person.clone()),
+                    ],
+                    [link.clone()],
+                    &crate::policy::graph_expansion::ParticipantOccasions::new(),
+                )
+                .unwrap();
+                assembly.absorb_expansion(root, &query, expansion).unwrap();
+            }
+            let ranked = &assembly.objects[&MemoryObjectRef::new(ObjectType::Episode, episode.id)];
+            assert_eq!(ranked.graph_component, 0.5);
+            assert_eq!(ranked.final_score(), 0.612_499_95);
+            assert!(!ranked.reminder_only);
+            assert_eq!(
+                ranked.cue_kinds,
+                BTreeSet::from([CueKind::Participant, CueKind::Recency])
+            );
+        }
+    }
+
     #[tokio::test]
     async fn section_rows_with_distinct_final_scores_are_descending() {
         let mut low = representative_fixtures().user_preference;
@@ -1842,7 +1993,7 @@ mod tests {
         }));
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.episode.id
-                && assignment.cue_kinds == BTreeSet::from([CueKind::Topic])
+                && assignment.cue_kinds == BTreeSet::from([CueKind::Topic, CueKind::Recency])
         }));
         assert!(trace.section_assignments.iter().any(|assignment| {
             assignment.object.id == fixtures.user_preference.id
@@ -2331,7 +2482,7 @@ mod tests {
                 .telemetry
                 .graph_expansion
                 .bounded_failure_count,
-            1
+            2
         );
         assert_eq!(
             outcome
@@ -3141,6 +3292,16 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
+        async fn query_recent_episodes(
+            &self,
+            reference_time: chrono::DateTime<chrono::Utc>,
+            limit: usize,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+            let _ = (reference_time, limit, policy);
+            Ok(Vec::new())
+        }
+
         async fn query_episode_occasions(
             &self,
             episodes: &[crate::domain::MemoryObjectRef],

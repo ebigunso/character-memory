@@ -727,11 +727,14 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 .iter()
                 .map(|episode| episode.id)
                 .collect::<Vec<_>>(),
-            vec![if include_suppressed {
+            [if include_suppressed {
                 latest_episode
             } else {
                 MemoryId::from_u128(50_080)
             }]
+            .into_iter()
+            .chain((0..7).map(|index| MemoryId::from_u128(50_000 + index * 10)))
+            .collect::<Vec<_>>()
         );
     }
     // Even when many excluded occasions precede the survivor (or none survives),
@@ -875,6 +878,13 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                         .pack
                         .relevant_episodes
                         .iter()
+                        .filter(|episode| {
+                            selected_cues(
+                                result,
+                                MemoryObjectRef::new(ObjectType::Episode, episode.id),
+                            )
+                            .contains(&CueKind::Participant)
+                        })
                         .map(|episode| episode.id)
                         .chain(
                             result
@@ -889,7 +899,7 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                         BTreeSet::from([episode_id]),
                         "route={route}, reverse_ids={reverse_ids}, N={count}"
                     );
-                    assert_eq!(result.pack.relevant_episodes.len(), usize::from(direct));
+                    assert_eq!(result.pack.relevant_episodes.len(), count.min(8) as usize);
                     assert_eq!(
                         result.pack.salient_observations.len(),
                         usize::from(mentions)
@@ -1014,9 +1024,17 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
     let expected = [false, true]
         .into_iter()
         .flat_map(|caller_built| {
-            [100, 101]
-                .into_iter()
-                .map(move |ubiquitous| (caller_built, ubiquitous, 1, 3, 1, 4, Some((24, 24))))
+            [100, 101].into_iter().map(move |ubiquitous| {
+                (
+                    caller_built,
+                    ubiquitous,
+                    1,
+                    3,
+                    1,
+                    if caller_built { 8 } else { 12 },
+                    Some((24, 24)),
+                )
+            })
         })
         .collect::<Vec<_>>();
     assert_eq!(observed, expected);
@@ -1068,7 +1086,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
             resolution: ActivityResolution::Unknown
         })
     );
-    assert!(unknown.memory_scenes.is_empty());
+    assert_eq!(unknown.pack.relevant_episodes.len(), 1);
+    assert_eq!(unknown.memory_scenes.len(), 1);
     assert_eq!(
         found.activity,
         Some(ActivityResult {
@@ -1135,7 +1154,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     untraced.include_trace = false;
     let empty = memory.retrieve(untraced.clone()).await.unwrap();
     assert_eq!(empty.activity, found.activity);
-    assert!(empty.memory_scenes.is_empty());
+    assert_eq!(empty.pack.relevant_episodes.len(), 1);
+    assert_eq!(empty.memory_scenes.len(), 1);
     assert!(empty.trace.is_none());
     untraced.lifecycle_policy.include_suppressed = true;
     assert_eq!(
@@ -1213,7 +1233,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     ] {
         assert_eq!(
             selected_cues(&found, object),
-            &BTreeSet::from([CueKind::Activity])
+            &if object.object_type == ObjectType::Episode {
+                BTreeSet::from([CueKind::Activity, CueKind::Recency])
+            } else {
+                BTreeSet::from([CueKind::Activity])
+            }
         );
     }
     let mut thread_context = context.clone();
@@ -1224,6 +1248,7 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
             .unwrap()
             .graph_expansions
             .iter()
+            .filter(|root| root.source != GraphRootSource::Recency)
             .map(|root| root.root)
             .collect::<Vec<_>>(),
         vec![
@@ -1261,8 +1286,25 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
                 resolution: ActivityResolution::Unknown
             })
         );
-        assert!(unknown.memory_scenes.is_empty());
-        assert!(unknown.trace.unwrap().graph_expansions.is_empty());
+        assert_eq!(unknown.pack.relevant_episodes.len(), 3);
+        assert_eq!(unknown.memory_scenes.len(), 3);
+        let expansions = unknown.trace.unwrap().graph_expansions;
+        assert_eq!(expansions.len(), 3);
+        assert!(expansions
+            .iter()
+            .all(|root| root.source == GraphRootSource::Recency));
+        assert_eq!(
+            expansions
+                .iter()
+                .map(|root| root.root.id)
+                .collect::<BTreeSet<_>>(),
+            unknown
+                .pack
+                .relevant_episodes
+                .iter()
+                .map(|episode| episode.id)
+                .collect()
+        );
     }
     let mut no_room = context.clone();
     no_room.graph_limits.max_nodes = 0;
@@ -1283,7 +1325,15 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
         .unwrap();
     let superseded = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(superseded.activity, found.activity);
-    assert!(superseded.memory_scenes.is_empty());
+    assert_eq!(superseded.pack.relevant_episodes[0].id, episode_id);
+    assert_eq!(superseded.memory_scenes.len(), 4);
+    assert_eq!(
+        selected_cues(
+            &superseded,
+            MemoryObjectRef::new(ObjectType::Episode, episode_id)
+        ),
+        &BTreeSet::from([CueKind::Recency])
+    );
     let mut historical = context.clone();
     historical.lifecycle_policy.include_superseded = true;
     assert!(memory
@@ -1310,7 +1360,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
         let result = memory.retrieve(context).await.unwrap();
         assert_eq!(result.activity, found.activity);
         assert_eq!(
-            !result.pack.relevant_episodes.is_empty(),
+            selected_cues(
+                &result,
+                MemoryObjectRef::new(ObjectType::Episode, episode_id)
+            )
+            .contains(&CueKind::Activity),
             include_suppressed && include_superseded
         );
     }
@@ -1352,7 +1406,7 @@ async fn authored_episode_without_links_is_recalled_by_its_participant() {
         .await
         .unwrap();
     assert!(queries.lock().unwrap().is_empty());
-    assert_eq!(result.pack.relevant_episodes.len(), 1);
+    assert_eq!(result.pack.relevant_episodes.len(), 2);
     assert_eq!(result.pack.relevant_episodes[0].id, episode_id);
     assert_eq!(
         recorded(&result, ObjectType::Episode, episode_id),
@@ -1409,10 +1463,10 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
     );
     let trace = key_result.trace.as_ref().unwrap();
     assert!(trace.vector_candidates.is_empty());
-    assert!(trace
-        .graph_expansions
-        .iter()
-        .all(|entry| entry.source == GraphRootSource::Participant));
+    assert!(trace.graph_expansions.iter().all(|entry| matches!(
+        entry.source,
+        GraphRootSource::Participant | GraphRootSource::Recency
+    )));
     assert!(key_result.rationale.telemetry.selectivity.decision_count > 0);
     assert!(trace.section_assignments.iter().any(|row| {
         matches!(row.reason, SectionAssignmentReason::Selected { .. })
@@ -1473,7 +1527,7 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
 
     assert_eq!(
         named.rationale.telemetry.unique_graph_root_candidate_count,
-        2
+        4
     );
 
     present.participants = vec![keyed(999), keyed(300)];
@@ -1481,7 +1535,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .retrieve(RetrievalContext::default().with_scene(present.clone()))
         .await
         .unwrap();
-    assert!(empty.memory_scenes.is_empty());
+    assert_eq!(empty.pack.relevant_episodes.len(), 2);
+    assert_eq!(empty.memory_scenes.len(), 2);
     assert!(empty.trace.is_none());
     let references = &empty.scene_references;
     assert_eq!(references[0].resolution, SceneReferenceResolution::Unknown);
@@ -1555,7 +1610,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     let described = MemoryObjectRef::new(ObjectType::Episode, episode_id);
     assert_eq!(
         selected_cues(&description_only, described),
-        &BTreeSet::from([CueKind::Participant])
+        &BTreeSet::from([CueKind::Participant, CueKind::Recency])
     );
     assert_eq!(*queries.lock().unwrap(), ["astronomer\nastronomer"]);
     assert_eq!(description_only.pack.relevant_episodes[0].id, episode_id);
@@ -1607,7 +1662,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
             &traced_place,
             MemoryObjectRef::new(ObjectType::Episode, episode_id)
         ),
-        &BTreeSet::from([CueKind::Place])
+        &BTreeSet::from([CueKind::Place, CueKind::Recency])
     );
     assert_eq!(place_result.pack.relevant_episodes[0].id, episode_id);
     assert_eq!(
@@ -1693,7 +1748,7 @@ fn beliefs_context() -> RetrievalContext {
 }
 
 #[tokio::test]
-async fn result_reports_all_source_scenes_without_admitting_sources_or_requiring_trace() {
+async fn result_reports_all_source_scenes_beside_recent_episodes_without_trace() {
     let (memory, _) = scene_memory().await;
     let first_scene = scene();
     let mut second_scene = scene();
@@ -1736,9 +1791,16 @@ async fn result_reports_all_source_scenes_without_admitting_sources_or_requiring
     ];
     let result = memory.retrieve(beliefs_context()).await.unwrap();
     assert!(result.trace.is_none());
-    assert!(
-        result.pack.relevant_episodes.is_empty() && result.pack.salient_observations.is_empty()
+    assert_eq!(
+        result
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>(),
+        [5000, 6000]
     );
+    assert!(result.pack.salient_observations.is_empty());
     for id in [8000, 8001] {
         assert_eq!(
             recorded(&result, ObjectType::DerivedMemory, MemoryId::from_u128(id)),

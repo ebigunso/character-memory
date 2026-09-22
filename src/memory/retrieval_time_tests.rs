@@ -1,0 +1,635 @@
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use serde_json::{json, Value};
+
+use crate::*;
+
+struct TimeProvider;
+
+#[async_trait]
+impl EmbeddingProvider for TimeProvider {
+    fn vector_size(&self) -> usize {
+        2
+    }
+    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
+        let score: f32 = if text == "topic" {
+            1.0
+        } else if text.contains("Strong 900") {
+            0.85
+        } else if text.contains("Strong ") {
+            0.9 - text.rsplit(' ').next().unwrap().parse::<f32>().unwrap() * 0.001
+        } else if text.contains("Weak") {
+            0.3
+        } else {
+            0.0
+        };
+        Ok(vec![score, (1.0 - score * score).sqrt()])
+    }
+    async fn bulk_generate_embeddings<'a>(
+        &self,
+        texts: &'a [&'a str],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let mut vectors = Vec::new();
+        for text in texts {
+            vectors.push(self.generate_embedding(text).await?);
+        }
+        Ok(vectors)
+    }
+}
+
+fn id(n: u128) -> MemoryId {
+    MemoryId::from_u128(n)
+}
+fn time() -> DateTime<Utc> {
+    "2026-09-21T18:00:00Z".parse().unwrap()
+}
+fn keyed() -> SceneParticipant {
+    SceneParticipant {
+        key: Some(id(7)),
+        ..Default::default()
+    }
+}
+fn provenance() -> CandidateProvenance {
+    CandidateProvenance::caller("recency witness")
+}
+
+async fn open() -> (CharacterMemory, tempfile::TempDir) {
+    let root = tempfile::tempdir().unwrap();
+    let settings = ::config::Config::builder()
+        .set_override(
+            "vector_store_path",
+            root.path().join("vectors").to_string_lossy().into_owned(),
+        )
+        .unwrap()
+        .set_override("graph_store_mode", "persistent")
+        .unwrap()
+        .set_override(
+            "oxigraph_path",
+            root.path().join("graph").to_string_lossy().into_owned(),
+        )
+        .unwrap()
+        .set_override("retrieval_stats_store_mode", "sqlite")
+        .unwrap()
+        .set_override(
+            "retrieval_stats_path",
+            root.path()
+                .join("stats.sqlite3")
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+    let memory = CharacterMemory::new_with_embedding_provider(
+        Settings::new(settings).unwrap(),
+        format!("time_{}", MemoryId::new_v4()),
+        Box::new(TimeProvider),
+    )
+    .await
+    .unwrap();
+    (memory, root)
+}
+
+fn episode(
+    mut plan: RememberWritePlan,
+    n: u128,
+    days: i64,
+    salience: f32,
+    person: bool,
+    topic: bool,
+) -> RememberWritePlan {
+    let mut draft = EpisodeDraft::new(if topic {
+        format!("Strong {}", n % 1000)
+    } else {
+        format!("Ordinary {n}")
+    });
+    draft.id = Some(id(n));
+    // Deliberately unrelated to scene chronology.
+    draft.created_at = Some(time() + Duration::days(n as i64));
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    let mut scene = Scene::at(time() - Duration::days(days));
+    if n == 100 {
+        scene.time += Duration::milliseconds(125);
+    }
+    if person {
+        scene.participants.push(keyed());
+    }
+    draft.scene = Some(scene);
+    draft.salience_score = salience;
+    plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+        draft,
+        provenance(),
+    )));
+    if person {
+        plan = link(
+            plan,
+            ObjectType::Episode,
+            n,
+            ObjectType::Entity,
+            7,
+            RelationType::Involves,
+        );
+    }
+    if topic {
+        plan = indexed(plan, ObjectType::Episode, n);
+    }
+    plan
+}
+
+fn indexed(plan: RememberWritePlan, kind: ObjectType, n: u128) -> RememberWritePlan {
+    plan.with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+        MemoryObjectRef::new(kind, id(n)),
+        provenance(),
+    )))
+}
+
+fn link(
+    plan: RememberWritePlan,
+    from: ObjectType,
+    from_id: u128,
+    to: ObjectType,
+    to_id: u128,
+    relation: RelationType,
+) -> RememberWritePlan {
+    let mut draft = MemoryLinkDraft::new(from, id(from_id), relation, to, id(to_id));
+    draft.id = Some(id(10_000_000 + from_id * 10_000 + to_id));
+    draft.created_at = Some(time());
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+        draft,
+        provenance(),
+    )))
+}
+
+fn belief(plan: RememberWritePlan, n: u128, sources: &[u128], topic: bool) -> RememberWritePlan {
+    let mut draft = DerivedMemoryDraft::new(
+        DerivedType::Claim,
+        if topic {
+            "Weak interpretation"
+        } else {
+            "What the occasions meant"
+        },
+    );
+    draft.id = Some(id(n));
+    draft.created_at = Some(time());
+    draft.updated_at = Some(time());
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    draft.salience_score = 0.0;
+    draft.derived_from_episode_ids = sources.iter().copied().map(id).collect();
+    let mut plan = plan.with_candidate(MemoryCandidate::DerivedMemory(
+        DerivedMemoryCandidate::new(draft, provenance()),
+    ));
+    for source in sources {
+        plan = link(
+            plan,
+            ObjectType::DerivedMemory,
+            n,
+            ObjectType::Episode,
+            *source,
+            RelationType::DerivedFrom,
+        );
+    }
+    if topic {
+        indexed(plan, ObjectType::DerivedMemory, n)
+    } else {
+        plan
+    }
+}
+
+fn base() -> RememberWritePlan {
+    let mut entity = EntityDraft::new();
+    entity.id = Some(id(7));
+    entity.created_at = Some(time());
+    entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
+        EntityCandidate::new(entity, provenance()),
+    ));
+    for (n, days, salience) in [
+        (900, 0, 0.0),
+        (100, 1, 1.0),
+        (700, 31, 0.3),
+        (600, 32, 0.0),
+        (500, 33, 0.0),
+        (50, -1, 0.0),
+    ] {
+        plan = episode(plan, n, days, salience, true, false);
+    }
+    // The named participant has several occasions but is not ubiquitous.
+    for n in 800..820 {
+        plan = episode(plan, n, 60, 0.0, false, false);
+    }
+    for index in 0..48 {
+        plan = episode(plan, 2000 + index, 90 + index as i64, 0.0, false, true);
+    }
+    plan = belief(plan, 300, &[900, 700], false);
+    let mut observation =
+        ObservationDraft::new(id(800), "A separate unlinked observation: violet steam");
+    observation.id = Some(id(400));
+    observation.created_at = Some(time());
+    observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+        observation,
+        provenance(),
+    )))
+}
+
+async fn commit(memory: &CharacterMemory, plan: RememberWritePlan) {
+    let outcome = memory.commit(plan, CommitOptions::default()).await.unwrap();
+    assert!(outcome.vector_indexing_failure.is_none(), "{outcome:?}");
+}
+
+fn query(topic: bool, person: bool) -> RetrievalContext {
+    let mut scene = Scene::at(time());
+    if person {
+        scene.participants.push(keyed());
+    }
+    let mut context = RetrievalContext::default().with_scene(scene).with_trace();
+    context.topic = topic.then(|| "topic".to_owned());
+    context.graph_limits.timeout_ms = None;
+    context
+}
+
+async fn record(
+    rows: &mut Vec<Value>,
+    case: &str,
+    memory: &CharacterMemory,
+    context: RetrievalContext,
+) -> RetrieveOutcome {
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    assert_eq!(result.scene, context.scene);
+    assert!(result.activity.is_none());
+    let trace = result.trace.as_ref().unwrap();
+    rows.push(json!({"case": case, "input": context, "outcome": result,
+        "episodes": result.pack.relevant_episodes.iter().map(|e| e.id.as_u128()).collect::<Vec<_>>(),
+        "work": result.pack.derived_memories.iter().map(|e| e.memory.id.as_u128()).collect::<Vec<_>>(),
+        "roots": trace.graph_expansions.iter().filter(|r| r.outcome == GraphExpansionOutcome::Expanded).map(|r| r.root.id.as_u128()).collect::<Vec<_>>() }));
+    result
+}
+
+fn episodes(result: &RetrieveOutcome) -> Vec<u128> {
+    result
+        .pack
+        .relevant_episodes
+        .iter()
+        .map(|episode| episode.id.as_u128())
+        .collect()
+}
+
+fn roots(result: &RetrieveOutcome) -> Vec<u128> {
+    result
+        .trace
+        .as_ref()
+        .unwrap()
+        .graph_expansions
+        .iter()
+        .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+        .map(|row| row.root.id.as_u128())
+        .collect()
+}
+
+fn assignment(result: &RetrieveOutcome, n: u128) -> &SectionAssignment {
+    result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .find(|row| row.object.id == id(n))
+        .unwrap()
+}
+
+fn scores(result: &RetrieveOutcome, n: u128) -> SectionScoreComponents {
+    match assignment(result, n).reason {
+        SectionAssignmentReason::Selected { scores }
+        | SectionAssignmentReason::OmittedByLimit { scores, .. } => scores,
+        ref reason => panic!("expected ranked object {n}: {reason:?}"),
+    }
+}
+
+fn recency_episodes(result: &RetrieveOutcome) -> Vec<u128> {
+    result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .filter(|row| {
+            row.object.object_type == ObjectType::Episode
+                && row.cue_kinds.contains(&CueKind::Recency)
+        })
+        .map(|row| row.object.id.as_u128())
+        .collect()
+}
+
+fn room(cap: usize) -> ContinuitySectionLimits {
+    ContinuitySectionLimits {
+        active_threads: cap,
+        relevant_episodes: cap,
+        salient_observations: cap,
+        derived_memories: cap,
+        preferences: cap,
+        relationship_notes: cap,
+        open_loops: cap,
+        commitments: cap,
+        character_signals: cap,
+    }
+}
+
+#[tokio::test]
+async fn recency_public_facade_witnesses() {
+    let mut rows = Vec::new();
+    let (memory, root) = open().await;
+    commit(&memory, base()).await;
+    let default = record(&mut rows, "1-default-room", &memory, query(false, false)).await;
+    assert_eq!(episodes(&default), [100, 700, 500, 600, 800, 801, 802, 803]);
+    assert_eq!(
+        roots(&default),
+        [900, 100, 700, 600, 500, 800, 801, 802, 803, 804, 805, 806]
+    );
+    assert_eq!(
+        default
+            .rationale
+            .telemetry
+            .unique_graph_root_candidate_count,
+        16
+    );
+    assert!(default.pack.salient_observations.is_empty());
+    let mut single = query(false, false);
+    single.section_limits = room(1);
+    let first = record(
+        &mut rows,
+        "1-room1-4-unlinked-5-reminder-leaf",
+        &memory,
+        single.clone(),
+    )
+    .await;
+    assert!(first.pack.salient_observations.is_empty());
+    assert_eq!(episodes(&first), [900]);
+    assert_eq!(recency_episodes(&first), [900]);
+    assert!(assignment(&first, 300)
+        .cue_kinds
+        .contains(&CueKind::Recency));
+    assert_eq!(scores(&first, 900).cue_score, Some(0.0));
+    assert!(first.trace.as_ref().unwrap().vector_candidates.is_empty());
+    let mut three = query(false, false);
+    three.section_limits = room(3);
+    let multiple = record(&mut rows, "revised-room3", &memory, three.clone()).await;
+    assert_eq!(episodes(&multiple), [100, 700, 900]);
+    assert_eq!(recency_episodes(&multiple), [100, 700, 900]);
+    let mut high_floor = three.clone();
+    high_floor.cue_floors.recency = 7;
+    assert_eq!(
+        roots(&memory.retrieve(high_floor).await.unwrap()),
+        roots(&multiple)
+    );
+    let mut zero = query(false, false);
+    zero.section_limits = room(0);
+    zero.cue_floors.recency = 7;
+    let zero = record(&mut rows, "revised-room0", &memory, zero).await;
+    assert!(roots(&zero).is_empty());
+    assert!(zero.pack.relevant_episodes.is_empty());
+    let mut tight = three;
+    tight.section_limits.relevant_episodes = 1;
+    let tight = record(&mut rows, "revised-room3-tight", &memory, tight).await;
+    assert_eq!(
+        episodes(&tight),
+        [100],
+        "the older salient contribution wins by score"
+    );
+    let known = record(
+        &mut rows,
+        "5-explicit-key-6-own-character-8-neighbor-score",
+        &memory,
+        query(false, true),
+    )
+    .await;
+    assert_eq!(episodes(&known), [100, 700, 500, 600, 900, 800, 801, 802]);
+    assert_eq!(
+        scores(&known, 900),
+        SectionScoreComponents {
+            final_score: 0.612_499_95,
+            cue_score: Some(0.75),
+            graph_score: Some(0.5),
+            salience_score: None,
+        }
+    );
+    assert_eq!(scores(&known, 300).graph_score, Some(1.0 / 3.0));
+    assert_eq!(scores(&known, 300).final_score, 0.570_833_3);
+    let mut known_single = query(false, true);
+    known_single.section_limits = room(1);
+    let known_single = memory.retrieve(known_single).await.unwrap();
+    assert_eq!(recency_episodes(&known_single), [900]);
+    assert!(assignment(&known_single, 700)
+        .cue_kinds
+        .contains(&CueKind::Participant));
+    let saturated = record(
+        &mut rows,
+        "7-saturated-original-store",
+        &memory,
+        query(true, false),
+    )
+    .await;
+    assert_eq!(episodes(&saturated), (2000..2008).collect::<Vec<_>>());
+    assert_eq!(roots(&saturated), (2000..2012).collect::<Vec<_>>());
+    assert!(recency_episodes(&saturated).is_empty());
+    let repeated = record(&mut rows, "11-identical-input", &memory, single.clone()).await;
+    assert_eq!(first, repeated);
+    let mut untraced = single.clone();
+    untraced.include_trace = false;
+    let untraced = memory.retrieve(untraced).await.unwrap();
+    assert_eq!(first.pack, untraced.pack);
+    assert!(untraced.trace.is_none());
+    let mut past = single.clone();
+    past.scene.time -= Duration::hours(12);
+    let past = record(&mut rows, "11-past-reference", &memory, past).await;
+    assert_eq!(episodes(&past), [100]);
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::Episode(id(900)),
+            "recency advances",
+        ))
+        .await
+        .unwrap();
+    let forgotten = record(&mut rows, "11-forgotten-latest", &memory, single.clone()).await;
+    assert_eq!(episodes(&forgotten), [100]);
+    let mut inclusive = single;
+    inclusive.lifecycle_policy.include_suppressed = true;
+    let inclusive = record(&mut rows, "11-include-forgotten", &memory, inclusive).await;
+    assert_eq!(episodes(&inclusive), [900]);
+    memory.close().await.unwrap();
+    root.close().unwrap();
+
+    for (case, strong, weak, overlap) in [
+        ("3-strong-spare", 2, false, false),
+        ("3-weak-descendant", 1, true, false),
+        ("7-saturated", 48, false, false),
+        ("7-topic-overlap", 2, false, true),
+    ] {
+        let (memory, root) = open().await;
+        let mut plan = episode(RememberWritePlan::new(), 900, 0, 1.0, false, overlap);
+        for index in 0..strong {
+            plan = episode(plan, 2000 + index, 2 + index as i64, 0.0, false, true);
+        }
+        if weak {
+            plan = episode(plan, 2003, 6, 0.0, false, false);
+            plan = belief(plan, 2100, &[2003], true);
+        }
+        if overlap {
+            plan = episode(plan, 750, 40, 0.0, false, false);
+            plan = belief(plan, 3200, &[900, 750], false);
+        }
+        commit(&memory, plan).await;
+        let mut context = query(true, false);
+        context.section_limits.relevant_episodes = if strong == 48 { 8 } else { 2 };
+        let result = record(&mut rows, case, &memory, context.clone()).await;
+        if strong == 2 && !overlap {
+            assert_eq!(episodes(&result), [2000, 2001]);
+            assert_eq!(scores(&result, 2000).final_score, 0.835);
+            assert_eq!(scores(&result, 2001).final_score, 0.834_35);
+            assert!(scores(&result, 2000).cue_score.unwrap() > 0.16);
+            assert!(scores(&result, 2001).cue_score.unwrap() > 0.16);
+            assert_eq!(roots(&result), [2000, 2001, 900]);
+        }
+        if weak {
+            assert_eq!(episodes(&result), [2000, 900]);
+            assert_eq!(scores(&result, 2003).final_score, 0.271_25);
+            assert_eq!(scores(&result, 900).final_score, 0.35);
+        }
+        if overlap {
+            assert_eq!(episodes(&result), [900, 2000]);
+            assert_eq!(scores(&result, 900).final_score, 0.902_500_03);
+            assert_eq!(scores(&result, 900).graph_score, Some(1.0));
+            assert!(assignment(&result, 900).cue_kinds.contains(&CueKind::Topic));
+            assert_eq!(recency_episodes(&result), [900, 2000, 2001, 750]);
+            assert!(assignment(&result, 3200)
+                .cue_kinds
+                .contains(&CueKind::Recency));
+            assert!(assignment(&result, 750)
+                .cue_kinds
+                .contains(&CueKind::Recency));
+            let mut bounded = context.clone();
+            bounded.section_limits = room(3);
+            let bounded = record(&mut rows, "7-overlap-bounded-provenance", &memory, bounded).await;
+            assert_eq!(
+                assignment(&bounded, 750).cue_kinds,
+                std::collections::BTreeSet::from([CueKind::Topic])
+            );
+            assert_eq!(roots(&bounded), [2000, 2001, 900]);
+            let root = result
+                .trace
+                .as_ref()
+                .unwrap()
+                .graph_expansions
+                .iter()
+                .find(|row| row.root.id == id(900))
+                .unwrap();
+            assert_eq!((root.object_count, root.relation_count), (3, 2));
+        }
+        if strong == 48 {
+            assert_eq!(episodes(&result), (2000..2008).collect::<Vec<_>>());
+            assert_eq!(roots(&result), (2000..2012).collect::<Vec<_>>());
+            assert_eq!(recency_episodes(&result), (2000..2012).collect::<Vec<_>>());
+            context.candidate_limits.max_graph_roots = 3;
+            let capped = record(&mut rows, "7-rootcap3", &memory, context.clone()).await;
+            assert_eq!(roots(&capped), [2000, 2001, 2002]);
+            assert_eq!(episodes(&capped), [2000, 2001, 2002]);
+            context.candidate_limits.max_graph_roots = 12;
+            context.cue_floors.recency = 1;
+            let shared_floor = record(&mut rows, "9-shared-floor1", &memory, context.clone()).await;
+            assert_eq!(episodes(&shared_floor), (2000..2008).collect::<Vec<_>>());
+            assert!(shared_floor
+                .trace
+                .as_ref()
+                .unwrap()
+                .floor_admissions
+                .is_empty());
+            let mut recent_only = RememberWritePlan::new();
+            for n in 901..916 {
+                recent_only = episode(recent_only, n, 0, 0.0, false, false);
+            }
+            commit(&memory, recent_only).await;
+            let reserved = record(&mut rows, "9-distinct-floor1", &memory, context).await;
+            assert_eq!(
+                episodes(&reserved),
+                (2000..2007).chain([900]).collect::<Vec<_>>()
+            );
+            for stage in [
+                crate::api::types::CueFloorStage::GraphRoots,
+                crate::api::types::CueFloorStage::Section {
+                    section: ContextPackSection::RelevantEpisodes,
+                },
+            ] {
+                assert!(reserved
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .floor_admissions
+                    .iter()
+                    .any(|row| row.object.id == id(900)
+                        && row.cue_kind == CueKind::Recency
+                        && row.stage == stage));
+            }
+        }
+        if strong == 2 && !overlap {
+            let mut plan = episode(RememberWritePlan::new(), 800, 45, 0.0, false, false);
+            plan = belief(plan, 3100, &[900, 800], false);
+            commit(&memory, plan).await;
+            let additions = record(
+                &mut rows,
+                "10-topic-spare-additions",
+                &memory,
+                query(true, false),
+            )
+            .await;
+            assert_eq!(episodes(&additions), [2000, 2001, 900, 800]);
+            assert_eq!(recency_episodes(&additions), [2000, 2001, 900, 800]);
+            let mut bounded = query(true, false);
+            bounded.section_limits = room(3);
+            let bounded = record(&mut rows, "10-bounded-additions", &memory, bounded).await;
+            assert_eq!(episodes(&bounded), [2000, 2001, 900]);
+            assert!(!recency_episodes(&bounded).contains(&800));
+            assert_eq!(
+                additions
+                    .pack
+                    .derived_memories
+                    .iter()
+                    .map(|row| row.memory.id.as_u128())
+                    .collect::<Vec<_>>(),
+                [3100]
+            );
+            assert!(assignment(&additions, 3100)
+                .cue_kinds
+                .contains(&CueKind::Recency));
+        }
+        memory.close().await.unwrap();
+        root.close().unwrap();
+    }
+    let (memory, root) = open().await;
+    let plan = episode(
+        episode(RememberWritePlan::new(), 900, 0, 0.0, false, false),
+        100,
+        0,
+        0.0,
+        false,
+        false,
+    );
+    commit(&memory, plan).await;
+    let mut fractional = query(false, false);
+    fractional.scene.time += Duration::seconds(1);
+    fractional.section_limits = room(1);
+    let later = record(
+        &mut rows,
+        "fractional-scene-time-order",
+        &memory,
+        fractional,
+    )
+    .await;
+    assert_eq!(episodes(&later), [100]);
+    let mut exact = query(false, false);
+    exact.section_limits = room(1);
+    let boundary = record(&mut rows, "fractional-future-cut", &memory, exact).await;
+    assert_eq!(episodes(&boundary), [900]);
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}

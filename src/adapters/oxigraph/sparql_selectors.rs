@@ -453,11 +453,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             episode = vocab::EPISODE,
             retention = vocab::RETENTION_STATE,
             reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
-            retention_filter = if policy.include_suppressed {
-                ""
-            } else {
-                "FILTER(?retention = \"active\" && ?episodeRetention = \"active\")"
-            },
+            retention_filter = occasion_retention_filter(policy),
         );
         self.query_solutions(&query_text)?
             .into_iter()
@@ -526,6 +522,47 @@ impl<'a> SparqlGraphSelectors<'a> {
             );
         }
         Ok(occasions)
+    }
+
+    pub(crate) fn select_recent_episodes(
+        &self,
+        reference_time: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let pattern = format!(
+            r#"
+            GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+            BIND(?episodeRetention AS ?retention)
+            BIND(xsd:dateTime(?sceneTime) AS ?time)
+            FILTER(?time <= {reference_time}^^xsd:dateTime)
+            {retention_filter}
+        "#,
+            object_type = vocab::OBJECT_TYPE,
+            object_id = vocab::OBJECT_ID,
+            scene_time = vocab::SCENE_TIME,
+            retention = vocab::RETENTION_STATE,
+            reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
+            retention_filter = occasion_retention_filter(policy),
+        );
+        // ponytail: the typed date needs a store-side scan/sort; add a chronological
+        // index only if measured recall latency warrants it. Payload reads stay bounded.
+        let episodes = self
+            .query_solutions(&format!(
+                r#"
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT DISTINCT ?episodeId ?time WHERE {{ {pattern} }}
+            ORDER BY DESC(?time) ?episodeId
+            LIMIT {limit}
+        "#,
+            ))?
+            .iter()
+            .map(|solution| memory_id_binding(solution, "episodeId"))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(episodes)
     }
 
     fn select_derived_memories_by_resource_predicate<'b>(
@@ -601,6 +638,14 @@ impl<'a> SparqlGraphSelectors<'a> {
         solutions
             .collect::<Result<Vec<_>, _>>()
             .map_err(oxigraph_sparql_error)
+    }
+}
+
+fn occasion_retention_filter(policy: GraphExpansionLifecyclePolicy) -> &'static str {
+    if policy.include_suppressed {
+        ""
+    } else {
+        "FILTER(?retention = \"active\" && ?episodeRetention = \"active\")"
     }
 }
 

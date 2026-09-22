@@ -328,13 +328,21 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
                 "{case}"
             );
         } else if case.starts_with("descriptions-only") {
-            let expected = if case.ends_with("floor-3") {
-                vec![id(1000), id(1001), id(1002)]
-            } else {
-                vec![id(1000)]
-            };
+            let expected = [1000, 1001, 1002, 1003, 2000, 2001, 2002, 2003].map(id);
             assert_eq!(row["episode_ids"], json!(expected), "{case}");
-            let omitted = 48 - expected.len();
+            for episode in expected {
+                let assignment = row["assignments"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|entry| entry["object"]["id"] == json!(episode))
+                    .unwrap();
+                assert!(assignment["cue_kinds"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("recency")));
+            }
+            let omitted = if case.ends_with("floor-3") { 45 } else { 47 };
             assert_eq!(
                 row["scene_cue_omitted_counts"],
                 json!({"participant": omitted, "place": omitted})
@@ -377,7 +385,7 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
         let result = memory.retrieve(context).await.unwrap();
         let trace = result.trace.unwrap();
         let expected = if floor < 2 {
-            vec![id(90)]
+            vec![id(90), id(20), id(30)]
         } else {
             vec![id(20), id(30), id(90)]
         };
@@ -493,7 +501,7 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .iter()
             .map(|e| e.id)
             .collect::<Vec<_>>(),
-        [id(10)]
+        [id(10), id(11)]
     );
     assert_eq!(
         result
@@ -503,6 +511,27 @@ async fn reminder_stops_at_the_thread_but_a_topic_route_keeps_full_standing() {
             .map(|t| t.id)
             .collect::<Vec<_>>(),
         [id(7)]
+    );
+    let history = result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .find(|row| row.object == MemoryObjectRef::new(ObjectType::Episode, id(11)))
+        .unwrap();
+    assert_eq!(history.cue_kinds, [CueKind::Recency].into_iter().collect());
+    let mut bounded = query(None, current.clone());
+    bounded.candidate_limits.max_graph_roots = 1;
+    let bounded = memory.retrieve(bounded).await.unwrap();
+    assert_eq!(
+        bounded
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>(),
+        [id(10)]
     );
     // In this small store every topic returns both episodes; membership alone
     // must not let the high reminder score travel through the thread.
