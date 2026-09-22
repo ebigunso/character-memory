@@ -47,47 +47,28 @@ where
         objects: &[MemoryObject],
         links: &[MemoryLink],
     ) -> StatsProjectionOutcome {
-        let endpoint_refs = stats_endpoint_refs(objects, links);
-        let attempted_object_ids = attempted_stats_object_ids(objects, &endpoint_refs);
-        let (stats_objects, mut causes) = if endpoint_refs.is_empty() {
-            (objects.to_vec(), Vec::new())
-        } else {
-            let endpoint_ids = endpoint_refs
-                .iter()
-                .map(|object_ref| object_ref.id)
-                .collect();
-            match self
-                .graph_store
-                .query_objects(&GraphObjectQuery::by_ids(endpoint_ids))
-                .await
-            {
-                Ok(endpoint_objects) => {
-                    let endpoint_objects = endpoint_objects
-                        .into_iter()
-                        .filter(|object| endpoint_refs.contains(&object.object_ref()))
-                        .collect::<Vec<_>>();
-                    let missing_endpoint_refs =
-                        missing_stats_endpoint_refs(&endpoint_refs, &endpoint_objects);
-                    let causes = if missing_endpoint_refs.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![StatsUpdateCause::EndpointHydration {
-                            error: GraphQueryError::Hydration {
-                                detail: format_missing_endpoint_refs(&missing_endpoint_refs),
-                            },
-                        }]
-                    };
-                    (
-                        stats_objects_with_endpoint_lifecycle(objects, endpoint_objects),
-                        causes,
-                    )
-                }
-                Err(error) => (
-                    objects.to_vec(),
-                    vec![StatsUpdateCause::EndpointHydration { error }],
-                ),
+        let mut endpoint_refs = stats_endpoint_refs(objects, links);
+        let mut stats_objects = objects.to_vec();
+        let mut causes = self
+            .hydrate_endpoints(&mut stats_objects, &endpoint_refs)
+            .await;
+        let mut episode_refs = Vec::new();
+        for object in &stats_objects {
+            if let MemoryObject::Observation(observation) = object {
+                push_stats_endpoint_ref(
+                    &mut episode_refs,
+                    &stats_objects,
+                    observation.episode_id,
+                    ObjectType::Episode,
+                );
             }
-        };
+        }
+        causes.extend(
+            self.hydrate_endpoints(&mut stats_objects, &episode_refs)
+                .await,
+        );
+        endpoint_refs.extend(episode_refs);
+        let attempted_object_ids = attempted_stats_object_ids(objects, &endpoint_refs);
 
         causes.extend(self.write_projection(&stats_objects, links).await);
 
@@ -114,6 +95,44 @@ where
         StatsProjectionOutcome {
             attempted_object_ids,
             causes,
+        }
+    }
+
+    async fn hydrate_endpoints(
+        &self,
+        objects: &mut Vec<MemoryObject>,
+        endpoint_refs: &[MemoryObjectRef],
+    ) -> Vec<StatsUpdateCause> {
+        if endpoint_refs.is_empty() {
+            return Vec::new();
+        }
+        let endpoint_ids = endpoint_refs
+            .iter()
+            .map(|object_ref| object_ref.id)
+            .collect();
+        match self
+            .graph_store
+            .query_objects(&GraphObjectQuery::by_ids(endpoint_ids))
+            .await
+        {
+            Ok(endpoint_objects) => {
+                let endpoint_objects = endpoint_objects
+                    .into_iter()
+                    .filter(|object| endpoint_refs.contains(&object.object_ref()))
+                    .collect::<Vec<_>>();
+                let missing = missing_stats_endpoint_refs(endpoint_refs, &endpoint_objects);
+                *objects = stats_objects_with_endpoint_lifecycle(objects, endpoint_objects);
+                if missing.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![StatsUpdateCause::EndpointHydration {
+                        error: GraphQueryError::Hydration {
+                            detail: format_missing_endpoint_refs(&missing),
+                        },
+                    }]
+                }
+            }
+            Err(error) => vec![StatsUpdateCause::EndpointHydration { error }],
         }
     }
 
@@ -320,6 +339,11 @@ mod tests {
 
         async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             self.health_result.clone()
+        }
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
         }
 
         async fn mark_unhealthy(

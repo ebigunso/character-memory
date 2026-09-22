@@ -3735,6 +3735,11 @@ mod tests {
         async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(RetrievalStatsHealth::default())
         }
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
 
         async fn mark_unhealthy(
             &self,
@@ -3842,6 +3847,11 @@ mod tests {
 
         async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             self.inner.health().await
+        }
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            self.inner.global_episode_counter().await
         }
 
         async fn mark_unhealthy(

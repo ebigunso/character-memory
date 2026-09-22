@@ -250,6 +250,8 @@ fn selected_cues(result: &RetrieveOutcome, object: MemoryObjectRef) -> &BTreeSet
 async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
+    // Keep this participant selective so the test observes cue union, not ubiquity.
+    write_episode(&memory, 6000, scene()).await;
     let id = MemoryId::from_u128(7000);
     let mut episode = EpisodeDraft::new("An astronomer arrived.");
     episode.id = Some(id);
@@ -295,6 +297,197 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
         .iter()
         .any(|root| { root.root == object && root.outcome == GraphExpansionOutcome::RootLimit }));
     memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
+    let (memory, _) = scene_memory().await;
+    create_notion(&memory, 100, None).await;
+    let participant = MemoryId::from_u128(100);
+    let episode = write_episode(&memory, 30_000, scene()).await;
+    write_episode(&memory, 31_000, scene()).await;
+    let mut extra = ObservationDraft::new(episode, "Another remark on the same occasion.");
+    extra.id = Some(MemoryId::from_u128(30_002));
+    extra.created_at = Some(scene().time);
+    extra.observed_at = Some(scene().time);
+    extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    memory
+        .commit(
+            RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
+                ObservationCandidate::new(extra, CandidateProvenance::caller("remark")),
+            )),
+            CommitOptions::default(),
+        )
+        .await
+        .unwrap();
+    for (index, observation) in [30_001, 30_002].into_iter().enumerate() {
+        let observation = MemoryId::from_u128(observation);
+        let mut link = if index == 0 {
+            MemoryLinkDraft::new(
+                ObjectType::Observation,
+                observation,
+                RelationType::Mentions,
+                ObjectType::Entity,
+                participant,
+            )
+        } else {
+            MemoryLinkDraft::new(
+                ObjectType::Entity,
+                participant,
+                RelationType::Mentions,
+                ObjectType::Observation,
+                observation,
+            )
+        };
+        link.id = Some(MemoryId::from_u128(32_000 + index as u128));
+        for _ in 0..2 {
+            memory.link(link.clone()).await.unwrap();
+        }
+    }
+    let mut context = RetrievalContext::default().with_trace();
+    context.scene.participants = vec![SceneParticipant {
+        key: Some(participant),
+        ..Default::default()
+    }];
+    let counts = |result: &RetrieveOutcome| {
+        let decision = result
+            .trace
+            .as_ref()
+            .unwrap()
+            .selectivity_decisions
+            .iter()
+            .find(|decision| {
+                decision.root.id == participant && decision.relation == RelationType::Mentions
+            })
+            .unwrap();
+        (decision.entity_count, decision.global_count)
+    };
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    assert_eq!(counts(&result), (Some(1), Some(2)));
+    assert_eq!(result.pack.salient_observations.len(), 2);
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::episode(episode),
+            "The occasion is forgotten",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        counts(&memory.retrieve(context.clone()).await.unwrap()),
+        (Some(0), Some(1))
+    );
+    context.lifecycle_policy.include_suppressed = true;
+    assert_eq!(
+        counts(&memory.retrieve(context).await.unwrap()),
+        (Some(1), Some(2))
+    );
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
+    let mut observed = Vec::new();
+    for caller_built in [false, true] {
+        // The application can regard either ordinary notion as its own identity.
+        for ubiquitous in [100, 101] {
+            let (memory, queries) = scene_memory().await;
+            for id in 100..106 {
+                create_notion(&memory, id, Some(&format!("Participant {id}"))).await;
+            }
+            let rare = 105;
+            for index in 0..24 {
+                let mut occasion = scene();
+                occasion.participants = [
+                    ubiquitous,
+                    102,
+                    103,
+                    104,
+                    if index >= 21 { rare } else { 201 - ubiquitous },
+                ]
+                .into_iter()
+                .map(|id| SceneParticipant {
+                    key: Some(MemoryId::from_u128(id)),
+                    ..Default::default()
+                })
+                .collect();
+                let id = 10_000 + index * 10;
+                if caller_built {
+                    let mut episode = EpisodeDraft::new("A group worked together.");
+                    episode.id = Some(MemoryId::from_u128(id));
+                    episode.created_at = Some(scene().time);
+                    episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+                    episode.scene = Some(occasion);
+                    memory
+                        .commit(
+                            RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
+                                EpisodeCandidate::new(
+                                    episode,
+                                    CandidateProvenance::caller("occasion"),
+                                ),
+                            )),
+                            CommitOptions::default(),
+                        )
+                        .await
+                        .unwrap();
+                } else {
+                    write_episode(&memory, id, occasion).await;
+                }
+            }
+            let mut present = scene();
+            present.participants = [ubiquitous, rare]
+                .into_iter()
+                .map(|id| SceneParticipant {
+                    key: Some(MemoryId::from_u128(id)),
+                    ..Default::default()
+                })
+                .collect();
+            let result = memory
+                .retrieve(RetrievalContext::default().with_scene(present).with_trace())
+                .await
+                .unwrap();
+            let trace = result.trace.as_ref().unwrap();
+            let relation = if caller_built {
+                RelationType::Involves
+            } else {
+                RelationType::Mentions
+            };
+            let retained = |id, relation| {
+                trace
+                    .fanout_utilization
+                    .iter()
+                    .find(|row| row.root.id == MemoryId::from_u128(id) && row.relation == relation)
+                    .unwrap()
+                    .retained_count
+            };
+            let counts = trace
+                .selectivity_decisions
+                .iter()
+                .find(|row| {
+                    row.root.id == MemoryId::from_u128(ubiquitous) && row.relation == relation
+                })
+                .and_then(|row| row.entity_count.zip(row.global_count));
+            observed.push((
+                caller_built,
+                ubiquitous,
+                retained(ubiquitous, relation),
+                retained(rare, relation),
+                retained(ubiquitous, RelationType::About),
+                result.pack.relevant_episodes.len() + result.pack.salient_observations.len(),
+                counts,
+            ));
+            assert!(queries.lock().unwrap().is_empty());
+            memory.close().await.unwrap();
+        }
+    }
+    let expected = [false, true]
+        .into_iter()
+        .flat_map(|caller_built| {
+            [100, 101]
+                .into_iter()
+                .map(move |ubiquitous| (caller_built, ubiquitous, 0, 3, 1, 3, Some((24, 24))))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(observed, expected);
 }
 
 #[tokio::test]
@@ -647,6 +840,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
     create_notion(&memory, 100, Some("Mira")).await;
     create_notion(&memory, 200, Some("Mira")).await;
     create_notion(&memory, 300, None).await;
+    // Reference resolution should cue an occasional participant.
+    write_episode(&memory, 6000, scene()).await;
     let mut past = scene();
     past.participants.push(keyed(100));
     past.setting.key = Some("private room".to_owned());

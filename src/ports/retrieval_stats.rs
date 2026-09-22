@@ -29,6 +29,10 @@ pub(crate) trait RetrievalStatsStore: Send + Sync {
         object_type: ObjectType,
     ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError>;
 
+    async fn global_episode_counter(
+        &self,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError>;
+
     async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError>;
 
     async fn mark_unhealthy(
@@ -115,12 +119,44 @@ fn retrieval_stats_edges_with_states(
     object_states: &[RetrievalStatsObjectState],
 ) -> Vec<RetrievalStatsEdge> {
     let object_state_lookup = object_state_lookup(object_states);
+    let observation_episodes = objects
+        .iter()
+        .filter_map(|object| match object {
+            MemoryObject::Observation(observation) => {
+                Some((observation.id, observation.episode_id))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
     let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
         append_intrinsic_edges(&mut edges, object, &object_state_lookup);
     }
     for link in links {
         append_link_edges(&mut edges, link, &object_state_lookup);
+        if link.relation == RelationType::Mentions {
+            let (entity_id, observation_id) = match (link.from_type, link.to_type) {
+                (ObjectType::Entity, ObjectType::Observation) => (link.from_id, link.to_id),
+                (ObjectType::Observation, ObjectType::Entity) => (link.to_id, link.from_id),
+                _ => continue,
+            };
+            if let Some(&episode_id) = observation_episodes.get(&observation_id) {
+                let (retention_state, is_current) =
+                    edge_lifecycle(episode_id, ObjectType::Episode, &object_state_lookup);
+                insert_edge(
+                    &mut edges,
+                    edge(
+                        entity_id,
+                        RelationType::Involves,
+                        episode_id,
+                        ObjectType::Episode,
+                        retention_state,
+                        is_current,
+                        link.created_at,
+                    ),
+                );
+            }
+        }
     }
     let mut edges = edges.into_values().collect::<Vec<_>>();
     edges.sort_by(|left, right| left.edge_key.cmp(&right.edge_key));
@@ -464,6 +500,7 @@ mod tests {
         in_memory, StoreFixture::in_memory();
         counts_edges_idempotently,
         counts_global_relation_object_pairs,
+        counts_all_episodes_once_in_their_lifecycle_scope,
         keeps_restrictive_lifecycle_on_repeated_edge,
         updates_lifecycle_counts_from_object_states,
         health_marker_survives_successful_writes,
@@ -473,10 +510,46 @@ mod tests {
         sqlite, StoreFixture::sqlite();
         counts_edges_idempotently,
         counts_global_relation_object_pairs,
+        counts_all_episodes_once_in_their_lifecycle_scope,
         keeps_restrictive_lifecycle_on_repeated_edge,
         updates_lifecycle_counts_from_object_states,
         health_marker_survives_successful_writes,
     );
+
+    async fn counts_all_episodes_once_in_their_lifecycle_scope(store: &dyn RetrievalStatsStore) {
+        let mut states = [RetentionState::Active, RetentionState::Suppressed]
+            .into_iter()
+            .enumerate()
+            .map(|(index, retention_state)| RetrievalStatsObjectState {
+                object_id: MemoryId::from_u128(index as u128 + 1),
+                object_type: ObjectType::Episode,
+                retention_state,
+                is_current: true,
+                observed_at: timestamp(),
+            })
+            .collect::<Vec<_>>();
+        for _ in 0..2 {
+            store.record_object_states(&states).await.unwrap();
+        }
+        assert_eq!(
+            store.global_episode_counter().await.unwrap(),
+            Some(RetrievalStatsCounter {
+                total_count: 2,
+                active_count: 1,
+                current_count: 1,
+            })
+        );
+        states[0].retention_state = RetentionState::Suppressed;
+        store.record_object_states(&states).await.unwrap();
+        assert_eq!(
+            store.global_episode_counter().await.unwrap(),
+            Some(RetrievalStatsCounter {
+                total_count: 2,
+                active_count: 0,
+                current_count: 0,
+            })
+        );
+    }
 
     async fn counts_edges_idempotently(store: &dyn RetrievalStatsStore) {
         let entity_id = id("550e8400-e29b-41d4-a716-446655460001");

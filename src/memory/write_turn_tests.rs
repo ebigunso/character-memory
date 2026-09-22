@@ -679,6 +679,11 @@ impl RetrievalStatsStore for GatedStats {
     async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
         self.store.health().await
     }
+    async fn global_episode_counter(
+        &self,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        self.store.global_episode_counter().await
+    }
     async fn mark_unhealthy(
         &self,
         cause: RetrievalStatsHealthCause,

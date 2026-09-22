@@ -1124,6 +1124,11 @@ mod tests {
         async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
             Ok(lock(&self.health).clone())
         }
+        async fn global_episode_counter(
+            &self,
+        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            Ok(None)
+        }
 
         async fn mark_unhealthy(
             &self,
