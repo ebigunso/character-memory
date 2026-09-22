@@ -249,6 +249,11 @@ pub struct MemoryScenes {
     pub memory: MemoryObjectRef,
     /// Empty means no recorded experience; unavailable sources are explicit entries.
     pub sources: Vec<SourceScene>,
+    /// Whole seconds since this interpreted memory's latest non-forgotten support
+    /// at or before the retrieval scene time. Observations use their own time, or
+    /// their parent scene time when absent. None means no such support, or a memory
+    /// other than an interpreted memory. This fact never changes recall or scores.
+    pub support_age_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

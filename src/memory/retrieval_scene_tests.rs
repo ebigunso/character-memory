@@ -1843,6 +1843,211 @@ fn beliefs_context() -> RetrievalContext {
 }
 
 #[tokio::test]
+async fn support_age_reports_experience_without_changing_recall() {
+    use chrono::{DateTime, Duration, Utc};
+    use serde_json::json;
+
+    let at = |text: &str| text.parse::<DateTime<Utc>>().unwrap();
+    let reference = at("2026-09-20T10:00:00Z");
+    let later = at("2026-10-20T10:00:00Z");
+    let old = at("2025-07-20T10:00:00Z");
+    let recent = reference - Duration::days(1);
+    let fallback = reference - Duration::days(3);
+    let current = reference - Duration::milliseconds(900);
+    let id = MemoryId::from_u128;
+    let (memory, queries) = scene_memory().await;
+    create_notion(&memory, 100, None).await;
+    let mut plan = RememberWritePlan::new();
+    for (n, time) in [
+        (5000, at("2025-06-20T10:00:00Z")),
+        (6000, reference - Duration::days(2)),
+        (7000, fallback),
+        (8000, reference - Duration::days(2)),
+        (9000, at("2026-12-01T10:00:00Z")),
+        (10000, reference - Duration::days(1)),
+    ] {
+        let mut episode = EpisodeDraft::new("An experience behind a belief.");
+        episode.id = Some(id(n));
+        episode.scene = Some(Scene::at(time.fixed_offset()));
+        episode.created_at = Some(later + Duration::days(n as i64));
+        episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            episode,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    for (n, parent, observed_at) in [
+        (5001, 5000, Some(old)),
+        (6001, 6000, Some(recent)),
+        (6002, 6000, Some(recent - Duration::hours(12))),
+        (7001, 7000, None),
+        (8001, 8000, Some(at("2026-12-02T10:00:00Z"))),
+        (10001, 10000, Some(current)),
+    ] {
+        let mut observation = ObservationDraft::new(id(parent), "Support for a belief.");
+        observation.id = Some(id(n));
+        observation.observed_at = observed_at;
+        observation.created_at = Some(later);
+        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            observation,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    for (n, episodes, observations) in [
+        (20000, vec![], vec![5001]),
+        (20001, vec![], vec![6001]),
+        (20002, vec![], vec![7001]),
+        (20003, vec![], vec![5001, 6001]),
+        (20004, vec![5000, 6000], vec![]),
+        (20005, vec![], vec![8001]),
+        (20006, vec![9000], vec![]),
+        (20007, vec![], vec![]),
+        (20008, vec![], vec![6001, 6002]),
+        (20009, vec![], vec![10001]),
+    ] {
+        let mut belief = DerivedMemoryDraft::new(DerivedType::Claim, format!("Belief {n}"));
+        belief.id = Some(id(n));
+        belief.entity_ids = vec![id(100)];
+        belief.given_by_application = episodes.is_empty() && observations.is_empty();
+        belief.derived_from_episode_ids = episodes.into_iter().map(id).collect();
+        belief.derived_from_observation_ids = observations.into_iter().map(id).collect();
+        belief.created_at = Some(later + Duration::days(n as i64));
+        belief.updated_at = belief.created_at;
+        belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+            belief,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    let mut rows = Vec::new();
+    for phase in 0..5 {
+        let targets = match phase {
+            1 => vec![LifecycleTargetRef::episode(id(6000))],
+            2 => vec![LifecycleTargetRef::observation(id(6001))],
+            3 => vec![
+                LifecycleTargetRef::episode(id(5000)),
+                LifecycleTargetRef::episode(id(7000)),
+            ],
+            _ => vec![],
+        };
+        for target in targets {
+            let mut draft = ForgetMemoryDraft::suppress(target, "Retain the supported belief.");
+            draft.cascade_policy.apply_to_derived_from_target = false;
+            memory.forget(draft).await.unwrap();
+        }
+        if phase == 4 {
+            let origin = SourceProvenanceReference {
+                episode_ids: vec![],
+                observation_ids: vec![id(10001)],
+                external_refs: vec![],
+            };
+            let mut replacement = ReplacementDerivedMemoryDraft::new(
+                DerivedType::Correction,
+                "This belief now rests on a different experience.",
+            );
+            replacement.id = Some(id(21000));
+            replacement.entity_ids = vec![id(100)];
+            replacement.derived_from_observation_ids = vec![id(10001)];
+            replacement.correction_origin_provenance = origin.clone();
+            let mut draft = CorrectMemoryDraft::new(
+                CorrectionTarget::derived_memory(id(20000)),
+                "Replace the old interpretation.",
+            )
+            .with_replacement(replacement);
+            draft.correction_origin = origin;
+            memory.correct(draft).await.unwrap();
+        }
+        for time in [reference, later] {
+            for include_suppressed in [false, true] {
+                let mut present = Scene::at(time.fixed_offset());
+                present.participants.push(keyed(100));
+                let mut context = RetrievalContext::default().with_scene(present);
+                context.candidate_limits.max_graph_roots = 1;
+                context.graph_limits.max_depth = 1;
+                context.graph_limits.max_fanout_per_node = 32;
+                context.graph_limits.timeout_ms = None;
+                context.graph_limits.allowed_relation_types = vec![RelationType::About];
+                context.graph_limits.allowed_object_types =
+                    vec![ObjectType::Entity, ObjectType::DerivedMemory];
+                context.section_limits.derived_memories = 32;
+                context.lifecycle_policy.include_suppressed = include_suppressed;
+                let result = memory.retrieve(context.clone()).await.unwrap();
+                assert!(result.trace.is_none());
+                assert!(result.pack.relevant_episodes.is_empty());
+                assert!(result.pack.salient_observations.is_empty());
+                assert_eq!(result.pack.derived_memories.len(), 10);
+                let traced = memory.retrieve(context.clone().with_trace()).await.unwrap();
+                assert_eq!(traced.pack, result.pack);
+                assert_eq!(traced.memory_scenes, result.memory_scenes);
+                let trace = traced.trace.as_ref().unwrap();
+                assert_eq!(
+                    trace
+                        .graph_expansions
+                        .iter()
+                        .filter(|root| root.outcome == GraphExpansionOutcome::Expanded)
+                        .map(|root| root.root.id)
+                        .collect::<Vec<_>>(),
+                    [id(100)]
+                );
+                let expected = [
+                    (
+                        if phase == 4 { 21000 } else { 20000 },
+                        Some(if phase == 4 { current } else { old }),
+                    ),
+                    (20001, (phase < 2).then_some(recent)),
+                    (20002, Some(fallback)),
+                    (20003, Some(if phase < 2 { recent } else { old })),
+                    (
+                        20004,
+                        match phase {
+                            0 => Some(reference - Duration::days(2)),
+                            1 | 2 => Some(at("2025-06-20T10:00:00Z")),
+                            _ => None,
+                        },
+                    ),
+                    (20005, None),
+                    (20006, None),
+                    (20007, None),
+                    (
+                        20008,
+                        Some(if phase < 2 {
+                            recent
+                        } else {
+                            recent - Duration::hours(12)
+                        }),
+                    ),
+                    (20009, Some(current)),
+                ]
+                .into_iter()
+                .map(|(n, support)| {
+                    (
+                        n.to_string(),
+                        support.map(|support| (time - support).num_seconds()),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+                for entry in &result.memory_scenes {
+                    assert_eq!(
+                        entry.support_age_seconds,
+                        expected[&entry.memory.id.as_u128().to_string()],
+                        "phase {phase}, reference {time}, include_suppressed {include_suppressed}, memory {:?}",
+                        entry.memory
+                    );
+                }
+                rows.push(json!({"phase": phase, "input": context, "outcome": result, "trace": trace, "expected_support_age_seconds": expected}));
+            }
+        }
+    }
+    assert!(queries.lock().unwrap().is_empty());
+    println!(
+        "SUPPORT_AGE_WITNESSES={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+}
+
+#[tokio::test]
 async fn result_reports_all_source_scenes_beside_recent_episodes_without_trace() {
     let (memory, _) = scene_memory().await;
     let first_scene = scene();

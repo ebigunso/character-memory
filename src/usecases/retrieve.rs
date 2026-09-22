@@ -531,7 +531,11 @@ where
         });
 
         let memory_scenes = self
-            .memory_scenes(&pack, context.lifecycle_policy.include_suppressed)
+            .memory_scenes(
+                &pack,
+                context.lifecycle_policy.include_suppressed,
+                context.scene.time.to_utc(),
+            )
             .await?;
         Ok(RetrieveOutcome {
             scene: context.scene,

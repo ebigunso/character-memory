@@ -6,6 +6,7 @@ use crate::api::types::{
 use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
 use crate::ports::graph_authority::GraphObjectQuery;
+use chrono::{DateTime, Utc};
 
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
@@ -351,6 +352,7 @@ where
         &self,
         pack: &ContinuityContextPack,
         include_suppressed: bool,
+        reference_time: DateTime<Utc>,
     ) -> Result<Vec<MemoryScenes>, CustomError> {
         let mut memories = Vec::new();
         let mut objects = HashMap::new();
@@ -436,6 +438,16 @@ where
         Ok(memories
             .into_iter()
             .map(|(memory, sources)| {
+                let support_age_seconds = if memory.object_type == ObjectType::DerivedMemory {
+                    sources
+                        .iter()
+                        .filter_map(|source| support_time(*source, &objects))
+                        .filter(|time| *time <= reference_time)
+                        .max()
+                        .map(|time| (reference_time - time).num_seconds())
+                } else {
+                    None
+                };
                 let mut seen = HashSet::new();
                 let mut sources = sources
                     .into_iter()
@@ -446,9 +458,38 @@ where
                     let source = source_scene_ref(scene);
                     (source.object_type.stable_rank(), source.id)
                 });
-                MemoryScenes { memory, sources }
+                MemoryScenes {
+                    memory,
+                    sources,
+                    support_age_seconds,
+                }
             })
             .collect())
+    }
+}
+
+fn support_time(
+    source: MemoryObjectRef,
+    objects: &HashMap<MemoryObjectRef, MemoryObject>,
+) -> Option<DateTime<Utc>> {
+    match objects.get(&source)? {
+        MemoryObject::Episode(episode) if episode.retention_state == RetentionState::Active => {
+            Some(episode.scene.time.to_utc())
+        }
+        MemoryObject::Observation(observation)
+            if observation.retention_state == RetentionState::Active =>
+        {
+            observation.observed_at.or_else(|| {
+                match objects.get(&MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    observation.episode_id,
+                ))? {
+                    MemoryObject::Episode(episode) => Some(episode.scene.time.to_utc()),
+                    _ => None,
+                }
+            })
+        }
+        _ => None,
     }
 }
 
