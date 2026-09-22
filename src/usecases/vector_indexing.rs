@@ -2,7 +2,6 @@ use crate::api::types::VectorIndexingFailure;
 use crate::domain::{MemoryObjectRef, ObjectType};
 use crate::errors::{CustomError, VectorIndexingCause};
 use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
-use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
@@ -12,36 +11,34 @@ pub(crate) struct VectorIndexingOutcome {
     pub(crate) failure: Option<VectorIndexingFailure>,
 }
 
-pub(crate) struct VectorIndexingService<'a, V, E>
+pub(crate) struct VectorIndexingService<'a, V>
 where
     V: VectorCandidateStore + ?Sized,
-    E: MemoryEmbedder + ?Sized,
 {
     vector_store: &'a V,
-    embedder: &'a E,
 }
 
-impl<'a, V, E> VectorIndexingService<'a, V, E>
+impl<'a, V> VectorIndexingService<'a, V>
 where
     V: VectorCandidateStore + ?Sized,
-    E: MemoryEmbedder + ?Sized,
 {
-    pub(crate) fn new(vector_store: &'a V, embedder: &'a E) -> Self {
-        Self {
-            vector_store,
-            embedder,
-        }
+    pub(crate) fn new(vector_store: &'a V) -> Self {
+        Self { vector_store }
     }
 
     pub(crate) async fn index<G: GraphAuthorityStore + ?Sized>(
         &self,
         graph_store: &G,
-        mut records: Vec<VectorRecord>,
+        records: Vec<VectorRecord>,
+        embeddings: Result<Vec<Vec<f32>>, CustomError>,
     ) -> Result<VectorIndexingOutcome, CustomError> {
+        // Keep original batch positions while filtering against graph state inside the turn.
+        let expected = records.len();
+        let mut records = records.into_iter().enumerate().collect::<Vec<_>>();
         let derived_ids = records
             .iter()
-            .filter(|record| record.object_type == ObjectType::DerivedMemory)
-            .map(|record| record.object_id)
+            .filter(|(_, record)| record.object_type == ObjectType::DerivedMemory)
+            .map(|(_, record)| record.object_id)
             .collect::<Vec<_>>();
         if !derived_ids.is_empty() {
             let superseded = match graph_store
@@ -53,7 +50,7 @@ where
                     return Ok(failed(
                         records
                             .iter()
-                            .map(|record| {
+                            .map(|(_, record)| {
                                 MemoryObjectRef::new(record.object_type, record.object_id)
                             })
                             .collect(),
@@ -61,7 +58,7 @@ where
                     ))
                 }
             };
-            records.retain(|record| {
+            records.retain(|(_, record)| {
                 record.object_type != ObjectType::DerivedMemory
                     || !superseded.contains(&record.object_id)
             });
@@ -75,13 +72,9 @@ where
 
         let objects = records
             .iter()
-            .map(|record| MemoryObjectRef::new(record.object_type, record.object_id))
+            .map(|(_, record)| MemoryObjectRef::new(record.object_type, record.object_id))
             .collect::<Vec<_>>();
-        let embedding_inputs = records
-            .iter()
-            .map(VectorRecord::embedding_input)
-            .collect::<Vec<_>>();
-        let embeddings = match self.embedder.embed_batch(&embedding_inputs).await {
+        let embeddings = match embeddings {
             Ok(embeddings) => embeddings,
             Err(CustomError::Embedding(error)) => {
                 return Ok(failed(objects, VectorIndexingCause::Embedding(error)));
@@ -89,8 +82,7 @@ where
             Err(error) => return Err(error),
         };
 
-        if embeddings.len() != records.len() {
-            let expected = records.len();
+        if embeddings.len() != expected {
             let actual = embeddings.len();
             return Ok(failed(
                 objects,
@@ -98,11 +90,11 @@ where
             ));
         }
 
-        if let Some(index) = embeddings
+        if let Some((_, record)) = records
             .iter()
-            .position(|embedding| embedding.iter().all(|value| *value == 0.0))
+            .find(|(index, _)| embeddings[*index].iter().all(|value| *value == 0.0))
         {
-            let object = objects[index];
+            let object = MemoryObjectRef::new(record.object_type, record.object_id);
             return Ok(failed(
                 objects,
                 VectorIndexingCause::ZeroNormEmbedding { object },
@@ -111,8 +103,7 @@ where
 
         let record_embeddings = records
             .iter()
-            .zip(embeddings.iter())
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
+            .map(|(index, record)| VectorRecordEmbedding::new(record, &embeddings[*index]))
             .collect::<Vec<_>>();
         match self
             .vector_store
@@ -169,6 +160,7 @@ mod tests {
 
     use crate::domain::MemoryId;
     use crate::models::vector::{zero_norm_record_fixture, EmbeddingInput, VectorCandidateSearch};
+    use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::vector_candidate::VectorCandidateRecall;
 
     struct FixedEmbedder(Vec<f32>);
@@ -223,10 +215,15 @@ mod tests {
         );
         let store = AdapterMustNotRun;
         let embedder = FixedEmbedder(embedding);
-        let service = VectorIndexingService::new(&store, &embedder);
+        let service = VectorIndexingService::new(&store);
+        let embeddings = embedder.embed_batch(&[record.embedding_input()]).await;
 
         let outcome = service
-            .index(&crate::test_support::in_memory_graph_store(), vec![record])
+            .index(
+                &crate::test_support::in_memory_graph_store(),
+                vec![record],
+                embeddings,
+            )
             .await
             .expect("typed outcome");
 

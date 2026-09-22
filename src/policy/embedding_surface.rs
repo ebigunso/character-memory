@@ -42,7 +42,7 @@ pub(crate) fn derived_memory_vector_record(memory: &DerivedMemory) -> VectorReco
         ObjectType::DerivedMemory,
         VectorSurface::DerivedText,
         memory.schema_version.clone(),
-        prefixed_text(derived_label(memory), &memory.text),
+        derived_embedding_text(memory.derived_type, &memory.text),
     )
 }
 
@@ -68,8 +68,15 @@ pub(crate) fn memory_object_vector_record(object: &MemoryObject) -> Option<Vecto
     }
 }
 
-fn derived_label(memory: &DerivedMemory) -> &'static str {
-    match memory.derived_type {
+pub(crate) fn derived_embedding_text(
+    derived_type: crate::domain::DerivedType,
+    text: &str,
+) -> String {
+    prefixed_text(derived_label(derived_type), text)
+}
+
+fn derived_label(derived_type: crate::domain::DerivedType) -> &'static str {
+    match derived_type {
         crate::domain::DerivedType::Reflection => "Reflection",
         crate::domain::DerivedType::UserPreference => "User preference",
         crate::domain::DerivedType::AssistantPreference => "Assistant preference",

@@ -75,6 +75,7 @@ impl CharacterMemory {
                 stats_store: Box::new(crate::adapters::stats::InMemoryRetrievalStatsStore::new()),
                 selectivity_policy: RetrievalSelectivityPolicy::default(),
             },
+            write_turn: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -93,6 +94,7 @@ impl CharacterMemory {
                 stats_store,
                 selectivity_policy,
             },
+            write_turn: tokio::sync::Mutex::new(()),
         }
     }
 }

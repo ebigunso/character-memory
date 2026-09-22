@@ -76,6 +76,8 @@ Applications with personal-data erasure obligations (for example, GDPR/CCPA dele
 
 ## Typical usage
 
+Writes through one `CharacterMemory` value apply one at a time, so use one value per store.
+
 A typical assistant loop looks like this:
 
 1. The user says something.
