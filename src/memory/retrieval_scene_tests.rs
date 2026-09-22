@@ -1658,6 +1658,11 @@ async fn description_search_scores_are_shared_and_precede_occasion_selection() {
     let identical = memory.retrieve(context.clone()).await.unwrap();
     let searches = &identical.trace.as_ref().unwrap().scene_cue_searches;
     assert_eq!(searches.len(), 2);
+    assert_eq!(
+        (searches[0].cue_kind, searches[1].cue_kind),
+        (crate::CueKind::Place, crate::CueKind::Participant)
+    );
+    assert!(searches.iter().all(|search| search.omitted_count == 0));
     assert_eq!(searches[0].references, [SceneReference::SettingWords]);
     assert_eq!(
         searches[1].references,
@@ -1695,6 +1700,10 @@ async fn description_search_scores_are_shared_and_precede_occasion_selection() {
         .scene_cue_searches
         .iter()
         .all(|search| (search.best_score.unwrap() - 1.0).abs() < 1e-6));
+    assert!(trace
+        .scene_cue_searches
+        .iter()
+        .all(|search| search.omitted_count == 1));
     let mut untraced_context = context.clone();
     untraced_context.include_trace = false;
     let untraced = memory.retrieve(untraced_context).await.unwrap();

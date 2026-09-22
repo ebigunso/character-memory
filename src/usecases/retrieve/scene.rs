@@ -9,15 +9,13 @@ use crate::ports::graph_authority::GraphObjectQuery;
 
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
-    pub kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
+    pub roots: Vec<CandidateRoot>,
     pub orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
     pub floor_admissions: Vec<CueFloorAdmission>,
-    pub topic_scores: HashMap<MemoryObjectRef, f32>,
-    pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
 }
 
@@ -131,7 +129,6 @@ where
         let mut all_candidates = Vec::new();
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
-        let mut scene_cue_omitted_counts = BTreeMap::new();
         let mut scene_cue_searches = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
@@ -181,28 +178,6 @@ where
                     recall.candidates.iter().cloned().collect::<Vec<_>>()
                 } else {
                     let pool = &recall.scene_pool;
-                    if context.include_trace {
-                        scene_cue_searches.push(SceneCueSearchTrace {
-                            references: references
-                                .iter()
-                                .map(|result| &result.reference)
-                                .chain(&descriptions)
-                                .filter(|reference| {
-                                    matches!(
-                                        (kind, reference),
-                                        (CueKind::Place, SceneReference::SettingWords)
-                                            | (
-                                                CueKind::Participant,
-                                                SceneReference::ParticipantName { .. }
-                                                    | SceneReference::ParticipantDescription { .. }
-                                            )
-                                    )
-                                })
-                                .cloned()
-                                .collect(),
-                            best_score: pool.first().map(|candidate| candidate.score),
-                        });
-                    }
                     let objects = pool
                         .iter()
                         .map(|candidate| {
@@ -238,7 +213,30 @@ where
                     }
                     .max(1);
                     eligible.truncate(limit);
-                    scene_cue_omitted_counts.insert(kind, count - eligible.len());
+                    if context.include_trace {
+                        scene_cue_searches.push(SceneCueSearchTrace {
+                            cue_kind: kind,
+                            references: references
+                                .iter()
+                                .map(|result| &result.reference)
+                                .chain(&descriptions)
+                                .filter(|reference| {
+                                    matches!(
+                                        (kind, reference),
+                                        (CueKind::Place, SceneReference::SettingWords)
+                                            | (
+                                                CueKind::Participant,
+                                                SceneReference::ParticipantName { .. }
+                                                    | SceneReference::ParticipantDescription { .. }
+                                            )
+                                    )
+                                })
+                                .cloned()
+                                .collect(),
+                            best_score: pool.first().map(|candidate| candidate.score),
+                            omitted_count: count - eligible.len(),
+                        });
+                    }
                     eligible
                 };
                 all_candidates.extend(candidates.iter().cloned());
@@ -295,13 +293,23 @@ where
                 (kind, order)
             })
             .collect();
-        let selection = select_with_cue_floors(
-            candidates.iter().map(|candidate| {
+        let roots = candidates
+            .iter()
+            .map(|candidate| {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                CandidateRoot::from_vector(
+                    candidate,
+                    kinds[&object].clone(),
+                    topic_scores.get(&object).copied(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let selection = select_with_cue_floors(
+            roots.iter().map(|root| {
                 (
-                    object,
-                    &kinds[&object],
-                    !kinds[&object].contains(&CueKind::Topic),
+                    MemoryObjectRef::new(root.object_type, root.object_id),
+                    &root.cue_kinds,
+                    root.reminder_only(),
                 )
             }),
             &orders,
@@ -310,10 +318,11 @@ where
             CueFloorStage::CandidateMerge,
         );
         let mut floor_admissions = Vec::new();
-        let selected = selection
-            .into_iter()
-            .map(|(index, cause)| {
-                let candidate = &candidates[index];
+        let mut selection = selection.into_iter().peekable();
+        let mut selected = Vec::new();
+        let mut selected_roots = Vec::new();
+        for (index, (candidate, root)) in candidates.into_iter().zip(roots).enumerate() {
+            if let Some((_, cause)) = selection.next_if(|(chosen, _)| *chosen == index) {
                 if let Some(cue_kind) = cause {
                     floor_admissions.push(CueFloorAdmission {
                         object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
@@ -321,20 +330,19 @@ where
                         cue_kind,
                     });
                 }
-                candidate.clone()
-            })
-            .collect::<Vec<_>>();
+                selected.push(candidate);
+                selected_roots.push(root);
+            }
+        }
         Ok(RecallCues {
-            topic_scores,
             candidates: CanonicalCandidates::new(selected),
-            kinds,
+            roots: selected_roots,
             orders,
             participants,
             references,
             dimension,
             completeness,
             floor_admissions,
-            scene_cue_omitted_counts,
             scene_cue_searches,
         })
     }

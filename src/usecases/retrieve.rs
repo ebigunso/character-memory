@@ -200,10 +200,9 @@ where
         }
         explicit_roots.extend(activity_roots);
         let root_selection = select_candidate_roots(
-            &vector_candidates,
-            &cues.kinds,
+            cues.roots,
             &explicit_roots,
-            (&cues.orders, &cues.topic_scores),
+            &cues.orders,
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
             (&state_scopes, &root_order, &scope_kinds),
@@ -408,7 +407,6 @@ where
             section_pressure,
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
-            scene_cue_omitted_counts: cues.scene_cue_omitted_counts,
             scene_cue_searches: cues.scene_cue_searches,
             vector_candidates: vector_candidates
                 .iter()
@@ -566,7 +564,7 @@ impl RetrieveAssembly {
             } else {
                 score * 0.75
             };
-            let reminder_only = candidate.full_standing_score.is_none();
+            let reminder_only = candidate.reminder_only();
             let candidate_score = candidate
                 .vector_score
                 .filter(|_| object_ref == candidate_ref);
@@ -1152,6 +1150,33 @@ struct CandidateRoot {
     full_standing_kinds: BTreeSet<CueKind>,
 }
 
+impl CandidateRoot {
+    fn from_vector(
+        candidate: &VectorCandidateMatch,
+        cue_kinds: BTreeSet<CueKind>,
+        topic_score: Option<f32>,
+    ) -> Self {
+        Self {
+            object_id: candidate.object_id,
+            object_type: candidate.object_type,
+            score: candidate.score,
+            source: GraphRootSource::Vector,
+            vector_score: Some(candidate.score),
+            full_standing_score: topic_score,
+            full_standing_kinds: cue_kinds
+                .iter()
+                .filter(|&&kind| kind == CueKind::Topic)
+                .copied()
+                .collect(),
+            cue_kinds,
+        }
+    }
+
+    fn reminder_only(&self) -> bool {
+        self.full_standing_score.is_none()
+    }
+}
+
 #[derive(Debug)]
 struct CandidateRootSelection {
     roots: Vec<CandidateRoot>,
@@ -1162,13 +1187,9 @@ struct CandidateRootSelection {
 }
 
 fn select_candidate_roots(
-    candidates: &[VectorCandidateMatch],
-    kinds: &HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
+    candidates: Vec<CandidateRoot>,
     explicit_roots: &[CandidateRoot],
-    (content_orders, topic_scores): (
-        &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
-        &HashMap<MemoryObjectRef, f32>,
-    ),
+    content_orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
     (scopes, root_order, scope_kinds): (
@@ -1186,17 +1207,19 @@ fn select_candidate_roots(
                 .push(MemoryObjectRef::new(root.object_type, root.object_id));
         }
     }
-    let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
+    let mut by_ref: HashMap<MemoryObjectRef, CandidateRoot> = HashMap::new();
     for candidate in candidates {
         let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
-        by_ref
-            .entry(object_ref)
-            .and_modify(|existing| {
-                if candidate.score.total_cmp(&existing.score).is_gt() {
-                    *existing = candidate;
+        match by_ref.entry(object_ref) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if candidate.score.total_cmp(&entry.get().score).is_gt() {
+                    entry.insert(candidate);
                 }
-            })
-            .or_insert(candidate);
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+        }
     }
     let mut content = by_ref.into_values().collect::<Vec<_>>();
     content.sort_by(|left, right| {
@@ -1213,38 +1236,7 @@ fn select_candidate_roots(
     let roots = explicit_roots
         .iter()
         .cloned()
-        .chain(content.into_iter().map(|candidate| {
-            CandidateRoot {
-                object_id: candidate.object_id,
-                object_type: candidate.object_type,
-                score: candidate.score,
-                source: GraphRootSource::Vector,
-                vector_score: Some(candidate.score),
-                full_standing_score: topic_scores
-                    .get(&MemoryObjectRef::new(
-                        candidate.object_type,
-                        candidate.object_id,
-                    ))
-                    .copied(),
-                full_standing_kinds: kinds
-                    .get(&MemoryObjectRef::new(
-                        candidate.object_type,
-                        candidate.object_id,
-                    ))
-                    .into_iter()
-                    .flatten()
-                    .filter(|&&kind| kind == CueKind::Topic)
-                    .copied()
-                    .collect(),
-                cue_kinds: kinds
-                    .get(&MemoryObjectRef::new(
-                        candidate.object_type,
-                        candidate.object_id,
-                    ))
-                    .cloned()
-                    .unwrap_or_default(),
-            }
-        }))
+        .chain(content)
         .collect::<Vec<_>>();
     let mut indices = HashMap::new();
     let mut merged: Vec<CandidateRoot> = Vec::new();
@@ -1320,7 +1312,7 @@ fn select_candidate_roots(
             (
                 MemoryObjectRef::new(root.object_type, root.object_id),
                 &root.cue_kinds,
-                root.full_standing_score.is_none(),
+                root.reminder_only(),
             )
         }),
         &orders,
@@ -1381,7 +1373,7 @@ fn graph_query_for_candidate(
     });
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
-    query.reminder_only = candidate.full_standing_score.is_none();
+    query.reminder_only = candidate.reminder_only();
     query.participant_reference_time = context.scene.time;
     query
 }
@@ -1736,10 +1728,12 @@ mod tests {
         let high = vector_candidate(MemoryId::from_u128(3), ObjectType::Episode, 0.9);
 
         let selected = select_candidate_roots(
-            &[middle.clone(), low, high.clone()],
-            &HashMap::new(),
+            [middle.clone(), low, high.clone()]
+                .iter()
+                .map(|candidate| CandidateRoot::from_vector(candidate, BTreeSet::new(), None))
+                .collect(),
             &[],
-            (&BTreeMap::new(), &HashMap::new()),
+            &BTreeMap::new(),
             2,
             RetrievalCueFloors::default(),
             (&state::StateScopes::new(), &HashMap::new(), &[]),
