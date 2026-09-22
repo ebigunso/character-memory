@@ -41,6 +41,7 @@ last_updated: "2026-09-22"
 - Every task that changes what comes to mind, its order or its standing carries a measurement validation item owned by the evaluation side: run at the task's tip before its pull request opens, before and after on the same instrument and the same inputs, with identifiers ordered against time, run twice. Docs, trace fields and cleanups are exempt only when the task says so.
 - The plan validator has no measurement kind and no evaluation-side owner, so the item is carried as `kind: command`, `owner: orchestrator`, with `detail` naming the evaluation worker who runs it, the family, and the falsifying number; the orchestrator dispatches it and is accountable for its evidence.
 - The before and after numbers go into the worker report and into the plan's Decision Log; a plan is not complete until its after-numbers exist.
+- Numbers are never relayed bare: every after-numbers report carries a paragraph on what the result means for the character against the behaviors the philosophy illustrates and an explicit verdict, direction confirmed or direction questioned; a result that contradicts the intended behavior reopens the design, not the acceptance line (decider instruction 2026-09-22).
 
 ## Design-Consult Threshold (coordination/advice separation)
 
