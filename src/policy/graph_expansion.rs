@@ -1101,6 +1101,15 @@ pub(crate) fn is_participant_pair(relation: RelationType, object_type: ObjectTyp
     )
 }
 
+pub(crate) fn participant_occasion_budget(query: &GraphExpansionQuery) -> Option<usize> {
+    query
+        .fanout_overrides
+        .iter()
+        .filter(|entry| is_participant_pair(entry.relation, entry.object_type))
+        .map(|entry| entry.max_fanout.min(query.max_fanout_per_node))
+        .max()
+}
+
 #[derive(Default)]
 struct ParticipantExclusions {
     // The excluded route's type can differ from its suppressed parent object's type.
@@ -1136,13 +1145,7 @@ fn limit_participant_occasions<T: Copy>(
     if !root_fanout_mode.applies_selectivity() || occasions.is_empty() {
         return exclusions;
     }
-    let Some(budget) = query
-        .fanout_overrides
-        .iter()
-        .filter(|entry| is_participant_pair(entry.relation, entry.object_type))
-        .map(|entry| entry.max_fanout)
-        .max()
-    else {
+    let Some(budget) = participant_occasion_budget(query) else {
         return exclusions;
     };
     let is_participant = |item: &T| {
@@ -1252,6 +1255,53 @@ mod tests {
     use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 
     use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
+
+    #[test]
+    fn participant_occasion_budget_clamps_across_route_types() {
+        let episode = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
+        let observation = MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(2));
+        let query = GraphExpansionQuery::new(MemoryId::from_u128(3), ObjectType::Entity, 1, 10)
+            .with_max_fanout_per_node(1)
+            .with_fanout_overrides(vec![
+                GraphExpansionFanoutOverride {
+                    relation: RelationType::Involves,
+                    object_type: ObjectType::Episode,
+                    max_fanout: 2,
+                },
+                GraphExpansionFanoutOverride {
+                    relation: RelationType::Mentions,
+                    object_type: ObjectType::Observation,
+                    max_fanout: 2,
+                },
+            ]);
+        let time = representative_fixtures().episode.scene.time.to_utc();
+        let occasions = [episode, observation]
+            .into_iter()
+            .map(|object| {
+                (
+                    object,
+                    ParticipantOccasion {
+                        episode_id: object.id,
+                        time: time + chrono::Duration::minutes(object.id.as_u128() as i64),
+                        retention_state: RetentionState::Active,
+                        episode_retention_state: RetentionState::Active,
+                    },
+                )
+            })
+            .collect();
+        let mut items = vec![
+            (RelationType::Involves, episode),
+            (RelationType::Mentions, observation),
+        ];
+        limit_participant_occasions(
+            &query,
+            &mut items,
+            RootFanoutMode::SelectivityOverrides,
+            &occasions,
+            |item| *item,
+        );
+        assert_eq!(items, vec![(RelationType::Mentions, observation)]);
+    }
 
     #[test]
     fn hub_retention_limit_keeps_large_window_only_for_root_selectivity_overrides() {

@@ -607,19 +607,8 @@ impl<'a> SparqlGraphSelectors<'a> {
         neighbors: &[MemoryObjectRef],
         query: &crate::ports::graph_authority::GraphExpansionQuery,
     ) -> Result<ParticipantOccasions, CustomError> {
-        let budget = query
-            .fanout_overrides
-            .iter()
-            .filter(|entry| {
-                crate::policy::graph_expansion::is_participant_pair(
-                    entry.relation,
-                    entry.object_type,
-                )
-            })
-            .map(|entry| entry.max_fanout)
-            .max()
-            .unwrap_or(0)
-            .min(query.max_fanout_per_node);
+        let budget =
+            crate::policy::graph_expansion::participant_occasion_budget(query).unwrap_or(0);
         if neighbors.is_empty() || budget == 0 {
             return Ok(ParticipantOccasions::new());
         }
