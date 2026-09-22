@@ -409,6 +409,7 @@ where
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_omitted_counts: cues.scene_cue_omitted_counts,
+            scene_cue_searches: cues.scene_cue_searches,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()

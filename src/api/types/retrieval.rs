@@ -520,6 +520,7 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     /// Recallable scene matches left out by each description search's occasion limit.
     /// Participant words share one search and therefore one count.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -538,6 +539,7 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
+            scene_cue_searches: Vec::new(),
             scene_cue_omitted_counts: BTreeMap::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
@@ -549,6 +551,16 @@ impl RetrievalTrace {
             section_assignments: Vec::new(),
         }
     }
+}
+
+/// One setting search or one shared search of all participants' names and descriptions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SceneCueSearchTrace {
+    /// Scene references sharing this search; the score is not per person or reference.
+    pub references: Vec<SceneReference>,
+    /// Best fetched scene-surface score, before occasion selection and graph eligibility.
+    /// `None` means the search returned no scene-surface matches.
+    pub best_score: Option<f32>,
 }
 
 impl Default for RetrievalTrace {

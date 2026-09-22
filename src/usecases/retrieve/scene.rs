@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::types::{
-    LastInteraction, MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult,
-    SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
+    LastInteraction, MemoryScenes, SceneCueSearchTrace, SceneReference, SceneReferenceResolution,
+    SceneReferenceResult, SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
 };
 use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
@@ -18,6 +18,7 @@ pub(super) struct RecallCues {
     pub floor_admissions: Vec<CueFloorAdmission>,
     pub topic_scores: HashMap<MemoryObjectRef, f32>,
     pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
+    pub scene_cue_searches: Vec<SceneCueSearchTrace>,
 }
 
 impl<G, V, E> RetrievePipeline<'_, G, V, E>
@@ -131,6 +132,7 @@ where
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
         let mut scene_cue_omitted_counts = BTreeMap::new();
+        let mut scene_cue_searches = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| {
@@ -179,6 +181,28 @@ where
                     recall.candidates.iter().cloned().collect::<Vec<_>>()
                 } else {
                     let pool = &recall.scene_pool;
+                    if context.include_trace {
+                        scene_cue_searches.push(SceneCueSearchTrace {
+                            references: references
+                                .iter()
+                                .map(|result| &result.reference)
+                                .chain(&descriptions)
+                                .filter(|reference| {
+                                    matches!(
+                                        (kind, reference),
+                                        (CueKind::Place, SceneReference::SettingWords)
+                                            | (
+                                                CueKind::Participant,
+                                                SceneReference::ParticipantName { .. }
+                                                    | SceneReference::ParticipantDescription { .. }
+                                            )
+                                    )
+                                })
+                                .cloned()
+                                .collect(),
+                            best_score: pool.first().map(|candidate| candidate.score),
+                        });
+                    }
                     let objects = pool
                         .iter()
                         .map(|candidate| {
@@ -311,6 +335,7 @@ where
             completeness,
             floor_admissions,
             scene_cue_omitted_counts,
+            scene_cue_searches,
         })
     }
 

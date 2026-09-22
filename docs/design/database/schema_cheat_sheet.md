@@ -34,7 +34,9 @@ These are the five emitted payload fields. Both adapters index `object_id`, `obj
 | `entity` | — | Graph notion identity | 0 |
 | `memory_link` | — | Graph relationship | 0 |
 
-The `query` surface represents search input. It is not emitted for a stored memory object. A topic searches content surfaces; scene words search their respective episode surfaces. Exact names also resolve through graph assertions.
+The `query` surface represents search input. It is not emitted for a stored memory object. A topic searches content surfaces; scene words search their respective episode surfaces and are not part of the summary text. Exact names also resolve through graph assertions.
+
+Descriptions contribute their most recent recallable occasions from the fetched matches, as many as the kind's floor and at least one; the rest of their matches contribute nothing. Trace-only `scene_cue_searches` lists a best score and the references sharing each search, once for the setting and once for all participant words; no returned match means `null`. `scene_cue_omitted_counts` records matches excluded by the occasion limit. These are retrieval diagnostics, not stored vector payload fields. See [description recall and trace](vector_payload_design.md#description-recall-and-trace) for score, admission and identity boundaries.
 
 ## Graph Resources
 
