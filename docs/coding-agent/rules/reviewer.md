@@ -2,7 +2,7 @@
 rule_schema_version: 2
 suite_id: "rules-cm-20260719"
 rule_file: "reviewer"
-last_updated: "2026-07-23"
+last_updated: "2026-09-22"
 ---
 
 # Reviewer Repository Rules
@@ -25,6 +25,8 @@ last_updated: "2026-07-23"
 | Retrieval or entity-policy changes | Entity-neutrality check (no name/role special-casing) | roadmap invariant 2.7 |
 | Live integration evidence | Endpoint + pass/skip census; no silent skips | worker.md skip-gating notes |
 | Pruning or closed-contract changes | Touched-file suppression census; bidirectional totality evidence for each claimed single source; empty/non-empty parity tests for every adapter implementing the port | lesson 2026-07-21 (Task_3 pruning wave) |
+| Plan review (any plan whose tasks change what comes to mind, its order or its standing) | The `Design` section names the instrument and the falsifying number, and every such task carries the measurement item; a plan that cannot say what would falsify it is a finding | orchestrator.md Measurement Of Behavior Changes (decider ruling 2026-09-22) |
+| Implementation review of a task with a measurement item | Before and after numbers on the same instrument and inputs are present in the worker report; a report without them is not done | orchestrator.md Measurement Of Behavior Changes (decider ruling 2026-09-22) |
 
 ## Review Heuristics
 
