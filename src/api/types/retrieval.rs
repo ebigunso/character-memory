@@ -628,6 +628,8 @@ pub enum SelectivityCountScope {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectivityDecision {
+    /// About fanout is not reduced when the scene explicitly names the subject.
+    SkippedSceneNamedRoot,
     HighSelectivity,
     LowSelectivitySupported,
     LowSelectivityRejected,

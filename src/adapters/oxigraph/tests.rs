@@ -972,6 +972,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn named_subject_state_intersects_links_before_applying_the_cap() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut unlinked = fixtures.user_preference.clone();
+        unlinked.entity_ids = vec![fixtures.hub_entity.id];
+        unlinked.salience_score = 1.0;
+        let mut linked = unlinked.clone();
+        linked.id = MemoryId::from_u128(7001);
+        linked.salience_score = 0.1;
+        let mut about = fixtures.soft_thread_link.clone();
+        about.from_id = linked.id;
+        about.from_type = ObjectType::DerivedMemory;
+        about.to_id = fixtures.hub_entity.id;
+        about.to_type = ObjectType::Entity;
+        about.relation = RelationType::About;
+        let objects = vec![
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::DerivedMemory(unlinked),
+            MemoryObject::DerivedMemory(linked.clone()),
+        ];
+        store.upsert_objects(&objects).await.unwrap();
+        store
+            .upsert_links(std::slice::from_ref(&about))
+            .await
+            .unwrap();
+        let mut query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+            .with_max_fanout_per_node(1);
+        query.current_subject_state = true;
+        let expansion = store.expand_bounded(&query).await.unwrap();
+        assert!(expansion
+            .objects
+            .contains(&MemoryObject::DerivedMemory(linked)));
+        let policy_expansion = crate::policy::graph_expansion::bounded_expansion(
+            &query,
+            objects,
+            [about],
+            &crate::policy::graph_expansion::ParticipantOccasions::new(),
+        )
+        .unwrap();
+        assert_eq!(expansion.objects, policy_expansion.objects);
+    }
+
+    #[tokio::test]
     async fn oxigraph_expansion_uses_targeted_supersession_evidence_outside_frontier() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

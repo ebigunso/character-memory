@@ -1,5 +1,6 @@
 mod activity;
 mod scene;
+mod state;
 
 // Continuity retrieval pipeline used by the public facade and internal tests.
 // Some helper APIs are intentionally retained for retrieval policy validation.
@@ -128,6 +129,7 @@ where
             }
         }
         let mut assembly = RetrieveAssembly::new(trace_mode);
+        let mut state_scopes = state::StateScopes::new();
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
@@ -163,6 +165,7 @@ where
                     stats_context,
                     context.lifecycle_policy,
                     trace_mode,
+                    candidate.source == GraphRootSource::Participant,
                 )
                 .await?
             } else {
@@ -190,6 +193,19 @@ where
                         if context.graph_limits.failure_mode == GraphFailureMode::FailClosed {
                             return Err(bounded_failure_error(failure));
                         }
+                    }
+                    if candidate.source == GraphRootSource::Participant {
+                        let scope = cues
+                            .participants
+                            .iter()
+                            .position(|id| *id == candidate.object_id)
+                            .expect("participant roots follow resolved scene notions");
+                        state::record_subject_state(
+                            &mut state_scopes,
+                            scope,
+                            candidate.object_id,
+                            &expansion,
+                        );
                     }
                     let explicit_kind = match candidate.source {
                         GraphRootSource::Participant => Some(CueKind::Participant),
@@ -246,6 +262,7 @@ where
         let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
+            &state_scopes,
             &section_orders,
             context.section_limits,
             context.cue_floors,
@@ -686,7 +703,8 @@ fn select_with_cue_floors<'a>(
 }
 
 fn build_pack(
-    ranked_objects: Vec<RankedObject>,
+    mut ranked_objects: Vec<RankedObject>,
+    state_scopes: &state::StateScopes,
     orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
@@ -697,15 +715,29 @@ fn build_pack(
     let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
+        state::order_section_state(&mut ranked_objects, section, state_scopes);
         let candidates = ranked_objects
             .iter()
             .filter(|ranked| section_for_object(&ranked.object) == Some(section))
             .collect::<Vec<_>>();
+        let mut orders = orders.clone();
+        // A named route takes its state scope rounds before other expansion results.
+        let state_order = candidates
+            .iter()
+            .map(|ranked| ranked.object.object_ref())
+            .filter(|object| state_scopes.contains_key(object))
+            .collect::<Vec<_>>();
+        if !state_order.is_empty() {
+            orders
+                .entry(CueKind::Participant)
+                .or_default()
+                .splice(..0, state_order);
+        }
         for (index, cause) in select_with_cue_floors(
             candidates
                 .iter()
                 .map(|ranked| (ranked.object.object_ref(), &ranked.cue_kinds)),
-            orders,
+            &orders,
             section_limit(section, limits),
             floors,
         ) {
@@ -1079,7 +1111,7 @@ fn graph_query_for_candidate(
     context: &RetrievalContext,
     fanout_overrides: Vec<crate::ports::graph_authority::GraphExpansionFanoutOverride>,
 ) -> GraphExpansionQuery {
-    GraphExpansionQuery::new(
+    let mut query = GraphExpansionQuery::new(
         candidate.object_id,
         candidate.object_type,
         context.graph_limits.max_depth,
@@ -1097,7 +1129,10 @@ fn graph_query_for_candidate(
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,
-    })
+    });
+    query.current_subject_state = candidate.object_type == ObjectType::Entity
+        && candidate.source == GraphRootSource::Participant;
+    query
 }
 
 fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &SelectivityTelemetry) {
@@ -1697,6 +1732,7 @@ mod tests {
             &stats_context,
             crate::api::types::RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();
@@ -1787,6 +1823,7 @@ mod tests {
             &stats_context,
             crate::api::types::RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
+            false,
         )
         .await
         .unwrap();

@@ -405,6 +405,35 @@ fn bounded_expansion_plan<'a>(
             )
         })
         .collect::<std::collections::HashMap<_, _>>();
+    let mut state_memories = objects
+        .iter()
+        .filter_map(|object| match object {
+            MemoryObject::DerivedMemory(memory)
+                if query.current_subject_state
+                    && memory.entity_ids.contains(&query.root_id)
+                    && (query.lifecycle_policy.include_superseded
+                        || !superseded.contains_key(&memory.id))
+                    && (query.lifecycle_policy.include_suppressed
+                        || memory.retention_state != RetentionState::Suppressed) =>
+            {
+                Some(memory)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    state_memories.sort_by(|left, right| {
+        superseded
+            .contains_key(&left.id)
+            .cmp(&superseded.contains_key(&right.id))
+            .then_with(|| right.salience_score.total_cmp(&left.salience_score))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let state_ranks = state_memories
+        .iter()
+        .enumerate()
+        .map(|(rank, memory)| (memory.id, rank))
+        .collect::<HashMap<_, _>>();
     let mut visited = HashSet::new();
     let mut expanded_nodes = HashSet::new();
     let mut selection_order = Vec::new();
@@ -463,6 +492,21 @@ fn bounded_expansion_plan<'a>(
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
+        if depth == 0 && query.current_subject_state {
+            for (link, neighbor) in &incident_links {
+                if link.relation == RelationType::About {
+                    if let Some(reason) = object_lifecycle.get(neighbor).copied().flatten() {
+                        push_filtered_node(&mut filtered_nodes, *neighbor, reason, &superseded);
+                    }
+                }
+            }
+            incident_links =
+                order_current_subject_links(incident_links, &state_ranks, |(link, neighbor)| {
+                    (link.relation == RelationType::About
+                        && neighbor.object_type == ObjectType::DerivedMemory)
+                        .then_some(neighbor.id)
+                });
+        }
 
         let root_fanout_mode = RootFanoutMode::for_node(
             depth == 0
@@ -564,6 +608,32 @@ fn bounded_expansion_plan<'a>(
         fanout_utilization,
         bounded_failure,
     })
+}
+
+// Replace only About-neighbour positions; every other relation retains its order.
+// Missing ranks are ineligible memories and cannot consume the state bucket.
+pub(crate) fn order_current_subject_links<T: Copy>(
+    links: Vec<T>,
+    ranks: &HashMap<MemoryId, usize>,
+    state_id: impl Fn(&T) -> Option<MemoryId>,
+) -> Vec<T> {
+    let mut state_links = links
+        .iter()
+        .copied()
+        .filter_map(|link| state_id(&link).and_then(|id| ranks.get(&id).map(|rank| (*rank, link))))
+        .collect::<Vec<_>>();
+    state_links.sort_by_key(|(rank, _)| *rank);
+    let mut state_links = state_links.into_iter().map(|(_, link)| link);
+    links
+        .into_iter()
+        .filter_map(|link| {
+            if state_id(&link).is_some() {
+                state_links.next()
+            } else {
+                Some(link)
+            }
+        })
+        .collect()
 }
 
 fn apply_fanout_limits<'a>(
