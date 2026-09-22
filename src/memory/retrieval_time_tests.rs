@@ -634,3 +634,187 @@ async fn recency_public_facade_witnesses() {
     root.close().unwrap();
     println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
 }
+
+#[tokio::test]
+async fn recency_stops_at_interpreted_memory_sources() {
+    let mut rows = Vec::new();
+    let mut exclusions = Vec::new();
+    for topic in [false, true] {
+        let (memory, temp) = open().await;
+        let mut plan = episode(
+            episode(RememberWritePlan::new(), 900, 0, 1.0, false, topic),
+            700,
+            40,
+            0.0,
+            false,
+            false,
+        );
+        let mut old = ObservationDraft::new(
+            id(700),
+            "old violet steam, unrelated to the latest occasion",
+        );
+        old.id = Some(id(400));
+        old.created_at = Some(time() - Duration::days(40));
+        old.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            old,
+            provenance(),
+        )));
+        plan = link(
+            plan,
+            ObjectType::Observation,
+            400,
+            ObjectType::Episode,
+            700,
+            RelationType::ObservedIn,
+        );
+        let mut claim = DerivedMemoryDraft::new(
+            DerivedType::Claim,
+            "An interpretation with old and new sources",
+        );
+        claim.id = Some(id(300));
+        claim.created_at = Some(time());
+        claim.updated_at = Some(time());
+        claim.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        claim.derived_from_episode_ids = vec![id(900)];
+        claim.derived_from_observation_ids = vec![id(400)];
+        plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+            claim,
+            provenance(),
+        )));
+        plan = link(
+            plan,
+            ObjectType::DerivedMemory,
+            300,
+            ObjectType::Episode,
+            900,
+            RelationType::DerivedFrom,
+        );
+        plan = link(
+            plan,
+            ObjectType::DerivedMemory,
+            300,
+            ObjectType::Observation,
+            400,
+            RelationType::DerivedFrom,
+        );
+        commit(&memory, plan).await;
+        let mut context = query(topic, false);
+        context.section_limits = room(1);
+        context.candidate_limits.max_graph_roots = 1;
+        let result = record(
+            &mut rows,
+            if topic { "topic-overlap" } else { "time-only" },
+            &memory,
+            context.clone(),
+        )
+        .await;
+        assert_eq!(episodes(&result), [900]);
+        assert_eq!(roots(&result), [900]);
+        assert_eq!(result.pack.derived_memories[0].memory.id, id(300));
+        exclusions.push(if topic {
+            result
+                .pack
+                .salient_observations
+                .iter()
+                .any(|row| row.id == id(400))
+                && assignment(&result, 400).cue_kinds
+                    == std::collections::BTreeSet::from([CueKind::Topic])
+        } else {
+            result.pack.salient_observations.is_empty()
+                && !result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .section_assignments
+                    .iter()
+                    .any(|row| row.object.id == id(400))
+        });
+        context.include_trace = false;
+        assert_eq!(result.pack, memory.retrieve(context).await.unwrap().pack);
+
+        // The same boundary still admits this occasion's own observation and
+        // the interpretation resting on that observation.
+        let mut own = ObservationDraft::new(id(900), "what happened this evening");
+        own.id = Some(id(410));
+        own.created_at = Some(time());
+        own.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        let mut own_claim = DerivedMemoryDraft::new(DerivedType::Claim, "this evening's meaning");
+        own_claim.id = Some(id(310));
+        own_claim.created_at = Some(time());
+        own_claim.updated_at = Some(time());
+        own_claim.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        own_claim.derived_from_observation_ids = vec![id(410)];
+        let plan = RememberWritePlan::new()
+            .with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+                own,
+                provenance(),
+            )))
+            .with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+                own_claim,
+                provenance(),
+            )));
+        let plan = link(
+            link(
+                plan,
+                ObjectType::Observation,
+                410,
+                ObjectType::Episode,
+                900,
+                RelationType::ObservedIn,
+            ),
+            ObjectType::DerivedMemory,
+            310,
+            ObjectType::Observation,
+            410,
+            RelationType::DerivedFrom,
+        );
+        commit(&memory, plan).await;
+        let mut context = query(topic, false);
+        context.section_limits = room(2);
+        context.candidate_limits.max_graph_roots = 1;
+        let own = record(
+            &mut rows,
+            if topic {
+                "topic-own-sources"
+            } else {
+                "time-own-sources"
+            },
+            &memory,
+            context.clone(),
+        )
+        .await;
+        assert_eq!(roots(&own), [900]);
+        assert!(own
+            .pack
+            .salient_observations
+            .iter()
+            .any(|row| row.id == id(410)));
+        assert!(own
+            .pack
+            .derived_memories
+            .iter()
+            .any(|row| row.memory.id == id(310)));
+        for n in [300, 310, 410] {
+            assert!(assignment(&own, n).cue_kinds.contains(&CueKind::Recency));
+        }
+        if topic {
+            assert_eq!(
+                assignment(&own, 400).cue_kinds,
+                std::collections::BTreeSet::from([CueKind::Topic])
+            );
+        } else {
+            assert_eq!(own.pack.salient_observations.len(), 1);
+        }
+        context.include_trace = false;
+        assert_eq!(own.pack, memory.retrieve(context).await.unwrap().pack);
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!("RECENCY_COSOURCE={}", serde_json::to_string(&rows).unwrap());
+    assert_eq!(
+        exclusions,
+        [true, true],
+        "time-only exclusion and Topic-only provenance"
+    );
+}

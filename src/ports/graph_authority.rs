@@ -202,9 +202,11 @@ impl GraphExpansionQuery {
         }
     }
 
-    // A notion or thread reached only by a reminder is visible, but is a leaf.
+    // Reminder notions/threads are leaves; a single occasion also stops at
+    // interpreted work instead of following its other sources.
     pub(crate) fn may_continue_from(&self, kind: ObjectType) -> bool {
-        !self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread)
+        (!self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread))
+            && (!self.single_occasion || kind != ObjectType::DerivedMemory)
     }
 
     pub(crate) fn allows_object(&self, object: MemoryObjectRef) -> bool {
