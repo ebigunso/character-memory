@@ -84,7 +84,7 @@ where
                         include_suppressed: context.lifecycle_policy.include_suppressed,
                         include_superseded: context.lifecycle_policy.include_superseded,
                     });
-                query.current_state = true;
+                query.current_state_limit = Some(context.candidate_limits.max_graph_roots);
                 let (mut memories, omitted) = self
                     .graph_store
                     .query_derived_memories_by_thread(&query)

@@ -3632,8 +3632,9 @@ mod tests {
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
+            limit: usize,
         ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            self.store.query_scope_state(key, policy).await
+            self.store.query_scope_state(key, policy, limit).await
         }
 
         async fn expand_bounded(

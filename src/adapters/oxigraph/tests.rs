@@ -1216,6 +1216,297 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retrieval_selectors_bound_state_and_occasion_prefixes() {
+        use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS};
+        use crate::domain::ScopeKey;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let key = ScopeKey::Setting("home".to_owned());
+        let mut objects = vec![
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
+        ];
+        let mut links = Vec::new();
+        let mut expected_state = Vec::new();
+        let mut expected_subject = Vec::new();
+        let mut neighbors = Vec::new();
+        for index in 0..20_u128 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(10_000 + index);
+            memory.created_at += chrono::Duration::minutes(index as i64);
+            memory.salience_score = (index % 7) as f32 / 10.0;
+            memory.entity_ids = vec![fixtures.hub_entity.id];
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.scope_keys = vec![key.clone()];
+            if index % 5 == 0 {
+                memory.retention_state = RetentionState::Suppressed;
+            }
+            if index % 5 >= 3 {
+                expected_state.push(memory.clone());
+                if index % 13 != 0 {
+                    expected_subject.push(memory.clone());
+                }
+            }
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(100_000 + index);
+            link.from_id = memory.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = fixtures.hub_entity.id;
+            link.to_type = ObjectType::Entity;
+            link.relation = RelationType::About;
+            if index % 13 != 0 {
+                links.push(link.clone());
+            }
+            if matches!(index % 5, 1 | 2) {
+                link.id = MemoryId::from_u128(110_000 + index);
+                link.to_id = memory.id;
+                link.to_type = ObjectType::DerivedMemory;
+                link.from_id = fixtures.correction.id;
+                link.relation = if index % 5 == 1 {
+                    RelationType::Resolves
+                } else {
+                    RelationType::Supersedes
+                };
+                links.push(link);
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+
+        for index in 0..10_u128 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(20_000 + index);
+            episode.scene.time += chrono::Duration::minutes(index as i64);
+            if index % 2 == 0 {
+                episode.retention_state = RetentionState::Suppressed;
+            }
+            neighbors.push(MemoryObjectRef::new(ObjectType::Episode, episode.id));
+            objects.push(MemoryObject::Episode(episode.clone()));
+            for offset in 0..2 {
+                let mut observation = fixtures.salient_observation.clone();
+                observation.id = MemoryId::from_u128(30_000 + 2 * index + offset);
+                observation.episode_id = episode.id;
+                neighbors.push(MemoryObjectRef::new(
+                    ObjectType::Observation,
+                    observation.id,
+                ));
+                objects.push(MemoryObject::Observation(observation));
+            }
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let policy = GraphExpansionLifecyclePolicy::default();
+        let selectors = SparqlGraphSelectors::new(&store.store);
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        let (scope, scope_filtered) = selectors.select_scope_state(&key, policy, 3).unwrap();
+        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
+        let (subject, subject_filtered) = selectors
+            .select_subject_state(fixtures.hub_entity.id, policy, 3, false)
+            .unwrap();
+        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
+        let mut query = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        query.current_state_limit = Some(3);
+        let (mut thread, thread_filtered) = store
+            .query_derived_memories_by_thread(&query)
+            .await
+            .unwrap();
+        thread.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
+        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
+        let mut occasion_query =
+            GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                .with_fanout_overrides(vec![
+                    GraphExpansionFanoutOverride {
+                        relation: RelationType::Involves,
+                        object_type: ObjectType::Episode,
+                        max_fanout: 3,
+                    },
+                    GraphExpansionFanoutOverride {
+                        relation: RelationType::Mentions,
+                        object_type: ObjectType::Observation,
+                        max_fanout: 3,
+                    },
+                ]);
+        occasion_query.current_subject_state = true;
+        occasion_query.participant_reference_time =
+            fixtures.episode.scene.time.to_utc() + chrono::Duration::minutes(8);
+        let occasions = selectors
+            .select_bounded_participant_occasions(&neighbors, &occasion_query)
+            .unwrap();
+        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 12);
+        for entries in [&scope_filtered, &subject_filtered, &thread_filtered] {
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.object_ref.id)
+                    .collect::<Vec<_>>(),
+                [10017, 10016, 10015].map(MemoryId::from_u128)
+            );
+        }
+        for (eligible, indices) in [(true, [7, 5, 3]), (false, [8, 6, 4])] {
+            let ids = occasions
+                .iter()
+                .filter(|(neighbor, occasion)| {
+                    occasion.filtered_reason(**neighbor, policy).is_none() == eligible
+                })
+                .map(|(_, occasion)| occasion.episode_id)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                ids,
+                indices
+                    .map(|index| MemoryId::from_u128(20_000 + index))
+                    .into_iter()
+                    .collect()
+            );
+        }
+        for memories in [&mut expected_state, &mut expected_subject] {
+            memories.sort_by(|a, b| {
+                b.salience_score
+                    .total_cmp(&a.salience_score)
+                    .then_with(|| b.created_at.cmp(&a.created_at))
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
+        assert_eq!(
+            &scope[..3],
+            &expected_state
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        let traversable = subject
+            .iter()
+            .copied()
+            .filter(|id| expected_subject.iter().any(|memory| memory.id == *id))
+            .take(3)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            traversable,
+            expected_subject
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        expected_state.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
+        assert_eq!(
+            thread
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>(),
+            expected_state
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        let counts = [
+            scope.len(),
+            scope_filtered.len(),
+            subject.len(),
+            subject_filtered.len(),
+            thread.len(),
+            thread_filtered.len(),
+            occasions.len(),
+        ];
+        assert_eq!(counts, [3, 3, 3, 3, 3, 3, 12]);
+        let observation_ids = occasions
+            .keys()
+            .filter(|neighbor| neighbor.object_type == ObjectType::Observation)
+            .map(|neighbor| neighbor.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            observation_ids,
+            [7, 5, 3, 8, 6, 4]
+                .map(|index| MemoryId::from_u128(30_000 + 2 * index))
+                .into_iter()
+                .collect()
+        );
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        assert!(selectors
+            .select_scope_state(&key, policy, 0)
+            .unwrap()
+            .0
+            .is_empty());
+        assert!(selectors
+            .select_subject_state(fixtures.hub_entity.id, policy, 0, false)
+            .unwrap()
+            .0
+            .is_empty());
+        query.current_state_limit = Some(0);
+        assert!(store
+            .query_derived_memories_by_thread(&query)
+            .await
+            .unwrap()
+            .0
+            .is_empty());
+        occasion_query.max_fanout_per_node = 0;
+        assert!(selectors
+            .select_bounded_participant_occasions(&neighbors, &occasion_query)
+            .unwrap()
+            .is_empty());
+        assert_eq!(MAX_SELECT_ROWS.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
+    async fn thread_expansion_excludes_resolved_members_outside_its_trace_prefix() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = vec![MemoryObject::MemoryThread(fixtures.soft_thread.clone())];
+        let mut links = Vec::new();
+        for index in 0..8 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(5000 + index);
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.created_at += chrono::Duration::minutes(index as i64);
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(6000 + index);
+            link.from_id = memory.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = fixtures.soft_thread.id;
+            link.to_type = ObjectType::MemoryThread;
+            link.relation = RelationType::PartOfThread;
+            links.push(link.clone());
+            if [0, 1, 6].contains(&index) {
+                link.id = MemoryId::from_u128(7000 + index);
+                link.from_id = fixtures.correction.id;
+                link.to_id = memory.id;
+                link.to_type = ObjectType::DerivedMemory;
+                link.relation = RelationType::Resolves;
+                links.push(link);
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let mut state = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        state.current_state_limit = Some(1);
+        let (_, excluded) = store
+            .query_derived_memories_by_thread(&state)
+            .await
+            .unwrap();
+        assert_eq!(
+            excluded
+                .iter()
+                .map(|row| row.object_ref.id)
+                .collect::<Vec<_>>(),
+            [MemoryId::from_u128(5006)]
+        );
+        let mut query =
+            GraphExpansionQuery::new(fixtures.soft_thread.id, ObjectType::MemoryThread, 1, 3)
+                .with_max_fanout_per_node(1);
+        query.current_thread_state = true;
+        let expansion = store.expand_bounded(&query).await.unwrap();
+        let members = expansion
+            .objects
+            .iter()
+            .filter(|object| object.object_type() == ObjectType::DerivedMemory)
+            .map(MemoryObject::id)
+            .collect::<Vec<_>>();
+        assert_eq!(members, [MemoryId::from_u128(5002)]);
+    }
+
+    #[tokio::test]
     async fn named_subject_state_intersects_links_before_applying_the_cap() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

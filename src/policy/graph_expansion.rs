@@ -227,7 +227,7 @@ pub(crate) fn derived_memories_by_thread(
                 .is_none()
         })
         .filter(|memory| {
-            if query.current_state && resolved.contains_key(&memory.id) {
+            if query.current_state_limit.is_some() && resolved.contains_key(&memory.id) {
                 push_filtered_node(
                     &mut filtered,
                     MemoryObjectRef::new(ObjectType::DerivedMemory, memory.id),
@@ -546,10 +546,9 @@ fn bounded_expansion_plan<'a>(
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
-        if depth == 0 {
+        if depth == 0 && query.current_thread_state {
             incident_links.retain(|(link, neighbor)| {
-                link.relation != RelationType::PartOfThread
-                    || !query.resolved_thread_members.contains(neighbor)
+                link.relation != RelationType::PartOfThread || !resolved.contains_key(&neighbor.id)
             });
         }
         if depth == 0 && query.current_subject_state {
@@ -836,7 +835,7 @@ pub(crate) fn bounded_hub_retention_limit(
     }
 }
 
-fn fanout_limit_for_pair(
+pub(crate) fn fanout_limit_for_pair(
     query: &GraphExpansionQuery,
     relation: RelationType,
     object_type: ObjectType,

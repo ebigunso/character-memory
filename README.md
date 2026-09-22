@@ -93,6 +93,8 @@ Each cue kind has a floor at the caps it encounters. The measured defaults reser
 
 With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a reserved or spare turn admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
 
+State and participant-occasion reads bound eligible results and exclusion evidence separately. Exclusion evidence is a latest-first prefix within the caller's budget, not a complete audit. Fanout omission telemetry counts only omissions seen within fetched prefixes; it does not count the entire matching store.
+
 The trace's `scene_cue_searches` reports the best similarity found for the setting and for the joined participant words, with the references sharing each search; a search with no matches has no score. Each entry identifies its cue kind and counts recallable matches left out by the description's occasion limit in `omitted_count`. There is no minimum similarity: whether a description is too weak to remind the character of anything remains a question for measurement, not a decision made by this score.
 
 A participant present in most experiences brings fewer past encounters to mind, while retaining the latest eligible one within the requested limits. A participant recognized by key or name brings only encounters at or before the scene time. Several remarks or participants in one encounter do not make it count more than once. Familiarity limits recalled encounters, not beliefs about that participant. This applies to every notion, including whichever one the application regards as the character.

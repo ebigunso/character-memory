@@ -627,7 +627,16 @@ pub(super) fn bounded_graph_visible_refs(
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
     let (state_ids, state_filtered) = if query.current_subject_state {
-        selectors.select_subject_state(query.root_id, query.lifecycle_policy)?
+        selectors.select_subject_state(
+            query.root_id,
+            query.lifecycle_policy,
+            crate::policy::graph_expansion::fanout_limit_for_pair(
+                query,
+                RelationType::About,
+                ObjectType::DerivedMemory,
+            ),
+            query.trace_mode.is_enabled(),
+        )?
     } else {
         (Vec::new(), Vec::new())
     };
@@ -643,23 +652,39 @@ pub(super) fn bounded_graph_visible_refs(
         if frontier.is_empty() {
             break;
         }
-        let link_refs = selectors.select_links_touching(&frontier)?;
+        let mut link_refs =
+            selectors.select_links_touching(&frontier, depth == 0 && query.current_thread_state)?;
         if depth == 0
             && query
                 .fanout_overrides
                 .iter()
                 .any(|entry| is_participant_pair(entry.relation, entry.object_type))
         {
+            let mut seen = HashSet::new();
             let neighbors = link_refs
                 .iter()
                 .filter_map(|link| {
                     let neighbor = link.other_endpoint(root_ref);
-                    is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+                    (is_participant_pair(link.relation, neighbor.object_type)
+                        && query.allows_object(neighbor)
+                        && (query.allowed_relation_types.is_empty()
+                            || query.allowed_relation_types.contains(&link.relation))
+                        && crate::policy::graph_expansion::fanout_limit_for_pair(
+                            query,
+                            link.relation,
+                            neighbor.object_type,
+                        ) > 0
+                        && seen.insert(neighbor))
+                    .then_some(neighbor)
                 })
-                .collect::<HashSet<_>>()
-                .into_iter()
                 .collect::<Vec<_>>();
-            participant_occasions = selectors.select_participant_occasions(&neighbors)?;
+            participant_occasions =
+                selectors.select_bounded_participant_occasions(&neighbors, query)?;
+            link_refs.retain(|link| {
+                let neighbor = link.other_endpoint(root_ref);
+                !is_participant_pair(link.relation, neighbor.object_type)
+                    || participant_occasions.contains_key(&neighbor)
+            });
         }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
@@ -700,18 +725,6 @@ pub(super) fn bounded_graph_visible_refs(
                     },
                 );
                 &ordered
-            } else if depth == 0 && !query.resolved_thread_members.is_empty() {
-                ordered = incident_link_refs
-                    .iter()
-                    .filter(|link| {
-                        link.relation != RelationType::PartOfThread
-                            || !query
-                                .resolved_thread_members
-                                .contains(&link.other_endpoint(*object_ref))
-                    })
-                    .copied()
-                    .collect();
-                &ordered
             } else {
                 incident_link_refs
             };
@@ -749,7 +762,7 @@ pub(super) fn bounded_graph_visible_refs(
 
     let candidate_refs = graph_refs.iter().copied().collect::<Vec<_>>();
     let lifecycle_link_ids = selectors
-        .select_links_touching(&candidate_refs)?
+        .select_links_touching(&candidate_refs, false)?
         .into_iter()
         .filter(|link_ref| {
             matches!(
