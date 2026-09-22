@@ -212,7 +212,7 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 }
 ```
 
-`commit` revalidates the plan before writing. Graph-authoritative objects, links, provenance, lifecycle, and currentness are critical writes; vector indexing and retrieval-stat updates are repairable and are reported in `RememberOutcome`.
+`commit` revalidates the plan before writing. Graph-authoritative objects, links, provenance, lifecycle, and currentness are critical writes; vector indexing and retrieval-stat updates are repairable and are reported in `RememberOutcome`. Failed graph reads feeding the stats projection, including endpoint hydration and currency lookup, report `StatsUpdateCause::GraphRead`; the nested `GraphQueryError` retains the underlying failure.
 
 For callers that want the standard write lifecycle in one call, `remember(RememberInput, RememberOptions)` composes `prepare`, `validate_plan`, and `commit` over the same graph-authoritative machinery.
 
