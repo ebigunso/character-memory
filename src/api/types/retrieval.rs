@@ -18,6 +18,10 @@ pub struct RetrievalContext {
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
+    /// Per-kind room at candidate, root and section caps. A calibration knob for
+    /// measured defaults; applications are not expected to set it. Five people
+    /// share one participant floor, rather than receiving one floor each.
+    pub cue_floors: RetrievalCueFloors,
     pub lifecycle_policy: RetrievalLifecyclePolicy,
     pub include_trace: bool,
     /// Object types admitted by vector candidate recall. Graph traversal has its own limits.
@@ -71,6 +75,7 @@ impl Default for RetrievalContext {
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
+            cue_floors: RetrievalCueFloors::default(),
             lifecycle_policy: RetrievalLifecyclePolicy::default(),
             include_trace: false,
             object_type_defaults: default_retrieval_object_types(),
@@ -98,6 +103,31 @@ impl Default for RetrievalCandidateLimits {
         Self {
             max_vector_candidates: 48,
             max_graph_roots: 12,
+        }
+    }
+}
+
+/// Calibration values for measured defaults, provisionally one slot per cue kind.
+/// Applications are not expected to set these. Floors apply per kind, not per
+/// person or place: five people share the participant floor.
+///
+/// Unused room returns to the common pool. Zero disables that kind's floor;
+/// all floors remain subject to the existing hard caps.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetrievalCueFloors {
+    pub participant: usize,
+    pub place: usize,
+    pub activity: usize,
+    pub topic: usize,
+}
+
+impl Default for RetrievalCueFloors {
+    fn default() -> Self {
+        Self {
+            participant: 1,
+            place: 1,
+            activity: 1,
+            topic: 1,
         }
     }
 }
@@ -474,6 +504,7 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    pub floor_admissions: Vec<CueFloorAdmission>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
@@ -487,6 +518,7 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
+            floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
             fanout_utilization: Vec::new(),
@@ -502,6 +534,23 @@ impl Default for RetrievalTrace {
     fn default() -> Self {
         Self::empty()
     }
+}
+
+/// A floor admitted this object outside the stage's original capped prefix.
+/// Earlier-stage admissions remain here even if the object is omitted later.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CueFloorAdmission {
+    pub object: MemoryObjectRef,
+    pub stage: CueFloorStage,
+    pub cue_kind: CueKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CueFloorStage {
+    CandidateMerge,
+    GraphRoots,
+    Section { section: ContextPackSection },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
