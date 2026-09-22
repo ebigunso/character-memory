@@ -438,10 +438,10 @@ where
         Ok(memories
             .into_iter()
             .map(|(memory, sources)| {
-                let support_age_seconds = if memory.object_type == ObjectType::DerivedMemory {
+                let seconds_since_support = if memory.object_type == ObjectType::DerivedMemory {
                     sources
                         .iter()
-                        .filter_map(|source| support_time(*source, &objects))
+                        .filter_map(|source| support_time(*source, &objects, include_suppressed))
                         .filter(|time| *time <= reference_time)
                         .max()
                         .map(|time| (reference_time - time).num_seconds())
@@ -461,7 +461,7 @@ where
                 MemoryScenes {
                     memory,
                     sources,
-                    support_age_seconds,
+                    seconds_since_support,
                 }
             })
             .collect())
@@ -471,13 +471,16 @@ where
 fn support_time(
     source: MemoryObjectRef,
     objects: &HashMap<MemoryObjectRef, MemoryObject>,
+    include_suppressed: bool,
 ) -> Option<DateTime<Utc>> {
     match objects.get(&source)? {
-        MemoryObject::Episode(episode) if episode.retention_state == RetentionState::Active => {
+        MemoryObject::Episode(episode)
+            if include_suppressed || episode.retention_state != RetentionState::Suppressed =>
+        {
             Some(episode.scene.time.to_utc())
         }
         MemoryObject::Observation(observation)
-            if observation.retention_state == RetentionState::Active =>
+            if include_suppressed || observation.retention_state != RetentionState::Suppressed =>
         {
             observation.observed_at.or_else(|| {
                 match objects.get(&MemoryObjectRef::new(

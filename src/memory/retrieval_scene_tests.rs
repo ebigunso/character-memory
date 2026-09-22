@@ -1922,6 +1922,7 @@ async fn support_age_reports_experience_without_changing_recall() {
     }
     memory.commit(plan, CommitOptions::default()).await.unwrap();
     let mut rows = Vec::new();
+    let mut mismatches = Vec::new();
     for phase in 0..5 {
         let targets = match phase {
             1 => vec![LifecycleTargetRef::episode(id(6000))],
@@ -1996,15 +1997,24 @@ async fn support_age_reports_experience_without_changing_recall() {
                         if phase == 4 { 21000 } else { 20000 },
                         Some(if phase == 4 { current } else { old }),
                     ),
-                    (20001, (phase < 2).then_some(recent)),
+                    (20001, (phase < 2 || include_suppressed).then_some(recent)),
                     (20002, Some(fallback)),
-                    (20003, Some(if phase < 2 { recent } else { old })),
+                    (
+                        20003,
+                        Some(if phase < 2 || include_suppressed {
+                            recent
+                        } else {
+                            old
+                        }),
+                    ),
                     (
                         20004,
-                        match phase {
-                            0 => Some(reference - Duration::days(2)),
-                            1 | 2 => Some(at("2025-06-20T10:00:00Z")),
-                            _ => None,
+                        if phase == 0 || include_suppressed {
+                            Some(reference - Duration::days(2))
+                        } else if phase < 3 {
+                            Some(at("2025-06-20T10:00:00Z"))
+                        } else {
+                            None
                         },
                     ),
                     (20005, None),
@@ -2012,7 +2022,7 @@ async fn support_age_reports_experience_without_changing_recall() {
                     (20007, None),
                     (
                         20008,
-                        Some(if phase < 2 {
+                        Some(if phase < 2 || include_suppressed {
                             recent
                         } else {
                             recent - Duration::hours(12)
@@ -2029,14 +2039,15 @@ async fn support_age_reports_experience_without_changing_recall() {
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
                 for entry in &result.memory_scenes {
-                    assert_eq!(
-                        entry.support_age_seconds,
-                        expected[&entry.memory.id.as_u128().to_string()],
-                        "phase {phase}, reference {time}, include_suppressed {include_suppressed}, memory {:?}",
-                        entry.memory
-                    );
+                    let expected_age = expected[&entry.memory.id.as_u128().to_string()];
+                    if entry.seconds_since_support != expected_age {
+                        mismatches.push(format!(
+                            "phase {phase}, reference {time}, include_suppressed {include_suppressed}, memory {:?}: {:?} != {expected_age:?}",
+                            entry.memory, entry.seconds_since_support
+                        ));
+                    }
                 }
-                rows.push(json!({"phase": phase, "input": context, "outcome": result, "trace": trace, "expected_support_age_seconds": expected}));
+                rows.push(json!({"phase": phase, "input": context, "outcome": result, "trace": trace, "expected_seconds_since_support": expected}));
             }
         }
     }
@@ -2045,6 +2056,7 @@ async fn support_age_reports_experience_without_changing_recall() {
         "SUPPORT_AGE_WITNESSES={}",
         serde_json::to_string(&rows).unwrap()
     );
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
 #[tokio::test]
