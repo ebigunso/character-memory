@@ -2108,6 +2108,59 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
 }
 
 #[tokio::test]
+async fn unshared_anniversary_competes_with_recent_daily_occasions_by_score() {
+    let mut selected = Vec::new();
+    let mut spare_roots = Vec::new();
+    let ordinary_salience = EpisodeDraft::new("An ordinary day").salience_score;
+    for anniversary_salience in [ordinary_salience, 1.0] {
+        let (memory, temp) = open().await;
+        let mut plan = RememberWritePlan::new();
+        for days in 0..400 {
+            plan = episode(
+                plan,
+                1000 + days as u128,
+                days,
+                if days == 365 {
+                    anniversary_salience
+                } else {
+                    ordinary_salience
+                },
+                false,
+                false,
+            );
+        }
+        plan = episode(plan, 2000, 800, ordinary_salience, false, true);
+        commit(&memory, plan).await;
+        let result = memory
+            .retrieve(ann_query(&time().to_rfc3339(), false, false, 2))
+            .await
+            .unwrap();
+        assert_eq!(ann_dates(&result), [1365]);
+        assert_eq!(scores(&result, 1365).cue_score, Some(0.0));
+        assert!(!result
+            .trace
+            .as_ref()
+            .unwrap()
+            .floor_admissions
+            .iter()
+            .any(|a| a.cue_kind == CueKind::DateMatch));
+        selected.push(episodes(&result));
+        for topic in [false, true] {
+            let mut context = ann_query(&time().to_rfc3339(), false, topic, 2);
+            context.candidate_limits.max_graph_roots = if topic { 2 } else { 1 };
+            spare_roots.push(roots(&memory.retrieve(context).await.unwrap()));
+        }
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    assert_eq!(selected, [vec![1000, 1001], vec![1365, 1000]]);
+    assert_eq!(
+        spare_roots,
+        [vec![1000], vec![2000, 1000], vec![1000], vec![2000, 1000]]
+    );
+}
+
+#[tokio::test]
 async fn unshared_anniversary_can_fill_spare_room_with_its_reminder_leaf() {
     let (memory, temp) = open().await;
     let mut plan = ann_episode(ann_entity(), 900, "2025-09-21T08:00:00+09:00", true, false);

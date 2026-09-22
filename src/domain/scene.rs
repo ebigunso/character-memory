@@ -8,6 +8,8 @@ use super::MemoryId;
 /// The situation as perceived. Omitted participants do not mean nobody was present.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Scene {
+    /// Use the same offset for retrieval as for writes when matching anniversaries.
+    /// The recorded local day is stored on `Episode::scene_local_date`.
     pub time: DateTime<FixedOffset>,
     pub participants: Vec<SceneParticipant>,
     pub setting: SceneSetting,
