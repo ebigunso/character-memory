@@ -110,7 +110,10 @@ pub(crate) const OBJECT_TYPE_FIELD: &str = QdrantPayloadField::ObjectType.name()
 pub(crate) const SURFACE_FIELD: &str = QdrantPayloadField::Surface.name();
 
 pub(crate) fn qdrant_point_id(record: &VectorRecord) -> MemoryId {
-    MemoryId::new_v5(&record.object_id, record.surface.to_string().as_bytes())
+    MemoryId::new_v5(
+        &record.object_id,
+        format!("{}:{}", record.object_type, record.surface).as_bytes(),
+    )
 }
 
 pub(crate) fn read_candidate_match<'a>(

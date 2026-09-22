@@ -671,8 +671,8 @@ impl VectorCandidateStore for GatedVector {
     ) -> Result<VectorCandidateRecall, CustomError> {
         self.store.search_candidates(query).await
     }
-    async fn delete_candidates(&self, ids: &[MemoryId]) -> Result<(), CustomError> {
-        self.store.delete_candidates(ids).await
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        self.store.delete_candidates(objects).await
     }
 }
 
