@@ -108,7 +108,7 @@ impl Default for RetrievalCandidateLimits {
     }
 }
 
-/// Calibration values for measured defaults, provisionally one slot per cue kind.
+/// Measured defaults reserve one slot per cue kind.
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///

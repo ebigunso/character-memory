@@ -1,8 +1,8 @@
 # Plan: every cue the scene gives can bring its memories, and no cue drowns another
 
-- status: in_progress
+- status: completed
 - generated: 2026-09-21
-- last_updated: 2026-09-21
+- last_updated: 2026-09-23
 - work_type: code
 
 ## Goal
@@ -176,6 +176,8 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 - 2026-09-21 Task_2 implemented (16692bd) and approved at Tier D: a notion's share is its distinct episodes over all episodes, counted once per episode however the write linked it, on the two paths that lead to experiences; in a store of 24 occasions with five participants each, the notion present in all of them went from 15 admitted observation edges to none on the `remember` path and from 3 episode edges to none on a caller-built one, while a rare participant kept all of its three and the belief about the ubiquitous notion stayed.
 - 2026-09-21 Task_3 implemented (4eec349) and approved at Tier D and Tier A: floors per cue kind at the candidate merge, root selection and the section caps, served by one helper in successive rounds in the order participant, place, activity, topic, with unused room returned and original order kept. Three cue-only memories each lost at a different choke point before the change are admitted after it; topic-only and single-kind retrievals are unchanged. Values are 1 per kind and provisional, at `context.cue_floors`.
 
+- 2026-09-23 Task_4 completed: the companion calibration supports retaining one reserved slot per cue kind; ADR-I-0036 is proposed, with Tier A changes applied and its promoted evidence linked. ADR-I-0022 remains accepted pending the decider's explicit acceptance and atomic retirement. The completion audit also corrects open-loop source episode order to recorded scene time descending, with a regression that reverses ID and creation-time order.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-21 Decision: the routes work is two plans, and this is the first.
@@ -205,6 +207,15 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Known property: at the default expansion depth a memory from the same occasion inherits the participant kind, so a topic-found memory can satisfy the participant floor on its own. That is defensible behavior and it means a reserved kind does not imply independent direct recall. The trace does not distinguish a kind a memory was found by from one it inherited; the calibration derives that from the existing candidate, root and relation traces, and a field is added only if that proves impossible.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: the measured floors, at Task_4.
+
+- 2026-09-22 Decision: retain the measured cue-floor defaults and propose their complete decision record.
+  - Trigger / new insight: the scene-overlap calibration keeps six of eight on-topic memories at the default floors, equal to the topic-alone result, while higher participant or place floors admit more weakly similar occasions at the topic's expense.
+  - Plan delta (what changed): participant, place, activity and topic floors remain one and are described as measured defaults; no executable code, configuration or tests change. The record carries forward experience-share participant reach and selection of beliefs about a named notion outside entity-root selectivity.
+  - Tradeoffs considered: raising the floors has no measured benefit in the overlap cases; a zero reservation still recalls an occasion, so a description-similarity bound is a separate decision requiring suitable evidence.
+  - Record proposed: [ADR-I-0036: Retain measured retrieval bounds with one reserved slot per cue kind](../../../decisions/implementation/ADR-I-0036-retain-measured-retrieval-bounds-with-one-reserved-slot-per-cue-kind.md), a complete replacement of ADR-I-0022. It constrains future defaults to a measured basis that preserves cue room, experience-based participant reach and recall of named-notion state; extra reserved scene room loses conversational relevance in the measured corpus.
+  - Acceptance: proposed only, pending the decider's explicit acceptance of the record. ADR-I-0022 remains accepted and unmoved until that acceptance and the atomic retirement step.
+
+- 2026-09-23 Decision: the scene-words plan supersedes the Design paragraph's sharing of spare slots by turns at all three caps; turns apply only at root selection, while candidate and section spare room follows score order.
 
 ## Notes
 - Risks: admission changes move the pollution and context-size baselines of ADR-I-0022; the companion repository re-measures once, at its own closing task. A calibration corpus authored for other pressures may not isolate these three floors; Task_4 names the pressure it needs.
