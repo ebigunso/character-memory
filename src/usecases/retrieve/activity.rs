@@ -55,6 +55,7 @@ where
             resolution: ActivityResolution::Found,
         });
         let root = |reference: MemoryObjectRef| CandidateRoot {
+            date_match_floor_eligible: false,
             object_id: reference.id,
             object_type: reference.object_type,
             score: 1.0,

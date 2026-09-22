@@ -292,7 +292,8 @@ pub(super) fn memory_object_from_rdf(
             object_type,
             modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
             scene: crate::domain::Scene {
-                time: timestamp_literal(subject, values, super::vocabulary::SCENE_TIME)?,
+                time: timestamp_literal(subject, values, super::vocabulary::SCENE_TIME)?
+                    .fixed_offset(),
                 participants: serde_json::from_str(
                     &values.literal(subject, super::vocabulary::SCENE_PARTICIPANTS)?,
                 )
@@ -310,6 +311,15 @@ pub(super) fn memory_object_from_rdf(
                     rdf_parse_error(subject, super::vocabulary::SCENE_CUSTOM_VALUES, error)
                 })?,
             },
+            scene_local_date: values
+                .optional_literal(super::vocabulary::SCENE_LOCAL_YEAR)
+                .map(|year| {
+                    let month_day = values.literal(subject, super::vocabulary::SCENE_MONTH_DAY)?;
+                    format!("{year}-{month_day}").parse().map_err(|error| {
+                        rdf_parse_error(subject, super::vocabulary::SCENE_LOCAL_YEAR, error)
+                    })
+                })
+                .transpose()?,
             ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
             summary: values.literal(subject, super::vocabulary::SUMMARY)?,
             raw_ref: values.optional_literal(super::vocabulary::RAW_REF),

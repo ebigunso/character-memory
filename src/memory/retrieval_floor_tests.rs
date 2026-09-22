@@ -24,8 +24,10 @@ async fn open_loop_activity_reserves_the_latest_recorded_source() {
     for (id, days) in [(1, 30), (2, 0), (3, 1)] {
         let mut draft = EpisodeDraft::new(format!("Source {id}"));
         draft.id = Some(MemoryId::from_u128(id));
-        draft.created_at = Some(occasion().time + chrono::Duration::days(id as i64));
-        draft.scene = Some(Scene::at(occasion().time - chrono::Duration::days(days)));
+        draft.created_at = Some(occasion().time.to_utc() + chrono::Duration::days(id as i64));
+        draft.scene = Some(Scene::at(
+            (occasion().time - chrono::Duration::days(days)).fixed_offset(),
+        ));
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         draft.salience_score = if id == 1 { 1.0 } else { 0.0 };
         plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
@@ -35,7 +37,7 @@ async fn open_loop_activity_reserves_the_latest_recorded_source() {
     }
     let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Finish the conversation");
     draft.id = Some(MemoryId::from_u128(4));
-    draft.created_at = Some(occasion().time);
+    draft.created_at = Some(occasion().time.to_utc());
     draft.updated_at = draft.created_at;
     draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     draft.derived_from_episode_ids = [1, 2, 3].map(MemoryId::from_u128).to_vec();
@@ -110,7 +112,7 @@ async fn open_loop_activity_reserves_the_latest_recorded_source() {
     for (id, parent) in [(9, 2), (10, 3), (11, 1)] {
         let mut draft = ObservationDraft::new(MemoryId::from_u128(parent), "Source observation");
         draft.id = Some(MemoryId::from_u128(id));
-        draft.created_at = Some(occasion().time);
+        draft.created_at = Some(occasion().time.to_utc());
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
             draft,
@@ -120,7 +122,7 @@ async fn open_loop_activity_reserves_the_latest_recorded_source() {
     for (id, source) in [(20, 9), (21, 10)] {
         let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Use the observation");
         draft.id = Some(MemoryId::from_u128(id));
-        draft.created_at = Some(occasion().time);
+        draft.created_at = Some(occasion().time.to_utc());
         draft.updated_at = draft.created_at;
         draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         draft.derived_from_observation_ids = [source, 11].map(MemoryId::from_u128).to_vec();
@@ -242,11 +244,11 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
     let mut episode = EpisodeDraft::new("An occasion with several recollections.");
     episode.id = Some(MemoryId::from_u128(1));
     episode.scene = Some(occasion());
-    episode.created_at = Some(occasion().time);
+    episode.created_at = Some(occasion().time.to_utc());
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut thread = MemoryThreadDraft::new("Work in progress", "The current activity.");
     thread.id = Some(MemoryId::from_u128(5000));
-    thread.created_at = Some(occasion().time);
+    thread.created_at = Some(occasion().time.to_utc());
     thread.updated_at = thread.created_at;
     thread.last_touched_at = thread.created_at;
     thread.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
@@ -283,7 +285,7 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
             }
             let mut episode = EpisodeDraft::new(format!("Recollection {id}"));
             episode.id = Some(MemoryId::from_u128(id));
-            episode.created_at = Some(scene.time);
+            episode.created_at = Some(scene.time.to_utc());
             episode.scene = Some(scene);
             episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             episode.salience_score = 0.0;
@@ -295,7 +297,7 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
             let mut observation =
                 ObservationDraft::new(MemoryId::from_u128(1), format!("Recollection {id}"));
             observation.id = Some(MemoryId::from_u128(id));
-            observation.observed_at = Some(occasion().time);
+            observation.observed_at = Some(occasion().time.to_utc());
             observation.created_at = observation.observed_at;
             observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             observation.salience_score = 0.0;
@@ -371,7 +373,7 @@ async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
         );
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     let strong_id = MemoryId::from_u128(7000);
@@ -402,7 +404,7 @@ async fn overlapping_scene_memory() -> (CharacterMemory, MemoryId) {
         scene.setting.words = Some(text.to_owned());
         let mut episode = EpisodeDraft::new(text);
         episode.id = Some(MemoryId::from_u128(id));
-        episode.created_at = Some(scene.time);
+        episode.created_at = Some(scene.time.to_utc());
         episode.scene = Some(scene);
         episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let provenance = CandidateProvenance::caller("overlapping surfaces");
@@ -567,7 +569,7 @@ async fn a_large_activity_shares_roots_with_the_topic() {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     memory
@@ -605,7 +607,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     memory
@@ -772,7 +774,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
     let provenance = || CandidateProvenance::caller("shared occasion");
     let mut person = EntityDraft::new();
     person.id = Some(MemoryId::from_u128(7));
-    person.created_at = Some(occasion().time);
+    person.created_at = Some(occasion().time.to_utc());
     person.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
         EntityCandidate::new(person, provenance()),
@@ -785,7 +787,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
     for (id, scene) in [(1, occasion()), (2, shared_scene.clone())] {
         let mut episode = EpisodeDraft::new("An occasion.");
         episode.id = Some(MemoryId::from_u128(id));
-        episode.created_at = Some(scene.time);
+        episode.created_at = Some(scene.time.to_utc());
         episode.scene = Some(scene);
         episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
@@ -799,7 +801,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
         let mut observation =
             ObservationDraft::new(MemoryId::from_u128(episode), format!("Recollection {id}"));
         observation.id = Some(MemoryId::from_u128(id));
-        observation.observed_at = Some(occasion().time);
+        observation.observed_at = Some(occasion().time.to_utc());
         observation.created_at = observation.observed_at;
         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         observation.salience_score = 0.0;

@@ -22,7 +22,7 @@ fn at(n: i64) -> DateTime<Utc> {
         + chrono::Duration::minutes(n)
 }
 fn scene(setting: Option<&str>, custom: &[(&str, &str)]) -> Scene {
-    let mut scene = Scene::at(at(10));
+    let mut scene = Scene::at((at(10)).fixed_offset());
     scene.setting.key = setting.map(str::to_owned);
     scene.custom_values = custom
         .iter()

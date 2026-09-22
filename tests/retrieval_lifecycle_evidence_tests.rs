@@ -28,7 +28,7 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     let mut episode = EpisodeDraft::new("source");
     episode.id = Some(id(101));
-    episode.scene = Some(Scene::at(at()));
+    episode.scene = Some(Scene::at((at()).fixed_offset()));
     episode.created_at = Some(at());
     let mut input = RememberInput::new("fixture").with_episode(episode);
     let mut successor = None;
@@ -95,8 +95,8 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
     }
     let mut counts = Vec::new();
     for trace in [false, true] {
-        let mut request =
-            RetrievalContext::new("quasar hatch calibration").with_scene(Scene::at(at()));
+        let mut request = RetrievalContext::new("quasar hatch calibration")
+            .with_scene(Scene::at((at()).fixed_offset()));
         request.object_type_defaults = vec![ObjectType::DerivedMemory];
         request.candidate_limits.max_vector_candidates = 1;
         request.candidate_limits.max_graph_roots = 1;

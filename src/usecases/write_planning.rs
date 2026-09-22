@@ -92,7 +92,7 @@ impl RememberInput {
             .and_then(|draft| draft.scene.as_ref())
             .or(self.scene.as_ref())
             .cloned()
-            .unwrap_or_else(|| Scene::at(defaults.created_at));
+            .unwrap_or_else(|| Scene::at((defaults.created_at).fixed_offset()));
         let mut plan = RememberWritePlan::new();
 
         if let Some(source_input_ref) = self.source_reference() {
@@ -319,7 +319,7 @@ impl RememberInput {
         } else {
             draft.episode_id
         };
-        draft.observed_at = draft.observed_at.or(Some(scene.time));
+        draft.observed_at = draft.observed_at.or(Some(scene.time.to_utc()));
         if draft.raw_ref.is_none() {
             draft.raw_ref = self.raw_refs.first().cloned();
         }
@@ -542,7 +542,7 @@ mod construction_tests {
     fn same_input_and_fixed_defaults_prepare_identical_plan() {
         let defaults =
             RememberPlanDefaults::fixed("fixed-operation", timestamp("2026-07-03T10:00:00Z"));
-        let mut scene = Scene::at(defaults.created_at);
+        let mut scene = Scene::at((defaults.created_at).fixed_offset());
         scene.participants.push(crate::SceneParticipant {
             key: Some(memory_id("550e8400-e29b-41d4-a716-446655443003")),
             ..Default::default()
@@ -2630,7 +2630,9 @@ mod tests {
     }
 
     fn complete_episode(mut draft: EpisodeDraft) -> EpisodeDraft {
-        draft.scene.get_or_insert_with(|| Scene::at(timestamp()));
+        draft
+            .scene
+            .get_or_insert_with(|| Scene::at((timestamp()).fixed_offset()));
         draft
             .id
             .get_or_insert(id("550e8400-e29b-41d4-a716-446655444100"));

@@ -406,6 +406,7 @@ pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
 
 pub(crate) fn simple_episode() -> Episode {
     Episode {
+        scene_local_date: None,
         id: fixture_id(10),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
@@ -424,7 +425,7 @@ pub(crate) fn simple_episode() -> Episode {
                     ..Default::default()
                 },
             ],
-            ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
+            ..crate::domain::Scene::at((timestamp("2026-04-27T10:00:00Z")).fixed_offset())
         },
         ended_at: Some(timestamp("2026-04-27T10:10:00Z")),
         summary: "Discussed deterministic store contract fixtures.".to_owned(),

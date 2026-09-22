@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::MemoryId;
@@ -8,14 +8,14 @@ use super::MemoryId;
 /// The situation as perceived. Omitted participants do not mean nobody was present.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Scene {
-    pub time: DateTime<Utc>,
+    pub time: DateTime<FixedOffset>,
     pub participants: Vec<SceneParticipant>,
     pub setting: SceneSetting,
     pub custom_values: BTreeMap<String, String>,
 }
 
 impl Scene {
-    pub fn at(time: DateTime<Utc>) -> Self {
+    pub fn at(time: DateTime<FixedOffset>) -> Self {
         Self {
             time,
             participants: Vec::new(),
@@ -25,7 +25,7 @@ impl Scene {
     }
 
     pub fn now() -> Self {
-        Self::at(Utc::now())
+        Self::at(Utc::now().fixed_offset())
     }
 
     pub(crate) fn without_blank_participants(mut self) -> Self {

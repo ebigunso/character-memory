@@ -3362,6 +3362,7 @@ mod tests {
 
     fn source_episode(ids: &FixedIds) -> Episode {
         Episode {
+            scene_local_date: None,
             id: ids.episode,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
@@ -3371,7 +3372,7 @@ mod tests {
                     words: None,
                 },
 
-                ..crate::domain::Scene::at(Utc::now())
+                ..crate::domain::Scene::at((Utc::now()).fixed_offset())
             },
             ended_at: None,
             summary: "Original source episode.".to_owned(),
@@ -3487,6 +3488,17 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_anniversaries(
+            &self,
+            date: chrono::NaiveDate,
+            participants: &[crate::domain::MemoryId],
+            limit: usize,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+            let _ = (date, participants, limit, policy);
+            Ok(Vec::new())
+        }
+
         async fn query_episodes_by_time(
             &self,
             start: Option<chrono::DateTime<chrono::Utc>>,

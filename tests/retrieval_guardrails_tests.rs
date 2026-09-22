@@ -364,7 +364,7 @@ fn entity(id: MemoryId) -> EntityDraft {
 fn episode(id: MemoryId, summary: &str, participants: &[MemoryId]) -> EpisodeDraft {
     let mut draft = EpisodeDraft::new(summary);
     draft.id = Some(id);
-    let mut scene = character_memory::Scene::at(timestamp());
+    let mut scene = character_memory::Scene::at((timestamp()).fixed_offset());
     scene.participants = participants
         .iter()
         .copied()

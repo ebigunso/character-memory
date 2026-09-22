@@ -36,7 +36,7 @@ fn entity(id: u128) -> EntityDraft {
 }
 
 fn scene(ids: &[u128], at: i64) -> Scene {
-    let mut scene = Scene::at(time(at));
+    let mut scene = Scene::at((time(at)).fixed_offset());
     scene.participants = ids
         .iter()
         .copied()

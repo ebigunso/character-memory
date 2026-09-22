@@ -550,6 +550,8 @@ pub struct RetrievalTrace {
     /// `None` means no range was supplied. Determined by one extra bounded ID read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_range_has_more: Option<bool>,
+    /// More eligible occasions share this local calendar date in earlier years.
+    pub anniversary_has_more: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     pub floor_admissions: Vec<CueFloorAdmission>,
@@ -567,6 +569,7 @@ impl RetrievalTrace {
         Self {
             vector_candidates: Vec::new(),
             time_range_has_more: None,
+            anniversary_has_more: false,
             scene_cue_searches: Vec::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
@@ -834,6 +837,7 @@ mod tests {
 
     fn episode(id: MemoryId) -> Episode {
         Episode {
+            scene_local_date: None,
             id,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
@@ -843,7 +847,7 @@ mod tests {
                     words: None,
                 },
 
-                ..crate::domain::Scene::at(timestamp("2026-04-29T10:00:00Z"))
+                ..crate::domain::Scene::at((timestamp("2026-04-29T10:00:00Z")).fixed_offset())
             },
             ended_at: Some(timestamp("2026-04-29T10:05:00Z")),
             summary: "Discussed context packs.".to_owned(),

@@ -29,7 +29,7 @@ fn keyed(n: u128) -> SceneParticipant {
     }
 }
 fn request(participants: Vec<SceneParticipant>) -> RetrievalContext {
-    let mut scene = Scene::at(reference_time());
+    let mut scene = Scene::at((reference_time()).fixed_offset());
     scene.participants = participants;
     RetrievalContext::default().with_scene(scene)
 }
@@ -73,7 +73,7 @@ async fn notion(memory: &CharacterMemory, n: u128, name: Option<&str>) {
 fn episode(n: u128, time: DateTime<Utc>) -> EpisodeDraft {
     let mut episode = EpisodeDraft::new(format!("Meeting {n}"));
     episode.id = Some(id(n));
-    episode.scene = Some(Scene::at(time));
+    episode.scene = Some(Scene::at((time).fixed_offset()));
     episode.created_at = Some(reference_time() + (reference_time() - time));
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     episode
@@ -267,7 +267,7 @@ async fn scene_boundary_and_whole_seconds_distinguish_zero_from_never_met() {
         BTreeSet::from([id(400), id(402), id(403), notion_episode])
     );
     let mut before = request(vec![keyed(100)]);
-    before.scene.time = earlier - Duration::milliseconds(1);
+    before.scene.time = (earlier - Duration::milliseconds(1)).fixed_offset();
     let result = memory.retrieve(before).await.unwrap();
     assert_eq!(last(&result), None);
     assert!(occasions(&result).is_empty());

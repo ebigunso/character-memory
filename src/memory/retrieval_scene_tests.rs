@@ -145,9 +145,10 @@ impl MemoryEmbedder for CueEmbedder {
 
 fn scene() -> Scene {
     Scene::at(
-        chrono::DateTime::parse_from_rfc3339("2026-09-20T10:00:00.123Z")
+        (chrono::DateTime::parse_from_rfc3339("2026-09-20T10:00:00.123Z")
             .unwrap()
-            .with_timezone(&chrono::Utc),
+            .with_timezone(&chrono::Utc))
+        .fixed_offset(),
     )
 }
 
@@ -165,7 +166,7 @@ async fn create_notion(memory: &CharacterMemory, id: u128, name: Option<&str>) {
     let notion_id = MemoryId::from_u128(id);
     let mut notion = EntityDraft::new();
     notion.id = Some(notion_id);
-    notion.created_at = Some(scene().time);
+    notion.created_at = Some(scene().time.to_utc());
     notion.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
         EntityCandidate::new(notion, CandidateProvenance::caller("notion")),
@@ -174,7 +175,7 @@ async fn create_notion(memory: &CharacterMemory, id: u128, name: Option<&str>) {
         let mut belief =
             DerivedMemoryDraft::new(DerivedType::Claim, "The astronomer is known by this name.");
         belief.id = Some(MemoryId::from_u128(id + 1000));
-        belief.created_at = Some(scene().time);
+        belief.created_at = Some(scene().time.to_utc());
         belief.updated_at = belief.created_at;
         belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         belief.entity_ids = vec![notion_id];
@@ -334,8 +335,8 @@ async fn observation_forget_recounts_notion_presence_without_removing_scene_part
             write_episode(&memory, 31_000, scene()).await;
             let mut extra = ObservationDraft::new(episode, "Another remark.");
             extra.id = Some(MemoryId::from_u128(30_002));
-            extra.created_at = Some(scene().time);
-            extra.observed_at = Some(scene().time);
+            extra.created_at = Some(scene().time.to_utc());
+            extra.observed_at = Some(scene().time.to_utc());
             extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             memory
                 .commit(
@@ -405,8 +406,8 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
     write_episode(&memory, 31_000, scene()).await;
     let mut extra = ObservationDraft::new(episode, "Another remark on the same occasion.");
     extra.id = Some(MemoryId::from_u128(30_002));
-    extra.created_at = Some(scene().time);
-    extra.observed_at = Some(scene().time);
+    extra.created_at = Some(scene().time.to_utc());
+    extra.observed_at = Some(scene().time.to_utc());
     extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     memory
         .commit(
@@ -582,8 +583,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
     if active_sibling {
         let mut observation = ObservationDraft::new(latest_episode, "Another active remark.");
         observation.id = Some(sibling);
-        observation.created_at = Some(scene().time);
-        observation.observed_at = Some(scene().time);
+        observation.created_at = Some(scene().time.to_utc());
+        observation.observed_at = Some(scene().time.to_utc());
         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         memory
             .commit(
@@ -822,7 +823,8 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                 let mut episode = EpisodeDraft::new("The participant visited.");
                 episode.id = Some(episode_id);
                 // Authorship order deliberately disagrees with scene recency.
-                episode.created_at = Some(scene().time - chrono::Duration::hours(count as i64));
+                episode.created_at =
+                    Some(scene().time.to_utc() - chrono::Duration::hours(count as i64));
                 episode.scene = Some(occasion);
                 episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                 let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
@@ -832,8 +834,8 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                     for offset in 1..=3 {
                         let mut observation = ObservationDraft::new(episode_id, "A remark.");
                         observation.id = Some(MemoryId::from_u128(id + offset));
-                        observation.created_at = Some(scene().time);
-                        observation.observed_at = Some(scene().time);
+                        observation.created_at = Some(scene().time.to_utc());
+                        observation.observed_at = Some(scene().time.to_utc());
                         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                         plan = plan.with_candidate(MemoryCandidate::Observation(
                             ObservationCandidate::new(
@@ -957,7 +959,7 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 if caller_built {
                     let mut episode = EpisodeDraft::new("A group worked together.");
                     episode.id = Some(MemoryId::from_u128(id));
-                    episode.created_at = Some(scene().time);
+                    episode.created_at = Some(scene().time.to_utc());
                     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                     episode.scene = Some(occasion);
                     memory
@@ -1052,11 +1054,11 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     thread.status = ThreadStatus::Resolved;
     let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens needs cleaning.");
     member.id = Some(member_id);
-    member.created_at = Some(scene().time);
+    member.created_at = Some(scene().time.to_utc());
     member.thread_ids = vec![thread_id];
     let mut older_member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens was installed.");
     older_member.id = Some(older_member_id);
-    older_member.created_at = Some(scene().time - chrono::Duration::days(1));
+    older_member.created_at = Some(scene().time.to_utc() - chrono::Duration::days(1));
     older_member.thread_ids = vec![thread_id];
     memory
         .remember(
@@ -1386,7 +1388,7 @@ async fn authored_episode_without_links_is_recalled_by_its_participant() {
     let episode_id = MemoryId::from_u128(5000);
     let mut episode = EpisodeDraft::new("An authored experience.");
     episode.id = Some(episode_id);
-    episode.created_at = Some(past.time);
+    episode.created_at = Some(past.time.to_utc());
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     episode.scene = Some(past.clone());
     let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
@@ -1813,7 +1815,7 @@ async fn write_belief(
         "The astronomer remembers these experiences.",
     );
     belief.id = Some(MemoryId::from_u128(id));
-    belief.created_at = Some(scene().time);
+    belief.created_at = Some(scene().time.to_utc());
     belief.updated_at = belief.created_at;
     belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     belief.derived_from_episode_ids = episodes.iter().map(|id| MemoryId::from_u128(*id)).collect();
@@ -1853,7 +1855,7 @@ async fn result_reports_all_source_scenes_beside_recent_episodes_without_trace()
     create_notion(&memory, 100, Some("Mira")).await;
     let mut thread = MemoryThreadDraft::new("Astronomer", "Plans for tomorrow.");
     thread.id = Some(MemoryId::from_u128(9000));
-    thread.created_at = Some(scene().time);
+    thread.created_at = Some(scene().time.to_utc());
     thread.updated_at = thread.created_at;
     thread.last_touched_at = thread.created_at;
     thread.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());

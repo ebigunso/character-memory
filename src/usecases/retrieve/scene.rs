@@ -101,14 +101,14 @@ where
         for &participant in &participants {
             let last = self
                 .graph_store
-                .query_last_interaction(participant, context.scene.time, policy)
+                .query_last_interaction(participant, context.scene.time.to_utc(), policy)
                 .await?;
             last_interactions.insert(
                 participant,
                 last.map(|(episode_id, scene_time)| LastInteraction {
                     episode_id,
                     scene_time,
-                    seconds_since: (context.scene.time - scene_time).num_seconds(),
+                    seconds_since: (context.scene.time.to_utc() - scene_time).num_seconds(),
                 }),
             );
         }
