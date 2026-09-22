@@ -7,7 +7,7 @@ use super::write_plan::{RememberDiagnostics, RepairMarker, StatsUpdateStatus};
 use crate::domain::{
     BeliefAssertion, DerivedMemory, DerivedType, DomainValidationError, Entity, Episode, MemoryId,
     MemoryLink, MemoryObject, MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation,
-    RelationType, RetentionState, ThreadStatus, DEFAULT_SCHEMA_VERSION,
+    RelationType, RetentionState, Scene, ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::VectorIndexingCause;
 
@@ -110,10 +110,9 @@ impl TryFrom<EntityDraft> for Entity {
 pub struct EpisodeDraft {
     pub id: Option<MemoryId>,
     pub modality: Modality,
-    pub source_conversation_id: Option<String>,
-    pub started_at: Option<DateTime<Utc>>,
+    /// Overrides the input scene; a caller-built episode candidate must supply it.
+    pub scene: Option<Scene>,
     pub ended_at: Option<DateTime<Utc>>,
-    pub participant_entity_ids: Vec<MemoryId>,
     pub summary: String,
     pub raw_ref: Option<String>,
     pub salience_score: f32,
@@ -127,10 +126,8 @@ impl EpisodeDraft {
         Self {
             id: None,
             modality: Modality::Chat,
-            source_conversation_id: None,
-            started_at: None,
+            scene: None,
             ended_at: None,
-            participant_entity_ids: Vec::new(),
             summary: summary.into(),
             raw_ref: None,
             salience_score: 0.5,
@@ -149,14 +146,12 @@ impl EpisodeDraft {
         self,
         defaults: &mut DraftDefaults,
     ) -> Result<Episode, DomainValidationError> {
-        let mut episode = Episode {
+        let episode = Episode {
             id: defaults.id(self.id),
             object_type: ObjectType::Episode,
             modality: self.modality,
-            source_conversation_id: self.source_conversation_id,
-            started_at: self.started_at,
+            scene: self.scene.ok_or(DomainValidationError::MissingScene)?,
             ended_at: self.ended_at,
-            participant_entity_ids: self.participant_entity_ids,
             summary: self.summary,
             raw_ref: self.raw_ref,
             salience_score: self.salience_score,
@@ -164,8 +159,6 @@ impl EpisodeDraft {
             created_at: defaults.timestamp(self.created_at),
             schema_version: defaults.schema_version(self.schema_version),
         };
-        episode.participant_entity_ids.sort_unstable();
-        episode.participant_entity_ids.dedup();
         episode.validate()?;
         Ok(episode)
     }
@@ -650,7 +643,9 @@ mod tests {
         let created_at = timestamp("2026-04-28T12:01:00Z");
         let mut draft = EpisodeDraft::new("Discussed durable draft inputs.");
         draft.id = Some(id);
-        draft.source_conversation_id = Some("conversation-42".to_owned());
+        let mut scene = Scene::at(created_at);
+        scene.setting.key = Some("conversation-42".to_owned());
+        draft.scene = Some(scene);
         draft.raw_ref = Some("raw://conversation/42#episode".to_owned());
         draft.salience_score = 0.8;
         draft.created_at = Some(created_at);
@@ -681,6 +676,7 @@ mod tests {
     fn draft_validation_reuses_domain_validation_errors() {
         let mut episode = EpisodeDraft::new(" ");
         episode.salience_score = 0.5;
+        episode.scene = Some(Scene::now());
         assert_eq!(
             episode.into_domain(),
             Err(DomainValidationError::EmptyEpisodeSummary)

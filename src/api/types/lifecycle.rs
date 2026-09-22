@@ -149,12 +149,12 @@ pub enum SourceObjectCorrectionTarget {
     Episode {
         id: MemoryId,
         original_raw_ref: Option<String>,
-        original_source_ref: Option<String>,
+        original_setting_key: Option<String>,
     },
     Observation {
         id: MemoryId,
         original_raw_ref: Option<String>,
-        original_source_ref: Option<String>,
+        original_setting_key: Option<String>,
     },
 }
 
@@ -697,7 +697,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: episode_id(),
                 original_raw_ref: Some("raw://original/episode".to_owned()),
-                original_source_ref: Some("conversation://original".to_owned()),
+                original_setting_key: Some("conversation://original".to_owned()),
             }),
             "Correct source episode summary and derived claims.",
         );

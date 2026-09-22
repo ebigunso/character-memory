@@ -8,7 +8,7 @@ use super::draft::{
 };
 use super::lifecycle::ExternalSourceReference;
 use crate::domain::{
-    CandidateValidation, MemoryCandidateKind, MemoryId, MemoryObjectRef, RelationType,
+    CandidateValidation, MemoryCandidateKind, MemoryId, MemoryObjectRef, RelationType, Scene,
 };
 use crate::errors::{StatsUpdateCause, VectorIndexingCause};
 
@@ -17,8 +17,8 @@ pub struct RememberInput {
     pub content: String,
     pub entity_ids: Vec<MemoryId>,
     pub thread_ids: Vec<MemoryId>,
-    pub participant_entity_ids: Vec<MemoryId>,
-    pub started_at: Option<DateTime<Utc>>,
+    /// When absent, preparation records its current time once in the episode candidate.
+    pub scene: Option<Scene>,
     pub ended_at: Option<DateTime<Utc>>,
     pub raw_refs: Vec<String>,
     pub source_spans: Vec<SourceSpan>,
@@ -36,8 +36,7 @@ impl RememberInput {
             content: content.into(),
             entity_ids: Vec::new(),
             thread_ids: Vec::new(),
-            participant_entity_ids: Vec::new(),
-            started_at: None,
+            scene: None,
             ended_at: None,
             raw_refs: Vec::new(),
             source_spans: Vec::new(),
@@ -60,13 +59,8 @@ impl RememberInput {
         self
     }
 
-    pub fn with_participant_entity_id(mut self, participant_entity_id: MemoryId) -> Self {
-        self.participant_entity_ids.push(participant_entity_id);
-        self
-    }
-
-    pub fn with_started_at(mut self, started_at: DateTime<Utc>) -> Self {
-        self.started_at = Some(started_at);
+    pub fn with_scene(mut self, scene: Scene) -> Self {
+        self.scene = Some(scene);
         self
     }
 

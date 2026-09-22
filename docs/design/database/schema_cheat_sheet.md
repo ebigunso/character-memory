@@ -27,7 +27,7 @@ These are the five emitted payload fields. The service indexes `object_id` and `
 
 | Object type | Surface | Text source | Maximum surfaces |
 |---|---|---|---|
-| `episode` | `summary` | Episode summary | 1 |
+| `episode` | `summary` | Episode summary followed by labelled scene words; keys and custom values excluded | 1 |
 | `observation` | `text` | Observation text | 1 |
 | `memory_thread` | `summary` | Thread title and summary | 1 |
 | `derived_memory` | `derived_text` | Interpreted-memory text | 1 |
@@ -55,8 +55,11 @@ Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
 |---|---|
 | `objectId`, `objectType`, `graphUri`, `schemaVersion` | Common identity and schema literals |
 | `createdAt`, `updatedAt` | Timestamps on the types that declare them |
-| `modality`, `sourceConversationId`, `startedAt`, `endedAt` | Episode source and time metadata |
-| `participantEntity` | Episode participant notion |
+| `modality`, `endedAt` | Episode modality and optional interval end |
+| `sceneTime` | Required experience time on the episode |
+| `sceneParticipants` | Lossless JSON array of participants, each with optional key, name and description; a key or nonblank words required |
+| `settingKey`, `settingWords` | Independently optional context key and words; the key is directly queryable |
+| `sceneCustomValues` | Lossless JSON object of string custom values |
 | `summary` | Episode or thread summary |
 | `rawRef` | Episode or observation source pointer |
 | `episode`, `speakerEntity`, `observedAt` | Observation source, optional speaker and time |
@@ -91,7 +94,7 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `assertionName` | Supplied name spelling |
 | `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
 
-Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). ID lists use set semantics: conversion sorts IDs and removes duplicates. This includes episode participants and ordinary/replacement memory source, thread, subject and predecessor IDs.
+Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
 
 Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104).
 

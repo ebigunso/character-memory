@@ -2,6 +2,7 @@ pub(crate) mod belief;
 mod lifecycle;
 mod object_ref;
 mod retrieval;
+mod scene;
 pub(crate) mod schema;
 mod write_validation;
 
@@ -11,6 +12,7 @@ pub use object_ref::MemoryObjectRef;
 pub use retrieval::{
     GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
 };
+pub use scene::{Scene, SceneParticipant, SceneSetting};
 pub use write_validation::{
     CandidateProvenanceIssue, CandidateReferenceRole, CandidateScoreField,
     CandidateSourceSpanIssue, CandidateTimestampField, CandidateValidation,
@@ -228,6 +230,12 @@ pub enum DomainValidationError {
     #[error("episode summary must not be empty")]
     EmptyEpisodeSummary,
 
+    #[error("a caller-built episode must state its scene")]
+    MissingScene,
+
+    #[error("a scene participant must have a key or nonblank name or description")]
+    EmptySceneParticipant,
+
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
 
@@ -285,10 +293,8 @@ pub struct Episode {
     pub id: MemoryId,
     pub object_type: ObjectType,
     pub modality: Modality,
-    pub source_conversation_id: Option<String>,
-    pub started_at: Option<DateTime<Utc>>,
+    pub scene: Scene,
     pub ended_at: Option<DateTime<Utc>>,
-    pub participant_entity_ids: Vec<MemoryId>,
     pub summary: String,
     pub raw_ref: Option<String>,
     pub salience_score: f32,
@@ -302,6 +308,15 @@ impl Episode {
         validate_object_type("Episode.object_type", self.object_type, ObjectType::Episode)?;
         if self.summary.trim().is_empty() {
             return Err(DomainValidationError::EmptyEpisodeSummary);
+        }
+        if self.scene.participants.iter().any(|participant| {
+            participant.key.is_none()
+                && [&participant.name, &participant.description]
+                    .into_iter()
+                    .flatten()
+                    .all(|words| words.trim().is_empty())
+        }) {
+            return Err(DomainValidationError::EmptySceneParticipant);
         }
         validate_score("Episode.salience_score", self.salience_score)
     }

@@ -191,11 +191,11 @@ fn append_intrinsic_edges(
 ) {
     match object {
         MemoryObject::Episode(episode) => {
-            for entity_id in &episode.participant_entity_ids {
+            for entity_id in episode.scene.participant_keys() {
                 insert_edge(
                     edges,
                     edge(
-                        *entity_id,
+                        entity_id,
                         RelationType::Involves,
                         episode.id,
                         ObjectType::Episode,
@@ -674,10 +674,14 @@ mod tests {
                 id: episode_id,
                 object_type: ObjectType::Episode,
                 modality: Modality::Chat,
-                source_conversation_id: None,
-                started_at: None,
+                scene: crate::domain::Scene {
+                    participants: vec![crate::domain::SceneParticipant {
+                        key: Some(entity_id),
+                        ..Default::default()
+                    }],
+                    ..crate::domain::Scene::at(timestamp())
+                },
                 ended_at: None,
-                participant_entity_ids: vec![entity_id],
                 summary: "episode".to_owned(),
                 raw_ref: None,
                 salience_score: 0.5,

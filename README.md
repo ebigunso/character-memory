@@ -141,7 +141,15 @@ This is useful when you want to:
 Character Memory separates planning from persistence. Use `prepare` to build an inspectable `RememberWritePlan`, `validate_plan` to check it against the current graph, and `commit` to persist it. `prepare` and `validate_plan` do not write graph objects, vector entries, retrieval statistics, or raw source data.
 
 ```rust
-let input = RememberInput::new("caller-provided note or transcript reference");
+use character_memory::{Scene, SceneParticipant};
+
+let mut scene = Scene::now();
+scene.participants.push(SceneParticipant {
+    description: Some("a visitor".to_owned()),
+    ..Default::default()
+});
+scene.setting.words = Some("a quiet room".to_owned());
+let input = RememberInput::new("caller-provided note or transcript reference").with_scene(scene);
 
 let plan = memory.prepare(input, PrepareOptions::default()).await?;
 let validation = memory.validate_plan(&plan).await?;
@@ -154,6 +162,8 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 `commit` revalidates the plan before writing. Graph-authoritative objects, links, provenance, lifecycle, and currentness are critical writes; vector indexing and retrieval-stat updates are repairable and are reported in `RememberOutcome`.
 
 For callers that want the standard write lifecycle in one call, `remember(RememberInput, RememberOptions)` composes `prepare`, `validate_plan`, and `commit` over the same graph-authoritative machinery.
+
+An episode stores one `Scene` with its time, participants, setting and custom values as supplied. Scene words join its single summary embedding; keys and custom values do not. If the input and episode draft omit the scene, `prepare` fixes the current time once; a caller-built episode must supply its scene. Writes reject participants with neither a key nor nonblank words, and keys that identify no existing or same-plan notion.
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 

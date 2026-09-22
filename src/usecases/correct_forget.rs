@@ -563,9 +563,9 @@ where
         let object_ref = source_correction_lifecycle_ref(target).as_memory_object_ref();
         let has_raw_ref =
             source_target_original_raw_ref(target).is_some_and(|value| !value.trim().is_empty());
-        let has_source_ref =
-            source_target_original_source_ref(target).is_some_and(|value| !value.trim().is_empty());
-        if !has_raw_ref && !has_source_ref {
+        let has_setting_key = source_target_original_setting_key(target)
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_raw_ref && !has_setting_key {
             return Err(CustomError::MissingOriginalSourceReference { target: object_ref });
         }
 
@@ -573,7 +573,7 @@ where
             SourceObjectCorrectionTarget::Episode {
                 id,
                 original_raw_ref,
-                original_source_ref,
+                original_setting_key,
             } => {
                 let episode = self.fetch_episode(*id).await?;
                 validate_optional_original_ref(
@@ -584,15 +584,15 @@ where
                 )?;
                 validate_optional_original_ref(
                     object_ref,
-                    SourceReferenceKind::Source,
-                    original_source_ref.as_deref(),
-                    episode.source_conversation_id.as_deref(),
+                    SourceReferenceKind::SettingKey,
+                    original_setting_key.as_deref(),
+                    episode.scene.setting.key.as_deref(),
                 )
             }
             SourceObjectCorrectionTarget::Observation {
                 id,
                 original_raw_ref,
-                original_source_ref,
+                original_setting_key,
             } => {
                 let observation = self.fetch_observation(*id).await?;
                 validate_optional_original_ref(
@@ -601,16 +601,16 @@ where
                     original_raw_ref.as_deref(),
                     observation.raw_ref.as_deref(),
                 )?;
-                if original_source_ref
+                if original_setting_key
                     .as_deref()
                     .is_some_and(|value| !value.trim().is_empty())
                 {
                     let episode = self.fetch_episode(observation.episode_id).await?;
                     validate_optional_original_ref(
                         object_ref,
-                        SourceReferenceKind::Source,
-                        original_source_ref.as_deref(),
-                        episode.source_conversation_id.as_deref(),
+                        SourceReferenceKind::SettingKey,
+                        original_setting_key.as_deref(),
+                        episode.scene.setting.key.as_deref(),
                     )?;
                 }
                 Ok(())
@@ -1037,16 +1037,16 @@ fn source_target_original_raw_ref(target: &SourceObjectCorrectionTarget) -> Opti
     }
 }
 
-fn source_target_original_source_ref(target: &SourceObjectCorrectionTarget) -> Option<&str> {
+fn source_target_original_setting_key(target: &SourceObjectCorrectionTarget) -> Option<&str> {
     match target {
         SourceObjectCorrectionTarget::Episode {
-            original_source_ref,
+            original_setting_key,
             ..
         }
         | SourceObjectCorrectionTarget::Observation {
-            original_source_ref,
+            original_setting_key,
             ..
-        } => original_source_ref.as_deref(),
+        } => original_setting_key.as_deref(),
     }
 }
 
@@ -2484,7 +2484,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: fixtures.episode.id,
                 original_raw_ref: fixtures.episode.raw_ref.clone(),
-                original_source_ref: fixtures.episode.source_conversation_id.clone(),
+                original_setting_key: fixtures.episode.scene.setting.key.clone(),
             }),
             "Correct episode-derived behavior.",
         )
@@ -2581,7 +2581,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: fixtures.episode.id,
                 original_raw_ref: fixtures.episode.raw_ref.clone(),
-                original_source_ref: fixtures.episode.source_conversation_id.clone(),
+                original_setting_key: fixtures.episode.scene.setting.key.clone(),
             }),
             "Correct episode-derived observation-only behavior.",
         )
@@ -2639,7 +2639,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: ids.episode,
                 original_raw_ref: None,
-                original_source_ref: None,
+                original_setting_key: None,
             }),
             "Correct source episode.",
         );
@@ -2670,7 +2670,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: ids.episode,
                 original_raw_ref: Some("raw://wrong".to_owned()),
-                original_source_ref: Some("conversation://original".to_owned()),
+                original_setting_key: Some("conversation://original".to_owned()),
             }),
             "Correct source episode.",
         );
@@ -2706,7 +2706,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Observation {
                 id: ids.observation,
                 original_raw_ref: Some("raw://original/observation".to_owned()),
-                original_source_ref: Some("conversation://wrong".to_owned()),
+                original_setting_key: Some("conversation://wrong".to_owned()),
             }),
             "Correct source observation.",
         );
@@ -2719,7 +2719,7 @@ mod tests {
 
         assert!(
             matches!(error, CustomError::OriginalSourceReferenceMismatch {
-            target, kind: SourceReferenceKind::Source, provided, stored,
+            target, kind: SourceReferenceKind::SettingKey, provided, stored,
         } if target == MemoryObjectRef::new(ObjectType::Observation, ids.observation)
             && provided == "conversation://wrong" && stored.as_deref() == Some("conversation://original"))
         );
@@ -2758,7 +2758,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: fixtures.episode.id,
                 original_raw_ref: fixtures.episode.raw_ref.clone(),
-                original_source_ref: fixtures.episode.source_conversation_id.clone(),
+                original_setting_key: fixtures.episode.scene.setting.key.clone(),
             }),
             "Correct the source again.",
         )
@@ -3319,7 +3319,7 @@ mod tests {
             CorrectionTarget::source_object(SourceObjectCorrectionTarget::Episode {
                 id: ids.episode,
                 original_raw_ref: Some("raw://original/episode".to_owned()),
-                original_source_ref: None,
+                original_setting_key: None,
             }),
             "Replace stale derived memory.",
         )
@@ -3366,10 +3366,15 @@ mod tests {
             id: ids.episode,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
-            source_conversation_id: Some("conversation://original".to_owned()),
-            started_at: None,
+            scene: crate::domain::Scene {
+                setting: crate::domain::SceneSetting {
+                    key: Some("conversation://original".to_owned()),
+                    words: None,
+                },
+
+                ..crate::domain::Scene::at(Utc::now())
+            },
             ended_at: None,
-            participant_entity_ids: Vec::new(),
             summary: "Original source episode.".to_owned(),
             raw_ref: Some("raw://original/episode".to_owned()),
             salience_score: 0.8,

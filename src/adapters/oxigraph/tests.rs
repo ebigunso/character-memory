@@ -74,7 +74,7 @@ mod tests {
             .unwrap()
             .with_timezone(&chrono::Utc);
         fixtures.episode.created_at = timestamp;
-        fixtures.episode.started_at = Some(timestamp);
+        fixtures.episode.scene.time = timestamp;
         fixtures.episode.ended_at = Some(timestamp);
         fixtures.salient_observation.created_at = timestamp;
         fixtures.salient_observation.observed_at = Some(timestamp);
@@ -102,6 +102,73 @@ mod tests {
                 ],
                 vec![link],
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn persisted_scene_round_trips_and_setting_key_is_independently_queryable() {
+        use crate::domain::{graph_uri, SceneParticipant};
+        use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+
+        let graph_dir = TempGraphDir::new();
+        let mut episode = representative_fixtures().episode;
+        episode.scene.setting.key = Some("room/shared".to_owned());
+        episode.scene.participants[0].name = Some("Alice".to_owned());
+        episode.scene.setting.words = Some("  a quiet room  ".to_owned());
+        episode.scene.participants.extend([
+            SceneParticipant {
+                name: Some("  Alice\n".to_owned()),
+                ..Default::default()
+            },
+            SceneParticipant {
+                description: Some("a visitor".to_owned()),
+                ..Default::default()
+            },
+            SceneParticipant {
+                name: Some("  Alice\n".to_owned()),
+                ..Default::default()
+            },
+        ]);
+        episode
+            .scene
+            .custom_values
+            .insert("session".to_owned(), " session/42 ".to_owned());
+        episode
+            .scene
+            .custom_values
+            .insert("empty".to_owned(), String::new());
+        let mut words_only = episode.clone();
+        words_only.id = MemoryId::from_u128(8601);
+        words_only.scene.setting.key = None;
+        words_only.scene.setting.words = Some("room/shared".to_owned());
+        let expected = vec![
+            MemoryObject::Episode(episode.clone()),
+            MemoryObject::Episode(words_only),
+        ];
+        {
+            let store = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+            store.upsert_objects(&expected).await.unwrap();
+        }
+        let reopened = OxigraphGraphAuthorityStore::new_persistent(graph_dir.path()).unwrap();
+        let actual = reopened
+            .query_objects(&GraphObjectQuery::by_types(vec![ObjectType::Episode], None))
+            .await
+            .unwrap();
+        assert_eq!(actual.len(), 2);
+        for object in expected {
+            assert!(actual.contains(&object));
+        }
+        let results = SparqlEvaluator::new()
+            .parse_query(r#"SELECT ?episode WHERE { GRAPH ?g { ?episode <urn:cmem:vocab:settingKey> "room/shared" } }"#).unwrap()
+            .on_store(&reopened.store).execute().unwrap();
+        let QueryResults::Solutions(solutions) = results else {
+            panic!("expected SELECT rows")
+        };
+        let rows = solutions.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].get("episode").unwrap().to_string(),
+            format!("<{}>", graph_uri(ObjectType::Episode, episode.id))
         );
     }
 

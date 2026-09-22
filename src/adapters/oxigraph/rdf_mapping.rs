@@ -134,18 +134,31 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
             enum_value(episode.retention_state),
         ),
         RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(episode.created_at)),
+        RdfTriple::literal(&subject, vocab::SCENE_TIME, timestamp(episode.scene.time)),
+        RdfTriple::literal(
+            &subject,
+            vocab::SCENE_PARTICIPANTS,
+            serde_json::to_string(&episode.scene.participants)
+                .expect("scene participants contain only strings and UUIDs"),
+        ),
+        RdfTriple::literal(
+            &subject,
+            vocab::SCENE_CUSTOM_VALUES,
+            serde_json::to_string(&episode.scene.custom_values)
+                .expect("scene custom values contain only strings"),
+        ),
     ]);
     push_optional_literal(
         &mut triples,
         &subject,
-        vocab::SOURCE_CONVERSATION_ID,
-        episode.source_conversation_id.as_deref(),
+        vocab::SETTING_KEY,
+        episode.scene.setting.key.as_deref(),
     );
     push_optional_literal(
         &mut triples,
         &subject,
-        vocab::STARTED_AT,
-        episode.started_at.map(timestamp),
+        vocab::SETTING_WORDS,
+        episode.scene.setting.words.as_deref(),
     );
     push_optional_literal(
         &mut triples,
@@ -159,13 +172,6 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
         vocab::RAW_REF,
         episode.raw_ref.as_deref(),
     );
-    for entity_id in &episode.participant_entity_ids {
-        triples.push(RdfTriple::resource(
-            &subject,
-            vocab::PARTICIPANT_ENTITY,
-            graph_uri(ObjectType::Entity, *entity_id),
-        ));
-    }
     triples
 }
 

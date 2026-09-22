@@ -17,12 +17,35 @@ pub const fn max_embedding_surfaces(object_type: ObjectType) -> usize {
 }
 
 pub(crate) fn episode_vector_record(episode: &Episode) -> VectorRecord {
+    let mut text = prefixed_text("Episode summary", &episode.summary);
+    let setting = episode
+        .scene
+        .setting
+        .words
+        .as_deref()
+        .map(|words| ("Setting", clean_text(words)));
+    let participants = episode.scene.participants.iter().map(|participant| {
+        let words = [&participant.name, &participant.description]
+            .into_iter()
+            .flatten()
+            .map(|words| clean_text(words))
+            .filter(|words| !words.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        ("With", words)
+    });
+    for (label, words) in setting.into_iter().chain(participants) {
+        if !words.is_empty() {
+            text.push('\n');
+            text.push_str(&prefixed_text(label, &words));
+        }
+    }
     VectorRecord::new(
         episode.id,
         ObjectType::Episode,
         VectorSurface::Summary,
         episode.schema_version.clone(),
-        prefixed_text("Episode summary", &episode.summary),
+        text,
     )
 }
 
@@ -230,10 +253,18 @@ mod tests {
             id: id(10),
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
-            source_conversation_id: Some("conversation-1".to_owned()),
-            started_at: Some(timestamp()),
+            scene: crate::domain::Scene {
+                setting: crate::domain::SceneSetting {
+                    key: Some("conversation-1".to_owned()),
+                    words: None,
+                },
+                participants: vec![crate::domain::SceneParticipant {
+                    key: Some(id(1)),
+                    ..Default::default()
+                }],
+                ..crate::domain::Scene::at(timestamp())
+            },
             ended_at: Some(timestamp()),
-            participant_entity_ids: vec![id(1)],
             summary: " Short   summary. ".to_owned(),
             raw_ref: Some("raw://episode".to_owned()),
             salience_score: 0.42,

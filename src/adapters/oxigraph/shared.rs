@@ -290,13 +290,26 @@ pub(super) fn memory_object_from_rdf(
             id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
             object_type,
             modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
-            source_conversation_id: values
-                .optional_literal(super::vocabulary::SOURCE_CONVERSATION_ID),
-            started_at: optional_timestamp_literal(values, super::vocabulary::STARTED_AT)?,
+            scene: crate::domain::Scene {
+                time: timestamp_literal(subject, values, super::vocabulary::SCENE_TIME)?,
+                participants: serde_json::from_str(
+                    &values.literal(subject, super::vocabulary::SCENE_PARTICIPANTS)?,
+                )
+                .map_err(|error| {
+                    rdf_parse_error(subject, super::vocabulary::SCENE_PARTICIPANTS, error)
+                })?,
+                setting: crate::domain::SceneSetting {
+                    key: values.optional_literal(super::vocabulary::SETTING_KEY),
+                    words: values.optional_literal(super::vocabulary::SETTING_WORDS),
+                },
+                custom_values: serde_json::from_str(
+                    &values.literal(subject, super::vocabulary::SCENE_CUSTOM_VALUES)?,
+                )
+                .map_err(|error| {
+                    rdf_parse_error(subject, super::vocabulary::SCENE_CUSTOM_VALUES, error)
+                })?,
+            },
             ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
-            participant_entity_ids: memory_ids_from_resources(
-                values.resource_values(super::vocabulary::PARTICIPANT_ENTITY),
-            )?,
             summary: values.literal(subject, super::vocabulary::SUMMARY)?,
             raw_ref: values.optional_literal(super::vocabulary::RAW_REF),
             salience_score: f32_literal(subject, values, super::vocabulary::SALIENCE_SCORE)?,

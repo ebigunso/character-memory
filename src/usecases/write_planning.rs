@@ -13,7 +13,7 @@ use crate::api::types::{
     ObservationDraft,
 };
 use crate::domain::MemoryObjectRef;
-use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType, DEFAULT_SCHEMA_VERSION};
+use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType, Scene, DEFAULT_SCHEMA_VERSION};
 
 /// Stable UUIDv5 namespace for write-plan IDs. IDs remain stable across releases as long as this
 /// namespace and `deterministic_uuid` label framing stay fixed.
@@ -86,6 +86,13 @@ impl RememberInput {
         include_stats_update_candidates: bool,
     ) -> RememberWritePlan {
         let refs = self.prepared_candidate_refs(defaults);
+        let scene = self
+            .episode_drafts
+            .first()
+            .and_then(|draft| draft.scene.as_ref())
+            .or(self.scene.as_ref())
+            .cloned()
+            .unwrap_or_else(|| Scene::at(defaults.created_at));
         let mut plan = RememberWritePlan::new();
 
         if let Some(source_input_ref) = self.source_reference() {
@@ -93,15 +100,17 @@ impl RememberInput {
         }
 
         let episode_provenance = self.helper_provenance();
-        let episode =
-            EpisodeCandidate::new(self.episode_candidate_draft(defaults), episode_provenance);
+        let episode = EpisodeCandidate::new(
+            self.episode_candidate_draft(defaults, &scene),
+            episode_provenance,
+        );
         plan = plan.with_candidate(MemoryCandidate::Episode(episode));
 
         let observation_provenance = self
             .helper_provenance()
             .with_source_episode(refs.episode_id);
         let observation = ObservationCandidate::new(
-            self.observation_candidate_draft(defaults, refs.episode_id),
+            self.observation_candidate_draft(defaults, refs.episode_id, &scene),
             observation_provenance,
         );
         plan = plan.with_candidate(MemoryCandidate::Observation(observation));
@@ -155,7 +164,7 @@ impl RememberInput {
             )));
         }
 
-        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id) {
+        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id, &scene) {
             plan = plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
                 link,
                 self.helper_provenance()
@@ -266,7 +275,11 @@ impl RememberInput {
         SourceSpan::source(source_ref)
     }
 
-    fn episode_candidate_draft(&self, defaults: &RememberPlanDefaults) -> EpisodeDraft {
+    fn episode_candidate_draft(
+        &self,
+        defaults: &RememberPlanDefaults,
+        scene: &Scene,
+    ) -> EpisodeDraft {
         let mut draft = self
             .episode_drafts
             .first()
@@ -275,11 +288,8 @@ impl RememberInput {
         draft
             .id
             .get_or_insert_with(|| defaults.stable_id("episode:0"));
-        draft.started_at = draft.started_at.or(self.started_at);
+        draft.scene = Some(scene.clone());
         draft.ended_at = draft.ended_at.or(self.ended_at);
-        if draft.participant_entity_ids.is_empty() {
-            draft.participant_entity_ids = self.participant_entity_ids.clone();
-        }
         if draft.raw_ref.is_none() {
             draft.raw_ref = self.raw_refs.first().cloned();
         }
@@ -294,6 +304,7 @@ impl RememberInput {
         &self,
         defaults: &RememberPlanDefaults,
         episode_id: MemoryId,
+        scene: &Scene,
     ) -> ObservationDraft {
         let mut draft = self
             .observation_drafts
@@ -308,7 +319,7 @@ impl RememberInput {
         } else {
             draft.episode_id
         };
-        draft.observed_at = draft.observed_at.or(self.started_at);
+        draft.observed_at = draft.observed_at.or(Some(scene.time));
         if draft.raw_ref.is_none() {
             draft.raw_ref = self.raw_refs.first().cloned();
         }
@@ -324,6 +335,7 @@ impl RememberInput {
         defaults: &RememberPlanDefaults,
         episode_id: MemoryId,
         observation_id: MemoryId,
+        scene: &Scene,
     ) -> Vec<MemoryLinkDraft> {
         let mut links = Vec::new();
         for (index, entity_id) in self.entity_ids.iter().copied().enumerate() {
@@ -339,7 +351,12 @@ impl RememberInput {
                 defaults.stable_id(format!("hint-link:entity:{index}")),
             ));
         }
-        for (index, participant_id) in self.participant_entity_ids.iter().copied().enumerate() {
+        let mut seen = HashSet::new();
+        for (index, participant_id) in scene
+            .participant_keys()
+            .filter(|id| seen.insert(*id))
+            .enumerate()
+        {
             links.push(complete_link_draft(
                 MemoryLinkDraft::new(
                     ObjectType::Observation,
@@ -525,12 +542,17 @@ mod construction_tests {
     fn same_input_and_fixed_defaults_prepare_identical_plan() {
         let defaults =
             RememberPlanDefaults::fixed("fixed-operation", timestamp("2026-07-03T10:00:00Z"));
+        let mut scene = Scene::at(defaults.created_at);
+        scene.participants.push(crate::SceneParticipant {
+            key: Some(memory_id("550e8400-e29b-41d4-a716-446655443003")),
+            ..Default::default()
+        });
         let input = RememberInput::new("Caller said they prefer terse planning notes.")
             .with_raw_ref("raw://conversation/7#turn=2")
             .with_source_span(SourceSpan::raw("raw://conversation/7#turn=2").with_turn_range(2, 2))
             .with_entity_id(memory_id("550e8400-e29b-41d4-a716-446655443001"))
             .with_thread_id(memory_id("550e8400-e29b-41d4-a716-446655443002"))
-            .with_participant_entity_id(memory_id("550e8400-e29b-41d4-a716-446655443003"))
+            .with_scene(scene)
             .with_derived_memory(DerivedMemoryDraft::new(
                 DerivedType::Reflection,
                 "Caller-provided reflection text.",
@@ -788,6 +810,13 @@ impl PlanValidationContext {
 
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
+            MemoryCandidate::Episode(candidate) => {
+                if let Some(scene) = &candidate.draft.scene {
+                    for id in scene.participant_keys() {
+                        self.add_ref_to_check(MemoryObjectRef::new(ObjectType::Entity, id));
+                    }
+                }
+            }
             MemoryCandidate::DerivedMemory(candidate) => {
                 for entity_id in &candidate.draft.entity_ids {
                     self.add_ref_to_check(MemoryObjectRef::new(ObjectType::Entity, *entity_id));
@@ -870,6 +899,14 @@ impl PlanValidationContext {
                     candidate.draft.schema_version.as_deref(),
                 ));
                 errors.extend(validate_episode_timestamps(&candidate.draft));
+                if let Some(scene) = &candidate.draft.scene {
+                    for id in scene.participant_keys() {
+                        errors.extend(self.validate_graph_authoritative_ref(
+                            MemoryObjectRef::new(ObjectType::Entity, id),
+                            CandidateReferenceRole::SceneParticipant,
+                        ));
+                    }
+                }
                 match candidate
                     .draft
                     .clone()
@@ -1292,6 +1329,9 @@ fn stable_episode_draft(draft: EpisodeDraft) -> Result<EpisodeDraft, CandidateTi
     if draft.created_at.is_none() {
         return Err(CandidateTimestampField::CreatedAt);
     }
+    if draft.scene.is_none() {
+        return Err(CandidateTimestampField::SceneTime);
+    }
     Ok(draft)
 }
 
@@ -1461,6 +1501,12 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
             CandidateValidationIssue::AuthoredBeliefAboutLink
         }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
+        DomainValidationError::MissingScene => CandidateValidationIssue::MissingTimestamp {
+            field: CandidateTimestampField::SceneTime,
+        },
+        DomainValidationError::EmptySceneParticipant => {
+            CandidateValidationIssue::EmptySceneParticipant
+        }
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }
@@ -2542,6 +2588,7 @@ mod tests {
     }
 
     fn complete_episode(mut draft: EpisodeDraft) -> EpisodeDraft {
+        draft.scene.get_or_insert_with(|| Scene::at(timestamp()));
         draft
             .id
             .get_or_insert(id("550e8400-e29b-41d4-a716-446655444100"));

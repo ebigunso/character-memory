@@ -5,7 +5,7 @@ use super::ObjectType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceReferenceKind {
     Raw,
-    Source,
+    SettingKey,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]

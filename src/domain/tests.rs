@@ -79,10 +79,18 @@ fn representative_episode() -> Episode {
         id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
-        source_conversation_id: Some("conversation-2026-04-27".to_owned()),
-        started_at: Some(timestamp("2026-04-27T10:00:00Z")),
+        scene: crate::domain::Scene {
+            setting: crate::domain::SceneSetting {
+                key: Some("conversation-2026-04-27".to_owned()),
+                words: None,
+            },
+            participants: vec![crate::domain::SceneParticipant {
+                key: Some(memory_id("550e8400-e29b-41d4-a716-446655440001")),
+                ..Default::default()
+            }],
+            ..crate::domain::Scene::at(timestamp("2026-04-27T10:00:00Z"))
+        },
         ended_at: Some(timestamp("2026-04-27T10:05:00Z")),
-        participant_entity_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655440001")],
         summary: "Discussed the episodic memory domain model.".to_owned(),
         raw_ref: Some("raw://conversation/2026-04-27#episode-1".to_owned()),
         salience_score: 0.8,
