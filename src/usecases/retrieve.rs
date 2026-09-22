@@ -199,9 +199,42 @@ where
             }
         }
         explicit_roots.extend(activity_roots);
+        let time_range_has_more =
+            if let Some(range) = context.time_range {
+                let limit = context.cue_floors.date_match.max(1);
+                let matches = self
+                    .graph_store
+                    .query_episodes_by_time(
+                        Some(range.start),
+                        range.end,
+                        limit.saturating_add(1),
+                        GraphExpansionLifecyclePolicy {
+                            include_suppressed: context.lifecycle_policy.include_suppressed,
+                            include_superseded: context.lifecycle_policy.include_superseded,
+                        },
+                    )
+                    .await?;
+                let has_more = matches.len() > limit;
+                explicit_roots.extend(matches.into_iter().take(limit).map(|object_id| {
+                    CandidateRoot {
+                        object_id,
+                        object_type: ObjectType::Episode,
+                        score: 0.0,
+                        source: GraphRootSource::DateMatch,
+                        vector_score: None,
+                        cue_kinds: BTreeSet::from([CueKind::DateMatch]),
+                        full_standing_score: None,
+                        full_standing_kinds: BTreeSet::new(),
+                    }
+                }));
+                Some(has_more)
+            } else {
+                None
+            };
         let recent = self
             .graph_store
-            .query_recent_episodes(
+            .query_episodes_by_time(
+                None,
                 context.scene.time,
                 prompt_ready_sections()
                     .into_iter()
@@ -433,6 +466,7 @@ where
         };
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_searches: cues.scene_cue_searches,
+            time_range_has_more,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -459,6 +493,7 @@ where
         Ok(RetrieveOutcome {
             scene: context.scene,
             activity,
+            time_range: context.time_range,
             scene_references: cues.references,
             memory_scenes,
             pack,
@@ -875,6 +910,7 @@ fn select_with_cue_floors<'a>(
         (CueKind::Participant, floors.participant),
         (CueKind::Place, floors.place),
         (CueKind::Activity, floors.activity),
+        (CueKind::DateMatch, floors.date_match),
         (CueKind::Topic, floors.topic),
         (CueKind::Recency, floors.recency),
     ]
@@ -890,7 +926,7 @@ fn select_with_cue_floors<'a>(
             .collect::<Vec<_>>();
         queue.sort_by_key(|&index| {
             (
-                kind != CueKind::Recency && candidates[index].2,
+                !matches!(kind, CueKind::Recency | CueKind::DateMatch) && candidates[index].2,
                 ranks
                     .get(&candidates[index].0)
                     .copied()
@@ -905,7 +941,7 @@ fn select_with_cue_floors<'a>(
             && (!matches!(stage, CueFloorStage::GraphRoots)
                 || kinds
                     .iter()
-                    .filter(|&&kind| kind != CueKind::Recency)
+                    .filter(|&&kind| !matches!(kind, CueKind::Recency | CueKind::DateMatch))
                     .count()
                     <= 1)
         {
@@ -917,7 +953,7 @@ fn select_with_cue_floors<'a>(
                     break 'selection;
                 }
                 if (reserve_floors && round >= *floor)
-                    || (!reserve_floors && *kind == CueKind::Recency)
+                    || (!reserve_floors && matches!(kind, CueKind::Recency | CueKind::DateMatch))
                 {
                     continue;
                 }
@@ -1312,14 +1348,24 @@ fn select_candidate_roots(
     });
     let roots = explicit_roots
         .iter()
-        .filter(|root| root.source != GraphRootSource::Recency)
+        .filter(|root| {
+            !matches!(
+                root.source,
+                GraphRootSource::Recency | GraphRootSource::DateMatch
+            )
+        })
         .cloned()
         .chain(content)
-        // Ungiven recency has no position ahead of the existing root prefix.
+        // Time sources use only their reservations and remaining root room.
         .chain(
             explicit_roots
                 .iter()
-                .filter(|root| root.source == GraphRootSource::Recency)
+                .filter(|root| {
+                    matches!(
+                        root.source,
+                        GraphRootSource::Recency | GraphRootSource::DateMatch
+                    )
+                })
                 .cloned(),
         )
         .collect::<Vec<_>>();
@@ -1377,7 +1423,7 @@ fn select_candidate_roots(
         })
         .collect::<HashMap<_, _>>();
     for (kind, order) in &mut orders {
-        if *kind != CueKind::Recency {
+        if !matches!(kind, CueKind::Recency | CueKind::DateMatch) {
             order.sort_by_key(|object| root_positions[object]);
         }
         let mut seen = HashSet::new();
@@ -3318,13 +3364,14 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
-        async fn query_recent_episodes(
+        async fn query_episodes_by_time(
             &self,
-            reference_time: chrono::DateTime<chrono::Utc>,
+            start: Option<chrono::DateTime<chrono::Utc>>,
+            end: chrono::DateTime<chrono::Utc>,
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
         ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
-            let _ = (reference_time, limit, policy);
+            let _ = (start, end, limit, policy);
             Ok(Vec::new())
         }
 

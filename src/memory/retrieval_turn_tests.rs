@@ -265,6 +265,7 @@ async fn shared_scene_topic_only_keeps_original_bytes() {
     query.scene.setting.words = None;
     let result = memory.retrieve(query.clone()).await.unwrap();
     query.cue_floors = RetrievalCueFloors {
+        date_match: 1,
         participant: 0,
         place: 0,
         activity: 0,

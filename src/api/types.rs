@@ -30,7 +30,7 @@ pub use retrieval::{
     SceneReferenceResult, SectionAssignment, SectionAssignmentReason, SectionPressureSummary,
     SectionScoreComponents, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
     SelectivityTrace, SourceScene, SourceSceneUnavailableReason, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    StaleCandidateOmissionSummary, StaleCandidateReason, TimeRange, VectorCandidateTrace,
     VectorRecallCompleteness,
 };
 pub use write_plan::{

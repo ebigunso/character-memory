@@ -524,13 +524,14 @@ impl<'a> SparqlGraphSelectors<'a> {
         Ok(occasions)
     }
 
-    pub(crate) fn select_recent_episodes(
+    pub(crate) fn select_episodes_by_time(
         &self,
-        reference_time: DateTime<Utc>,
+        start: Option<DateTime<Utc>>,
+        end: DateTime<Utc>,
         limit: usize,
         policy: GraphExpansionLifecyclePolicy,
     ) -> Result<Vec<MemoryId>, CustomError> {
-        if limit == 0 {
+        if start.is_some_and(|start| start > end) || limit == 0 {
             return Ok(Vec::new());
         }
         let pattern = format!(
@@ -538,14 +539,19 @@ impl<'a> SparqlGraphSelectors<'a> {
             GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
             BIND(?episodeRetention AS ?retention)
             BIND(xsd:dateTime(?sceneTime) AS ?time)
-            FILTER(?time <= {reference_time}^^xsd:dateTime)
+            FILTER(?time <= {end}^^xsd:dateTime)
+            {start_filter}
             {retention_filter}
         "#,
             object_type = vocab::OBJECT_TYPE,
             object_id = vocab::OBJECT_ID,
             scene_time = vocab::SCENE_TIME,
             retention = vocab::RETENTION_STATE,
-            reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
+            end = sparql_string_literal(&end.to_rfc3339()),
+            start_filter = start.map_or_else(String::new, |start| format!(
+                "FILTER(?time >= {}^^xsd:dateTime)",
+                sparql_string_literal(&start.to_rfc3339())
+            )),
             retention_filter = occasion_retention_filter(policy),
         );
         // ponytail: the typed date needs a store-side scan/sort; add a chronological

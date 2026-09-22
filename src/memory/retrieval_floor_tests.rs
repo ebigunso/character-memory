@@ -620,6 +620,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
         context.candidate_limits.max_graph_roots = cap;
         context.graph_limits.max_depth = 1;
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: 0,
             place: 0,
             activity: 5,
@@ -937,6 +938,7 @@ async fn single_kind_keeps_section_ids_and_order() {
             let result = memory.retrieve(context.clone()).await.unwrap();
             let mut prefix_context = context.clone();
             prefix_context.cue_floors = RetrievalCueFloors {
+                date_match: 1,
                 participant: 0,
                 place: 0,
                 activity: 0,
@@ -955,7 +957,9 @@ async fn single_kind_keeps_section_ids_and_order() {
                 CueKind::Participant => 2000,
                 CueKind::Place => 3000,
                 CueKind::Activity => 4000,
-                CueKind::Recency => unreachable!("fixture uses only given cues"),
+                CueKind::Recency | CueKind::DateMatch => {
+                    unreachable!("fixture uses only given cues")
+                }
             };
             let expected = if kind == CueKind::Topic {
                 (first..first + section as u128).collect::<Vec<_>>()
@@ -1029,6 +1033,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
     for (floor, cap) in (0..=4).map(|cap| (1, cap)).chain([(2, 5)]) {
         let mut context = mixed_context();
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: floor,
             place: floor,
             activity: floor,
@@ -1055,6 +1060,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
 
         let mut context = mixed_context();
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: floor,
             place: floor,
             activity: floor,
@@ -1154,7 +1160,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
             CueKind::Topic => floors.topic = 0,
-            CueKind::Recency => unreachable!("fixture uses only given cues"),
+            CueKind::Recency | CueKind::DateMatch => unreachable!("fixture uses only given cues"),
         }
         // The other three reservations consume all room, so this kind waits.
         context.candidate_limits.max_graph_roots = 3;

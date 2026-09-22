@@ -46,7 +46,7 @@ Retrieval is graph-authoritative and hybrid:
 
 - **Vector candidate recall:** uses embedded Qdrant Edge by default, or an explicit Qdrant service, to find semantically similar memory objects
 - **Graph expansion:** uses Oxigraph as the authority for entities, threads, provenance, lifecycle state, and links
-- **Temporal structure:** memories carry when they happened; a time-based retrieval signal is planned and not yet implemented, and the context pack is ordered by relevance today
+- **Temporal structure:** recent occasions and an application-supplied time range can recall experiences by their recorded scene time
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
@@ -56,7 +56,24 @@ An episode has a content search surface for its summary and up to two separate s
 
 For each recognized participant, `last_interactions` says when the character last met them and how much time has passed. If a name could mean several participants, each has its own answer. No eligible encounter at or before the scene time means never met. These facts remain available even when no memories fit the requested amount. Forgotten encounters count only when `include_suppressed` is enabled.
 
-Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place`, `Activity` and `Recency`.
+Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
+
+For a question about a span of time, the application supplies both endpoints with `.with_time_range(start, end)`. The library does not parse dates from the topic or call a model to determine the span. The range can accompany a topic and an activity:
+
+```rust
+use character_memory::{ActivityRef, MemoryId, RetrievalContext};
+use chrono::{DateTime, Utc};
+
+let start: DateTime<Utc> = "2026-09-15T00:00:00Z".parse()?;
+let end: DateTime<Utc> = "2026-09-15T23:59:59.999999999Z".parse()?;
+let thread_id: MemoryId = "00000000-0000-0000-0000-000000000007".parse()?;
+let context = RetrievalContext::new("What happened last Tuesday?")
+    .with_activity(ActivityRef::Thread(thread_id))
+    .with_time_range(start, end);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Date match contributes the newest recallable episodes inside the range, including both endpoints, up to its floor and at least one. The provisional floor is one. Unlike recency, the given range reserves room at roots and sections; it takes no spare root turn. Other cues can still recall episodes outside the range, and a shared hit keeps its score and standing. The reference scene time does not shorten the span. An inverted range matches nothing and is echoed unchanged, as every supplied range is, even with tracing off. With tracing enabled, `time_range_has_more` says whether the range contained more eligible occasions than this source contributed; later caps can still omit those contributions. It reads one extra ID and performs no count query. A crowded range is not a filtered topic search: an older topical memory inside it can still be missed when the unrestricted topic search ranks it below its cap.
 
 Recent recallable episodes at or before the scene time can come to mind without any other cue, together with memories resting on those occasions. Recorded scene time determines recency, not creation time. Recency contributes the newest occasions up to the largest requested section cap, in newest-first selector order; all-zero section caps contribute none. Its floor ships at zero until measured. It takes no spare turn at root selection and uses only room left after the given cue kinds, so full roots remain unchanged at the default floor. The root and section caps still bound what is recalled. Every reminder road, including scene descriptions, stays on its occasion: a person, thread or interpreted memory reached through it is a leaf. Another occasion does not open or inherit the reminder kind through shared work. An object that actually expands as a root keeps the best proximity of every road that reached it; objects reached only through roots inherit proximity from full-standing roads when present.
 
@@ -68,7 +85,7 @@ A description brings the most recent few recallable occasions among its fetched 
 
 An occasion recalled by a description can bring what was observed and concluded there. It does not by itself bring the whole history of a person or thread mentioned there. A topic, key or name can still recall that history on its own strength.
 
-Each cue kind has a floor at the merged candidate cap, the graph root cap and each section cap. The measured defaults reserve one slot each for participant, place, activity and topic. Floors apply per kind, not per person or place: five people share one participant floor. `context.cue_floors` is a calibration knob for measured defaults; applications are not expected to set it. Slots are reserved in successive rounds in that order. Unused room returns to the common pool, and selected memories keep their original order. A zero floor reserves nothing for that kind; a zero cap admits nothing. A single kind also receives its floor from its own queue, then fills remaining room in final-ranked order. Topic-only retrieval keeps its selection. Calibration uses the public companion evaluation repository, a development aid outside the core library.
+Each cue kind has a floor at the caps it encounters. The measured defaults reserve one slot each for participant, place, activity and topic; date match provisionally reserves one and recency defaults to zero. Floors apply per kind, not per person or place: five people share one participant floor. `context.cue_floors` is a calibration knob for measured defaults; applications are not expected to set it. Slots are reserved in successive rounds: participant, place, activity, date match, topic, recency. Unused room returns to the common pool, and selected memories keep their ranked order. A zero floor reserves nothing for that kind; a zero cap admits nothing. A single kind also receives its floor from its own queue, then fills remaining room in final-ranked order. Topic-only retrieval keeps its selection. Calibration uses the public companion evaluation repository, a development aid outside the core library.
 
 With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a reserved or spare turn admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
 

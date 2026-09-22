@@ -3487,14 +3487,15 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
-        async fn query_recent_episodes(
+        async fn query_episodes_by_time(
             &self,
-            reference_time: chrono::DateTime<chrono::Utc>,
+            start: Option<chrono::DateTime<chrono::Utc>>,
+            end: chrono::DateTime<chrono::Utc>,
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
         ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
             self.store
-                .query_recent_episodes(reference_time, limit, policy)
+                .query_episodes_by_time(start, end, limit, policy)
                 .await
         }
 

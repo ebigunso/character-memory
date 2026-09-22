@@ -114,7 +114,8 @@ mod tests {
             .is_err());
         assert!(store.query_episode_occasions(&[]).await.unwrap().is_empty());
         let recent = store
-            .query_recent_episodes(
+            .query_episodes_by_time(
+                None,
                 fixtures.episode.scene.time,
                 1,
                 GraphExpansionLifecyclePolicy::default(),
@@ -125,7 +126,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recency_store_cut_uses_eligible_metadata() {
+    async fn time_store_cut_uses_eligible_metadata() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let source = representative_fixtures().episode;
         let reference = source.scene.time;
@@ -145,17 +146,18 @@ mod tests {
             .collect::<Vec<_>>();
         store.upsert_objects(&objects).await.unwrap();
         let ids = store
-            .query_recent_episodes(reference, 3, GraphExpansionLifecyclePolicy::default())
+            .query_episodes_by_time(None, reference, 3, GraphExpansionLifecyclePolicy::default())
             .await
             .unwrap();
         assert_eq!(ids, [1999, 1998, 1997].map(MemoryId::from_u128));
         let ids = store
-            .query_recent_episodes(reference, 0, GraphExpansionLifecyclePolicy::default())
+            .query_episodes_by_time(None, reference, 0, GraphExpansionLifecyclePolicy::default())
             .await
             .unwrap();
         assert!(ids.is_empty());
         let ids = store
-            .query_recent_episodes(
+            .query_episodes_by_time(
+                None,
                 reference,
                 1,
                 GraphExpansionLifecyclePolicy {
@@ -166,6 +168,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids, [MemoryId::from_u128(2000)]);
+        let ids = store
+            .query_episodes_by_time(
+                Some(reference - chrono::Duration::milliseconds(3)),
+                reference,
+                4,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, [1999, 1998, 1997].map(MemoryId::from_u128));
     }
 
     #[tokio::test]

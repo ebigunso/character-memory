@@ -12,7 +12,10 @@ impl EmbeddingProvider for TimeProvider {
         2
     }
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-        let score: f32 = if text == "topic" {
+        let score: f32 = if matches!(
+            text,
+            "topic" | "what happened last Tuesday" | "what happened today"
+        ) {
             1.0
         } else if text.contains("Strong 900") {
             0.85
@@ -1103,4 +1106,366 @@ async fn tier_a_equal_score_recent_occasions_ignore_id_order() {
         .map(|days| time() - Duration::days(days))
         .collect::<Vec<_>>();
     assert_eq!(recalled_times, [latest.clone(), latest]);
+}
+
+fn range_episode(plan: RememberWritePlan, n: u128, at: DateTime<Utc>) -> RememberWritePlan {
+    let mut plan = episode(plan, n, 0, 0.0, false, false);
+    for candidate in &mut plan.candidates {
+        if let MemoryCandidate::Episode(candidate) = candidate {
+            if candidate.draft.id == Some(id(n)) {
+                candidate.draft.scene.as_mut().unwrap().time = at;
+            }
+        }
+    }
+    indexed(plan, ObjectType::Episode, n)
+}
+
+fn range_fixture(reverse: bool) -> RememberWritePlan {
+    let mut plan = RememberWritePlan::new();
+    let tuesday = time() - Duration::days(6) - Duration::hours(18);
+    let today = time() - Duration::hours(18);
+    for (index, hours) in [0, 6, 12, 18, 23].into_iter().enumerate() {
+        let n = if reverse { 204 - index } else { 100 + index };
+        plan = range_episode(plan, n as u128, tuesday + Duration::hours(hours));
+    }
+    for (index, hours) in [0, 6, 12, 17, 18].into_iter().enumerate() {
+        let n = if reverse { 604 - index } else { 500 + index };
+        plan = range_episode(plan, n as u128, today + Duration::hours(hours));
+    }
+    for index in 0..48 {
+        plan = episode(plan, 2000 + index, 30 + index as i64, 0.0, false, true);
+    }
+    plan
+}
+
+#[tokio::test]
+async fn time_range_without_input_baseline() {
+    let mut rows = Vec::new();
+    for reverse in [false, true] {
+        let (memory, temp) = open().await;
+        commit(&memory, range_fixture(reverse)).await;
+        for topic in ["what happened last Tuesday", "what happened today"] {
+            let mut context = query(true, false);
+            context.topic = Some(topic.to_owned());
+            let result = record(
+                &mut rows,
+                &format!("{topic}-reverse={reverse}"),
+                &memory,
+                context,
+            )
+            .await;
+            assert_eq!(episodes(&result), (2000..2008).collect::<Vec<_>>());
+            assert_eq!(roots(&result), (2000..2012).collect::<Vec<_>>());
+        }
+        let mut quiet = query(true, false);
+        quiet.section_limits = room(24);
+        quiet.candidate_limits.max_vector_candidates = 2;
+        quiet.candidate_limits.max_graph_roots = 64;
+        record(
+            &mut rows,
+            &format!("quiet-room-reverse={reverse}"),
+            &memory,
+            quiet,
+        )
+        .await;
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!(
+        "TIME_RANGE_BASELINE={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+}
+
+fn date_match_episodes(result: &RetrieveOutcome) -> Vec<u128> {
+    result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .filter(|row| {
+            row.object.object_type == ObjectType::Episode
+                && row.cue_kinds.contains(&CueKind::DateMatch)
+        })
+        .map(|row| row.object.id.as_u128())
+        .collect()
+}
+
+#[tokio::test]
+async fn time_range_reserves_the_requested_day_under_topic_pressure() {
+    let mut rows = Vec::new();
+    for reverse in [false, true] {
+        let (memory, temp) = open().await;
+        commit(&memory, range_fixture(reverse)).await;
+        let tuesday = time() - Duration::days(6) - Duration::hours(18);
+        for (topic, start, end, expected) in [
+            (
+                "what happened last Tuesday",
+                tuesday,
+                tuesday + Duration::hours(23),
+                if reverse { [200, 201] } else { [104, 103] },
+            ),
+            (
+                "what happened today",
+                time() - Duration::hours(18),
+                time(),
+                if reverse { [600, 601] } else { [504, 503] },
+            ),
+        ] {
+            let mut context = query(true, false).with_time_range(start, end);
+            context.topic = Some(topic.to_owned());
+            context.cue_floors.date_match = 0;
+            let zero = record(
+                &mut rows,
+                &format!("zero-floor-{topic}-reverse={reverse}"),
+                &memory,
+                context.clone(),
+            )
+            .await;
+            assert_eq!(episodes(&zero), (2000..2008).collect::<Vec<_>>());
+            assert!(date_match_episodes(&zero).is_empty());
+            context.cue_floors.date_match = 2;
+            let result = record(
+                &mut rows,
+                &format!("{topic}-reverse={reverse}"),
+                &memory,
+                context.clone(),
+            )
+            .await;
+            assert_eq!(result.time_range, context.time_range);
+            assert_eq!(date_match_episodes(&result), expected);
+            assert_eq!(
+                episodes(&result),
+                (2000..2006).chain(expected).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                result.trace.as_ref().unwrap().time_range_has_more,
+                Some(true)
+            );
+            for n in expected {
+                assert!(roots(&result).contains(&n));
+                assert_eq!(scores(&result, n).cue_score, Some(0.0));
+            }
+            context.include_trace = false;
+            let untraced = memory.retrieve(context).await.unwrap();
+            assert_eq!(untraced.pack, result.pack);
+            assert_eq!(untraced.time_range, result.time_range);
+        }
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!(
+        "TIME_RANGE_PRESSURE={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn time_range_preserves_other_cues_when_there_is_room() {
+    let mut rows = Vec::new();
+    for reverse in [false, true] {
+        let (memory, temp) = open().await;
+        commit(&memory, range_fixture(reverse)).await;
+        let mut context = query(true, false);
+        context.section_limits = room(24);
+        context.candidate_limits.max_vector_candidates = 2;
+        context.candidate_limits.max_graph_roots = 64;
+        let without = record(
+            &mut rows,
+            &format!("quiet-without-reverse={reverse}"),
+            &memory,
+            context.clone(),
+        )
+        .await;
+        let start = time() - Duration::days(6) - Duration::hours(18);
+        context = context.with_time_range(start, start + Duration::hours(23));
+        context.cue_floors.date_match = 2;
+        let with = record(
+            &mut rows,
+            &format!("quiet-with-reverse={reverse}"),
+            &memory,
+            context,
+        )
+        .await;
+        assert_eq!(with.pack, without.pack);
+        for n in episodes(&without) {
+            assert_eq!(scores(&with, n), scores(&without, n));
+        }
+        assert_eq!(
+            date_match_episodes(&with),
+            if reverse { [200, 201] } else { [104, 103] }
+        );
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!("TIME_RANGE_QUIET={}", serde_json::to_string(&rows).unwrap());
+}
+
+#[tokio::test]
+async fn time_range_overlap_keeps_standing_and_reminders_stay_on_the_occasion() {
+    let mut rows = Vec::new();
+    for topic in [false, true] {
+        let (memory, temp) = open().await;
+        commit(&memory, description_fixture(true)).await;
+        let mut context = query(topic, false);
+        context.section_limits = room(2);
+        context.candidate_limits.max_graph_roots = 1;
+        let without = record(
+            &mut rows,
+            &format!("overlap-without-topic={topic}"),
+            &memory,
+            context.clone(),
+        )
+        .await;
+        context = context.with_time_range(time(), time());
+        let with = record(
+            &mut rows,
+            &format!("overlap-with-topic={topic}"),
+            &memory,
+            context,
+        )
+        .await;
+        assert_eq!(with.pack, without.pack);
+        assert_eq!(roots(&with), [900]);
+        assert_eq!(date_match_episodes(&with), [900]);
+        assert_eq!(scores(&with, 900), scores(&without, 900));
+        assert_eq!(
+            with.trace.as_ref().unwrap().time_range_has_more,
+            Some(false)
+        );
+        assert!(assignment(&with, 300)
+            .cue_kinds
+            .contains(&CueKind::DateMatch));
+        if topic {
+            assert_eq!(episodes(&with).len(), 2);
+            assert_eq!(
+                assignment(&with, 700).cue_kinds,
+                std::collections::BTreeSet::from([CueKind::Topic])
+            );
+            assert!(assignment(&with, 900).cue_kinds.contains(&CueKind::Topic));
+            assert_eq!(scores(&with, 700), scores(&without, 700));
+        } else {
+            assert_eq!(episodes(&with), [900]);
+        }
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!(
+        "TIME_RANGE_OVERLAP={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn time_range_uses_both_ends_without_the_scene_reference_cut() {
+    let (memory, temp) = open().await;
+    let start = time() + Duration::days(1);
+    let end = start + Duration::milliseconds(125);
+    let mut plan = RememberWritePlan::new();
+    for (n, at) in [
+        (99, start - Duration::milliseconds(1)),
+        (900, start),
+        (100, end),
+        (98, end + Duration::milliseconds(1)),
+    ] {
+        plan = range_episode(plan, n, at);
+    }
+    commit(&memory, plan).await;
+    let mut rows = Vec::new();
+    for (case, range_start, range_end, expected) in [
+        ("future-inclusive", start, end, vec![100, 900]),
+        ("point-inclusive", start, start, vec![900]),
+        ("inverted", end, start, vec![]),
+        ("empty", time(), time(), vec![]),
+    ] {
+        let mut context = query(false, false).with_time_range(range_start, range_end);
+        context.cue_floors.date_match = 2;
+        let with = record(&mut rows, case, &memory, context.clone()).await;
+        assert_eq!(with.time_range, context.time_range);
+        assert_eq!(date_match_episodes(&with), expected);
+        assert_eq!(episodes(&with), expected);
+        assert_eq!(
+            with.trace.as_ref().unwrap().time_range_has_more,
+            Some(false)
+        );
+        context.include_trace = false;
+        let untraced = memory.retrieve(context).await.unwrap();
+        assert_eq!(untraced.pack, with.pack);
+        assert_eq!(untraced.time_range, with.time_range);
+    }
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    println!(
+        "TIME_RANGE_BOUNDARIES={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn time_range_floor_bounds_contribution_after_lifecycle_filtering() {
+    let (memory, temp) = open().await;
+    let start = time() + Duration::days(1);
+    let end = start + Duration::hours(2);
+    let mut plan = RememberWritePlan::new();
+    for (n, hours) in [(300, 0), (200, 1), (100, 2)] {
+        plan = range_episode(plan, n, start + Duration::hours(hours));
+    }
+    commit(&memory, plan).await;
+    let mut rows = Vec::new();
+    for floor in [0, 1, 2, 3, 7] {
+        let mut context = query(false, false).with_time_range(start, end);
+        context.cue_floors.date_match = floor;
+        let result = record(
+            &mut rows,
+            &format!("contribution-floor-{floor}"),
+            &memory,
+            context,
+        )
+        .await;
+        let count = floor.clamp(1, 3);
+        assert_eq!(episodes(&result), [100, 200, 300][..count]);
+        assert_eq!(date_match_episodes(&result), [100, 200, 300][..count]);
+        assert_eq!(
+            result.trace.as_ref().unwrap().time_range_has_more,
+            Some(floor < 3)
+        );
+    }
+    memory
+        .forget(ForgetMemoryDraft::suppress(
+            LifecycleTargetRef::Episode(id(100)),
+            "range eligibility",
+        ))
+        .await
+        .unwrap();
+    for include_suppressed in [false, true] {
+        let mut context = query(false, false).with_time_range(start, end);
+        context.cue_floors.date_match = 2;
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let result = record(
+            &mut rows,
+            &format!("range-include-suppressed-{include_suppressed}"),
+            &memory,
+            context,
+        )
+        .await;
+        assert_eq!(
+            episodes(&result),
+            if include_suppressed {
+                [100, 200]
+            } else {
+                [200, 300]
+            }
+        );
+        assert_eq!(
+            result.trace.as_ref().unwrap().time_range_has_more,
+            Some(include_suppressed)
+        );
+    }
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    println!(
+        "TIME_RANGE_FLOORS={}",
+        serde_json::to_string(&rows).unwrap()
+    );
 }
