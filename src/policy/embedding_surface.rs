@@ -293,6 +293,7 @@ mod tests {
 
     fn derived_memory_fixture() -> DerivedMemory {
         DerivedMemory {
+            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             id: id(40),

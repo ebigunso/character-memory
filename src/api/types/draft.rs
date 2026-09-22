@@ -397,6 +397,7 @@ impl DerivedMemoryDraft {
             derived_from_observation_ids: self.derived_from_observation_ids,
             thread_ids: self.thread_ids,
             entity_ids: self.entity_ids,
+            scope_keys: Vec::new(),
             assertions: self.assertions,
             given_by_application: self.given_by_application,
             salience_score: self.salience_score,

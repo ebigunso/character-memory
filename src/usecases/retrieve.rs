@@ -107,7 +107,84 @@ where
                 cue_kinds: BTreeSet::from([CueKind::Participant]),
             })
             .collect::<Vec<_>>();
+        let mut assembly = RetrieveAssembly::new(trace_mode);
+        let mut state_scopes = state::StateScopes::new();
+        let mut root_order = HashMap::new();
+        let keys = context.scene.scope_keys();
+        let scope_kinds = std::iter::repeat_n(CueKind::Participant, cues.participants.len())
+            .chain(std::iter::repeat_n(CueKind::Place, keys.len()))
+            .chain([CueKind::Activity])
+            .collect::<Vec<_>>();
+        if context.graph_limits.allowed_object_types.is_empty()
+            || context
+                .graph_limits
+                .allowed_object_types
+                .contains(&ObjectType::DerivedMemory)
+        {
+            for (offset, key) in keys.iter().enumerate() {
+                let (ids, filtered) = self
+                    .graph_store
+                    .query_scope_state(
+                        key,
+                        GraphExpansionLifecyclePolicy {
+                            include_suppressed: context.lifecycle_policy.include_suppressed,
+                            include_superseded: context.lifecycle_policy.include_superseded,
+                        },
+                    )
+                    .await?;
+                assembly
+                    .lifecycle_decisions
+                    .extend(filtered.into_iter().map(|entry| {
+                        filtered_lifecycle_decision(
+                            entry.object_ref,
+                            entry.reason,
+                            &entry.superseded_by,
+                        )
+                    }));
+                // Lifecycle filtering and successor deduplication precede this cap.
+                for (rank, id) in ids
+                    .into_iter()
+                    .take(context.candidate_limits.max_graph_roots)
+                    .enumerate()
+                {
+                    root_order.insert(
+                        (
+                            cues.participants.len() + offset,
+                            MemoryObjectRef::new(ObjectType::DerivedMemory, id),
+                        ),
+                        rank,
+                    );
+                    state_scopes
+                        .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, id))
+                        .or_default()
+                        .push(cues.participants.len() + offset);
+                    explicit_roots.push(CandidateRoot {
+                        object_id: id,
+                        object_type: ObjectType::DerivedMemory,
+                        score: 1.0,
+                        source: GraphRootSource::Place,
+                        vector_score: None,
+                        cue_kinds: BTreeSet::from([CueKind::Place]),
+                    });
+                }
+            }
+        }
         let (activity, activity_roots) = self.activity_roots(&context).await?;
+        for (rank, root) in activity_roots.iter().enumerate() {
+            if root.object_type == ObjectType::DerivedMemory {
+                root_order.insert(
+                    (
+                        cues.participants.len() + keys.len(),
+                        MemoryObjectRef::new(root.object_type, root.object_id),
+                    ),
+                    rank,
+                );
+                state_scopes
+                    .entry(MemoryObjectRef::new(root.object_type, root.object_id))
+                    .or_default()
+                    .push(cues.participants.len() + keys.len());
+            }
+        }
         explicit_roots.extend(activity_roots);
         let root_selection = select_candidate_roots(
             &vector_candidates,
@@ -116,6 +193,7 @@ where
             &cues.orders,
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
+            (&state_scopes, &root_order, &scope_kinds),
         );
         let candidate_roots = root_selection.roots;
         // Explicit roots and what they bring precede word matches at sections.
@@ -128,8 +206,6 @@ where
                     .push(MemoryObjectRef::new(root.object_type, root.object_id));
             }
         }
-        let mut assembly = RetrieveAssembly::new(trace_mode);
-        let mut state_scopes = state::StateScopes::new();
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
         let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
@@ -207,14 +283,16 @@ where
                             &expansion,
                         );
                     }
-                    let explicit_kind = match candidate.source {
-                        GraphRootSource::Participant => Some(CueKind::Participant),
-                        GraphRootSource::Activity => Some(CueKind::Activity),
-                        GraphRootSource::Vector => None,
-                    };
-                    if let Some(kind) = explicit_kind {
+                    for kind in explicit_roots
+                        .iter()
+                        .filter(|root| {
+                            root.object_type == candidate.object_type
+                                && root.object_id == candidate.object_id
+                        })
+                        .flat_map(|root| &root.cue_kinds)
+                    {
                         section_orders
-                            .entry(kind)
+                            .entry(*kind)
                             .or_default()
                             .extend(&expansion.selection_order);
                     }
@@ -262,7 +340,7 @@ where
         let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
-            &state_scopes,
+            (&state_scopes, &scope_kinds),
             &section_orders,
             context.section_limits,
             context.cue_floors,
@@ -704,7 +782,7 @@ fn select_with_cue_floors<'a>(
 
 fn build_pack(
     mut ranked_objects: Vec<RankedObject>,
-    state_scopes: &state::StateScopes,
+    (state_scopes, scope_kinds): (&state::StateScopes, &[CueKind]),
     orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
@@ -722,16 +800,24 @@ fn build_pack(
             .collect::<Vec<_>>();
         let mut orders = orders.clone();
         // A named route takes its state scope rounds before other expansion results.
-        let state_order = candidates
-            .iter()
-            .map(|ranked| ranked.object.object_ref())
-            .filter(|object| state_scopes.contains_key(object))
-            .collect::<Vec<_>>();
-        if !state_order.is_empty() {
-            orders
-                .entry(CueKind::Participant)
-                .or_default()
-                .splice(..0, state_order);
+        for kind in [CueKind::Participant, CueKind::Place, CueKind::Activity] {
+            let scopes = state::scopes_for_kind(state_scopes, scope_kinds, kind);
+            let mut state_order = candidates
+                .iter()
+                .copied()
+                .filter(|ranked| scopes.contains_key(&ranked.object.object_ref()))
+                .collect::<Vec<_>>();
+            state_order.sort_by_key(|ranked| ranked.rank_key());
+            state::order_state(
+                &mut state_order,
+                &scopes,
+                |ranked| Some(ranked.object.object_ref()),
+                |_, _| 0,
+            );
+            orders.entry(kind).or_default().splice(
+                ..0,
+                state_order.iter().map(|ranked| ranked.object.object_ref()),
+            );
         }
         for (index, cause) in select_with_cue_floors(
             candidates
@@ -991,6 +1077,11 @@ fn select_candidate_roots(
     content_orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
+    (scopes, root_order, scope_kinds): (
+        &state::StateScopes,
+        &HashMap<(usize, MemoryObjectRef), usize>,
+        &[CueKind],
+    ),
 ) -> CandidateRootSelection {
     let mut orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
     for root in explicit_roots {
@@ -1000,9 +1091,6 @@ fn select_candidate_roots(
                 .or_default()
                 .push(MemoryObjectRef::new(root.object_type, root.object_id));
         }
-    }
-    for (kind, order) in content_orders {
-        orders.entry(*kind).or_default().extend(order);
     }
     let mut by_ref: HashMap<MemoryObjectRef, &VectorCandidateMatch> = HashMap::new();
     for candidate in candidates {
@@ -1066,6 +1154,44 @@ fn select_candidate_roots(
             indices.insert(object, merged.len());
             merged.push(root);
         }
+    }
+    // A shared root may first appear in another scope. Keep each selector's own
+    // order here; pack queues deliberately use only their final ranked indices.
+    state::order_state(
+        &mut merged,
+        scopes,
+        |root| Some(MemoryObjectRef::new(root.object_type, root.object_id)),
+        |scope, root| {
+            root_order[&(
+                scope,
+                MemoryObjectRef::new(root.object_type, root.object_id),
+            )]
+        },
+    );
+    let root_positions = merged
+        .iter()
+        .enumerate()
+        .map(|(index, root)| {
+            (
+                MemoryObjectRef::new(root.object_type, root.object_id),
+                index,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for (kind, order) in &mut orders {
+        order.sort_by_key(|object| root_positions[object]);
+        let mut seen = HashSet::new();
+        order.retain(|object| seen.insert(*object));
+        let own_scopes = state::scopes_for_kind(scopes, scope_kinds, *kind);
+        state::order_state(
+            order,
+            &own_scopes,
+            |object| Some(*object),
+            |scope, object| root_order[&(scope, *object)],
+        );
+    }
+    for (kind, order) in content_orders {
+        orders.entry(*kind).or_default().extend(order);
     }
     let unique_count = merged.len();
     let selection = select_with_cue_floors(
@@ -1368,6 +1494,8 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
     use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -1459,6 +1587,7 @@ mod tests {
             &BTreeMap::new(),
             2,
             RetrievalCueFloors::default(),
+            (&state::StateScopes::new(), &HashMap::new(), &[]),
         );
 
         assert_eq!(
@@ -2917,6 +3046,15 @@ mod tests {
             _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             Ok(Vec::new())
+        }
+
+        async fn query_scope_state(
+            &self,
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            let _ = (key, policy);
+            unreachable!("scope selector is not used by this failure fixture")
         }
 
         async fn expand_bounded(

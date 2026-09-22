@@ -94,7 +94,8 @@ where
                     validation.status == CandidateValidationStatus::Invalid
                         || !validation.warnings.is_empty()
                 }));
-        let values = values?;
+        let mut values = values?;
+        super::scope::derive_scope_keys(self.graph_store, &mut values.objects).await?;
 
         self.reject_divergent_existing_writes(&values.objects, &values.links)
             .await?;
@@ -329,6 +330,9 @@ fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
+    use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -1263,6 +1267,14 @@ mod tests {
             query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
         ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
             self.store.query_derived_memories_by_thread(query).await
+        }
+
+        async fn query_scope_state(
+            &self,
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            self.store.query_scope_state(key, policy).await
         }
 
         async fn expand_bounded(

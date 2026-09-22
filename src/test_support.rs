@@ -494,6 +494,7 @@ fn derived_memory(
     retention_state: RetentionState,
 ) -> DerivedMemory {
     DerivedMemory {
+        scope_keys: Vec::new(),
         assertions: Vec::new(),
         given_by_application: false,
         id,

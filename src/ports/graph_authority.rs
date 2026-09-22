@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::domain::{
     DerivedMemory, GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
-    ObjectType, RelationType,
+    ObjectType, RelationType, ScopeKey,
 };
 use crate::errors::{CustomError, GraphQueryError};
 
@@ -358,6 +358,12 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError>;
 
+    async fn query_scope_state(
+        &self,
+        key: &ScopeKey,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError>;
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -421,6 +427,14 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<Vec<DerivedMemory>, CustomError> {
         (**self).query_derived_memories_by_thread(query).await
+    }
+
+    async fn query_scope_state(
+        &self,
+        key: &ScopeKey,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        (**self).query_scope_state(key, policy).await
     }
 
     async fn expand_bounded(

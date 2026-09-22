@@ -309,6 +309,7 @@ pub enum GraphRootSource {
     Vector,
     Participant,
     Activity,
+    Place,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -810,6 +811,7 @@ mod tests {
 
     fn derived_memory(id: MemoryId, source_episode_id: MemoryId) -> DerivedMemory {
         DerivedMemory {
+            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             id,

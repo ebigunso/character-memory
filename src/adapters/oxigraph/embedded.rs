@@ -9,6 +9,7 @@ use oxigraph::store::Store;
 
 use crate::domain::{
     graph_uri, DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType,
+    ScopeKey,
 };
 use crate::errors::{CustomError, GraphQueryError};
 use crate::policy::graph_expansion::{
@@ -16,7 +17,8 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-    GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
+    GraphExpansion, GraphExpansionFilteredNode, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
+    GraphObjectQuery,
 };
 
 use super::rdf_mapping::{rdf_triples_for_link, rdf_triples_for_object};
@@ -275,6 +277,14 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             ),
             links,
         ))
+    }
+
+    async fn query_scope_state(
+        &self,
+        key: &ScopeKey,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        SparqlGraphSelectors::new(&self.store).select_scope_state(key, policy)
     }
 
     async fn expand_bounded(

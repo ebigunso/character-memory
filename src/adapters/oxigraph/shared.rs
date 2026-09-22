@@ -362,6 +362,19 @@ pub(super) fn memory_object_from_rdf(
             schema_version: values.literal(subject, super::vocabulary::SCHEMA_VERSION)?,
         })),
         ObjectType::DerivedMemory => Ok(MemoryObject::DerivedMemory(DerivedMemory {
+            scope_keys: values
+                .literals
+                .get(super::vocabulary::SCOPE_KEY)
+                .into_iter()
+                .flatten()
+                .map(|value| {
+                    serde_json::from_str(value).map_err(|error| {
+                        rdf_parse_error(subject, super::vocabulary::SCOPE_KEY, error)
+                    })
+                })
+                .collect::<Result<std::collections::BTreeSet<_>, _>>()?
+                .into_iter()
+                .collect(),
             id: memory_id_literal(subject, values, super::vocabulary::OBJECT_ID)?,
             object_type,
             derived_type: enum_literal(subject, values, super::vocabulary::DERIVED_TYPE)?,

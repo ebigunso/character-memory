@@ -97,7 +97,8 @@ where
             .collect::<Vec<_>>();
         let embeddings = self.embedder.embed_batch(&inputs).await;
         let _turn = write_turn.lock().await;
-        let plan = self.correction_plan(draft, replacements).await?;
+        let mut plan = self.correction_plan(draft, replacements).await?;
+        super::scope::derive_scope_keys(self.graph_store, &mut plan.graph_objects).await?;
         let idempotent_ids = self.idempotent_replacement_ids(&plan).await?;
         let graph_objects = plan
             .graph_objects
@@ -908,6 +909,7 @@ fn replacement_memory(
         derived_from_observation_ids: draft.derived_from_observation_ids,
         thread_ids: draft.thread_ids,
         entity_ids: draft.entity_ids,
+        scope_keys: Vec::new(),
         assertions: draft.assertions,
         given_by_application: draft.given_by_application,
         salience_score: draft.salience_score,
@@ -1177,6 +1179,8 @@ fn missing_object_error(object_type: ObjectType, id: MemoryId) -> CustomError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ScopeKey;
+    use crate::ports::graph_authority::GraphExpansionFilteredNode;
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex, MutexGuard};
     use uuid::Uuid;
@@ -3324,6 +3328,7 @@ mod tests {
 
     fn old_memory(ids: &FixedIds) -> DerivedMemory {
         DerivedMemory {
+            scope_keys: Vec::new(),
             assertions: Vec::new(),
             given_by_application: false,
             id: ids.old,
@@ -3579,6 +3584,14 @@ mod tests {
         ) -> Result<Vec<DerivedMemory>, CustomError> {
             lock(&self.calls).push(StoreCall::GraphThreadQuery(query.thread_ids.clone()));
             self.store.query_derived_memories_by_thread(query).await
+        }
+
+        async fn query_scope_state(
+            &self,
+            key: &ScopeKey,
+            policy: GraphExpansionLifecyclePolicy,
+        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+            self.store.query_scope_state(key, policy).await
         }
 
         async fn expand_bounded(

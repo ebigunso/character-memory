@@ -311,6 +311,13 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
         RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(memory.created_at)),
         RdfTriple::literal(&subject, vocab::UPDATED_AT, timestamp(memory.updated_at)),
     ]);
+    for key in &memory.scope_keys {
+        triples.push(RdfTriple::literal(
+            &subject,
+            vocab::SCOPE_KEY,
+            serde_json::to_string(key).expect("scope keys contain only strings"),
+        ));
+    }
     for id in &memory.derived_from_episode_ids {
         triples.push(RdfTriple::resource(
             &subject,

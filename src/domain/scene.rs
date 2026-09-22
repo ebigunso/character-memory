@@ -60,3 +60,30 @@ pub struct SceneSetting {
     pub key: Option<String>,
     pub words: Option<String>,
 }
+
+/// Internal context values, never identifiers supplied to retrieval.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ScopeKey {
+    Setting(String),
+    Custom { name: String, value: String },
+}
+
+impl Scene {
+    pub(crate) fn scope_keys(&self) -> Vec<ScopeKey> {
+        self.setting
+            .key
+            .iter()
+            .cloned()
+            .map(ScopeKey::Setting)
+            .chain(
+                self.custom_values
+                    .iter()
+                    .map(|(name, value)| ScopeKey::Custom {
+                        name: name.clone(),
+                        value: value.clone(),
+                    }),
+            )
+            .collect()
+    }
+}
