@@ -132,7 +132,7 @@ pub enum CandidateValidationIssue {
         target_id: MemoryId,
     },
     #[error(
-        "scene participant key {participant_id} occurs more than once; the person is stored and reported repeatedly as given"
+        "scene participant key {participant_id} is listed more than once; recall will report the person present twice and their words count twice in participant search"
     )]
     RepeatedSceneParticipant { participant_id: MemoryId },
 }

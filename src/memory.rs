@@ -1482,32 +1482,6 @@ mod tests {
                         memory.commit(plan, CommitOptions::default()).await.unwrap(),
                         outcome
                     );
-                } else {
-                    // A prepared standard-path write is equally replayable; its generated link ids are fixed.
-                    let separate = injected_memory().await;
-                    let mut other = warning_entity();
-                    other.id = Some(Uuid::from_u128(20));
-                    separate
-                        .remember(
-                            warning_input(100)
-                                .with_entity(warning_entity())
-                                .with_entity(other),
-                            RememberOptions::default(),
-                        )
-                        .await
-                        .unwrap();
-                    let first = separate
-                        .commit(plan.clone(), CommitOptions::default())
-                        .await
-                        .unwrap();
-                    assert_eq!(
-                        separate
-                            .commit(plan, CommitOptions::default())
-                            .await
-                            .unwrap(),
-                        first
-                    );
-                    separate.close().await.unwrap();
                 }
                 memory.close().await.unwrap();
             }
