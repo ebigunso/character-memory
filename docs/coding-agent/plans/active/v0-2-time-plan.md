@@ -47,6 +47,7 @@
 - Alternative: the range filters the content search. Rejected as the meaning of the input: time never gates recall. A content search restricted to the span is left until a scenario fails without it; the README states the ceiling.
 - Chosen, the calendar day: `Scene.time` carries the offset; the stored instant literal is unchanged; commit derives the local date from the offset given and stores it on the episode; the anniversary read matches the present scene's local month and day exactly with a local year earlier than the present scene's local year. Whether the stored form is one literal or a month-day key beside a year is the worker's choice, provided the read is an exact match without full-store hydration. Alternative: earlier year judged by instant. Rejected: wrong across offsets. Alternative: compare in UTC. Rejected: wrong for every deployment away from UTC, silently. Alternative: store the offset-carrying literal and extract month and day in the query engine. Rejected: the engine leaves an offset beyond fourteen hours unbound and a filter then drops the row silently, the read is a scan, and chrono equality ignores the offset so replay could not tell two local days apart. Alternative: a UTC offset given only at retrieval. Rejected: wrong whenever the character moved or the clocks changed. Episodes written before this plan have no local date and never match an anniversary; there is no migration.
 - Chosen, staleness: a computed fact on the admitted interpreted memory's existing memory-scenes entry. Alternative: leave it to the application. Rejected unless the baseline shows otherwise: the plan review found the result collapses an observation into its parent scene and discards the observation's own time, so a consumer cannot derive it in every case. Alternative: omit or demote memories past an age. Rejected by ADR-D-0018.
+- Measurement (standing rule of 2026-09-22): every task that changes what comes to mind, its order or its standing carries a measurement validation owned by the evals side, run at the task's tip before its pull request opens, before and after on the same instrument and inputs, in both id orders, twice. Instrument: the companion evaluation repository's Task_9 generated runner extended with a time family: a store of dated experiences with ids opposed to time, a scene giving only a time, a range beside a topic, and an anniversary shared with a scene-resolved notion and one unshared. Falsifiers, any one of which falsifies the design: the occasion contributed by recency is not the latest by recorded scene time; at a recency floor of zero a topic keeps fewer on-topic memories with recency present than alone; date match holds reserved room for an unshared anniversary. Task_1 measures the first two, Task_2 the second with the range present, Task_3 the third; Task_4 reports an age and changes nothing that comes, so it is exempt. The validator's vocabulary has no measurement kind, so the item is carried as a manual validation owned by the orchestrator, whose detail names the evals worker as the runner.
 - Why chosen: the smallest shape that makes "when" a cue like a description of where and with whom, contributing a few occasions and letting scores decide, without letting it take room from cues someone gave. Fit: the phase draft sections 2 and 2.1; philosophy "make time a first-class dimension" and "the character knows how things stand before it has reflected"; ADR-D-0018, D-0022, D-0023, D-0029, D-0038, ADR-I-0013, I-0022.
 
 ## Compatibility stance (required if a contract/interface/persisted format is touched)
@@ -115,6 +116,10 @@
     required: true
     owner: reviewer
     detail: "Tier D diff review, reproducing the baseline evidence at the parent commit and tracing the root's standing, its score components and duplicate merging for score or standing changes; Tier A review of the road against ADR-D-0022, ADR-D-0018 and rulings 39, 45, 46 and 47"
+  - kind: manual
+    required: true
+    owner: orchestrator
+    detail: "Measurement, run by the evals worker at this task's tip before its pull request opens: the time family on the Task_9 generated runner, before and after on the same inputs, both id orders, twice; falsified if the contributed occasion is not the latest by recorded scene time, or if at a recency floor of zero the topic keeps fewer on-topic memories with recency present than alone"
 
 ### Task_2: A question about a span of time brings what happened then
 - type: impl
@@ -149,6 +154,10 @@
     required: true
     owner: reviewer
     detail: "Tier D diff review; Tier A review of the input against ADR-D-0023 and ADR-D-0029 (a perceived fact, never a purpose, nothing resolved by the application) and of cue-not-filter against ADR-D-0018 and ADR-D-0038"
+  - kind: manual
+    required: true
+    owner: orchestrator
+    detail: "Measurement, run by the evals worker at this task's tip before its pull request opens: the time family with the range beside a topic, before and after on the same inputs, both id orders, twice; falsified if the contributed occasions are not the most recent inside the range, or if the topic keeps fewer on-topic memories with the range present than alone beyond the date-match floor's reservation"
 
 ### Task_3: This day in an earlier year comes back
 - type: impl
@@ -202,6 +211,10 @@
     required: true
     owner: user
     detail: "If a record was proposed, the decider accepts or returns it, in a batch at the slice boundary"
+  - kind: manual
+    required: true
+    owner: orchestrator
+    detail: "Measurement, run by the evals worker at this task's tip before its pull request opens: the time family with a shared and an unshared anniversary, before and after on the same inputs, both id orders, twice; falsified if date match holds reserved room for an unshared anniversary, or if the shared one is not the occasion contributed first"
 
 ### Task_4: An old belief is held as old
 - type: impl
@@ -231,7 +244,7 @@
   - kind: review
     required: true
     owner: reviewer
-    detail: "Tier D diff review, confirming no second provenance read; Tier A review against ADR-D-0018 (reported, never enforced) and ADR-D-0028"
+    detail: "Tier D diff review, confirming no second provenance read; Tier A review against ADR-D-0018 (reported, never enforced) and ADR-D-0028. No measurement item: this task reports an age and changes nothing that comes to mind, its order or its standing, so it is exempt from the standing rule of 2026-09-22"
 
 ## Integration
 - The library stack: the cues pull requests, the fixes pull request, the state plan through its Task_4, the scene-words plan (Task_1 and Task_2 landed at tip 63f176f on `feature/2026-09-21/scene-reminders`; Task_3, the trace field and the documents, in progress), then this plan, prospective memory, write-path warnings, the renderer.
