@@ -793,8 +793,8 @@ impl RetrieveAssembly {
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
         // Reorder only contributed-occasion slots within an equal-score/type
-        // tie: the given range precedes recency. Other objects retain the
-        // general ID order and their positions.
+        // tie: floor-eligible date matches precede recency and unshared anniversaries.
+        // Other objects retain the general ID order and their positions.
         for tied in ranked_objects.chunk_by_mut(|left, right| {
             left.rank_key().score == right.rank_key().score
                 && left.object.object_type() == right.object.object_type()
@@ -818,7 +818,7 @@ impl RetrieveAssembly {
                 .collect::<Vec<_>>();
             recent.sort_by_key(|ranked| match &ranked.object {
                 MemoryObject::Episode(episode) => (
-                    !ranked.cue_kinds.contains(&CueKind::DateMatch),
+                    !ranked.date_match_floor_eligible,
                     std::cmp::Reverse(episode.scene.time),
                     episode.id,
                 ),
@@ -1425,6 +1425,23 @@ fn select_candidate_roots(
             })
             .then_with(|| left.object_id.cmp(&right.object_id))
     });
+    let mut time_roots = explicit_roots
+        .iter()
+        .filter(|root| {
+            matches!(
+                root.source,
+                GraphRootSource::Recency | GraphRootSource::DateMatch
+            )
+        })
+        .collect::<Vec<_>>();
+    // Only eligible date matches lead. Recency is the newest bounded prefix;
+    // additional unshared anniversaries are older, and overlaps merge below.
+    time_roots.sort_by_key(|root| {
+        (
+            !root.date_match_floor_eligible,
+            root.source == GraphRootSource::DateMatch,
+        )
+    });
     let roots = explicit_roots
         .iter()
         .filter(|root| {
@@ -1436,17 +1453,7 @@ fn select_candidate_roots(
         .cloned()
         .chain(content)
         // Time sources use only their reservations and remaining root room.
-        .chain(
-            explicit_roots
-                .iter()
-                .filter(|root| {
-                    matches!(
-                        root.source,
-                        GraphRootSource::Recency | GraphRootSource::DateMatch
-                    )
-                })
-                .cloned(),
-        )
+        .chain(time_roots.into_iter().cloned())
         .collect::<Vec<_>>();
     let mut indices = HashMap::new();
     let mut merged: Vec<CandidateRoot> = Vec::new();
@@ -1923,16 +1930,15 @@ mod tests {
                 3 | 5 => CueKind::DateMatch,
                 _ => CueKind::Topic,
             };
-            assembly.objects.insert(
-                MemoryObjectRef::new(ObjectType::Episode, episode.id),
-                RankedObject::new(
-                    MemoryObject::Episode(episode),
-                    if n == 6 { 1.0 } else { 0.0 },
-                    BTreeSet::from([kind]),
-                    1.0,
-                    None,
-                ),
+            let mut ranked = RankedObject::new(
+                MemoryObject::Episode(episode),
+                if n == 6 { 1.0 } else { 0.0 },
+                BTreeSet::from([kind]),
+                1.0,
+                None,
             );
+            ranked.date_match_floor_eligible = kind == CueKind::DateMatch;
+            assembly.objects.insert(ranked.object.object_ref(), ranked);
         }
         assert_eq!(
             assembly
