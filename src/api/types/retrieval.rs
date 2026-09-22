@@ -520,6 +520,7 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     /// Recallable scene matches left out by each description search's occasion limit.
     /// Participant words share one search and therefore one count.
@@ -887,6 +888,15 @@ mod tests {
             ..policy
         }
         .allows_retention_state(RetentionState::Suppressed));
+    }
+
+    #[test]
+    fn empty_scene_search_trace_reads_across_pins() {
+        let mut prior = serde_json::to_value(RetrievalTrace::empty()).unwrap();
+        prior.as_object_mut().unwrap().remove("scene_cue_searches");
+        let trace: RetrievalTrace = serde_json::from_value(prior.clone()).unwrap();
+        assert!(trace.scene_cue_searches.is_empty());
+        assert_eq!(serde_json::to_value(trace).unwrap(), prior);
     }
 
     #[test]

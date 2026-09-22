@@ -60,7 +60,7 @@ Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(Activity
 
 Thread members are taken most recent first.
 
-A description brings the most recent few recallable occasions among its fetched matches, at or before the scene time: as many as its cue kind's reserved amount, called its floor, and at least the latest one. Its other matches contribute nothing; the trace counts those left out by this limit. What was brought then competes by relevance. Keys and names take their kind's reserved room first, so adding a description does not displace what is already known merely to fill that reservation. Only graph-root selection shares spare room by turns among cue kinds; candidate and section selection fill spare room by score.
+A description brings the most recent few recallable occasions among its fetched matches, at or before the scene time: as many as its cue kind's reserved amount, called its floor, and at least the latest one. Its other matches contribute nothing; the trace counts those left out by this limit. What was brought then competes by relevance. Keys and names take their kind's reserved room first, so adding a description does not displace what is already known merely to fill that reservation. Turns among cue kinds apply only where the memories to expand from are chosen; everywhere else, spare room goes by score.
 
 An occasion recalled by a description can bring what was observed and concluded there. It does not by itself bring the whole history of a person or thread mentioned there. A topic, key or name can still recall that history on its own strength.
 
