@@ -76,7 +76,7 @@ fn context() -> RetrievalContext {
 fn episode(id: u128, summary: String, scene: Scene) -> [MemoryCandidate; 2] {
     let mut draft = EpisodeDraft::new(summary);
     draft.id = Some(MemoryId::from_u128(id));
-    draft.created_at = Some(scene.time);
+    draft.created_at = Some(scene.time.to_utc());
     draft.scene = Some(scene);
     draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     [
@@ -99,7 +99,7 @@ async fn cohort_memory() -> CharacterMemory {
     );
     let mut person = EntityDraft::new();
     person.id = Some(MemoryId::from_u128(7));
-    person.created_at = Some(context().scene.time);
+    person.created_at = Some(context().scene.time.to_utc());
     person.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     memory
         .commit(
@@ -124,7 +124,7 @@ async fn cohort_memory() -> CharacterMemory {
         for candidate in episode(
             2000 + index,
             format!("Orchid lesson {index}"),
-            Scene::at(context().scene.time),
+            Scene::at((context().scene.time).fixed_offset()),
         ) {
             plan = plan.with_candidate(candidate);
         }
@@ -181,8 +181,14 @@ async fn shared_scene_cohort_keeps_the_latest_occasion_and_score_fills_the_pack(
             [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
         );
         assert!(trace.floor_admissions.is_empty());
-        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Participant], 47);
-        assert_eq!(trace.scene_cue_omitted_counts[&CueKind::Place], 47);
+        assert_eq!(
+            trace
+                .scene_cue_searches
+                .iter()
+                .map(|search| (search.cue_kind, search.omitted_count))
+                .collect::<Vec<_>>(),
+            [(CueKind::Place, 47), (CueKind::Participant, 47)]
+        );
     }
     memory.close().await.unwrap();
 }
@@ -259,10 +265,12 @@ async fn shared_scene_topic_only_keeps_original_bytes() {
     query.scene.setting.words = None;
     let result = memory.retrieve(query.clone()).await.unwrap();
     query.cue_floors = RetrievalCueFloors {
+        date_match: 1,
         participant: 0,
         place: 0,
         activity: 0,
         topic: 0,
+        recency: 0,
     };
     let zero_floors = memory.retrieve(query).await.unwrap();
     assert_eq!(
@@ -331,7 +339,12 @@ async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admission
         .unwrap();
     assert_eq!(
         shared.cue_kinds,
-        BTreeSet::from([CueKind::Participant, CueKind::Place, CueKind::Topic])
+        BTreeSet::from([
+            CueKind::Participant,
+            CueKind::Place,
+            CueKind::Topic,
+            CueKind::Recency
+        ])
     );
     query.candidate_limits.max_graph_roots = 64;
     query.section_limits.relevant_episodes = 64;

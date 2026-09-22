@@ -113,6 +113,132 @@ mod tests {
             .await
             .is_err());
         assert!(store.query_episode_occasions(&[]).await.unwrap().is_empty());
+        let recent = store
+            .query_episodes_by_time(
+                None,
+                fixtures.episode.scene.time.to_utc(),
+                1,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent, [fixtures.episode.id]);
+    }
+
+    #[tokio::test]
+    async fn anniversary_selector_reads_metadata_and_skips_legacy_episodes() {
+        use super::super::vocabulary as vocab;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let legacy = representative_fixtures().episode;
+        assert_eq!(legacy.scene_local_date, None);
+        let mut dated = legacy.clone();
+        dated.id = MemoryId::from_u128(900);
+        dated.scene_local_date = Some("2025-09-21".parse().unwrap());
+        dated.scene.participants = vec![crate::SceneParticipant {
+            key: Some(MemoryId::from_u128(7)),
+            ..Default::default()
+        }];
+        store
+            .upsert_objects(&[
+                MemoryObject::Episode(legacy.clone()),
+                MemoryObject::Episode(dated.clone()),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .query_objects(&GraphObjectQuery::by_ids(vec![legacy.id]))
+                .await
+                .unwrap(),
+            [MemoryObject::Episode(legacy)]
+        );
+        // A selector must not need the episode's content to find a match.
+        for quad in store.store.iter().map(Result::unwrap).collect::<Vec<_>>() {
+            if quad.predicate.as_str() == vocab::SUMMARY {
+                store.store.remove(&quad).unwrap();
+            }
+        }
+        assert_eq!(
+            store
+                .query_anniversaries(
+                    "2026-09-21".parse().unwrap(),
+                    &[MemoryId::from_u128(7)],
+                    1,
+                    GraphExpansionLifecyclePolicy::default()
+                )
+                .await
+                .unwrap(),
+            [(dated.id, false)]
+        );
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_ids(vec![dated.id]))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn time_store_cut_uses_eligible_metadata() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let source = representative_fixtures().episode;
+        let reference = source.scene.time;
+        let objects = (0..1001)
+            .map(|index| {
+                let mut episode = source.clone();
+                episode.id = MemoryId::from_u128(2000 - index);
+                episode.scene.time = reference - chrono::Duration::milliseconds(index as i64);
+                if index == 0 {
+                    episode.retention_state = RetentionState::Suppressed;
+                }
+                if index == 1000 {
+                    episode.scene.time = reference + chrono::Duration::seconds(1);
+                }
+                MemoryObject::Episode(episode)
+            })
+            .collect::<Vec<_>>();
+        store.upsert_objects(&objects).await.unwrap();
+        let ids = store
+            .query_episodes_by_time(
+                None,
+                reference.to_utc(),
+                3,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, [1999, 1998, 1997].map(MemoryId::from_u128));
+        let ids = store
+            .query_episodes_by_time(
+                None,
+                reference.to_utc(),
+                0,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert!(ids.is_empty());
+        let ids = store
+            .query_episodes_by_time(
+                None,
+                reference.to_utc(),
+                1,
+                GraphExpansionLifecyclePolicy {
+                    include_suppressed: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, [MemoryId::from_u128(2000)]);
+        let ids = store
+            .query_episodes_by_time(
+                Some(reference.to_utc() - chrono::Duration::milliseconds(3)),
+                reference.to_utc(),
+                4,
+                GraphExpansionLifecyclePolicy::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, [1999, 1998, 1997].map(MemoryId::from_u128));
     }
 
     #[tokio::test]
@@ -123,7 +249,7 @@ mod tests {
             .unwrap()
             .with_timezone(&chrono::Utc);
         fixtures.episode.created_at = timestamp;
-        fixtures.episode.scene.time = timestamp;
+        fixtures.episode.scene.time = timestamp.fixed_offset();
         fixtures.episode.ended_at = Some(timestamp);
         fixtures.salient_observation.created_at = timestamp;
         fixtures.salient_observation.observed_at = Some(timestamp);

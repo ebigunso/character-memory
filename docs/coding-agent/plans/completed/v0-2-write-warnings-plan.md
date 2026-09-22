@@ -1,6 +1,6 @@
 # Plan: the library tells the writer when what it is about to store will not do what the writer means
 
-- status: in-progress
+- status: completed
 - generated: 2026-09-22
 - last_updated: 2026-09-22
 - work_type: code
@@ -41,7 +41,7 @@
 - justification: no external consumers; the companion evaluation repository matches on `CandidateValidationStatus` only and is unaffected by new variants unless it matches exhaustively, which the task checks.
 
 ## Context (workspace)
-- Related files/areas: `src/domain/write_validation.rs` (`CandidateValidation` with `warnings`, `CandidateValidationIssue` tagged `kind`, `DuplicateObservationEcho` at 123), `src/usecases/write_planning.rs` (`WritePlanValidator` at 690, `PlanValidationContext` at 744 with `existing_refs` holding references only, link endpoint collection at 844, `validate_candidate` at 891, `echo_surface_warning` at 1079, `caller_hint_links` deduplicating participant keys at 354), `src/api/types/write_plan.rs` (`RememberDiagnostics::refresh_validation_warning_messages` at 617), `src/usecases/remember.rs:90` (validations with warnings kept on the accepted path), `src/memory.rs:74` (`validate_plan` returns `Vec<CandidateValidation>`), `src/domain/scene.rs` (`without_blank_participants`, `participant_keys`), `src/policy/embedding_surface.rs:28` (participant words joined per entry), `src/usecases/scope.rs` (scope keys from source scenes), `src/policy/graph_expansion.rs:118` (`resolved_by` read from `Resolves` and `FulfillsCommitment`), README lines 161 to 217 (`validate_plan` and `remember`); the companion `C:/Users/Kohta/GitLocal/CharacterMemoryEvals/crates/cmem-eval/src/adapter.rs` (status-only reads at 1816, 3828, 4768); the load-bearing decisions list items 2, 3, 13, 36, 42; the state plan Task_3 (resolution ends being current state).
+- Related files/areas: `src/domain/write_validation.rs` (`CandidateValidation` with `warnings`, `CandidateValidationIssue` tagged `kind`, `DuplicateObservationEcho` at 123), `src/usecases/write_planning.rs` (`WritePlanValidator` at 690, `PlanValidationContext` at 744 with `existing_refs` holding references only, link endpoint collection at 844, `validate_candidate` at 891, `echo_surface_warning` at 1079, `caller_hint_links` deduplicating participant keys at 354), `src/api/types/write_plan.rs` (`RememberDiagnostics::refresh_validation_warning_messages` at 617), `src/usecases/remember.rs:90` (validations with warnings kept on the accepted path), `src/memory.rs:74` (`validate_plan` returns `Vec<CandidateValidation>`), `src/domain/scene.rs` (`without_blank_participants`, `participant_keys`), `src/policy/embedding_surface.rs:28` (participant words joined per entry), `src/usecases/scope.rs` (scope keys from source scenes), `src/policy/graph_expansion.rs:118` (`resolved_by` read from `Resolves` and `FulfillsCommitment`), README lines 161 to 217 (`validate_plan` and `remember`); the companion `../CharacterMemoryEvals/crates/cmem-eval/src/adapter.rs` (status-only reads at 1816, 3828, 4768); the load-bearing decisions list items 2, 3, 13, 36, 42; the state plan Task_3 (resolution ends being current state).
 - Existing patterns or references: one warning exists, produced in the validator per candidate, asserted in tests by equality on the `warnings` list found by `candidate_index` and `candidate_kind` (`write_planning.rs:1747`, `memory.rs:256`, `tests/write_planning_tests.rs:168`), projected to a diagnostic message with severity warning; the README does not mention it; the validator fetches every referenced object not in the plan with one by-reference query and records existence; a scene is stored as given after blank entries are dropped; the write already deduplicates participant keys when it makes links (one Observation-Mentions-Entity per distinct key on the ordinary `remember` path at `write_planning.rs:354`, and commit adds the Episode-Involves-Entity fallback only for a key with no such link at 1261 to 1312), so a repeated key produces one link and two scene entries.
 - Design record consulted and deviations from its acceptance: ADR-D-0028, ADR-D-0029, ADR-D-0024, ADR-D-0018. No deviation.
 
@@ -102,6 +102,7 @@ One crate, one task, one PR stacked on the top of the library stack as Integrati
 - One PR that reverts on its own; no stored format changes, so a revert leaves nothing behind.
 
 ## Progress Log (append-only)
+- 2026-09-22: the one task is done at 0d6502a (PR 142): Tier D approved at e1ff33e (nine-case observer red at the parent, green at the tip, outcomes and links equal), Tier A approved with two changes applied.
 
 - (none yet)
 
@@ -117,6 +118,11 @@ One crate, one task, one PR stacked on the top of the library stack as Integrati
   - Trigger / new insight: the first draft warned when a scene time was later than the record's `created_at`. That instant is the process clock at prepare, while visibility to recency and last met depends on the retrieval reference time, which the write cannot know; a device stamping a few seconds ahead would warn on every write; and decision 3 says the library never judges what the application perceived.
   - Plan delta (what changed): the warning is removed from the goal, the definition of done, the design and the task; the README states the reader's rule instead (recency and last met see an experience only at reference times at or after its scene time). The two tasks are folded into one task and one wave over the same files; the graph-query-count acceptance is replaced by a diff check (no new `by_refs` call site and no new graph read) verified by the Tier D reviewer.
   - Tradeoffs considered: a margin on the late time was rejected before as an unmeasured number, and no margin survives the reference-time argument.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+- 2026-09-22 Decision: the plan is complete; its completion audit is the Tier A implementation review.
+  - Trigger / new insight: the plan has one task and changes no recall; the Tier A review judged every added function, test and README line (two warnings earn their place; one redundant test block deleted; the warning text states its consequence).
+  - Plan delta (what changed): none; the measurement item stays an explicit exemption, with the driver's warning drift test as the evidence.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 

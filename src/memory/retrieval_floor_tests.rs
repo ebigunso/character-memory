@@ -11,6 +11,175 @@ use crate::{CharacterMemory, CustomError};
 
 struct FloorEmbedder;
 
+#[tokio::test]
+async fn open_loop_activity_reserves_the_latest_recorded_source() {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    let provenance = || CandidateProvenance::caller("open-loop source order");
+    let mut plan = RememberWritePlan::new();
+    // Neither IDs nor creation times give the scene order: 2, 3, 1.
+    for (id, days) in [(1, 30), (2, 0), (3, 1)] {
+        let mut draft = EpisodeDraft::new(format!("Source {id}"));
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time.to_utc() + chrono::Duration::days(id as i64));
+        draft.scene = Some(Scene::at(
+            (occasion().time - chrono::Duration::days(days)).fixed_offset(),
+        ));
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        draft.salience_score = if id == 1 { 1.0 } else { 0.0 };
+        plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Finish the conversation");
+    draft.id = Some(MemoryId::from_u128(4));
+    draft.created_at = Some(occasion().time.to_utc());
+    draft.updated_at = draft.created_at;
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    draft.derived_from_episode_ids = [1, 2, 3].map(MemoryId::from_u128).to_vec();
+    plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+        draft,
+        provenance(),
+    )));
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    for roots in [2, 4] {
+        let mut context = RetrievalContext::default()
+            .with_scene(occasion())
+            .with_trace()
+            .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(4)));
+        context.candidate_limits.max_graph_roots = roots;
+        context.section_limits.relevant_episodes = 1;
+        context.graph_limits.max_depth = 0;
+        let outcome = memory.retrieve(context).await.unwrap();
+        let episodes = outcome
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>();
+        println!("OPEN_LOOP_ORDER roots={roots} episodes={episodes:?}");
+        assert_eq!(episodes, [2], "root cap {roots}");
+    }
+    let mut forget = ForgetMemoryDraft::suppress(
+        LifecycleTargetRef::episode(MemoryId::from_u128(2)),
+        "Forget the latest source only",
+    );
+    forget.cascade_policy.apply_to_derived_from_target = false;
+    memory.forget(forget).await.unwrap();
+    let mut observed = Vec::new();
+    for include_suppressed in [false, true] {
+        let mut context = RetrievalContext::default()
+            .with_scene(occasion())
+            .with_trace()
+            .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(4)));
+        context.candidate_limits.max_graph_roots = 2;
+        context.section_limits.relevant_episodes = 1;
+        context.graph_limits.max_depth = 0;
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let outcome = memory.retrieve(context).await.unwrap();
+        let episodes = outcome
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>();
+        println!(
+            "OPEN_LOOP_ELIGIBILITY include_suppressed={include_suppressed} episodes={episodes:?}"
+        );
+        assert_eq!(
+            outcome.activity.unwrap().resolution,
+            ActivityResolution::Found
+        );
+        if !include_suppressed {
+            assert!(outcome
+                .trace
+                .unwrap()
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|row| {
+                    row.object.id == MemoryId::from_u128(2)
+                        && row.reason == LifecycleFilterReason::SuppressedOmitted
+                }));
+        }
+        observed.push(episodes);
+    }
+    assert_eq!(observed, [vec![3], vec![2]]);
+    let mut plan = RememberWritePlan::new();
+    for (id, parent) in [(9, 2), (10, 3), (11, 1)] {
+        let mut draft = ObservationDraft::new(MemoryId::from_u128(parent), "Source observation");
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time.to_utc());
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    for (id, source) in [(20, 9), (21, 10)] {
+        let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Use the observation");
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time.to_utc());
+        draft.updated_at = draft.created_at;
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        draft.derived_from_observation_ids = [source, 11].map(MemoryId::from_u128).to_vec();
+        plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    let mut forget = ForgetMemoryDraft::suppress(
+        LifecycleTargetRef::observation(MemoryId::from_u128(10)),
+        "Forget observation only",
+    );
+    forget.cascade_policy.apply_to_derived_from_target = false;
+    memory.forget(forget).await.unwrap();
+    let mut observed = Vec::new();
+    for activity in [20, 21] {
+        for include_suppressed in [false, true] {
+            let mut context = RetrievalContext::default()
+                .with_scene(occasion())
+                .with_trace()
+                .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(activity)));
+            context.candidate_limits.max_graph_roots = 2;
+            context.section_limits.salient_observations = 1;
+            context.graph_limits.max_depth = 0;
+            context.lifecycle_policy.include_suppressed = include_suppressed;
+            let outcome = memory.retrieve(context).await.unwrap();
+            let observations = outcome
+                .pack
+                .salient_observations
+                .iter()
+                .map(|observation| observation.id.as_u128())
+                .collect::<Vec<_>>();
+            println!("OPEN_LOOP_OBSERVATION activity={activity} include_suppressed={include_suppressed} observations={observations:?}");
+            if !include_suppressed {
+                let excluded = if activity == 20 {
+                    MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(2))
+                } else {
+                    MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(10))
+                };
+                assert!(outcome
+                    .trace
+                    .unwrap()
+                    .lifecycle_filter_decisions
+                    .iter()
+                    .any(|row| {
+                        row.object == excluded
+                            && row.reason == LifecycleFilterReason::SuppressedOmitted
+                    }));
+            }
+            observed.push(observations);
+        }
+    }
+    assert_eq!(observed, [vec![11], vec![9], vec![11], vec![10]]);
+    memory.close().await.unwrap();
+}
+
 #[async_trait]
 impl MemoryEmbedder for FloorEmbedder {
     async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
@@ -75,11 +244,11 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
     let mut episode = EpisodeDraft::new("An occasion with several recollections.");
     episode.id = Some(MemoryId::from_u128(1));
     episode.scene = Some(occasion());
-    episode.created_at = Some(occasion().time);
+    episode.created_at = Some(occasion().time.to_utc());
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut thread = MemoryThreadDraft::new("Work in progress", "The current activity.");
     thread.id = Some(MemoryId::from_u128(5000));
-    thread.created_at = Some(occasion().time);
+    thread.created_at = Some(occasion().time.to_utc());
     thread.updated_at = thread.created_at;
     thread.last_touched_at = thread.created_at;
     thread.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
@@ -116,7 +285,7 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
             }
             let mut episode = EpisodeDraft::new(format!("Recollection {id}"));
             episode.id = Some(MemoryId::from_u128(id));
-            episode.created_at = Some(scene.time);
+            episode.created_at = Some(scene.time.to_utc());
             episode.scene = Some(scene);
             episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             episode.salience_score = 0.0;
@@ -128,7 +297,7 @@ async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
             let mut observation =
                 ObservationDraft::new(MemoryId::from_u128(1), format!("Recollection {id}"));
             observation.id = Some(MemoryId::from_u128(id));
-            observation.observed_at = Some(occasion().time);
+            observation.observed_at = Some(occasion().time.to_utc());
             observation.created_at = observation.observed_at;
             observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             observation.salience_score = 0.0;
@@ -204,7 +373,7 @@ async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
         );
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     let strong_id = MemoryId::from_u128(7000);
@@ -235,7 +404,7 @@ async fn overlapping_scene_memory() -> (CharacterMemory, MemoryId) {
         scene.setting.words = Some(text.to_owned());
         let mut episode = EpisodeDraft::new(text);
         episode.id = Some(MemoryId::from_u128(id));
-        episode.created_at = Some(scene.time);
+        episode.created_at = Some(scene.time.to_utc());
         episode.scene = Some(scene);
         episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         let provenance = CandidateProvenance::caller("overlapping surfaces");
@@ -400,7 +569,7 @@ async fn a_large_activity_shares_roots_with_the_topic() {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     memory
@@ -438,7 +607,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
         let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
         member.id = Some(MemoryId::from_u128(id));
         member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
+        member.created_at = Some(occasion().time.to_utc());
         input = input.with_derived_memory(member);
     }
     memory
@@ -453,10 +622,12 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
         context.candidate_limits.max_graph_roots = cap;
         context.graph_limits.max_depth = 1;
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: 0,
             place: 0,
             activity: 5,
             topic: 1,
+            recency: 0,
         };
         let result = memory.retrieve(context.clone()).await.unwrap();
         let repeat = memory.retrieve(context).await.unwrap();
@@ -562,8 +733,17 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
             .iter()
             .find(|row| row.object.id == MemoryId::from_u128(id))
             .unwrap();
-        assert_eq!(row.cue_kinds, BTreeSet::from([kind]));
+        let mut expected = BTreeSet::from([kind]);
+        if id != 4000 {
+            expected.insert(CueKind::Recency);
+        }
+        assert_eq!(row.cue_kinds, expected);
     }
+    assert!(trace.graph_expansions.iter().any(|root| {
+        root.root == MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(4000))
+            && root.source == GraphRootSource::Recency
+            && root.outcome == GraphExpansionOutcome::RootLimit
+    }));
     let encoded = serde_json::to_value(trace).unwrap();
     let decoded: RetrievalTrace = serde_json::from_value(encoded).unwrap();
     assert_eq!(decoded.floor_admissions, trace.floor_admissions);
@@ -594,7 +774,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
     let provenance = || CandidateProvenance::caller("shared occasion");
     let mut person = EntityDraft::new();
     person.id = Some(MemoryId::from_u128(7));
-    person.created_at = Some(occasion().time);
+    person.created_at = Some(occasion().time.to_utc());
     person.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
         EntityCandidate::new(person, provenance()),
@@ -607,7 +787,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
     for (id, scene) in [(1, occasion()), (2, shared_scene.clone())] {
         let mut episode = EpisodeDraft::new("An occasion.");
         episode.id = Some(MemoryId::from_u128(id));
-        episode.created_at = Some(scene.time);
+        episode.created_at = Some(scene.time.to_utc());
         episode.scene = Some(scene);
         episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
@@ -621,7 +801,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
         let mut observation =
             ObservationDraft::new(MemoryId::from_u128(episode), format!("Recollection {id}"));
         observation.id = Some(MemoryId::from_u128(id));
-        observation.observed_at = Some(occasion().time);
+        observation.observed_at = Some(occasion().time.to_utc());
         observation.created_at = observation.observed_at;
         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         observation.salience_score = 0.0;
@@ -686,7 +866,7 @@ async fn default_depth_credits_participant_inherited_through_the_episode() {
             .unwrap();
         assert_eq!(
             row.cue_kinds,
-            BTreeSet::from([CueKind::Topic, CueKind::Participant])
+            BTreeSet::from([CueKind::Topic, CueKind::Participant, CueKind::Recency])
         );
     }
     assert!(trace.graph_relations.iter().any(|row| {
@@ -726,7 +906,7 @@ async fn participant_and_place_keep_room_without_a_topic() {
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
-    assert_eq!(selected, [3000, 2000]);
+    assert_eq!(selected, [3000, 2000, 1, 1000, 4000, 1001]);
     assert!(result.trace.unwrap().floor_admissions.is_empty());
     memory.close().await.unwrap();
 }
@@ -760,10 +940,12 @@ async fn single_kind_keeps_section_ids_and_order() {
             let result = memory.retrieve(context.clone()).await.unwrap();
             let mut prefix_context = context.clone();
             prefix_context.cue_floors = RetrievalCueFloors {
+                date_match: 1,
                 participant: 0,
                 place: 0,
                 activity: 0,
                 topic: 0,
+                recency: 0,
             };
             let prefix = memory.retrieve(prefix_context).await.unwrap();
             assert_eq!(
@@ -771,21 +953,36 @@ async fn single_kind_keeps_section_ids_and_order() {
                 serde_json::to_vec(&prefix).unwrap(),
                 "single-kind retrieval must preserve the original ranked prefix"
             );
-            // Exact section/id/order projections captured at 61fbb29.
+            // The original given-cue prefix remains; recency uses spare root and section room.
             let first = match kind {
                 CueKind::Topic => 1000,
                 CueKind::Participant => 2000,
                 CueKind::Place => 3000,
                 CueKind::Activity => 4000,
+                CueKind::Recency | CueKind::DateMatch => {
+                    unreachable!("fixture uses only given cues")
+                }
             };
-            let count = if kind != CueKind::Topic { 1 } else { section };
+            let expected = if kind == CueKind::Topic {
+                (first..first + section as u128).collect::<Vec<_>>()
+            } else {
+                [first]
+                    .into_iter()
+                    .chain(
+                        [1, 1000, 2000, 3000, 4000, 1001, 2001, 3001]
+                            .into_iter()
+                            .filter(|&id| id != first),
+                    )
+                    .take(section)
+                    .collect()
+            };
             let pack = result.pack;
             assert_eq!(
                 pack.relevant_episodes
                     .iter()
                     .map(|object| object.id.as_u128())
                     .collect::<Vec<_>>(),
-                (first..first + count as u128).collect::<Vec<_>>(),
+                expected,
                 "{kind:?} {candidates}/{roots}/{section}"
             );
             assert_eq!(
@@ -793,12 +990,30 @@ async fn single_kind_keeps_section_ids_and_order() {
                     .iter()
                     .map(|object| object.id.as_u128())
                     .collect::<Vec<_>>(),
-                if kind == CueKind::Activity {
+                if kind == CueKind::Activity || (kind != CueKind::Topic && section > 1) {
                     vec![5000]
                 } else {
                     vec![]
-                }
+                },
+                "{kind:?} {candidates}/{roots}/{section}"
             );
+            if !matches!(kind, CueKind::Topic | CueKind::Activity) && section > 1 {
+                let thread = result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .section_assignments
+                    .iter()
+                    .find(|row| {
+                        row.object
+                            == MemoryObjectRef::new(
+                                ObjectType::MemoryThread,
+                                MemoryId::from_u128(5000),
+                            )
+                    })
+                    .unwrap();
+                assert_eq!(thread.cue_kinds, BTreeSet::from([CueKind::Recency]));
+            }
             assert!(pack.salient_observations.is_empty());
             assert!(pack.derived_memories.is_empty());
             assert!(pack.preferences.is_empty());
@@ -820,10 +1035,12 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
     for (floor, cap) in (0..=4).map(|cap| (1, cap)).chain([(2, 5)]) {
         let mut context = mixed_context();
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: floor,
             place: floor,
             activity: floor,
             topic: floor,
+            recency: 0,
         };
         context.candidate_limits.max_graph_roots = cap;
         let first = memory.retrieve(context).await.unwrap();
@@ -845,10 +1062,12 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
 
         let mut context = mixed_context();
         context.cue_floors = RetrievalCueFloors {
+            date_match: 1,
             participant: floor,
             place: floor,
             activity: floor,
             topic: floor,
+            recency: 0,
         };
         context.section_limits.relevant_episodes = cap;
         let first = memory.retrieve(context).await.unwrap();
@@ -880,7 +1099,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             .iter()
             .map(|object| object.id.as_u128())
             .collect::<Vec<_>>(),
-        [4000]
+        [4000, 1, 1000, 2000, 3000, 1001, 2001, 3001]
     );
     memory.close().await.unwrap();
 }
@@ -918,7 +1137,8 @@ async fn overlapping_kinds_share_one_slot_and_return_unused_room() {
             CueKind::Topic,
             CueKind::Participant,
             CueKind::Place,
-            CueKind::Activity
+            CueKind::Activity,
+            CueKind::Recency
         ])
     );
     memory.close().await.unwrap();
@@ -942,6 +1162,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
             CueKind::Topic => floors.topic = 0,
+            CueKind::Recency | CueKind::DateMatch => unreachable!("fixture uses only given cues"),
         }
         // The other three reservations consume all room, so this kind waits.
         context.candidate_limits.max_graph_roots = 3;

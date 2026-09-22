@@ -146,14 +146,16 @@ impl EpisodeDraft {
         self,
         defaults: &mut DraftDefaults,
     ) -> Result<Episode, DomainValidationError> {
+        let scene = self
+            .scene
+            .ok_or(DomainValidationError::MissingScene)?
+            .without_blank_participants();
         let episode = Episode {
             id: defaults.id(self.id),
             object_type: ObjectType::Episode,
             modality: self.modality,
-            scene: self
-                .scene
-                .ok_or(DomainValidationError::MissingScene)?
-                .without_blank_participants(),
+            scene_local_date: Some(scene.time.date_naive()),
+            scene,
             ended_at: self.ended_at,
             summary: self.summary,
             raw_ref: self.raw_ref,
@@ -647,7 +649,7 @@ mod tests {
         let created_at = timestamp("2026-04-28T12:01:00Z");
         let mut draft = EpisodeDraft::new("Discussed durable draft inputs.");
         draft.id = Some(id);
-        let mut scene = Scene::at(created_at);
+        let mut scene = Scene::at((created_at).fixed_offset());
         scene.setting.key = Some("conversation-42".to_owned());
         draft.scene = Some(scene);
         draft.raw_ref = Some("raw://conversation/42#episode".to_owned());

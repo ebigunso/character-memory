@@ -453,11 +453,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             episode = vocab::EPISODE,
             retention = vocab::RETENTION_STATE,
             reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
-            retention_filter = if policy.include_suppressed {
-                ""
-            } else {
-                "FILTER(?retention = \"active\" && ?episodeRetention = \"active\")"
-            },
+            retention_filter = occasion_retention_filter(policy),
         );
         self.query_solutions(&query_text)?
             .into_iter()
@@ -526,6 +522,140 @@ impl<'a> SparqlGraphSelectors<'a> {
             );
         }
         Ok(occasions)
+    }
+
+    pub(crate) fn select_anniversaries(
+        &self,
+        date: chrono::NaiveDate,
+        participants: &[MemoryId],
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<(MemoryId, bool)>, CustomError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let shared = if participants.is_empty() {
+            "false".to_owned()
+        } else {
+            let values = participants
+                .iter()
+                .map(|id| format!("<{}>", graph_uri(ObjectType::Entity, *id)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!(
+                r#"EXISTS {{
+                VALUES ?participant {{ {values} }}
+                {{
+                    GRAPH ?linkGraph {{
+                        ?link a <{link_class}> ; <{relation}> "involves" .
+                        {{ ?link <{from}> ?participant ; <{to}> ?episode . }}
+                        UNION {{ ?link <{to}> ?participant ; <{from}> ?episode . }}
+                    }}
+                }} UNION {{
+                    GRAPH ?linkGraph {{
+                        ?link a <{link_class}> ; <{relation}> "mentions" .
+                        {{ ?link <{from}> ?participant ; <{to}> ?neighbor . }}
+                        UNION {{ ?link <{to}> ?participant ; <{from}> ?neighbor . }}
+                    }}
+                    GRAPH ?neighbor {{ ?neighbor <{object_type}> "observation" ; <{episode_pred}> ?episode ; <{retention}> ?neighborRetention . }}
+                    {retention_filter}
+                }}
+            }}"#,
+                link_class = vocab::CLASS_MEMORY_LINK,
+                from = vocab::FROM,
+                to = vocab::TO,
+                relation = vocab::RELATION,
+                object_type = vocab::OBJECT_TYPE,
+                episode_pred = vocab::EPISODE,
+                retention = vocab::RETENTION_STATE,
+                retention_filter =
+                    occasion_retention_filter(policy).replace("?retention", "?neighborRetention")
+            )
+        };
+        let query = format!(
+            r#"
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT DISTINCT ?episodeId ?time ?shared WHERE {{
+                GRAPH ?episode {{
+                    ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ;
+                        <{month_day}> {month_day_value} ; <{local_year}> ?localYear ;
+                        <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention .
+                }}
+                FILTER(xsd:integer(?localYear) < {year})
+                BIND(?episodeRetention AS ?retention)
+                {retention_filter}
+                BIND(xsd:dateTime(?sceneTime) AS ?time)
+                BIND({shared} AS ?shared)
+            }}
+            ORDER BY DESC(?shared) DESC(?time) ?episodeId
+            LIMIT {limit}
+        "#,
+            object_type = vocab::OBJECT_TYPE,
+            object_id = vocab::OBJECT_ID,
+            month_day = vocab::SCENE_MONTH_DAY,
+            local_year = vocab::SCENE_LOCAL_YEAR,
+            month_day_value = sparql_string_literal(&date.format("%m-%d").to_string()),
+            year = chrono::Datelike::year(&date),
+            scene_time = vocab::SCENE_TIME,
+            retention = vocab::RETENTION_STATE,
+            retention_filter = occasion_retention_filter(policy)
+        );
+        self.query_solutions(&query)?
+            .iter()
+            .map(|row| {
+                Ok((
+                    memory_id_binding(row, "episodeId")?,
+                    literal_binding(row, "shared")? == "true",
+                ))
+            })
+            .collect()
+    }
+
+    pub(crate) fn select_episodes_by_time(
+        &self,
+        start: Option<DateTime<Utc>>,
+        end: DateTime<Utc>,
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        if start.is_some_and(|start| start > end) || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let pattern = format!(
+            r#"
+            GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+            BIND(?episodeRetention AS ?retention)
+            BIND(xsd:dateTime(?sceneTime) AS ?time)
+            FILTER(?time <= {end}^^xsd:dateTime)
+            {start_filter}
+            {retention_filter}
+        "#,
+            object_type = vocab::OBJECT_TYPE,
+            object_id = vocab::OBJECT_ID,
+            scene_time = vocab::SCENE_TIME,
+            retention = vocab::RETENTION_STATE,
+            end = sparql_string_literal(&end.to_rfc3339()),
+            start_filter = start.map_or_else(String::new, |start| format!(
+                "FILTER(?time >= {}^^xsd:dateTime)",
+                sparql_string_literal(&start.to_rfc3339())
+            )),
+            retention_filter = occasion_retention_filter(policy),
+        );
+        // ponytail: the typed date needs a store-side scan/sort; add a chronological
+        // index only if measured recall latency warrants it. Payload reads stay bounded.
+        let episodes = self
+            .query_solutions(&format!(
+                r#"
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT DISTINCT ?episodeId ?time WHERE {{ {pattern} }}
+            ORDER BY DESC(?time) ?episodeId
+            LIMIT {limit}
+        "#,
+            ))?
+            .iter()
+            .map(|solution| memory_id_binding(solution, "episodeId"))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(episodes)
     }
 
     fn select_derived_memories_by_resource_predicate<'b>(
@@ -601,6 +731,14 @@ impl<'a> SparqlGraphSelectors<'a> {
         solutions
             .collect::<Result<Vec<_>, _>>()
             .map_err(oxigraph_sparql_error)
+    }
+}
+
+fn occasion_retention_filter(policy: GraphExpansionLifecyclePolicy) -> &'static str {
+    if policy.include_suppressed {
+        ""
+    } else {
+        "FILTER(?retention = \"active\" && ?episodeRetention = \"active\")"
     }
 }
 

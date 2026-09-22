@@ -145,9 +145,10 @@ impl MemoryEmbedder for CueEmbedder {
 
 fn scene() -> Scene {
     Scene::at(
-        chrono::DateTime::parse_from_rfc3339("2026-09-20T10:00:00.123Z")
+        (chrono::DateTime::parse_from_rfc3339("2026-09-20T10:00:00.123Z")
             .unwrap()
-            .with_timezone(&chrono::Utc),
+            .with_timezone(&chrono::Utc))
+        .fixed_offset(),
     )
 }
 
@@ -165,7 +166,7 @@ async fn create_notion(memory: &CharacterMemory, id: u128, name: Option<&str>) {
     let notion_id = MemoryId::from_u128(id);
     let mut notion = EntityDraft::new();
     notion.id = Some(notion_id);
-    notion.created_at = Some(scene().time);
+    notion.created_at = Some(scene().time.to_utc());
     notion.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
         EntityCandidate::new(notion, CandidateProvenance::caller("notion")),
@@ -174,7 +175,7 @@ async fn create_notion(memory: &CharacterMemory, id: u128, name: Option<&str>) {
         let mut belief =
             DerivedMemoryDraft::new(DerivedType::Claim, "The astronomer is known by this name.");
         belief.id = Some(MemoryId::from_u128(id + 1000));
-        belief.created_at = Some(scene().time);
+        belief.created_at = Some(scene().time.to_utc());
         belief.updated_at = belief.created_at;
         belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         belief.entity_ids = vec![notion_id];
@@ -334,8 +335,8 @@ async fn observation_forget_recounts_notion_presence_without_removing_scene_part
             write_episode(&memory, 31_000, scene()).await;
             let mut extra = ObservationDraft::new(episode, "Another remark.");
             extra.id = Some(MemoryId::from_u128(30_002));
-            extra.created_at = Some(scene().time);
-            extra.observed_at = Some(scene().time);
+            extra.created_at = Some(scene().time.to_utc());
+            extra.observed_at = Some(scene().time.to_utc());
             extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
             memory
                 .commit(
@@ -405,8 +406,8 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
     write_episode(&memory, 31_000, scene()).await;
     let mut extra = ObservationDraft::new(episode, "Another remark on the same occasion.");
     extra.id = Some(MemoryId::from_u128(30_002));
-    extra.created_at = Some(scene().time);
-    extra.observed_at = Some(scene().time);
+    extra.created_at = Some(scene().time.to_utc());
+    extra.observed_at = Some(scene().time.to_utc());
     extra.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     memory
         .commit(
@@ -582,8 +583,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
     if active_sibling {
         let mut observation = ObservationDraft::new(latest_episode, "Another active remark.");
         observation.id = Some(sibling);
-        observation.created_at = Some(scene().time);
-        observation.observed_at = Some(scene().time);
+        observation.created_at = Some(scene().time.to_utc());
+        observation.observed_at = Some(scene().time.to_utc());
         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
         memory
             .commit(
@@ -727,11 +728,15 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 .iter()
                 .map(|episode| episode.id)
                 .collect::<Vec<_>>(),
-            vec![if include_suppressed {
-                latest_episode
-            } else {
-                MemoryId::from_u128(50_080)
-            }]
+            (0..8)
+                .map(|index| MemoryId::from_u128(
+                    (if include_suppressed {
+                        latest_episode.as_u128()
+                    } else {
+                        50_080
+                    }) - index * 10
+                ))
+                .collect::<Vec<_>>()
         );
     }
     // Even when many excluded occasions precede the survivor (or none survives),
@@ -818,7 +823,8 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                 let mut episode = EpisodeDraft::new("The participant visited.");
                 episode.id = Some(episode_id);
                 // Authorship order deliberately disagrees with scene recency.
-                episode.created_at = Some(scene().time - chrono::Duration::hours(count as i64));
+                episode.created_at =
+                    Some(scene().time.to_utc() - chrono::Duration::hours(count as i64));
                 episode.scene = Some(occasion);
                 episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                 let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
@@ -828,8 +834,8 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                     for offset in 1..=3 {
                         let mut observation = ObservationDraft::new(episode_id, "A remark.");
                         observation.id = Some(MemoryId::from_u128(id + offset));
-                        observation.created_at = Some(scene().time);
-                        observation.observed_at = Some(scene().time);
+                        observation.created_at = Some(scene().time.to_utc());
+                        observation.observed_at = Some(scene().time.to_utc());
                         observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                         plan = plan.with_candidate(MemoryCandidate::Observation(
                             ObservationCandidate::new(
@@ -875,6 +881,13 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                         .pack
                         .relevant_episodes
                         .iter()
+                        .filter(|episode| {
+                            selected_cues(
+                                result,
+                                MemoryObjectRef::new(ObjectType::Episode, episode.id),
+                            )
+                            .contains(&CueKind::Participant)
+                        })
                         .map(|episode| episode.id)
                         .chain(
                             result
@@ -889,7 +902,7 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                         BTreeSet::from([episode_id]),
                         "route={route}, reverse_ids={reverse_ids}, N={count}"
                     );
-                    assert_eq!(result.pack.relevant_episodes.len(), usize::from(direct));
+                    assert_eq!(result.pack.relevant_episodes.len(), count.min(8) as usize);
                     assert_eq!(
                         result.pack.salient_observations.len(),
                         usize::from(mentions)
@@ -946,7 +959,7 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 if caller_built {
                     let mut episode = EpisodeDraft::new("A group worked together.");
                     episode.id = Some(MemoryId::from_u128(id));
-                    episode.created_at = Some(scene().time);
+                    episode.created_at = Some(scene().time.to_utc());
                     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
                     episode.scene = Some(occasion);
                     memory
@@ -1014,9 +1027,17 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
     let expected = [false, true]
         .into_iter()
         .flat_map(|caller_built| {
-            [100, 101]
-                .into_iter()
-                .map(move |ubiquitous| (caller_built, ubiquitous, 1, 3, 1, 4, Some((24, 24))))
+            [100, 101].into_iter().map(move |ubiquitous| {
+                (
+                    caller_built,
+                    ubiquitous,
+                    1,
+                    3,
+                    1,
+                    if caller_built { 8 } else { 12 },
+                    Some((24, 24)),
+                )
+            })
         })
         .collect::<Vec<_>>();
     assert_eq!(observed, expected);
@@ -1033,11 +1054,11 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     thread.status = ThreadStatus::Resolved;
     let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens needs cleaning.");
     member.id = Some(member_id);
-    member.created_at = Some(scene().time);
+    member.created_at = Some(scene().time.to_utc());
     member.thread_ids = vec![thread_id];
     let mut older_member = DerivedMemoryDraft::new(DerivedType::Claim, "The lens was installed.");
     older_member.id = Some(older_member_id);
-    older_member.created_at = Some(scene().time - chrono::Duration::days(1));
+    older_member.created_at = Some(scene().time.to_utc() - chrono::Duration::days(1));
     older_member.thread_ids = vec![thread_id];
     memory
         .remember(
@@ -1068,7 +1089,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
             resolution: ActivityResolution::Unknown
         })
     );
-    assert!(unknown.memory_scenes.is_empty());
+    assert_eq!(unknown.pack.relevant_episodes.len(), 1);
+    assert_eq!(unknown.memory_scenes.len(), 1);
     assert_eq!(
         found.activity,
         Some(ActivityResult {
@@ -1135,7 +1157,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     untraced.include_trace = false;
     let empty = memory.retrieve(untraced.clone()).await.unwrap();
     assert_eq!(empty.activity, found.activity);
-    assert!(empty.memory_scenes.is_empty());
+    assert_eq!(empty.pack.relevant_episodes.len(), 1);
+    assert_eq!(empty.memory_scenes.len(), 1);
     assert!(empty.trace.is_none());
     untraced.lifecycle_policy.include_suppressed = true;
     assert_eq!(
@@ -1213,7 +1236,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     ] {
         assert_eq!(
             selected_cues(&found, object),
-            &BTreeSet::from([CueKind::Activity])
+            &if object.object_type == ObjectType::Episode {
+                BTreeSet::from([CueKind::Activity, CueKind::Recency])
+            } else {
+                BTreeSet::from([CueKind::Activity])
+            }
         );
     }
     let mut thread_context = context.clone();
@@ -1224,6 +1251,7 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
             .unwrap()
             .graph_expansions
             .iter()
+            .filter(|root| root.source != GraphRootSource::Recency)
             .map(|root| root.root)
             .collect::<Vec<_>>(),
         vec![
@@ -1261,8 +1289,25 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
                 resolution: ActivityResolution::Unknown
             })
         );
-        assert!(unknown.memory_scenes.is_empty());
-        assert!(unknown.trace.unwrap().graph_expansions.is_empty());
+        assert_eq!(unknown.pack.relevant_episodes.len(), 3);
+        assert_eq!(unknown.memory_scenes.len(), 3);
+        let expansions = unknown.trace.unwrap().graph_expansions;
+        assert_eq!(expansions.len(), 3);
+        assert!(expansions
+            .iter()
+            .all(|root| root.source == GraphRootSource::Recency));
+        assert_eq!(
+            expansions
+                .iter()
+                .map(|root| root.root.id)
+                .collect::<BTreeSet<_>>(),
+            unknown
+                .pack
+                .relevant_episodes
+                .iter()
+                .map(|episode| episode.id)
+                .collect()
+        );
     }
     let mut no_room = context.clone();
     no_room.graph_limits.max_nodes = 0;
@@ -1283,7 +1328,15 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
         .unwrap();
     let superseded = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(superseded.activity, found.activity);
-    assert!(superseded.memory_scenes.is_empty());
+    assert_eq!(superseded.pack.relevant_episodes[0].id, episode_id);
+    assert_eq!(superseded.memory_scenes.len(), 4);
+    assert_eq!(
+        selected_cues(
+            &superseded,
+            MemoryObjectRef::new(ObjectType::Episode, episode_id)
+        ),
+        &BTreeSet::from([CueKind::Recency])
+    );
     let mut historical = context.clone();
     historical.lifecycle_policy.include_superseded = true;
     assert!(memory
@@ -1310,7 +1363,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
         let result = memory.retrieve(context).await.unwrap();
         assert_eq!(result.activity, found.activity);
         assert_eq!(
-            !result.pack.relevant_episodes.is_empty(),
+            selected_cues(
+                &result,
+                MemoryObjectRef::new(ObjectType::Episode, episode_id)
+            )
+            .contains(&CueKind::Activity),
             include_suppressed && include_superseded
         );
     }
@@ -1331,7 +1388,7 @@ async fn authored_episode_without_links_is_recalled_by_its_participant() {
     let episode_id = MemoryId::from_u128(5000);
     let mut episode = EpisodeDraft::new("An authored experience.");
     episode.id = Some(episode_id);
-    episode.created_at = Some(past.time);
+    episode.created_at = Some(past.time.to_utc());
     episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     episode.scene = Some(past.clone());
     let plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
@@ -1352,7 +1409,7 @@ async fn authored_episode_without_links_is_recalled_by_its_participant() {
         .await
         .unwrap();
     assert!(queries.lock().unwrap().is_empty());
-    assert_eq!(result.pack.relevant_episodes.len(), 1);
+    assert_eq!(result.pack.relevant_episodes.len(), 2);
     assert_eq!(result.pack.relevant_episodes[0].id, episode_id);
     assert_eq!(
         recorded(&result, ObjectType::Episode, episode_id),
@@ -1409,10 +1466,10 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
     );
     let trace = key_result.trace.as_ref().unwrap();
     assert!(trace.vector_candidates.is_empty());
-    assert!(trace
-        .graph_expansions
-        .iter()
-        .all(|entry| entry.source == GraphRootSource::Participant));
+    assert!(trace.graph_expansions.iter().all(|entry| matches!(
+        entry.source,
+        GraphRootSource::Participant | GraphRootSource::Recency
+    )));
     assert!(key_result.rationale.telemetry.selectivity.decision_count > 0);
     assert!(trace.section_assignments.iter().any(|row| {
         matches!(row.reason, SectionAssignmentReason::Selected { .. })
@@ -1473,7 +1530,7 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
 
     assert_eq!(
         named.rationale.telemetry.unique_graph_root_candidate_count,
-        2
+        4
     );
 
     present.participants = vec![keyed(999), keyed(300)];
@@ -1481,7 +1538,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .retrieve(RetrievalContext::default().with_scene(present.clone()))
         .await
         .unwrap();
-    assert!(empty.memory_scenes.is_empty());
+    assert_eq!(empty.pack.relevant_episodes.len(), 2);
+    assert_eq!(empty.memory_scenes.len(), 2);
     assert!(empty.trace.is_none());
     let references = &empty.scene_references;
     assert_eq!(references[0].resolution, SceneReferenceResolution::Unknown);
@@ -1555,11 +1613,18 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     let described = MemoryObjectRef::new(ObjectType::Episode, episode_id);
     assert_eq!(
         selected_cues(&description_only, described),
-        &BTreeSet::from([CueKind::Participant])
+        &BTreeSet::from([CueKind::Participant, CueKind::Recency])
     );
     assert_eq!(*queries.lock().unwrap(), ["astronomer\nastronomer"]);
     assert_eq!(description_only.pack.relevant_episodes[0].id, episode_id);
     assert!(description_only.pack.derived_memories.is_empty());
+    assert_eq!(
+        description_only.trace.as_ref().unwrap().scene_cue_searches[0].references,
+        [
+            SceneReference::ParticipantDescription { index: 0 },
+            SceneReference::ParticipantDescription { index: 1 },
+        ]
+    );
     assert_eq!(
         description_only.trace.as_ref().unwrap().vector_candidates[0].surface,
         VectorSurface::SceneParticipants
@@ -1607,7 +1672,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
             &traced_place,
             MemoryObjectRef::new(ObjectType::Episode, episode_id)
         ),
-        &BTreeSet::from([CueKind::Place])
+        &BTreeSet::from([CueKind::Place, CueKind::Recency])
     );
     assert_eq!(place_result.pack.relevant_episodes[0].id, episode_id);
     assert_eq!(
@@ -1625,6 +1690,91 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn description_search_scores_are_shared_and_precede_occasion_selection() {
+    let (memory, _) = scene_memory().await;
+    let mut present = scene();
+    present.setting.words = Some("observatory".to_owned());
+    present.participants = vec![
+        SceneParticipant {
+            name: Some("astronomer".to_owned()),
+            ..Default::default()
+        },
+        SceneParticipant {
+            description: Some("navigator".to_owned()),
+            ..Default::default()
+        },
+    ];
+    let mut past = present.clone();
+    past.time -= chrono::Duration::days(1);
+    write_episode(&memory, 9000, past).await;
+    let context = RetrievalContext::default()
+        .with_scene(present.clone())
+        .with_trace();
+    let identical = memory.retrieve(context.clone()).await.unwrap();
+    let searches = &identical.trace.as_ref().unwrap().scene_cue_searches;
+    assert_eq!(searches.len(), 2);
+    assert_eq!(
+        (searches[0].cue_kind, searches[1].cue_kind),
+        (crate::CueKind::Place, crate::CueKind::Participant)
+    );
+    assert!(searches.iter().all(|search| search.omitted_count == 0));
+    assert_eq!(searches[0].references, [SceneReference::SettingWords]);
+    assert_eq!(
+        searches[1].references,
+        [
+            SceneReference::ParticipantName { index: 0 },
+            SceneReference::ParticipantDescription { index: 1 },
+        ]
+    );
+    assert!(searches
+        .iter()
+        .all(|search| (search.best_score.unwrap() - 1.0).abs() < 1e-6));
+
+    let mut reworded = context.clone();
+    reworded.scene.setting.words = Some("astronomer observatory".to_owned());
+    reworded.scene.participants[0].name = Some("stargazer".to_owned());
+    let reworded = memory.retrieve(reworded).await.unwrap();
+    let searches = &reworded.trace.unwrap().scene_cue_searches;
+    assert!((searches[0].best_score.unwrap() - 0.70886356).abs() < 1e-6);
+    assert!((searches[1].best_score.unwrap() - 0.09950372).abs() < 1e-6);
+
+    // Oppose IDs to time; the selected latest occasion is not the best match.
+    let mut latest = present;
+    latest.setting.words = Some("planetarium".to_owned());
+    latest.participants[0].name = Some("stargazer".to_owned());
+    write_episode(&memory, 8000, latest).await;
+    let recent = memory.retrieve(context.clone()).await.unwrap();
+    let trace = recent.trace.as_ref().unwrap();
+    assert_eq!(trace.vector_candidates.len(), 1);
+    assert_eq!(
+        trace.vector_candidates[0].object.id,
+        MemoryId::from_u128(8000)
+    );
+    assert!((trace.vector_candidates[0].score - 0.09950372).abs() < 1e-6);
+    assert!(trace
+        .scene_cue_searches
+        .iter()
+        .all(|search| (search.best_score.unwrap() - 1.0).abs() < 1e-6));
+    assert!(trace
+        .scene_cue_searches
+        .iter()
+        .all(|search| search.omitted_count == 1));
+    let mut untraced_context = context.clone();
+    untraced_context.include_trace = false;
+    let untraced = memory.retrieve(untraced_context).await.unwrap();
+    let mut expected = recent;
+    expected.trace = None;
+    assert_eq!(untraced, expected);
+
+    let (without_surfaces, _) = scene_memory().await;
+    write_episode(&without_surfaces, 7000, scene()).await;
+    let empty = without_surfaces.retrieve(context).await.unwrap();
+    let searches = empty.trace.unwrap().scene_cue_searches;
+    assert_eq!(searches.len(), 2);
+    assert!(searches.iter().all(|search| search.best_score.is_none()));
 }
 
 #[tokio::test]
@@ -1665,7 +1815,7 @@ async fn write_belief(
         "The astronomer remembers these experiences.",
     );
     belief.id = Some(MemoryId::from_u128(id));
-    belief.created_at = Some(scene().time);
+    belief.created_at = Some(scene().time.to_utc());
     belief.updated_at = belief.created_at;
     belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     belief.derived_from_episode_ids = episodes.iter().map(|id| MemoryId::from_u128(*id)).collect();
@@ -1693,7 +1843,224 @@ fn beliefs_context() -> RetrievalContext {
 }
 
 #[tokio::test]
-async fn result_reports_all_source_scenes_without_admitting_sources_or_requiring_trace() {
+async fn support_age_reports_experience_without_changing_recall() {
+    use chrono::{DateTime, Duration, Utc};
+    use serde_json::json;
+
+    let at = |text: &str| text.parse::<DateTime<Utc>>().unwrap();
+    let reference = at("2026-09-20T10:00:00Z");
+    let later = at("2026-10-20T10:00:00Z");
+    let old = at("2025-07-20T10:00:00Z");
+    let recent = reference - Duration::days(1);
+    let fallback = reference - Duration::days(3);
+    let current = reference - Duration::milliseconds(900);
+    let id = MemoryId::from_u128;
+    let (memory, queries) = scene_memory().await;
+    create_notion(&memory, 100, None).await;
+    let mut plan = RememberWritePlan::new();
+    for (n, time) in [
+        (5000, at("2025-06-20T10:00:00Z")),
+        (6000, reference - Duration::days(2)),
+        (7000, fallback),
+        (8000, reference - Duration::days(2)),
+        (9000, at("2026-12-01T10:00:00Z")),
+        (10000, reference - Duration::days(1)),
+    ] {
+        let mut episode = EpisodeDraft::new("An experience behind a belief.");
+        episode.id = Some(id(n));
+        episode.scene = Some(Scene::at(time.fixed_offset()));
+        episode.created_at = Some(later + Duration::days(n as i64));
+        episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            episode,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    for (n, parent, observed_at) in [
+        (5001, 5000, Some(old)),
+        (6001, 6000, Some(recent)),
+        (6002, 6000, Some(recent - Duration::hours(12))),
+        (7001, 7000, None),
+        (8001, 8000, Some(at("2026-12-02T10:00:00Z"))),
+        (10001, 10000, Some(current)),
+    ] {
+        let mut observation = ObservationDraft::new(id(parent), "Support for a belief.");
+        observation.id = Some(id(n));
+        observation.observed_at = observed_at;
+        observation.created_at = Some(later);
+        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            observation,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    for (n, episodes, observations) in [
+        (20000, vec![], vec![5001]),
+        (20001, vec![], vec![6001]),
+        (20002, vec![], vec![7001]),
+        (20003, vec![], vec![5001, 6001]),
+        (20004, vec![5000, 6000], vec![]),
+        (20005, vec![], vec![8001]),
+        (20006, vec![9000], vec![]),
+        (20007, vec![], vec![]),
+        (20008, vec![], vec![6001, 6002]),
+        (20009, vec![], vec![10001]),
+    ] {
+        let mut belief = DerivedMemoryDraft::new(DerivedType::Claim, format!("Belief {n}"));
+        belief.id = Some(id(n));
+        belief.entity_ids = vec![id(100)];
+        belief.given_by_application = episodes.is_empty() && observations.is_empty();
+        belief.derived_from_episode_ids = episodes.into_iter().map(id).collect();
+        belief.derived_from_observation_ids = observations.into_iter().map(id).collect();
+        belief.created_at = Some(later + Duration::days(n as i64));
+        belief.updated_at = belief.created_at;
+        belief.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+            belief,
+            CandidateProvenance::caller("support age"),
+        )));
+    }
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    let mut rows = Vec::new();
+    let mut mismatches = Vec::new();
+    for phase in 0..5 {
+        let targets = match phase {
+            1 => vec![LifecycleTargetRef::episode(id(6000))],
+            2 => vec![LifecycleTargetRef::observation(id(6001))],
+            3 => vec![
+                LifecycleTargetRef::episode(id(5000)),
+                LifecycleTargetRef::episode(id(7000)),
+            ],
+            _ => vec![],
+        };
+        for target in targets {
+            let mut draft = ForgetMemoryDraft::suppress(target, "Retain the supported belief.");
+            draft.cascade_policy.apply_to_derived_from_target = false;
+            memory.forget(draft).await.unwrap();
+        }
+        if phase == 4 {
+            let origin = SourceProvenanceReference {
+                episode_ids: vec![],
+                observation_ids: vec![id(10001)],
+                external_refs: vec![],
+            };
+            let mut replacement = ReplacementDerivedMemoryDraft::new(
+                DerivedType::Correction,
+                "This belief now rests on a different experience.",
+            );
+            replacement.id = Some(id(21000));
+            replacement.entity_ids = vec![id(100)];
+            replacement.derived_from_observation_ids = vec![id(10001)];
+            replacement.correction_origin_provenance = origin.clone();
+            let mut draft = CorrectMemoryDraft::new(
+                CorrectionTarget::derived_memory(id(20000)),
+                "Replace the old interpretation.",
+            )
+            .with_replacement(replacement);
+            draft.correction_origin = origin;
+            memory.correct(draft).await.unwrap();
+        }
+        for time in [reference, later] {
+            for include_suppressed in [false, true] {
+                let mut present = Scene::at(time.fixed_offset());
+                present.participants.push(keyed(100));
+                let mut context = RetrievalContext::default().with_scene(present);
+                context.candidate_limits.max_graph_roots = 1;
+                context.graph_limits.max_depth = 1;
+                context.graph_limits.max_fanout_per_node = 32;
+                context.graph_limits.timeout_ms = None;
+                context.graph_limits.allowed_relation_types = vec![RelationType::About];
+                context.graph_limits.allowed_object_types =
+                    vec![ObjectType::Entity, ObjectType::DerivedMemory];
+                context.section_limits.derived_memories = 32;
+                context.lifecycle_policy.include_suppressed = include_suppressed;
+                let result = memory.retrieve(context.clone()).await.unwrap();
+                assert!(result.trace.is_none());
+                assert!(result.pack.relevant_episodes.is_empty());
+                assert!(result.pack.salient_observations.is_empty());
+                assert_eq!(result.pack.derived_memories.len(), 10);
+                let traced = memory.retrieve(context.clone().with_trace()).await.unwrap();
+                assert_eq!(traced.pack, result.pack);
+                assert_eq!(traced.memory_scenes, result.memory_scenes);
+                let trace = traced.trace.as_ref().unwrap();
+                assert_eq!(
+                    trace
+                        .graph_expansions
+                        .iter()
+                        .filter(|root| root.outcome == GraphExpansionOutcome::Expanded)
+                        .map(|root| root.root.id)
+                        .collect::<Vec<_>>(),
+                    [id(100)]
+                );
+                let expected = [
+                    (
+                        if phase == 4 { 21000 } else { 20000 },
+                        Some(if phase == 4 { current } else { old }),
+                    ),
+                    (20001, (phase < 2 || include_suppressed).then_some(recent)),
+                    (20002, Some(fallback)),
+                    (
+                        20003,
+                        Some(if phase < 2 || include_suppressed {
+                            recent
+                        } else {
+                            old
+                        }),
+                    ),
+                    (
+                        20004,
+                        if phase == 0 || include_suppressed {
+                            Some(reference - Duration::days(2))
+                        } else if phase < 3 {
+                            Some(at("2025-06-20T10:00:00Z"))
+                        } else {
+                            None
+                        },
+                    ),
+                    (20005, None),
+                    (20006, None),
+                    (20007, None),
+                    (
+                        20008,
+                        Some(if phase < 2 || include_suppressed {
+                            recent
+                        } else {
+                            recent - Duration::hours(12)
+                        }),
+                    ),
+                    (20009, Some(current)),
+                ]
+                .into_iter()
+                .map(|(n, support)| {
+                    (
+                        n.to_string(),
+                        support.map(|support| (time - support).num_seconds()),
+                    )
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+                for entry in &result.memory_scenes {
+                    let expected_age = expected[&entry.memory.id.as_u128().to_string()];
+                    if entry.seconds_since_support != expected_age {
+                        mismatches.push(format!(
+                            "phase {phase}, reference {time}, include_suppressed {include_suppressed}, memory {:?}: {:?} != {expected_age:?}",
+                            entry.memory, entry.seconds_since_support
+                        ));
+                    }
+                }
+                rows.push(json!({"phase": phase, "input": context, "outcome": result, "trace": trace, "expected_seconds_since_support": expected}));
+            }
+        }
+    }
+    assert!(queries.lock().unwrap().is_empty());
+    println!(
+        "SUPPORT_AGE_WITNESSES={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[tokio::test]
+async fn result_reports_all_source_scenes_beside_recent_episodes_without_trace() {
     let (memory, _) = scene_memory().await;
     let first_scene = scene();
     let mut second_scene = scene();
@@ -1705,7 +2072,7 @@ async fn result_reports_all_source_scenes_without_admitting_sources_or_requiring
     create_notion(&memory, 100, Some("Mira")).await;
     let mut thread = MemoryThreadDraft::new("Astronomer", "Plans for tomorrow.");
     thread.id = Some(MemoryId::from_u128(9000));
-    thread.created_at = Some(scene().time);
+    thread.created_at = Some(scene().time.to_utc());
     thread.updated_at = thread.created_at;
     thread.last_touched_at = thread.created_at;
     thread.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
@@ -1736,9 +2103,16 @@ async fn result_reports_all_source_scenes_without_admitting_sources_or_requiring
     ];
     let result = memory.retrieve(beliefs_context()).await.unwrap();
     assert!(result.trace.is_none());
-    assert!(
-        result.pack.relevant_episodes.is_empty() && result.pack.salient_observations.is_empty()
+    assert_eq!(
+        result
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>(),
+        [5000, 6000]
     );
+    assert!(result.pack.salient_observations.is_empty());
     for id in [8000, 8001] {
         assert_eq!(
             recorded(&result, ObjectType::DerivedMemory, MemoryId::from_u128(id)),

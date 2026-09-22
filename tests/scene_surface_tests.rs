@@ -72,7 +72,7 @@ fn id(n: u128) -> MemoryId {
     MemoryId::from_u128(n)
 }
 fn scene(setting: Option<&str>, participants: &[&str]) -> Scene {
-    let mut scene = Scene::at(time());
+    let mut scene = Scene::at((time()).fixed_offset());
     scene.setting.words = setting.map(str::to_owned);
     scene.participants = participants
         .iter()
@@ -321,7 +321,7 @@ async fn check_scoped_recall_and_deletion(service: bool) {
             .find(|row| row.object.id == id(2))
             .unwrap()
             .cue_kinds,
-        BTreeSet::from([CueKind::Topic])
+        BTreeSet::from([CueKind::Topic, CueKind::Recency])
     );
     calls.queries.lock().unwrap().clear();
     let result = memory

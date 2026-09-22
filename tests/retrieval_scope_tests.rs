@@ -22,7 +22,7 @@ fn at(n: i64) -> DateTime<Utc> {
         + chrono::Duration::minutes(n)
 }
 fn scene(setting: Option<&str>, custom: &[(&str, &str)]) -> Scene {
-    let mut scene = Scene::at(at(10));
+    let mut scene = Scene::at((at(10)).fixed_offset());
     scene.setting.key = setting.map(str::to_owned);
     scene.custom_values = custom
         .iter()
@@ -152,7 +152,10 @@ async fn source_union_namespaces_and_restart_determine_scope() {
             .unwrap()
             .graph_expansions
             .iter()
-            .all(|row| row.source == GraphRootSource::Place));
+            .all(|row| matches!(
+                row.source,
+                GraphRootSource::Place | GraphRootSource::Recency
+            )));
         assert!(!serde_json::to_string(&result)
             .unwrap()
             .contains("scope_keys"));
