@@ -131,16 +131,45 @@ where
                         .into_iter()
                         .map(|id| MemoryObjectRef::new(ObjectType::Observation, id)),
                 );
-                let episodes = members
+                let sources = members
                     .iter()
                     .copied()
-                    .filter(|reference| reference.object_type == ObjectType::Episode)
+                    .filter(|reference| {
+                        matches!(
+                            reference.object_type,
+                            ObjectType::Episode | ObjectType::Observation
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let occasions = self.graph_store.query_episode_occasions(&episodes).await?;
+                let occasions = self.graph_store.query_episode_occasions(&sources).await?;
+                let policy = GraphExpansionLifecyclePolicy {
+                    include_suppressed: context.lifecycle_policy.include_suppressed,
+                    include_superseded: context.lifecycle_policy.include_superseded,
+                };
+                members.retain(|reference| {
+                    if let Some((object_ref, reason)) = occasions
+                        .get(reference)
+                        .and_then(|occasion| occasion.filtered_reason(*reference, policy))
+                    {
+                        filtered.push(GraphExpansionFilteredNode {
+                            object_ref,
+                            reason,
+                            superseded_by: Vec::new(),
+                        });
+                        false
+                    } else {
+                        true
+                    }
+                });
                 members.sort_by_key(|reference| {
                     (
                         reference.object_type.stable_rank(),
-                        std::cmp::Reverse(occasions.get(reference).map(|occasion| occasion.time)),
+                        std::cmp::Reverse(
+                            occasions
+                                .get(reference)
+                                .filter(|_| reference.object_type == ObjectType::Episode)
+                                .map(|occasion| occasion.time),
+                        ),
                         reference.id,
                     )
                 });

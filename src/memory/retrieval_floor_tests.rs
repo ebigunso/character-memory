@@ -62,6 +62,119 @@ async fn open_loop_activity_reserves_the_latest_recorded_source() {
         println!("OPEN_LOOP_ORDER roots={roots} episodes={episodes:?}");
         assert_eq!(episodes, [2], "root cap {roots}");
     }
+    let mut forget = ForgetMemoryDraft::suppress(
+        LifecycleTargetRef::episode(MemoryId::from_u128(2)),
+        "Forget the latest source only",
+    );
+    forget.cascade_policy.apply_to_derived_from_target = false;
+    memory.forget(forget).await.unwrap();
+    let mut observed = Vec::new();
+    for include_suppressed in [false, true] {
+        let mut context = RetrievalContext::default()
+            .with_scene(occasion())
+            .with_trace()
+            .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(4)));
+        context.candidate_limits.max_graph_roots = 2;
+        context.section_limits.relevant_episodes = 1;
+        context.graph_limits.max_depth = 0;
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let outcome = memory.retrieve(context).await.unwrap();
+        let episodes = outcome
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>();
+        println!(
+            "OPEN_LOOP_ELIGIBILITY include_suppressed={include_suppressed} episodes={episodes:?}"
+        );
+        assert_eq!(
+            outcome.activity.unwrap().resolution,
+            ActivityResolution::Found
+        );
+        if !include_suppressed {
+            assert!(outcome
+                .trace
+                .unwrap()
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|row| {
+                    row.object.id == MemoryId::from_u128(2)
+                        && row.reason == LifecycleFilterReason::SuppressedOmitted
+                }));
+        }
+        observed.push(episodes);
+    }
+    assert_eq!(observed, [vec![3], vec![2]]);
+    let mut plan = RememberWritePlan::new();
+    for (id, parent) in [(9, 2), (10, 3), (11, 1)] {
+        let mut draft = ObservationDraft::new(MemoryId::from_u128(parent), "Source observation");
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time);
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    for (id, source) in [(20, 9), (21, 10)] {
+        let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Use the observation");
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time);
+        draft.updated_at = draft.created_at;
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        draft.derived_from_observation_ids = [source, 11].map(MemoryId::from_u128).to_vec();
+        plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    let mut forget = ForgetMemoryDraft::suppress(
+        LifecycleTargetRef::observation(MemoryId::from_u128(10)),
+        "Forget observation only",
+    );
+    forget.cascade_policy.apply_to_derived_from_target = false;
+    memory.forget(forget).await.unwrap();
+    let mut observed = Vec::new();
+    for activity in [20, 21] {
+        for include_suppressed in [false, true] {
+            let mut context = RetrievalContext::default()
+                .with_scene(occasion())
+                .with_trace()
+                .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(activity)));
+            context.candidate_limits.max_graph_roots = 2;
+            context.section_limits.salient_observations = 1;
+            context.graph_limits.max_depth = 0;
+            context.lifecycle_policy.include_suppressed = include_suppressed;
+            let outcome = memory.retrieve(context).await.unwrap();
+            let observations = outcome
+                .pack
+                .salient_observations
+                .iter()
+                .map(|observation| observation.id.as_u128())
+                .collect::<Vec<_>>();
+            println!("OPEN_LOOP_OBSERVATION activity={activity} include_suppressed={include_suppressed} observations={observations:?}");
+            if !include_suppressed {
+                let excluded = if activity == 20 {
+                    MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(2))
+                } else {
+                    MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(10))
+                };
+                assert!(outcome
+                    .trace
+                    .unwrap()
+                    .lifecycle_filter_decisions
+                    .iter()
+                    .any(|row| {
+                        row.object == excluded
+                            && row.reason == LifecycleFilterReason::SuppressedOmitted
+                    }));
+            }
+            observed.push(observations);
+        }
+    }
+    assert_eq!(observed, [vec![11], vec![9], vec![11], vec![10]]);
     memory.close().await.unwrap();
 }
 
