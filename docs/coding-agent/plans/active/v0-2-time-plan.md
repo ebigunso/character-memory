@@ -266,7 +266,8 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-23 Tasks 1 to 4 implemented and approved by both review tiers: Task_1 recency (PR 145), Task_2 the caller's range and Task_3 the anniversary (PR 146, final tip `d36d96d` after the rulings on the range's contribution and the unshared anniversary's order), Task_4 the time since a belief was last supported (PR 147, final tip `0ce2f35` after the Tier A contract fix: the age follows `include_suppressed` and is named `seconds_since_support`).
+- 2026-09-23 Slice measurement at `d36d96d` against `f174f1b`, run by the companion's evaluation worker on its frozen instrument `f3ebb4b` (367 daily occasions over a year, identifiers opposed to time in both orders, each run twice and byte-identical, zero bounded failures). Reading: `CharacterMemoryEvals/.agent-work/worker2/task9-time-checkpoint/time-d36d96d.md` on the calibration branch, to be kept as a recoverable reading under the companion's evidence rule.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -310,6 +311,14 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Plan delta (what changed): the range contributes the latest occasions inside it up to the largest cap in force, plus one to tell whether more existed; it reserves only its floor and takes no spare turn at root selection; in room nothing else claims, date-match candidates come before recency-only ones. The anniversary stays bounded to the larger of one and its floor, because nobody asked for it.
   - Tradeoffs considered: letting the range outrank the topic by score was rejected, since time never changes a score; a reservation is how a given cue claims room.
   - Lesson: when a rule changes for one cue kind, check every sibling kind for the same asymmetry.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-23 Decision: the slice measurement confirms the direction for what a caller gives and questions it for one thing nobody gave.
+  - Trigger / new insight: after-numbers at `d36d96d`. A caller's Tuesday range brings 5 of 5 Tuesdays where it brought none, newest first, keeping today's occasions; under a loud topic it takes one observation's place. Meeting a person by key on the anniversary of a shared occasion brings last year's occasion under a loud topic, at the cost of one topic episode (6 of 8 to 5 of 8). With the person absent or the name ambiguous, no anniversary comes. A morning at +09:00 matches the local day, not the UTC one. An ordinary unshared anniversary never displaces a recent day. All other families are unchanged. What this means for the character: when asked about a day, or when meeting someone on the day of something they shared, the character remembers it, at the price of one slot of the conversation, and the calendar alone brings nothing. Direction confirmed.
+  - Direction questioned: a highly salient unshared anniversary (something important that happened a year ago today) never comes in a year-deep store. It is cut at the root cap before its salience is weighed, because every zero-score root is ordered by time and twelve recent days fill the cap. Task_3's acceptance line "a more salient one still comes" held only in a fixture with spare root room.
+  - Plan delta (what changed): the fix belongs to the root order the consolidation slice rewrites: among equal scores, the root stage orders by the section's own standing measure (salience) before time, so nothing the section would choose is starved earlier (rulings log item 65). That acceptance line moves to the consolidation plan and is measured at its slice end; this plan closes with it recorded as moved, not met.
+  - Tradeoffs considered: a reserved root seat for unshared anniversaries (rejected: nobody gave it, and it adds a special case), a salience threshold (rejected: a new tuning value).
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
