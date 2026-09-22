@@ -284,6 +284,8 @@ fn rdf_subject_values_for_named_graph(
         None,
         Some(GraphNameRef::NamedNode(graph_name.as_ref())),
     ) {
+        #[cfg(test)]
+        RDF_QUADS_READ.with(|count| count.set(count.get() + 1));
         let quad = quad.map_err(oxigraph_error)?;
         let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
             continue;

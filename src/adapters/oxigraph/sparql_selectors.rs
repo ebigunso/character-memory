@@ -412,6 +412,33 @@ impl<'a> SparqlGraphSelectors<'a> {
         Ok((ranked_ids, filtered))
     }
 
+    pub(crate) fn select_link_ids_touching(
+        &self,
+        object_refs: &[MemoryObjectRef],
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        if object_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query = format!(
+            r#"SELECT DISTINCT ?id WHERE {{
+                {nodes}
+                GRAPH ?link {{
+                    ?link a <{link_class}> ; <{object_id}> ?id .
+                    {{ ?link <{from}> ?node . }} UNION {{ ?link <{to}> ?node . }}
+                }}
+            }} ORDER BY ?id"#,
+            nodes = sparql_node_iri_values("node", object_refs),
+            link_class = vocab::CLASS_MEMORY_LINK,
+            object_id = vocab::OBJECT_ID,
+            from = vocab::FROM,
+            to = vocab::TO,
+        );
+        self.query_solutions(&query)?
+            .iter()
+            .map(|row| memory_id_binding(row, "id"))
+            .collect()
+    }
+
     pub(crate) fn select_links_touching(
         &self,
         object_refs: &[MemoryObjectRef],

@@ -1505,6 +1505,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forget_cascade_reads_only_affected_object_and_link_graphs() {
+        use super::super::shared::RDF_QUADS_READ;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = Vec::new();
+        for index in 0..3_u128 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(50 + index);
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.derived_from_episode_ids = vec![fixtures.episode.id];
+            memory.derived_from_observation_ids.clear();
+            if index == 2 {
+                memory.retention_state = RetentionState::Suppressed;
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        // Lifecycle links still count when their source object is absent.
+        let links =
+            [(RelationType::Resolves, 50), (RelationType::Supersedes, 51)].map(|(relation, id)| {
+                let mut link = fixtures.soft_thread_link.clone();
+                link.id = MemoryId::from_u128(900 + id);
+                link.from_type = ObjectType::DerivedMemory;
+                link.from_id = MemoryId::from_u128(999);
+                link.to_type = ObjectType::DerivedMemory;
+                link.to_id = MemoryId::from_u128(id);
+                link.relation = relation;
+                link
+            });
+        store.upsert_links(&links).await.unwrap();
+        let thread_query = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        let provenance_query =
+            GraphDerivedMemoryProvenanceQuery::by_sources(vec![fixtures.episode.id], Vec::new());
+        let mut reads = Vec::new();
+        for unrelated in [false, true] {
+            if unrelated {
+                let mut extra_objects = Vec::new();
+                let mut extra_links = Vec::new();
+                for n in 0..12_u128 {
+                    let mut entity = fixtures.hub_entity.clone();
+                    entity.id = MemoryId::from_u128(1000 + n);
+                    extra_links.push(
+                        crate::MemoryLinkDraft::new(
+                            ObjectType::Entity,
+                            entity.id,
+                            RelationType::AssociatedWith,
+                            ObjectType::Entity,
+                            fixtures.hub_entity.id,
+                        )
+                        .into_domain()
+                        .unwrap(),
+                    );
+                    extra_objects.push(MemoryObject::Entity(entity));
+                }
+                store.upsert_objects(&extra_objects).await.unwrap();
+                store.upsert_links(&extra_links).await.unwrap();
+            }
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let (thread, filtered) = store
+                .query_derived_memories_by_thread(&thread_query)
+                .await
+                .unwrap();
+            let thread_reads = RDF_QUADS_READ.with(|count| count.get());
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let provenance = store
+                .query_derived_memories_by_provenance(&provenance_query)
+                .await
+                .unwrap();
+            reads.push((thread_reads, RDF_QUADS_READ.with(|count| count.get())));
+            for memories in [thread, provenance] {
+                assert_eq!(
+                    memories.iter().map(|memory| memory.id).collect::<Vec<_>>(),
+                    vec![MemoryId::from_u128(50)]
+                );
+            }
+            assert!(filtered.is_empty());
+        }
+        assert_eq!(
+            reads[0], reads[1],
+            "unrelated graphs must not increase either cascade read: {reads:?}"
+        );
+        RDF_QUADS_READ.with(|count| count.set(0));
+        store
+            .query_derived_memories_by_thread(
+                &GraphDerivedMemoryThreadQuery::by_threads(Vec::new()),
+            )
+            .await
+            .unwrap();
+        store
+            .query_derived_memories_by_provenance(&GraphDerivedMemoryProvenanceQuery::by_sources(
+                Vec::new(),
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
     async fn thread_expansion_excludes_resolved_members_outside_its_trace_prefix() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

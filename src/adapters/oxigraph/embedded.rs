@@ -287,7 +287,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
                 .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
-        let links = hydrate_all_links_from_store(&self.store)?;
+        let link_ids = SparqlGraphSelectors::new(&self.store).select_link_ids_touching(
+            &objects
+                .iter()
+                .map(MemoryObject::object_ref)
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_ids_from_store(&self.store, &link_ids)?;
         Ok(derived_memories_by_provenance(
             query,
             objects.into_iter().filter(
@@ -332,7 +338,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
                 .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
-        let links = hydrate_all_links_from_store(&self.store)?;
+        let link_ids = SparqlGraphSelectors::new(&self.store).select_link_ids_touching(
+            &objects
+                .iter()
+                .map(MemoryObject::object_ref)
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_ids_from_store(&self.store, &link_ids)?;
         Ok(derived_memories_by_thread(
             query,
             objects.into_iter().filter(
