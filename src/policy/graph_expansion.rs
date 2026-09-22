@@ -204,11 +204,6 @@ pub(crate) fn derived_memories_by_thread(
     let links = links.into_iter().collect::<Vec<_>>();
     let link_refs = links.iter().collect::<Vec<_>>();
     let superseded = incoming_derived_memory_ids(&link_refs, &[RelationType::Supersedes]);
-    let resolved = incoming_derived_memory_ids(
-        &link_refs,
-        &[RelationType::Resolves, RelationType::FulfillsCommitment],
-    );
-    let mut filtered = Vec::new();
     let mut memories = objects
         .into_iter()
         .filter_map(|object| match object {
@@ -226,24 +221,10 @@ pub(crate) fn derived_memories_by_thread(
             derived_memory_lifecycle_filter_reason(memory, &superseded, query.lifecycle_policy)
                 .is_none()
         })
-        .filter(|memory| {
-            if query.current_state_limit.is_some() && resolved.contains_key(&memory.id) {
-                push_filtered_node(
-                    &mut filtered,
-                    MemoryObjectRef::new(ObjectType::DerivedMemory, memory.id),
-                    GraphExpansionFilteredReason::Resolved,
-                    &superseded,
-                );
-                false
-            } else {
-                true
-            }
-        })
         .collect::<Vec<_>>();
 
     memories.sort_by_key(|memory| memory.id);
-    filtered.sort_by_key(|entry| entry.object_ref.id);
-    (memories, filtered)
+    (memories, Vec::new())
 }
 
 fn derived_memory_matches_provenance(
