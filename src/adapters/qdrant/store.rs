@@ -720,7 +720,11 @@ mod tests {
             let records = [
                 (1, ObjectType::Episode, VectorSurface::Summary),
                 (1, ObjectType::Episode, VectorSurface::Text),
+                (1, ObjectType::Episode, VectorSurface::SceneSetting),
+                (1, ObjectType::Episode, VectorSurface::SceneParticipants),
                 (2, ObjectType::Episode, VectorSurface::Summary),
+                (2, ObjectType::Episode, VectorSurface::SceneSetting),
+                (2, ObjectType::Episode, VectorSurface::SceneParticipants),
                 (1, ObjectType::MemoryThread, VectorSurface::Summary),
                 (2, ObjectType::MemoryThread, VectorSurface::Summary),
             ]
@@ -738,11 +742,15 @@ mod tests {
                 .map(|record| VectorRecordEmbedding::new(record, &[1.0, 0.0]))
                 .collect::<Vec<_>>();
             store.upsert_vector_records(&embeddings).await?;
-            let query = VectorCandidateSearch::new(
+            let mut query = VectorCandidateSearch::new(
                 vec![1.0, 0.0],
                 10,
                 vec![ObjectType::Episode, ObjectType::MemoryThread],
             );
+            query.surfaces.extend([
+                VectorSurface::SceneSetting,
+                VectorSurface::SceneParticipants,
+            ]);
             let before = store.search_candidates(&query).await?;
             store
                 .delete_candidates(&[
@@ -775,7 +783,11 @@ mod tests {
                 [
                     (1, ObjectType::Episode, VectorSurface::Summary),
                     (1, ObjectType::Episode, VectorSurface::Text),
+                    (1, ObjectType::Episode, VectorSurface::SceneSetting),
+                    (1, ObjectType::Episode, VectorSurface::SceneParticipants),
                     (2, ObjectType::Episode, VectorSurface::Summary),
+                    (2, ObjectType::Episode, VectorSurface::SceneSetting),
+                    (2, ObjectType::Episode, VectorSurface::SceneParticipants),
                     (1, ObjectType::MemoryThread, VectorSurface::Summary),
                     (2, ObjectType::MemoryThread, VectorSurface::Summary),
                 ]
@@ -787,6 +799,8 @@ mod tests {
                 surfaces(&after),
                 [
                     (2, ObjectType::Episode, VectorSurface::Summary),
+                    (2, ObjectType::Episode, VectorSurface::SceneSetting),
+                    (2, ObjectType::Episode, VectorSurface::SceneParticipants),
                     (1, ObjectType::MemoryThread, VectorSurface::Summary),
                 ]
                 .map(|(id, object_type, surface)| (MemoryId::from_u128(id), object_type, surface))

@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn point_identity_is_stable_per_object_and_distinct_per_surface() {
+    fn point_identity_is_stable_and_distinct_per_type_id_and_surface() {
         let summary = VectorRecord::new(
             MemoryId::from_u128(7),
             ObjectType::Episode,
@@ -321,6 +321,28 @@ mod tests {
         assert_eq!(qdrant_point_id(&summary), qdrant_point_id(&summary));
         assert_eq!(qdrant_point_id(&summary), qdrant_point_id(&re_embedded));
         assert_ne!(qdrant_point_id(&summary), qdrant_point_id(&text));
+        let mut identities = std::collections::HashSet::new();
+        for id in [7, 8] {
+            for object_type in [ObjectType::Episode, ObjectType::MemoryThread] {
+                for surface in [
+                    VectorSurface::Summary,
+                    VectorSurface::Text,
+                    VectorSurface::DerivedText,
+                    VectorSurface::SceneSetting,
+                    VectorSurface::SceneParticipants,
+                    VectorSurface::Query,
+                ] {
+                    let record = VectorRecord::new(
+                        MemoryId::from_u128(id),
+                        object_type,
+                        surface,
+                        DEFAULT_SCHEMA_VERSION,
+                        "same text",
+                    );
+                    assert!(identities.insert(qdrant_point_id(&record)), "{record:?}");
+                }
+            }
+        }
     }
 
     #[test]
