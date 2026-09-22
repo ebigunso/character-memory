@@ -702,10 +702,12 @@ impl RetrieveAssembly {
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
-            if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
-                ranked.resolved_by.extend(resolvers);
-                ranked.resolved_by.sort_unstable();
-                ranked.resolved_by.dedup();
+            if object_ref.object_type == ObjectType::DerivedMemory {
+                if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
+                    ranked.resolved_by.extend(resolvers);
+                    ranked.resolved_by.sort_unstable();
+                    ranked.resolved_by.dedup();
+                }
             }
         }
 
@@ -1852,6 +1854,49 @@ mod tests {
         high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
+
+    #[test]
+    fn resolution_metadata_stays_on_derived_memory_when_ids_collide() {
+        let fixtures = representative_fixtures();
+        let entity = fixtures.hub_entity;
+        let mut memory = fixtures.open_loop;
+        memory.id = entity.id;
+        let resolver = fixtures.correction.id;
+        let candidate = CandidateRoot {
+            object_id: entity.id,
+            object_type: ObjectType::Entity,
+            score: 1.0,
+            source: GraphRootSource::Participant,
+            vector_score: None,
+            cue_kinds: BTreeSet::from([CueKind::Participant]),
+            full_standing_score: Some(1.0),
+            full_standing_kinds: BTreeSet::from([CueKind::Participant]),
+            date_match_floor_eligible: false,
+        };
+        let query = GraphExpansionQuery::new(entity.id, ObjectType::Entity, 1, 2);
+        let mut expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::Entity(entity.clone()),
+                MemoryObject::DerivedMemory(memory),
+            ],
+            Vec::new(),
+        );
+        expansion.resolved_by.insert(entity.id, vec![resolver]);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
+        assembly
+            .absorb_expansion(&candidate, &query, expansion)
+            .unwrap();
+        assert!(
+            assembly.objects[&MemoryObjectRef::new(ObjectType::Entity, entity.id)]
+                .resolved_by
+                .is_empty()
+        );
+        assert_eq!(
+            assembly.objects[&MemoryObjectRef::new(ObjectType::DerivedMemory, entity.id)]
+                .resolved_by,
+            vec![resolver]
+        );
+    }
 
     #[test]
     fn single_kind_reserves_own_head_then_fills_final_ranked_room() {

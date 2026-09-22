@@ -548,7 +548,9 @@ fn bounded_expansion_plan<'a>(
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
         if depth == 0 && query.current_thread_state {
             incident_links.retain(|(link, neighbor)| {
-                link.relation != RelationType::PartOfThread || !resolved.contains_key(&neighbor.id)
+                link.relation != RelationType::PartOfThread
+                    || neighbor.object_type != ObjectType::DerivedMemory
+                    || !resolved.contains_key(&neighbor.id)
             });
         }
         if depth == 0 && query.current_subject_state {

@@ -543,3 +543,52 @@ async fn recalled_resolution_has_no_omission_but_section_capped_resolution_does(
     memory.close().await.unwrap();
     root.close().unwrap();
 }
+
+#[tokio::test]
+async fn thread_resolution_keeps_same_id_observation_on_an_independent_route() {
+    let (memory, root) = fixture(false).await;
+    let mut observation =
+        character_memory::ObservationDraft::new(id(101), "independent observed fact");
+    observation.id = Some(id(301));
+    observation.created_at = Some(at(11));
+    commit(
+        &memory,
+        RememberInput::new("observation thread membership")
+            .with_thread_id(id(601))
+            .with_observation(observation),
+    )
+    .await;
+    let mut association = MemoryLinkDraft::new(
+        ObjectType::MemoryThread,
+        id(601),
+        RelationType::AssociatedWith,
+        ObjectType::DerivedMemory,
+        id(301),
+    );
+    association.id = Some(id(9001));
+    association.created_at = Some(at(31));
+    memory.link(association).await.unwrap();
+    let mut missing = Vec::new();
+    for trace in [false, true] {
+        let mut context = request("thread_expansion");
+        context.include_trace = trace;
+        context.candidate_limits.max_graph_roots = 1;
+        context.graph_limits.allowed_relation_types =
+            vec![RelationType::PartOfThread, RelationType::AssociatedWith];
+        let outcome = memory.retrieve(context).await.unwrap();
+        if !outcome
+            .pack
+            .salient_observations
+            .iter()
+            .any(|object| object.id == id(301))
+        {
+            missing.push(trace);
+        }
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    assert!(
+        missing.is_empty(),
+        "Observation 301 lost for trace modes {missing:?}; resolution belongs to DerivedMemory 301"
+    );
+}
