@@ -1217,8 +1217,10 @@ mod tests {
 
     #[tokio::test]
     async fn retrieval_selectors_bound_state_and_occasion_prefixes() {
-        use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS};
-        use crate::domain::ScopeKey;
+        use super::super::shared::RDF_QUADS_READ;
+        use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS, SELECT_CALLS};
+        use crate::domain::{graph_uri, ScopeKey};
+        use oxigraph::model::{GraphNameRef, NamedNode};
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let key = ScopeKey::Setting("home".to_owned());
@@ -1298,11 +1300,51 @@ mod tests {
         let selectors = SparqlGraphSelectors::new(&store.store);
         MAX_SELECT_ROWS.with(|count| count.set(0));
         let (scope, scope_filtered) = selectors.select_scope_state(&key, policy, 3).unwrap();
-        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
         let (subject, subject_filtered) = selectors
             .select_subject_state(fixtures.hub_entity.id, policy, 3, false)
             .unwrap();
-        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
+        let quad_budget = |ids: &[MemoryId]| {
+            ids.iter()
+                .map(|id| {
+                    let graph = NamedNode::new(graph_uri(ObjectType::DerivedMemory, *id)).unwrap();
+                    store
+                        .store
+                        .quads_for_pattern(
+                            None,
+                            None,
+                            None,
+                            Some(GraphNameRef::NamedNode(graph.as_ref())),
+                        )
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        // Rank scans may read all keyed IDs. Full objects and exclusion evidence
+        // remain bounded before canonical RDF hydration.
+        for (ids, filtered) in [(&scope, &scope_filtered), (&subject, &subject_filtered)] {
+            let bounded = ids
+                .iter()
+                .copied()
+                .chain(filtered.iter().map(|entry| entry.object_ref.id))
+                .collect::<Vec<_>>();
+            assert_eq!(bounded.len(), 6);
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let hydrated = store
+                .query_objects(&GraphObjectQuery::by_refs(
+                    bounded
+                        .iter()
+                        .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                        .collect(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(hydrated.len(), 6);
+            assert_eq!(
+                RDF_QUADS_READ.with(|count| count.get()),
+                quad_budget(&bounded)
+            );
+        }
+        RDF_QUADS_READ.with(|count| count.set(0));
         let mut query = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
         query.current_state_limit = Some(3);
         let (mut thread, thread_filtered) = store
@@ -1310,7 +1352,10 @@ mod tests {
             .await
             .unwrap();
         thread.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
-        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 3);
+        assert_eq!(
+            RDF_QUADS_READ.with(|count| count.get()),
+            quad_budget(&thread.iter().map(|memory| memory.id).collect::<Vec<_>>())
+        );
         let mut occasion_query =
             GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
                 .with_fanout_overrides(vec![
@@ -1328,10 +1373,39 @@ mod tests {
         occasion_query.current_subject_state = true;
         occasion_query.participant_reference_time =
             fixtures.episode.scene.time.to_utc() + chrono::Duration::minutes(8);
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        SELECT_CALLS.with(|count| count.set(0));
         let occasions = selectors
             .select_bounded_participant_occasions(&neighbors, &occasion_query)
             .unwrap();
-        assert!(MAX_SELECT_ROWS.with(|count| count.get()) <= 12);
+        assert_eq!(SELECT_CALLS.with(|count| count.get()), 1);
+        assert_eq!(MAX_SELECT_ROWS.with(|count| count.get()), neighbors.len());
+        let occasion_refs = occasions.keys().copied().collect::<Vec<_>>();
+        let occasion_quad_budget = occasion_refs
+            .iter()
+            .map(|object| {
+                let graph = NamedNode::new(graph_uri(object.object_type, object.id)).unwrap();
+                store
+                    .store
+                    .quads_for_pattern(
+                        None,
+                        None,
+                        None,
+                        Some(GraphNameRef::NamedNode(graph.as_ref())),
+                    )
+                    .count()
+            })
+            .sum::<usize>();
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let hydrated_occasions = store
+            .query_objects(&GraphObjectQuery::by_refs(occasion_refs))
+            .await
+            .unwrap();
+        assert_eq!(hydrated_occasions.len(), 12);
+        assert_eq!(
+            RDF_QUADS_READ.with(|count| count.get()),
+            occasion_quad_budget
+        );
         for entries in [&scope_filtered, &subject_filtered, &thread_filtered] {
             assert_eq!(
                 entries
