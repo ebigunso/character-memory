@@ -1052,6 +1052,25 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         })
     });
 
+    let exclusions = limit_participant_occasions(
+        query,
+        &mut incident_links,
+        root_fanout_mode,
+        occasions,
+        |link| (link.relation(), link.other_endpoint(object_ref)),
+    );
+    if depth == 0 && query.current_subject_state && query.trace_mode.is_enabled() {
+        // The selector's extra state row is omission evidence, not a traversal edge.
+        let cap = fanout_limit_for_pair(query, RelationType::About, ObjectType::DerivedMemory);
+        let mut selected = HashSet::new();
+        incident_links.retain(|link| {
+            let neighbor = link.other_endpoint(object_ref);
+            link.relation() != RelationType::About
+                || neighbor.object_type != ObjectType::DerivedMemory
+                || selected.contains(&neighbor.id)
+                || (selected.len() < cap && selected.insert(neighbor.id))
+        });
+    }
     let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
     if exceeds_hub_limit {
         let failure = GraphExpansionBoundedFailure {
@@ -1063,13 +1082,6 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         }
         bounded_failure.get_or_insert(failure);
     }
-    let exclusions = limit_participant_occasions(
-        query,
-        &mut incident_links,
-        root_fanout_mode,
-        occasions,
-        |link| (link.relation(), link.other_endpoint(object_ref)),
-    );
     if exceeds_hub_limit {
         incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
     }

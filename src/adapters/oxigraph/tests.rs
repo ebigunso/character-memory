@@ -1449,6 +1449,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn participant_hub_limit_counts_only_the_admitted_occasion_prefix() {
+        use crate::ports::graph_authority::TraceMode;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = vec![MemoryObject::Entity(fixtures.hub_entity.clone())];
+        let mut links = Vec::new();
+        for index in 0..4_u128 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(20_000 + index);
+            episode.scene.time += chrono::Duration::minutes(index as i64);
+            links.push(
+                crate::MemoryLinkDraft::new(
+                    ObjectType::Episode,
+                    episode.id,
+                    RelationType::Involves,
+                    ObjectType::Entity,
+                    fixtures.hub_entity.id,
+                )
+                .into_domain()
+                .unwrap(),
+            );
+            objects.push(MemoryObject::Episode(episode));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let mut outputs = Vec::new();
+        for trace in [TraceMode::Disabled, TraceMode::Enabled] {
+            let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                .with_max_hub_edges(1)
+                .with_max_fanout_per_node(1)
+                .with_failure_policy(GraphExpansionFailurePolicy {
+                    timeout_ms: None,
+                    mode: crate::domain::GraphFailureMode::FailClosed,
+                })
+                .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                    relation: RelationType::Involves,
+                    object_type: ObjectType::Episode,
+                    max_fanout: 1,
+                }])
+                .with_fanout_utilization_recording(trace);
+            let expansion = store.expand_bounded(&query).await.unwrap();
+            assert!(expansion.bounded_failure.is_none());
+            assert!(expansion
+                .objects
+                .iter()
+                .any(|object| object.id() == MemoryId::from_u128(20_003)));
+            outputs.push((
+                expansion.objects,
+                expansion.links,
+                expansion.selection_order,
+            ));
+        }
+        assert_eq!(outputs[0], outputs[1]);
+    }
+
+    #[tokio::test]
     async fn thread_expansion_excludes_resolved_members_outside_its_trace_prefix() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();

@@ -592,3 +592,45 @@ async fn thread_resolution_keeps_same_id_observation_on_an_independent_route() {
         "Observation 301 lost for trace modes {missing:?}; resolution belongs to DerivedMemory 301"
     );
 }
+
+#[tokio::test]
+async fn named_state_trace_does_not_change_recall_at_the_hub_limit() {
+    let (memory, root) = fixture(false).await;
+    let mut input = RememberInput::new("Two active subject memories");
+    for n in [303, 304] {
+        let mut belief = derived(n, DerivedType::Claim, "active subject state", 101, n as i64);
+        belief.entity_ids.push(id(501));
+        input = input.with_derived_memory(belief);
+    }
+    commit(&memory, input).await;
+    let mut packs = Vec::new();
+    for trace in [false, true] {
+        let mut context = request("named");
+        context.include_trace = trace;
+        context.candidate_limits.max_graph_roots = 1;
+        context.graph_limits.max_fanout_per_node = 1;
+        context.graph_limits.max_hub_edges = 1;
+        context.graph_limits.failure_mode = character_memory::GraphFailureMode::FailClosed;
+        context.graph_limits.allowed_relation_types = vec![RelationType::About];
+        packs.push(memory.retrieve(context).await.map(|outcome| {
+            if trace {
+                assert!(outcome
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .fanout_utilization
+                    .iter()
+                    .any(|entry| entry.relation == RelationType::About
+                        && entry.omitted_by_fanout_count > 0));
+            }
+            serde_json::to_value(outcome.pack).unwrap()
+        }));
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    let packs = packs
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("both trace modes must succeed at the hub boundary");
+    assert_eq!(packs[0], packs[1], "trace mode must not change recall");
+}

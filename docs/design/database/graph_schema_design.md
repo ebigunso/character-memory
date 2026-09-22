@@ -124,6 +124,8 @@ Pack expansion reads bounded occasion prefixes and exclusion evidence separately
 
 State reads also apply lifecycle eligibility before their caller's query limit; subject state additionally requires a traversable About link. Exclusion evidence has a separate latest-first prefix of the same budget. Fanout omission telemetry counts omissions within fetched prefixes, without a whole-store count query. Thread expansion excludes resolved members independently of that bounded evidence.
 
+The hub limit counts the fetched, eligibility-pruned traversal prefix, excluding trace-only omission evidence, so a larger stored history alone does not cause a hub failure.
+
 ## Cross-Store Failures
 
 Graph writes are critical. Vector and stats updates are repairable parts of the write outcome, with typed failures and affected IDs. A graph-only memory loses semantic recall until vector indexing is repaired; stale candidates are checked against graph existence and lifecycle before inclusion. Replaying an old plan does not re-index an interpreted memory that graph authority identifies as superseded.
