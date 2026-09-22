@@ -240,9 +240,7 @@ pub enum SceneReferenceResolution {
     /// For a name, no notion is currently known by exactly this name, nothing more.
     /// For a key, no notion currently exists at that key.
     Unknown,
-    ContentCue {
-        matches: Vec<MemoryObjectRef>,
-    },
+    ContentCue,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

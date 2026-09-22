@@ -6,7 +6,7 @@ use crate::api::types::{
 };
 use crate::domain::{CandidateValidationStatus, MemoryLink, MemoryObject, MemoryObjectRef};
 use crate::errors::CustomError;
-use crate::models::vector::VectorRecord;
+use crate::models::vector::{EmbeddingInput, VectorRecord};
 use crate::policy::memory_object_vector_record;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
@@ -73,17 +73,14 @@ where
             }
             _ => Vec::new(),
         };
-        let embeddings = if vector_records.is_empty() {
+        let inputs = vector_records
+            .iter()
+            .map(VectorRecord::embedding_input)
+            .collect::<Vec<_>>();
+        let embeddings = if inputs.is_empty() {
             Ok(Vec::new())
         } else {
-            self.embedder
-                .embed_batch(
-                    &vector_records
-                        .iter()
-                        .map(VectorRecord::embedding_input)
-                        .collect::<Vec<_>>(),
-                )
-                .await
+            self.embedder.embed_batch(&inputs).await
         };
         let _turn = write_turn.lock().await;
         let validation = WritePlanValidator::new(self.graph_store)
@@ -106,6 +103,7 @@ where
             values.objects,
             values.links,
             vector_records,
+            &inputs,
             embeddings,
             options,
         )
@@ -133,6 +131,7 @@ where
         objects: Vec<MemoryObject>,
         links: Vec<MemoryLink>,
         vector_records: Vec<VectorRecord>,
+        inputs: &[EmbeddingInput],
         embeddings: Result<Vec<Vec<f32>>, CustomError>,
         options: CommitOptions,
     ) -> Result<RememberOutcome, CustomError> {
@@ -163,7 +162,7 @@ where
                 outcome.repair_needed.push(marker.clone());
                 outcome.diagnostics.repair_needed.push(marker);
             }
-            self.record_vector_outcome(&mut outcome, vector_records, embeddings)
+            self.record_vector_outcome(&mut outcome, vector_records, inputs, embeddings)
                 .await?;
         }
 
@@ -179,6 +178,7 @@ where
         &self,
         outcome: &mut RememberOutcome,
         vector_records: Vec<VectorRecord>,
+        inputs: &[EmbeddingInput],
         embeddings: Result<Vec<Vec<f32>>, CustomError>,
     ) -> Result<(), CustomError> {
         if vector_records.is_empty() {
@@ -186,7 +186,7 @@ where
         }
 
         let indexing = VectorIndexingService::new(self.vector_store)
-            .index(self.graph_store, vector_records, embeddings)
+            .index(self.graph_store, vector_records, inputs, embeddings)
             .await?;
         outcome.vector_indexed_object_ids = indexing
             .indexed_objects
