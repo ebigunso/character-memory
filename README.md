@@ -54,7 +54,7 @@ For each recognized participant, `last_interactions` says when the character las
 
 Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place` and `Activity`.
 
-Thread members are taken most recent first.
+Thread members are taken most recent first by creation time; an open loop's source episodes are taken most recent first by recorded scene time.
 
 Candidate, graph root and section selection serve each cue kind's floor from its own order. Keyed and named routes take their kind's floor before reminders. Descriptions contribute their most recent recallable occasions at or before the scene time, as many as the kind's floor and at least one. Spare room follows score order at candidate and section caps; only root selection shares spare turns among kinds. A reminder can bring memories resting on its occasion. A person or thread reached only through that reminder is a leaf: it can be included, but recall does not continue through it. When a topic, key or name also reaches the occasion, linked history inherits that route’s score; the occasion itself keeps its best matching score. The pack keeps its final score order.
 

@@ -11,6 +11,60 @@ use crate::{CharacterMemory, CustomError};
 
 struct FloorEmbedder;
 
+#[tokio::test]
+async fn open_loop_activity_reserves_the_latest_recorded_source() {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    let provenance = || CandidateProvenance::caller("open-loop source order");
+    let mut plan = RememberWritePlan::new();
+    // Neither IDs nor creation times give the scene order: 2, 3, 1.
+    for (id, days) in [(1, 30), (2, 0), (3, 1)] {
+        let mut draft = EpisodeDraft::new(format!("Source {id}"));
+        draft.id = Some(MemoryId::from_u128(id));
+        draft.created_at = Some(occasion().time + chrono::Duration::days(id as i64));
+        draft.scene = Some(Scene::at(occasion().time - chrono::Duration::days(days)));
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        draft.salience_score = if id == 1 { 1.0 } else { 0.0 };
+        plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            draft,
+            provenance(),
+        )));
+    }
+    let mut draft = DerivedMemoryDraft::new(DerivedType::OpenLoop, "Finish the conversation");
+    draft.id = Some(MemoryId::from_u128(4));
+    draft.created_at = Some(occasion().time);
+    draft.updated_at = draft.created_at;
+    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    draft.derived_from_episode_ids = [1, 2, 3].map(MemoryId::from_u128).to_vec();
+    plan = plan.with_candidate(MemoryCandidate::DerivedMemory(DerivedMemoryCandidate::new(
+        draft,
+        provenance(),
+    )));
+    memory.commit(plan, CommitOptions::default()).await.unwrap();
+    for roots in [2, 4] {
+        let mut context = RetrievalContext::default()
+            .with_scene(occasion())
+            .with_trace()
+            .with_activity(ActivityRef::OpenLoop(MemoryId::from_u128(4)));
+        context.candidate_limits.max_graph_roots = roots;
+        context.section_limits.relevant_episodes = 1;
+        context.graph_limits.max_depth = 0;
+        let outcome = memory.retrieve(context).await.unwrap();
+        let episodes = outcome
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id.as_u128())
+            .collect::<Vec<_>>();
+        println!("OPEN_LOOP_ORDER roots={roots} episodes={episodes:?}");
+        assert_eq!(episodes, [2], "root cap {roots}");
+    }
+    memory.close().await.unwrap();
+}
+
 #[async_trait]
 impl MemoryEmbedder for FloorEmbedder {
     async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {

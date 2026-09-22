@@ -131,8 +131,19 @@ where
                         .into_iter()
                         .map(|id| MemoryObjectRef::new(ObjectType::Observation, id)),
                 );
-                members
-                    .sort_by_key(|reference| (reference.object_type.stable_rank(), reference.id));
+                let episodes = members
+                    .iter()
+                    .copied()
+                    .filter(|reference| reference.object_type == ObjectType::Episode)
+                    .collect::<Vec<_>>();
+                let occasions = self.graph_store.query_episode_occasions(&episodes).await?;
+                members.sort_by_key(|reference| {
+                    (
+                        reference.object_type.stable_rank(),
+                        std::cmp::Reverse(occasions.get(reference).map(|occasion| occasion.time)),
+                        reference.id,
+                    )
+                });
             }
             _ => return Ok((result, roots, filtered)),
         }
