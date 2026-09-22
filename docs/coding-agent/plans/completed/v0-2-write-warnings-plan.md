@@ -1,6 +1,6 @@
 # Plan: the library tells the writer when what it is about to store will not do what the writer means
 
-- status: in-progress
+- status: completed
 - generated: 2026-09-22
 - last_updated: 2026-09-22
 - work_type: code
@@ -102,6 +102,7 @@ One crate, one task, one PR stacked on the top of the library stack as Integrati
 - One PR that reverts on its own; no stored format changes, so a revert leaves nothing behind.
 
 ## Progress Log (append-only)
+- 2026-09-22: the one task is done at 0d6502a (PR 142): Tier D approved at e1ff33e (nine-case observer red at the parent, green at the tip, outcomes and links equal), Tier A approved with two changes applied.
 
 - (none yet)
 
@@ -117,6 +118,11 @@ One crate, one task, one PR stacked on the top of the library stack as Integrati
   - Trigger / new insight: the first draft warned when a scene time was later than the record's `created_at`. That instant is the process clock at prepare, while visibility to recency and last met depends on the retrieval reference time, which the write cannot know; a device stamping a few seconds ahead would warn on every write; and decision 3 says the library never judges what the application perceived.
   - Plan delta (what changed): the warning is removed from the goal, the definition of done, the design and the task; the README states the reader's rule instead (recency and last met see an experience only at reference times at or after its scene time). The two tasks are folded into one task and one wave over the same files; the graph-query-count acceptance is replaced by a diff check (no new `by_refs` call site and no new graph read) verified by the Tier D reviewer.
   - Tradeoffs considered: a margin on the late time was rejected before as an unmeasured number, and no margin survives the reference-time argument.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+- 2026-09-22 Decision: the plan is complete; its completion audit is the Tier A implementation review.
+  - Trigger / new insight: the plan has one task and changes no recall; the Tier A review judged every added function, test and README line (two warnings earn their place; one redundant test block deleted; the warning text states its consequence).
+  - Plan delta (what changed): none; the measurement item stays an explicit exemption, with the driver's warning drift test as the evidence.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
