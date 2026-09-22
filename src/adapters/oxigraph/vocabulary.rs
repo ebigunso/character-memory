@@ -16,6 +16,8 @@ pub(crate) const UPDATED_AT: &str = "urn:cmem:vocab:updatedAt";
 
 pub(crate) const MODALITY: &str = "urn:cmem:vocab:modality";
 pub(crate) const SCENE_TIME: &str = "urn:cmem:vocab:sceneTime";
+pub(crate) const SCENE_LOCAL_YEAR: &str = "urn:cmem:vocab:sceneLocalYear";
+pub(crate) const SCENE_MONTH_DAY: &str = "urn:cmem:vocab:sceneMonthDay";
 pub(crate) const SCENE_PARTICIPANTS: &str = "urn:cmem:vocab:sceneParticipants";
 pub(crate) const SETTING_KEY: &str = "urn:cmem:vocab:settingKey";
 pub(crate) const SETTING_WORDS: &str = "urn:cmem:vocab:settingWords";

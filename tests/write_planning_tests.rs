@@ -215,7 +215,7 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
     assert_eq!(episode.summary, "Equivalent graph state observation");
     assert_eq!(
         episode.scene,
-        character_memory::Scene::at(fixed_timestamp())
+        character_memory::Scene::at((fixed_timestamp()).fixed_offset())
     );
     let observation = wrapper_retrieval
         .pack
@@ -384,7 +384,7 @@ fn remember_equivalence_input() -> RememberInput {
 
     let mut episode = EpisodeDraft::new("Equivalent graph state observation");
     episode.id = Some(episode_id);
-    episode.scene = Some(character_memory::Scene::at(timestamp));
+    episode.scene = Some(character_memory::Scene::at((timestamp).fixed_offset()));
     episode.created_at = Some(timestamp);
 
     let mut observation =

@@ -26,11 +26,11 @@ pub use retrieval::{
     LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, MemoryScenes,
     RetrievalCandidateLimits, RetrievalContext, RetrievalCueFloors, RetrievalGraphLimits,
     RetrievalLifecyclePolicy, RetrievalRationale, RetrievalTelemetry, RetrievalTrace,
-    RetrieveOutcome, SceneReference, SceneReferenceResolution, SceneReferenceResult,
-    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
-    SelectivityCountScope, SelectivityDecision, SelectivityTelemetry, SelectivityTrace,
-    SourceScene, SourceSceneUnavailableReason, StaleCandidateOmission,
-    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
+    RetrieveOutcome, SceneCueSearchTrace, SceneReference, SceneReferenceResolution,
+    SceneReferenceResult, SectionAssignment, SectionAssignmentReason, SectionPressureSummary,
+    SectionScoreComponents, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
+    SelectivityTrace, SourceScene, SourceSceneUnavailableReason, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, TimeRange, VectorCandidateTrace,
     VectorRecallCompleteness,
 };
 pub use write_plan::{

@@ -16,6 +16,8 @@ pub struct RetrievalContext {
     pub scene: Scene,
     pub topic: Option<String>,
     pub activity: Option<ActivityRef>,
+    /// An application-supplied cue, never a filter on other recall roads.
+    pub time_range: Option<TimeRange>,
     pub candidate_limits: RetrievalCandidateLimits,
     pub graph_limits: RetrievalGraphLimits,
     pub section_limits: ContinuitySectionLimits,
@@ -52,6 +54,11 @@ impl RetrievalContext {
         self
     }
 
+    pub fn with_time_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
+        self.time_range = Some(TimeRange { start, end });
+        self
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.object_type_defaults.is_empty() {
             return Err(ConfigValidationError {
@@ -73,6 +80,7 @@ impl Default for RetrievalContext {
             scene: Scene::now(),
             topic: None,
             activity: None,
+            time_range: None,
             candidate_limits: RetrievalCandidateLimits::default(),
             graph_limits: RetrievalGraphLimits::default(),
             section_limits: ContinuitySectionLimits::default(),
@@ -108,18 +116,23 @@ impl Default for RetrievalCandidateLimits {
     }
 }
 
-/// Calibration values for measured defaults, provisionally one slot per cue kind.
+/// Given cues reserve one slot per kind; date match is provisional until measured.
 /// Applications are not expected to set these. Floors apply per kind, not per
 /// person or place: five people share the participant floor.
 ///
 /// After reservations, spare room follows score order except at root selection,
-/// where present kinds share turns. A zero floor removes only the reservation.
+/// where given non-time kinds share turns. Time kinds then take remaining room.
+/// A zero floor removes the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
     pub participant: usize,
     pub place: usize,
     pub activity: usize,
+    /// Provisional reservation for an application-supplied time range.
+    pub date_match: usize,
     pub topic: usize,
+    /// Recent occasions take only spare root room until a reservation is measured.
+    pub recency: usize,
 }
 
 impl Default for RetrievalCueFloors {
@@ -128,7 +141,9 @@ impl Default for RetrievalCueFloors {
             participant: 1,
             place: 1,
             activity: 1,
+            date_match: 1,
             topic: 1,
+            recency: 0,
         }
     }
 }
@@ -220,6 +235,8 @@ pub struct RetrieveOutcome {
     /// can be present and unperceived.
     pub scene: Scene,
     pub activity: Option<ActivityResult>,
+    /// Echoes the supplied span, including an inverted span that matches nothing.
+    pub time_range: Option<TimeRange>,
     pub scene_references: Vec<SceneReferenceResult>,
     pub memory_scenes: Vec<MemoryScenes>,
     pub pack: ContinuityContextPack,
@@ -232,6 +249,12 @@ pub struct MemoryScenes {
     pub memory: MemoryObjectRef,
     /// Empty means no recorded experience; unavailable sources are explicit entries.
     pub sources: Vec<SourceScene>,
+    /// Whole seconds since this interpreted memory's latest eligible support
+    /// at or before the retrieval scene time. Observations use their own time, or
+    /// their parent scene time when absent. None means no such support, or a memory
+    /// other than an interpreted memory. Suppressed sources count only when
+    /// include_suppressed is enabled. This fact never changes recall or scores.
+    pub seconds_since_support: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -302,6 +325,13 @@ pub enum ActivityRef {
     OpenLoop(MemoryId),
 }
 
+/// Both endpoints are included. An end before its start matches no occasions.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeRange {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActivityResult {
     pub activity: ActivityRef,
@@ -322,6 +352,8 @@ pub enum GraphRootSource {
     Participant,
     Activity,
     Place,
+    Recency,
+    DateMatch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -520,10 +552,14 @@ pub struct LifecycleOmissionSummary {
 #[non_exhaustive]
 pub struct RetrievalTrace {
     pub vector_candidates: Vec<VectorCandidateTrace>,
-    /// Recallable scene matches left out by each description search's occasion limit.
-    /// Participant words share one search and therefore one count.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
+    /// Whether eligible occasions inside the supplied range exceeded its contribution.
+    /// `None` means no range was supplied. Determined by one extra bounded ID read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_range_has_more: Option<bool>,
+    /// More eligible occasions share this local calendar date in earlier years.
+    pub anniversary_has_more: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     pub floor_admissions: Vec<CueFloorAdmission>,
     pub graph_relations: Vec<GraphRelationTrace>,
     pub graph_expansions: Vec<GraphExpansionTrace>,
@@ -538,7 +574,9 @@ impl RetrievalTrace {
     pub fn empty() -> Self {
         Self {
             vector_candidates: Vec::new(),
-            scene_cue_omitted_counts: BTreeMap::new(),
+            time_range_has_more: None,
+            anniversary_has_more: false,
+            scene_cue_searches: Vec::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
             graph_expansions: Vec::new(),
@@ -549,6 +587,19 @@ impl RetrievalTrace {
             section_assignments: Vec::new(),
         }
     }
+}
+
+/// One setting search or one shared search of all participants' names and descriptions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SceneCueSearchTrace {
+    pub cue_kind: CueKind,
+    /// Scene references sharing this search; the score is not per person or reference.
+    pub references: Vec<SceneReference>,
+    /// Best fetched scene-surface score, before occasion selection and graph eligibility.
+    /// `None` means the search returned no scene-surface matches.
+    pub best_score: Option<f32>,
+    /// Recallable matches left out by this search's occasion limit.
+    pub omitted_count: usize,
 }
 
 impl Default for RetrievalTrace {
@@ -752,6 +803,8 @@ pub enum CueKind {
     Participant,
     Place,
     Activity,
+    Recency,
+    DateMatch,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -790,6 +843,7 @@ mod tests {
 
     fn episode(id: MemoryId) -> Episode {
         Episode {
+            scene_local_date: None,
             id,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
@@ -799,7 +853,7 @@ mod tests {
                     words: None,
                 },
 
-                ..crate::domain::Scene::at(timestamp("2026-04-29T10:00:00Z"))
+                ..crate::domain::Scene::at((timestamp("2026-04-29T10:00:00Z")).fixed_offset())
             },
             ended_at: Some(timestamp("2026-04-29T10:05:00Z")),
             summary: "Discussed context packs.".to_owned(),
@@ -875,6 +929,15 @@ mod tests {
             ..policy
         }
         .allows_retention_state(RetentionState::Suppressed));
+    }
+
+    #[test]
+    fn empty_scene_search_trace_reads_across_pins() {
+        let mut prior = serde_json::to_value(RetrievalTrace::empty()).unwrap();
+        prior.as_object_mut().unwrap().remove("scene_cue_searches");
+        let trace: RetrievalTrace = serde_json::from_value(prior.clone()).unwrap();
+        assert!(trace.scene_cue_searches.is_empty());
+        assert_eq!(serde_json::to_value(trace).unwrap(), prior);
     }
 
     #[test]

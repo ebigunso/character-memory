@@ -1,23 +1,23 @@
 use super::*;
 use crate::api::types::{
-    LastInteraction, MemoryScenes, SceneReference, SceneReferenceResolution, SceneReferenceResult,
-    SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
+    LastInteraction, MemoryScenes, SceneCueSearchTrace, SceneReference, SceneReferenceResolution,
+    SceneReferenceResult, SourceScene, SourceSceneUnavailableReason, VectorRecallCompleteness,
 };
 use crate::domain::RetentionState;
 use crate::models::vector::CanonicalCandidates;
 use crate::ports::graph_authority::GraphObjectQuery;
+use chrono::{DateTime, Utc};
 
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
-    pub kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>>,
+    pub roots: Vec<CandidateRoot>,
     pub orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
     pub floor_admissions: Vec<CueFloorAdmission>,
-    pub topic_scores: HashMap<MemoryObjectRef, f32>,
-    pub scene_cue_omitted_counts: BTreeMap<CueKind, usize>,
+    pub scene_cue_searches: Vec<SceneCueSearchTrace>,
 }
 
 impl<G, V, E> RetrievePipeline<'_, G, V, E>
@@ -102,14 +102,14 @@ where
         for &participant in &participants {
             let last = self
                 .graph_store
-                .query_last_interaction(participant, context.scene.time, policy)
+                .query_last_interaction(participant, context.scene.time.to_utc(), policy)
                 .await?;
             last_interactions.insert(
                 participant,
                 last.map(|(episode_id, scene_time)| LastInteraction {
                     episode_id,
                     scene_time,
-                    seconds_since: (context.scene.time - scene_time).num_seconds(),
+                    seconds_since: (context.scene.time.to_utc() - scene_time).num_seconds(),
                 }),
             );
         }
@@ -130,7 +130,7 @@ where
         let mut all_candidates = Vec::new();
         let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
         let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
-        let mut scene_cue_omitted_counts = BTreeMap::new();
+        let mut scene_cue_searches = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| {
@@ -214,7 +214,30 @@ where
                     }
                     .max(1);
                     eligible.truncate(limit);
-                    scene_cue_omitted_counts.insert(kind, count - eligible.len());
+                    if context.include_trace {
+                        scene_cue_searches.push(SceneCueSearchTrace {
+                            cue_kind: kind,
+                            references: references
+                                .iter()
+                                .map(|result| &result.reference)
+                                .chain(&descriptions)
+                                .filter(|reference| {
+                                    matches!(
+                                        (kind, reference),
+                                        (CueKind::Place, SceneReference::SettingWords)
+                                            | (
+                                                CueKind::Participant,
+                                                SceneReference::ParticipantName { .. }
+                                                    | SceneReference::ParticipantDescription { .. }
+                                            )
+                                    )
+                                })
+                                .cloned()
+                                .collect(),
+                            best_score: pool.first().map(|candidate| candidate.score),
+                            omitted_count: count - eligible.len(),
+                        });
+                    }
                     eligible
                 };
                 all_candidates.extend(candidates.iter().cloned());
@@ -271,13 +294,23 @@ where
                 (kind, order)
             })
             .collect();
-        let selection = select_with_cue_floors(
-            candidates.iter().map(|candidate| {
+        let roots = candidates
+            .iter()
+            .map(|candidate| {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
+                CandidateRoot::from_vector(
+                    candidate,
+                    kinds[&object].clone(),
+                    topic_scores.get(&object).copied(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let selection = select_with_cue_floors(
+            roots.iter().map(|root| {
                 (
-                    object,
-                    &kinds[&object],
-                    !kinds[&object].contains(&CueKind::Topic),
+                    MemoryObjectRef::new(root.object_type, root.object_id),
+                    &root.cue_kinds,
+                    root.reminder_only(),
                 )
             }),
             &orders,
@@ -286,10 +319,11 @@ where
             CueFloorStage::CandidateMerge,
         );
         let mut floor_admissions = Vec::new();
-        let selected = selection
-            .into_iter()
-            .map(|(index, cause)| {
-                let candidate = &candidates[index];
+        let mut selection = selection.into_iter().peekable();
+        let mut selected = Vec::new();
+        let mut selected_roots = Vec::new();
+        for (index, (candidate, root)) in candidates.into_iter().zip(roots).enumerate() {
+            if let Some((_, cause)) = selection.next_if(|(chosen, _)| *chosen == index) {
                 if let Some(cue_kind) = cause {
                     floor_admissions.push(CueFloorAdmission {
                         object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
@@ -297,20 +331,20 @@ where
                         cue_kind,
                     });
                 }
-                candidate.clone()
-            })
-            .collect::<Vec<_>>();
+                selected.push(candidate);
+                selected_roots.push(root);
+            }
+        }
         Ok(RecallCues {
-            topic_scores,
             candidates: CanonicalCandidates::new(selected),
-            kinds,
+            roots: selected_roots,
             orders,
             participants,
             references,
             dimension,
             completeness,
             floor_admissions,
-            scene_cue_omitted_counts,
+            scene_cue_searches,
         })
     }
 
@@ -318,6 +352,7 @@ where
         &self,
         pack: &ContinuityContextPack,
         include_suppressed: bool,
+        reference_time: DateTime<Utc>,
     ) -> Result<Vec<MemoryScenes>, CustomError> {
         let mut memories = Vec::new();
         let mut objects = HashMap::new();
@@ -403,6 +438,16 @@ where
         Ok(memories
             .into_iter()
             .map(|(memory, sources)| {
+                let seconds_since_support = if memory.object_type == ObjectType::DerivedMemory {
+                    sources
+                        .iter()
+                        .filter_map(|source| support_time(*source, &objects, include_suppressed))
+                        .filter(|time| *time <= reference_time)
+                        .max()
+                        .map(|time| (reference_time - time).num_seconds())
+                } else {
+                    None
+                };
                 let mut seen = HashSet::new();
                 let mut sources = sources
                     .into_iter()
@@ -413,9 +458,41 @@ where
                     let source = source_scene_ref(scene);
                     (source.object_type.stable_rank(), source.id)
                 });
-                MemoryScenes { memory, sources }
+                MemoryScenes {
+                    memory,
+                    sources,
+                    seconds_since_support,
+                }
             })
             .collect())
+    }
+}
+
+fn support_time(
+    source: MemoryObjectRef,
+    objects: &HashMap<MemoryObjectRef, MemoryObject>,
+    include_suppressed: bool,
+) -> Option<DateTime<Utc>> {
+    match objects.get(&source)? {
+        MemoryObject::Episode(episode)
+            if include_suppressed || episode.retention_state != RetentionState::Suppressed =>
+        {
+            Some(episode.scene.time.to_utc())
+        }
+        MemoryObject::Observation(observation)
+            if include_suppressed || observation.retention_state != RetentionState::Suppressed =>
+        {
+            observation.observed_at.or_else(|| {
+                match objects.get(&MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    observation.episode_id,
+                ))? {
+                    MemoryObject::Episode(episode) => Some(episode.scene.time.to_utc()),
+                    _ => None,
+                }
+            })
+        }
+        _ => None,
     }
 }
 

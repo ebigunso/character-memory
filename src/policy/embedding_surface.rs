@@ -276,6 +276,7 @@ mod tests {
 
     fn episode_fixture() -> Episode {
         Episode {
+            scene_local_date: None,
             id: id(10),
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
@@ -288,7 +289,7 @@ mod tests {
                     key: Some(id(1)),
                     ..Default::default()
                 }],
-                ..crate::domain::Scene::at(timestamp())
+                ..crate::domain::Scene::at((timestamp()).fixed_offset())
             },
             ended_at: Some(timestamp()),
             summary: " Short   summary. ".to_owned(),
