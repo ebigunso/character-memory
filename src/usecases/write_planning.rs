@@ -746,6 +746,7 @@ struct PlanValidationContext {
     refs_requiring_graph: HashSet<MemoryObjectRef>,
     existing_refs: HashSet<MemoryObjectRef>,
     episode_content_by_id: HashMap<MemoryId, String>,
+    derived_subjects_and_threads: HashMap<MemoryId, (Vec<MemoryId>, Vec<MemoryId>)>,
 }
 
 impl PlanValidationContext {
@@ -755,6 +756,7 @@ impl PlanValidationContext {
             refs_requiring_graph: HashSet::new(),
             existing_refs: HashSet::new(),
             episode_content_by_id: HashMap::new(),
+            derived_subjects_and_threads: HashMap::new(),
         };
 
         for candidate in &plan.candidates {
@@ -796,6 +798,14 @@ impl PlanValidationContext {
                 if let Some(id) = candidate.draft.id {
                     self.plan_refs
                         .insert(MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory));
+                    self.derived_subjects_and_threads
+                        .entry(id)
+                        .or_insert_with(|| {
+                            (
+                                candidate.draft.entity_ids.clone(),
+                                candidate.draft.thread_ids.clone(),
+                            )
+                        });
                 }
             }
             MemoryCandidate::MemoryLink(candidate) => {
@@ -886,6 +896,11 @@ impl PlanValidationContext {
 
     fn add_existing_object(&mut self, object: &MemoryObject) {
         self.existing_refs.insert(object.object_ref());
+        if let MemoryObject::DerivedMemory(memory) = object {
+            self.derived_subjects_and_threads
+                .entry(memory.id)
+                .or_insert_with(|| (memory.entity_ids.clone(), memory.thread_ids.clone()));
+        }
     }
 
     fn validate_candidate(&self, index: usize, candidate: &MemoryCandidate) -> CandidateValidation {
@@ -1073,7 +1088,61 @@ impl PlanValidationContext {
         if let Some(warning) = self.echo_surface_warning(candidate) {
             validation.warnings.push(warning);
         }
+        match candidate {
+            MemoryCandidate::MemoryLink(candidate) => {
+                if let Some(warning) = self.resolver_warning(&candidate.draft) {
+                    validation.warnings.push(warning);
+                }
+            }
+            MemoryCandidate::Episode(candidate) => {
+                if let Some(scene) = &candidate.draft.scene {
+                    let mut seen = HashSet::new();
+                    let mut warned = HashSet::new();
+                    for participant_id in scene.participant_keys() {
+                        if !seen.insert(participant_id) && warned.insert(participant_id) {
+                            validation.warnings.push(
+                                CandidateValidationIssue::RepeatedSceneParticipant {
+                                    participant_id,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
         validation
+    }
+
+    fn resolver_warning(&self, link: &MemoryLinkDraft) -> Option<CandidateValidationIssue> {
+        if !matches!(
+            link.relation,
+            RelationType::Resolves | RelationType::FulfillsCommitment
+        ) || link.from_type != ObjectType::DerivedMemory
+            || link.to_type != ObjectType::DerivedMemory
+            || link.from_id == link.to_id
+        {
+            return None;
+        }
+        let (resolver_subjects, resolver_threads) =
+            self.derived_subjects_and_threads.get(&link.from_id)?;
+        let (target_subjects, target_threads) =
+            self.derived_subjects_and_threads.get(&link.to_id)?;
+        if resolver_subjects
+            .iter()
+            .any(|id| target_subjects.contains(id))
+            || resolver_threads
+                .iter()
+                .any(|id| target_threads.contains(id))
+        {
+            return None;
+        }
+        Some(
+            CandidateValidationIssue::ResolverWithoutSharedSubjectOrThread {
+                resolver_id: link.from_id,
+                target_id: link.to_id,
+            },
+        )
     }
 
     fn echo_surface_warning(

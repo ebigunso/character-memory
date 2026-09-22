@@ -124,6 +124,17 @@ pub enum CandidateValidationIssue {
         echo_surface: String,
         matching_episode_ids: Vec<MemoryId>,
     },
+    #[error(
+        "resolving memory {resolver_id} shares no subject or thread with {target_id}; the matter leaves where things stand, but the settling will not come to mind on meeting the person"
+    )]
+    ResolverWithoutSharedSubjectOrThread {
+        resolver_id: MemoryId,
+        target_id: MemoryId,
+    },
+    #[error(
+        "scene participant key {participant_id} occurs more than once; the person is stored and reported repeatedly as given"
+    )]
+    RepeatedSceneParticipant { participant_id: MemoryId },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

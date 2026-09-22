@@ -187,11 +187,23 @@ An episode stores one `Scene` with its time, participants, setting and custom va
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 
+### Write warnings
+
+A valid write can carry warnings. Read each candidate's `warnings` in the validations returned by `validate_plan`, or in `RememberOutcome.diagnostics.validations` after `remember` or `commit`. Each warning has a `kind` tag and identifies the affected memories or participant key; `candidate_index` and `candidate_kind` identify the candidate. The same warnings are also projected into `diagnostics.messages` with warning severity and the code `WritePlanValidationWarning`. Warnings neither refuse a write nor change what is stored.
+
+- `duplicate_observation_echo`: an observation or interpreted memory repeats its source episode's summary exactly, so that wording is stored and indexed again.
+- `resolver_without_shared_subject_or_thread`: a `Resolves` or `FulfillsCommitment` link joins interpreted memories with no shared subject and no shared thread. The matter leaves where things stand, but meeting the person alone will not bring the memory that says it was settled. The warning belongs to the link candidate and names the resolver and target, including when either is already stored.
+- `repeated_scene_participant`: the same participant key occurs more than once in an episode's scene. Every entry is kept and reported, and its words contribute again to the participant search text; the write still creates only one participant link per distinct key. There is one warning per repeated key. Identical descriptions without keys do not establish that two participants are the same person.
+
+`remember(RememberInput::new("Alice asked about the trip"), RememberOptions::default())` uses the same text for the episode summary and observation, so it carries the echo warning. Give the episode a distinct summary with `.with_episode(EpisodeDraft::new("Planning a trip with Alice"))`, or supply a distinct observation, to keep the two texts different. A resolution written through the separate `link` method carries no validation warnings; a link-only `RememberWritePlan` passed to `validate_plan` or `commit` does.
+
+Recency and last met see an experience only at reference times at or after its scene time. A later scene time is stored as given and does not itself produce a warning.
+
 ## Notions and naming beliefs
 
 An `Entity` represents a notion the character holds: an id, object type, creation time and schema version. An entity has no name. Construct its draft with `EntityDraft::new()` and supply or retain its id. Names and other descriptions belong to ordinary `DerivedMemory` beliefs about that id. A belief's `assertions: Vec<BeliefAssertion>` can carry `BeliefPredicate::KnownAs { name }` for a subject in its `entity_ids`. An assertion is the character's own commitment; hearsay, doubt and aspects without a mechanical reader remain plain text.
 
-Set `given_by_application = true` when the application gives a belief about a notion without source episodes or observations. That declaration requires a notion subject and cannot coexist with source experiences. With neither sources nor the declaration, admission fails. To initialize a notion and a given belief before any experience, author their candidates in a `RememberWritePlan` with explicit ids, timestamps and schema versions; validate and commit the plan. The `RememberInput` convenience path also creates an episode and observation for its input, but does not attach those as sources to a given belief.
+Set `given_by_application = true` when the application gives a belief about a notion without source episodes or observations. That declaration requires a notion subject and cannot coexist with source experiences. Without source experiences, the belief has no setting or custom context to recall it by; its subjects and the topic can still bring it to mind. With neither sources nor the declaration, admission fails. To initialize a notion and a given belief before any experience, author their candidates in a `RememberWritePlan` with explicit ids, timestamps and schema versions; validate and commit the plan. The `RememberInput` convenience path also creates an episode and observation for its input, but does not attach those as sources to a given belief.
 
 A rename is an ordinary supersession. With caller-retained `notion_id`, `old_belief_id` and a fresh `new_belief_id`, prepare the new belief, inspect validation and commit:
 
