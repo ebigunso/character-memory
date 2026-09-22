@@ -17,12 +17,22 @@ impl MemoryEmbedder for FloorEmbedder {
         let (axis, score) = if input.surface == VectorSurface::Query {
             (
                 match input.text.as_str() {
-                    "topic" => 0,
+                    "topic" | "orchids" => 0,
                     "person" => 1,
                     "place" => 2,
+                    "work" => 3,
                     text => panic!("unexpected query {text}"),
                 },
                 1.0_f32,
+            )
+        } else if input.text.contains("orchids") {
+            (
+                0,
+                if input.text.contains("work") {
+                    0.2
+                } else {
+                    0.89
+                },
             )
         } else {
             match input.object_id.map(|id| id.as_u128()) {
@@ -138,6 +148,269 @@ fn mixed_context() -> RetrievalContext {
     context
 }
 
+async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(4).await),
+        Box::new(FloorEmbedder),
+    );
+    let mut thread = MemoryThreadDraft::new("Work in progress", "The current activity.");
+    thread.id = Some(MemoryId::from_u128(5000));
+    let mut input = RememberInput::new("Progress on the work.")
+        .with_scene(occasion())
+        .with_memory_thread(thread);
+    for id in 6000..6012 {
+        let mut member = DerivedMemoryDraft::new(
+            DerivedType::Claim,
+            "The work included a passing mention of orchids.",
+        );
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    let strong_id = MemoryId::from_u128(7000);
+    let mut strong = DerivedMemoryDraft::new(DerivedType::Claim, "orchids need careful watering.");
+    strong.id = Some(strong_id);
+    input = input.with_derived_memory(strong);
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    (memory, strong_id)
+}
+
+#[tokio::test]
+async fn weak_topic_membership_does_not_spend_the_strong_topic_roots_turn() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut outcomes = Vec::new();
+    let mut included = Vec::new();
+    for place_cue in [false, true] {
+        let mut context = RetrievalContext::new("orchids")
+            .with_scene(occasion())
+            .with_trace();
+        if place_cue {
+            context.scene.setting.words = Some("work".to_owned());
+        } else {
+            context.activity = Some(ActivityRef::Thread(MemoryId::from_u128(5000)));
+        }
+        context.graph_limits.max_depth = 0;
+        context.candidate_limits.max_graph_roots = 12;
+        context.section_limits.derived_memories = 12;
+        let result = memory.retrieve(context).await.unwrap();
+        let trace = result.trace.unwrap();
+        if !place_cue {
+            assert_eq!(trace.vector_candidates[0].object.id, strong_id);
+            assert!((trace.vector_candidates[0].score - 0.89).abs() < 0.0001);
+            for id in 6000..6012 {
+                let row = trace
+                    .vector_candidates
+                    .iter()
+                    .find(|row| row.object.id == MemoryId::from_u128(id))
+                    .unwrap();
+                assert!((row.score - 0.2).abs() < 0.0001);
+            }
+        }
+        let strong_root = trace
+            .graph_expansions
+            .iter()
+            .find(|row| row.root.id == strong_id)
+            .unwrap();
+        outcomes.push(strong_root.outcome);
+        included.push(
+            result
+                .pack
+                .derived_memories
+                .iter()
+                .any(|entry| entry.memory.id == strong_id),
+        );
+    }
+    assert_eq!(outcomes, [GraphExpansionOutcome::Expanded; 2]);
+    assert_eq!(included, [true; 2]);
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_candidate_merge() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 12;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 48;
+    let mut topic_only = context.clone();
+    topic_only.scene.setting.words = None;
+    let topic_only = memory.retrieve(topic_only).await.unwrap();
+    let candidates = topic_only.trace.unwrap().vector_candidates;
+    assert_eq!(candidates[0].object.id, strong_id);
+    assert!((candidates[0].score - 0.89).abs() < 0.0001);
+    assert!(candidates[1..]
+        .iter()
+        .all(|candidate| (candidate.score - 0.2).abs() < 0.0001));
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert_eq!(trace.vector_candidates.len(), 12);
+    assert!(
+        trace
+            .vector_candidates
+            .iter()
+            .any(|row| row.object.id == strong_id),
+        "the strongest Topic hit was lost at candidate merge"
+    );
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::CandidateMerge,
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    assert!(result
+        .pack
+        .derived_memories
+        .iter()
+        .any(|row| row.memory.id == strong_id));
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn overlapping_cue_orders_protect_the_topic_at_section_cap() {
+    let (memory, strong_id) = overlapping_cue_memory().await;
+    let mut context = RetrievalContext::new("orchids").with_trace();
+    context.object_type_defaults = vec![ObjectType::DerivedMemory];
+    context.scene.setting.words = Some("work".to_owned());
+    context.candidate_limits.max_vector_candidates = 48;
+    context.candidate_limits.max_graph_roots = 48;
+    context.graph_limits.max_depth = 0;
+    context.section_limits.derived_memories = 2;
+    let result = memory.retrieve(context).await.unwrap();
+    let trace = result.trace.unwrap();
+    assert!(trace
+        .vector_candidates
+        .iter()
+        .any(|row| row.object.id == strong_id));
+    assert!(trace
+        .graph_expansions
+        .iter()
+        .any(|row| row.root.id == strong_id && row.outcome == GraphExpansionOutcome::Expanded));
+    let assignment = trace
+        .section_assignments
+        .iter()
+        .find(|row| row.object.id == strong_id)
+        .unwrap();
+    assert_eq!(result.pack.derived_memories.len(), 2);
+    assert!(trace.floor_admissions.contains(&CueFloorAdmission {
+        object: MemoryObjectRef::new(ObjectType::DerivedMemory, strong_id),
+        stage: CueFloorStage::Section {
+            section: ContextPackSection::DerivedMemories,
+        },
+        cue_kind: CueKind::Topic,
+    }));
+    assert!(
+        result
+            .pack
+            .derived_memories
+            .iter()
+            .any(|row| row.memory.id == strong_id),
+        "the strongest Topic hit was lost only at the section cap: {assignment:?}"
+    );
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_large_activity_shares_roots_with_the_topic() {
+    let memory = floor_memory().await;
+    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
+    for id in 6000..6016 {
+        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    let mut context = RetrievalContext::new("topic")
+        .with_activity(ActivityRef::Thread(MemoryId::from_u128(5000)))
+        .with_scene(occasion())
+        .with_trace();
+    context.graph_limits.max_depth = 1;
+    let first = memory.retrieve(context.clone()).await.unwrap();
+    let second = memory.retrieve(context).await.unwrap();
+    assert_eq!(first.pack, second.pack);
+    assert_eq!(first.trace, second.trace);
+    let topic_memories = first
+        .pack
+        .salient_observations
+        .iter()
+        .filter(|memory| (1000..1048).contains(&memory.id.as_u128()))
+        .count();
+    assert!(
+        topic_memories >= 3,
+        "topic brought only {topic_memories} memories"
+    );
+    assert!(first.pack.derived_memories.len() >= 3);
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
+    let memory = floor_memory().await;
+    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
+    for id in 6000..6016 {
+        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
+        member.id = Some(MemoryId::from_u128(id));
+        member.thread_ids = vec![MemoryId::from_u128(5000)];
+        member.created_at = Some(occasion().time);
+        input = input.with_derived_memory(member);
+    }
+    memory
+        .remember(input, RememberOptions::default())
+        .await
+        .unwrap();
+    for (cap, activity_count, topic_count) in [(6, 5, 1), (8, 6, 2), (4, 3, 1)] {
+        let mut context = RetrievalContext::new("topic")
+            .with_activity(ActivityRef::Thread(MemoryId::from_u128(5000)))
+            .with_scene(occasion())
+            .with_trace();
+        context.candidate_limits.max_graph_roots = cap;
+        context.graph_limits.max_depth = 1;
+        context.cue_floors = RetrievalCueFloors {
+            participant: 0,
+            place: 0,
+            activity: 5,
+            topic: 1,
+        };
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        let repeat = memory.retrieve(context).await.unwrap();
+        assert_eq!(result.pack, repeat.pack);
+        assert_eq!(result.trace, repeat.trace);
+        let expanded = result
+            .trace
+            .unwrap()
+            .graph_expansions
+            .into_iter()
+            .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+            .map(|row| row.root.id.as_u128())
+            .collect::<Vec<_>>();
+        let topics = expanded
+            .iter()
+            .filter(|id| (1000..1048).contains(*id))
+            .count();
+        assert_eq!(
+            (expanded.len() - topics, topics),
+            (activity_count, topic_count),
+            "cap={cap}"
+        );
+    }
+    memory.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let memory = floor_memory().await;
@@ -181,11 +454,25 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
         (2000, CueFloorStage::CandidateMerge, CueKind::Participant),
         (2000, CueFloorStage::GraphRoots, CueKind::Participant),
         (3000, CueFloorStage::GraphRoots, CueKind::Place),
-        (2000, section, CueKind::Participant),
-        (3000, section, CueKind::Place),
+        (2001, section, CueKind::Participant),
+        (2002, section, CueKind::Participant),
         (4000, section, CueKind::Activity),
     ];
-    assert_eq!(trace.floor_admissions.len(), expected.len());
+    assert_eq!(trace.floor_admissions.len(), 42);
+    for (stage, count) in [
+        (CueFloorStage::CandidateMerge, 31),
+        (CueFloorStage::GraphRoots, 8),
+        (section, 3),
+    ] {
+        assert_eq!(
+            trace
+                .floor_admissions
+                .iter()
+                .filter(|row| row.stage == stage)
+                .count(),
+            count
+        );
+    }
     for (id, stage, cue_kind) in expected {
         assert!(trace.floor_admissions.contains(&CueFloorAdmission {
             object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
@@ -218,7 +505,7 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
     let no_section = memory.retrieve(no_section).await.unwrap();
     assert!(no_section.pack.salient_observations.is_empty());
     let admissions = no_section.trace.unwrap().floor_admissions;
-    assert_eq!(admissions.len(), 3);
+    assert_eq!(admissions.len(), 39);
     assert!(admissions
         .iter()
         .all(|row| !matches!(row.stage, CueFloorStage::Section { .. })));
@@ -356,24 +643,27 @@ async fn participant_and_place_keep_room_without_a_topic() {
     context.activity = None;
     context.candidate_limits.max_vector_candidates = 96;
     context.candidate_limits.max_graph_roots = 96;
-    context.section_limits.salient_observations = 2;
-    let result = memory.retrieve(context).await.unwrap();
+    context.section_limits.salient_observations = 6;
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    let repeated = memory.retrieve(context).await.unwrap();
+    assert_eq!(result.pack, repeated.pack);
+    assert_eq!(result.trace, repeated.trace);
     let selected = result
         .pack
         .salient_observations
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
-    assert_eq!(selected, [3000, 2000]);
+    assert_eq!(selected, [3000, 3001, 3002, 2000, 2001, 2002]);
     assert_eq!(
         result.trace.unwrap().floor_admissions,
-        [CueFloorAdmission {
-            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(2000)),
+        [2000, 2001, 2002].map(|id| CueFloorAdmission {
+            object: MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(id)),
             stage: CueFloorStage::Section {
                 section: ContextPackSection::SalientObservations
             },
             cue_kind: CueKind::Participant,
-        }]
+        })
     );
     memory.close().await.unwrap();
 }
@@ -405,6 +695,19 @@ async fn single_kind_keeps_section_ids_and_order() {
             context.candidate_limits.max_graph_roots = roots;
             context.section_limits.salient_observations = section;
             let result = memory.retrieve(context.clone()).await.unwrap();
+            let mut prefix_context = context.clone();
+            prefix_context.cue_floors = RetrievalCueFloors {
+                participant: 0,
+                place: 0,
+                activity: 0,
+                topic: 0,
+            };
+            let prefix = memory.retrieve(prefix_context).await.unwrap();
+            assert_eq!(
+                serde_json::to_vec(&result).unwrap(),
+                serde_json::to_vec(&prefix).unwrap(),
+                "single-kind retrieval must preserve the original ranked prefix"
+            );
             // Exact section/id/order projections captured at 61fbb29.
             let first = match kind {
                 CueKind::Topic => 1000,
@@ -569,6 +872,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
         (CueKind::Participant, 2000),
         (CueKind::Place, 3000),
         (CueKind::Activity, 4000),
+        (CueKind::Topic, 1000),
     ] {
         let mut context = mixed_context();
         let floors = &mut context.cue_floors;
@@ -576,9 +880,11 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Participant => floors.participant = 0,
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
-            CueKind::Topic => unreachable!(),
+            CueKind::Topic => floors.topic = 0,
         }
-        let result = memory.retrieve(context).await.unwrap();
+        // The other three reservations consume all room, so this kind waits.
+        context.candidate_limits.max_graph_roots = 3;
+        let result = memory.retrieve(context.clone()).await.unwrap();
         assert!(
             !result
                 .pack
@@ -592,40 +898,19 @@ async fn each_zero_floor_removes_only_its_reservation() {
             .unwrap()
             .floor_admissions
             .iter()
+            .filter(|row| row.stage == CueFloorStage::GraphRoots)
             .all(|row| row.cue_kind != kind));
+        // A zero reservation still participates when spare turns are available.
+        context.candidate_limits.max_graph_roots = 8;
+        let spare = memory.retrieve(context).await.unwrap();
+        assert!(
+            spare
+                .pack
+                .salient_observations
+                .iter()
+                .any(|object| object.id == MemoryId::from_u128(witness)),
+            "{kind:?}"
+        );
     }
-    // A long activity supplies enough explicit roots to crowd out the topic.
-    let mut input = RememberInput::new("Progress on the work.").with_scene(occasion());
-    for id in 6000..6016 {
-        let mut member = DerivedMemoryDraft::new(DerivedType::Claim, "A detail of the work.");
-        member.id = Some(MemoryId::from_u128(id));
-        member.thread_ids = vec![MemoryId::from_u128(5000)];
-        member.created_at = Some(occasion().time);
-        input = input.with_derived_memory(member);
-    }
-    memory
-        .remember(input, RememberOptions::default())
-        .await
-        .unwrap();
-    let protected = memory.retrieve(mixed_context()).await.unwrap();
-    assert!(protected
-        .trace
-        .unwrap()
-        .floor_admissions
-        .iter()
-        .any(|row| row.cue_kind == CueKind::Topic && row.stage == CueFloorStage::GraphRoots));
-    let mut context = mixed_context();
-    context.cue_floors.topic = 0;
-    let unprotected = memory.retrieve(context).await.unwrap();
-    let trace = unprotected.trace.unwrap();
-    assert!(trace
-        .floor_admissions
-        .iter()
-        .all(|row| row.cue_kind != CueKind::Topic));
-    assert!(trace
-        .graph_expansions
-        .iter()
-        .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
-        .all(|row| !(1000..1048).contains(&row.root.id.as_u128())));
     memory.close().await.unwrap();
 }

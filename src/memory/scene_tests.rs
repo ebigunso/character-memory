@@ -247,33 +247,32 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
     }
 }
 
+struct TextEmbedder([&'static str; 2]);
+#[async_trait]
+impl MemoryEmbedder for TextEmbedder {
+    async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
+        Ok(vec![
+            f32::from(input.text.contains(self.0[0])),
+            f32::from(input.text.contains(self.0[1])),
+            1.0,
+        ])
+    }
+
+    async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
+        let mut embeddings = Vec::new();
+        for input in inputs {
+            embeddings.push(self.embed(input).await?);
+        }
+        Ok(embeddings)
+    }
+}
+
 #[tokio::test]
 async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
-    struct TextEmbedder;
-    #[async_trait]
-    impl MemoryEmbedder for TextEmbedder {
-        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(vec![
-                f32::from(input.text.contains("volcano")),
-                f32::from(input.text.contains("harbor")),
-            ])
-        }
-
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            let mut embeddings = Vec::new();
-            for input in inputs {
-                embeddings.push(self.embed(input).await?);
-            }
-            Ok(embeddings)
-        }
-    }
     let memory = CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(2).await),
-        Box::new(TextEmbedder),
+        Box::new(TemporaryVectorCandidateStore::open(3).await),
+        Box::new(TextEmbedder(["volcano", "harbor"])),
     );
     let id = MemoryId::from_u128(8801);
     let mut episode = episode_draft(id.as_u128(), Some(Scene::at(time())));
@@ -497,7 +496,7 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
 }
 
 #[tokio::test]
-async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_created_at() {
+async fn omitted_scene_time_uses_preparation_instant_instead_of_episode_creation_time() {
     let (memory, _) = memory().await;
     let before = Utc::now();
     let plan = memory
@@ -547,23 +546,26 @@ async fn omitted_scene_time_is_fixed_at_prepare_and_replayed_without_using_creat
 #[tokio::test]
 async fn writes_reject_missing_scene_and_unknown_keys() {
     let (memory, inputs) = memory().await;
+    let with_vector = |draft| {
+        episode_plan(draft).with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+            MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(8401)),
+            CandidateProvenance::caller("summary"),
+        )))
+    };
     assert_eq!(
         episode_draft(8401, None).into_domain(),
         Err(DomainValidationError::MissingScene)
     );
     let error = memory
         .commit(
-            episode_plan(episode_draft(8401, None)),
+            with_vector(episode_draft(8401, None)),
             CommitOptions::default(),
         )
         .await
         .unwrap_err();
-    assert_issue(
-        error,
-        CandidateValidationIssue::MissingTimestamp {
-            field: CandidateTimestampField::SceneTime,
-        },
-    );
+    assert_issue(error, CandidateValidationIssue::MissingScene);
+    // Missing scene is rejected while materializing request-owned values.
+    assert!(inputs.lock().unwrap().is_empty());
     let unknown = MemoryId::from_u128(8499);
     let mut scene = Scene::at(time());
     scene.participants.push(SceneParticipant {
@@ -572,7 +574,7 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
     });
     let error = memory
         .commit(
-            episode_plan(episode_draft(8401, Some(scene))),
+            with_vector(episode_draft(8401, Some(scene))),
             CommitOptions::default(),
         )
         .await
@@ -584,7 +586,13 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
             referenced: MemoryObjectRef::new(ObjectType::Entity, unknown),
         },
     );
-    assert!(inputs.lock().unwrap().is_empty());
+    // Key validation needs the graph inside the write turn, after embedding.
+    assert_eq!(inputs.lock().unwrap().len(), 1);
+    let recalled = memory
+        .retrieve(RetrievalContext::new("An experience").with_trace())
+        .await
+        .unwrap();
+    assert!(recalled.trace.unwrap().vector_candidates.is_empty());
     assert!(objects(
         &memory,
         vec![
@@ -595,6 +603,59 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
     )
     .await
     .is_empty());
+    memory.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
+    let memory = CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(3).await),
+        Box::new(TextEmbedder(["Monday", "Tuesday"])),
+    );
+    let old_id = MemoryId::from_u128(8902);
+    let mut old = DerivedMemoryDraft::new(DerivedType::Claim, "The meeting is Monday.");
+    old.id = Some(old_id);
+    memory
+        .remember(
+            RememberInput::new("We discussed the meeting.")
+                .with_episode(episode_draft(8901, Some(Scene::at(time()))))
+                .with_derived_memory(old),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+    let mut correction = CorrectMemoryDraft::new(
+        CorrectionTarget::derived_memory(old_id),
+        "The meeting is Tuesday.",
+    );
+    correction.correction_origin = SourceProvenanceReference {
+        episode_ids: vec![],
+        observation_ids: vec![],
+        external_refs: vec![ExternalSourceReference::source("calendar:update")],
+    };
+    let outcome = memory.correct(correction).await.unwrap();
+    assert!(outcome.vector_maintenance_failure.is_none());
+    let [replacement] = outcome.graph_mutated_object_ids.as_slice() else {
+        panic!("one default replacement expected")
+    };
+    assert!(outcome.vector_maintained_object_ids.contains(replacement));
+    let mut query = RetrievalContext::new("Tuesday").with_trace();
+    query.object_type_defaults = vec![ObjectType::DerivedMemory];
+    query.graph_limits.max_depth = 0;
+    let result = memory.retrieve(query).await.unwrap();
+    assert!(result
+        .trace
+        .unwrap()
+        .vector_candidates
+        .iter()
+        .any(|candidate| candidate.object == *replacement && candidate.score > 0.9999));
+    assert!(result
+        .pack
+        .derived_memories
+        .iter()
+        .any(|entry| entry.memory.id == replacement.id
+            && entry.memory.text == "The meeting is Tuesday."));
     memory.close().await.unwrap();
 }
 

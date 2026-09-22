@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::domain::{graph_uri, MemoryId, MemoryObjectRef, ObjectType, RelationType};
 use crate::errors::CustomError;
+use crate::policy::graph_expansion::{ParticipantOccasion, ParticipantOccasions};
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphObjectQuery,
 };
@@ -287,6 +288,59 @@ impl<'a> SparqlGraphSelectors<'a> {
             )
         });
         Ok(refs)
+    }
+
+    pub(crate) fn select_participant_occasions(
+        &self,
+        neighbors: &[MemoryObjectRef],
+    ) -> Result<ParticipantOccasions, CustomError> {
+        if neighbors.is_empty() {
+            return Ok(ParticipantOccasions::new());
+        }
+        let node_values = sparql_node_iri_values("node", neighbors);
+        let query_text = format!(
+            r#"
+            SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{
+              {node_values}
+              GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
+              {{
+                GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+              }} UNION {{
+                GRAPH ?node {{ ?node <{episode}> ?episode . }}
+                GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+              }}
+            }}
+        "#,
+            object_id = vocab::OBJECT_ID,
+            object_type = vocab::OBJECT_TYPE,
+            scene_time = vocab::SCENE_TIME,
+            episode = vocab::EPISODE,
+            retention = vocab::RETENTION_STATE,
+        );
+        let mut occasions = ParticipantOccasions::new();
+        for solution in self.query_solutions(&query_text)? {
+            let neighbor = MemoryObjectRef::from_id_type(
+                memory_id_binding(&solution, "id")?,
+                enum_binding(&solution, "objectType")?,
+            );
+            let time = literal_binding(&solution, "sceneTime")?
+                .parse()
+                .map_err(|error| {
+                    CustomError::DatabaseError(format!(
+                        "Oxigraph SPARQL invalid Scene.time: {error}"
+                    ))
+                })?;
+            occasions.insert(
+                neighbor,
+                ParticipantOccasion {
+                    episode_id: memory_id_binding(&solution, "episodeId")?,
+                    time,
+                    retention_state: enum_binding(&solution, "retention")?,
+                    episode_retention_state: enum_binding(&solution, "episodeRetention")?,
+                },
+            );
+        }
+        Ok(occasions)
     }
 
     fn select_derived_memories_by_resource_predicate<'b>(

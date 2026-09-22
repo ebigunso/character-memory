@@ -374,6 +374,7 @@ async fn every_belief_subject_is_linked_and_counted_once() {
                     &query,
                     objects.clone(),
                     stored_links.clone(),
+                    &Default::default(),
                 )
                 .unwrap(),
             ] {
