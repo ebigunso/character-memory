@@ -56,7 +56,7 @@ async fn fixture(resolvers_share_state: bool) -> (CharacterMemory, tempfile::Tem
     person.id = Some(id(501));
     let mut thread = MemoryThreadDraft::new("shared work", "shared work");
     thread.id = Some(id(601));
-    let mut original_scene = Scene::at(at(10));
+    let mut original_scene = Scene::at((at(10)).fixed_offset());
     original_scene.setting.key = Some("workshop".into());
     original_scene
         .custom_values
@@ -81,8 +81,8 @@ async fn fixture(resolvers_share_state: bool) -> (CharacterMemory, tempfile::Tem
         input = input.with_derived_memory(draft);
     }
     commit(&memory, input).await;
-    let mut input =
-        RememberInput::new("later results").with_episode(episode(102, Scene::at(at(20))));
+    let mut input = RememberInput::new("later results")
+        .with_episode(episode(102, Scene::at((at(20)).fixed_offset())));
     for (n, text) in [
         (401, "calibration completed successfully"),
         (402, "delivered all supplies"),
@@ -116,7 +116,7 @@ async fn fixture(resolvers_share_state: bool) -> (CharacterMemory, tempfile::Tem
 }
 
 fn request(route: &str) -> RetrievalContext {
-    let mut scene = Scene::at(at(40));
+    let mut scene = Scene::at((at(40)).fixed_offset());
     if route == "named" || route == "mixed" {
         scene.participants.push(SceneParticipant {
             key: Some(id(501)),

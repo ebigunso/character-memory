@@ -76,7 +76,7 @@ fn context() -> RetrievalContext {
 fn episode(id: u128, summary: String, scene: Scene) -> [MemoryCandidate; 2] {
     let mut draft = EpisodeDraft::new(summary);
     draft.id = Some(MemoryId::from_u128(id));
-    draft.created_at = Some(scene.time);
+    draft.created_at = Some(scene.time.to_utc());
     draft.scene = Some(scene);
     draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     [
@@ -99,7 +99,7 @@ async fn cohort_memory() -> CharacterMemory {
     );
     let mut person = EntityDraft::new();
     person.id = Some(MemoryId::from_u128(7));
-    person.created_at = Some(context().scene.time);
+    person.created_at = Some(context().scene.time.to_utc());
     person.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
     memory
         .commit(
@@ -124,7 +124,7 @@ async fn cohort_memory() -> CharacterMemory {
         for candidate in episode(
             2000 + index,
             format!("Orchid lesson {index}"),
-            Scene::at(context().scene.time),
+            Scene::at((context().scene.time).fixed_offset()),
         ) {
             plan = plan.with_candidate(candidate);
         }

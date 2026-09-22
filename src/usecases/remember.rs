@@ -1169,6 +1169,17 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for RecordingGraphStore {
+        async fn query_anniversaries(
+            &self,
+            date: chrono::NaiveDate,
+            participants: &[crate::domain::MemoryId],
+            limit: usize,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+            let _ = (date, participants, limit, policy);
+            Ok(Vec::new())
+        }
+
         async fn query_episodes_by_time(
             &self,
             start: Option<chrono::DateTime<chrono::Utc>>,

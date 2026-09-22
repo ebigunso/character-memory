@@ -21,7 +21,7 @@ fn time() -> DateTime<Utc> {
 }
 
 fn words_scene() -> Scene {
-    let mut scene = Scene::at(time());
+    let mut scene = Scene::at((time()).fixed_offset());
     scene.setting.words = Some("  窓のそば\nquiet café  ".to_owned());
     scene.participants = vec![
         SceneParticipant {
@@ -198,7 +198,7 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
         let participant = MemoryId::from_u128(8700);
         let mut entity = EntityDraft::new();
         entity.id = Some(participant);
-        let mut scene = Scene::at(time());
+        let mut scene = Scene::at((time()).fixed_offset());
         scene.setting.key = Some("never embed this setting key".to_owned());
         scene.custom_values.insert(
             "session".to_owned(),
@@ -277,7 +277,7 @@ async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_sa
         Box::new(TextEmbedder(["volcano", "harbor"])),
     );
     let id = MemoryId::from_u128(8801);
-    let mut episode = episode_draft(id.as_u128(), Some(Scene::at(time())));
+    let mut episode = episode_draft(id.as_u128(), Some(Scene::at((time()).fixed_offset())));
     episode.summary = "A volcano erupted".to_owned();
     let mut observation = ObservationDraft::new(id, "Ships arrived at the harbor");
     observation.id = Some(id);
@@ -348,7 +348,7 @@ async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_pla
     let control = MemoryId::from_u128(8701);
     let situated = MemoryId::from_u128(8702);
     for (id, words) in [(control, None), (situated, Some("observatory"))] {
-        let mut scene = Scene::at(time());
+        let mut scene = Scene::at((time()).fixed_offset());
         scene.setting.words = words.map(str::to_owned);
         let mut episode = episode_draft(id.as_u128(), Some(scene));
         episode.summary = "We made a decision".to_owned();
@@ -420,7 +420,7 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
     observation.observed_at = Some(time() + chrono::Duration::seconds(10));
     observation.speaker_entity_id = Some(involved);
     let ended_at = time() + chrono::Duration::minutes(5);
-    let mut overridden = Scene::at(time() + chrono::Duration::days(1));
+    let mut overridden = Scene::at((time() + chrono::Duration::days(1)).fixed_offset());
     overridden
         .custom_values
         .insert("input-only".to_owned(), "must not merge".to_owned());
@@ -521,7 +521,7 @@ async fn omitted_scene_time_uses_preparation_instant_instead_of_episode_creation
         .unwrap();
     assert!(scene.time >= before && scene.time <= after);
     assert_ne!(scene.time, time());
-    assert_eq!(scene, Scene::at(scene.time));
+    assert_eq!(scene, Scene::at((scene.time).fixed_offset()));
     let serialized = serde_json::to_string(&plan).unwrap();
     for _ in 0..2 {
         memory
@@ -539,7 +539,7 @@ async fn omitted_scene_time_uses_preparation_instant_instead_of_episode_creation
                 assert_eq!(episode.created_at, time());
             }
             MemoryObject::Observation(observation) => {
-                assert_eq!(observation.observed_at, Some(scene.time))
+                assert_eq!(observation.observed_at, Some(scene.time.to_utc()))
             }
             _ => unreachable!(),
         }
@@ -571,7 +571,7 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
     // Missing scene is rejected while materializing request-owned values.
     assert!(inputs.lock().unwrap().is_empty());
     let unknown = MemoryId::from_u128(8499);
-    let mut scene = Scene::at(time());
+    let mut scene = Scene::at((time()).fixed_offset());
     scene.participants.push(SceneParticipant {
         key: Some(unknown),
         ..Default::default()
@@ -623,7 +623,10 @@ async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
     memory
         .remember(
             RememberInput::new("We discussed the meeting.")
-                .with_episode(episode_draft(8901, Some(Scene::at(time()))))
+                .with_episode(episode_draft(
+                    8901,
+                    Some(Scene::at((time()).fixed_offset())),
+                ))
                 .with_derived_memory(old),
             RememberOptions::default(),
         )
@@ -669,7 +672,7 @@ async fn source_correction_uses_setting_key_and_preserves_every_source_scene() {
         let (memory, _) = memory().await;
         let mut original_scene = words_scene();
         original_scene.setting.key = Some("channel/original".to_owned());
-        let correction_scene = Scene::at(time() + chrono::Duration::days(1));
+        let correction_scene = Scene::at((time() + chrono::Duration::days(1)).fixed_offset());
         let original = MemoryId::from_u128(8501);
         let observation = MemoryId::from_u128(8502);
         let correction = MemoryId::from_u128(8503);

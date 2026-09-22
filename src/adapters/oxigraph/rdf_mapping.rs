@@ -134,7 +134,11 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
             enum_value(episode.retention_state),
         ),
         RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(episode.created_at)),
-        RdfTriple::literal(&subject, vocab::SCENE_TIME, timestamp(episode.scene.time)),
+        RdfTriple::literal(
+            &subject,
+            vocab::SCENE_TIME,
+            timestamp(episode.scene.time.to_utc()),
+        ),
         RdfTriple::literal(
             &subject,
             vocab::SCENE_PARTICIPANTS,
@@ -148,6 +152,20 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
                 .expect("scene custom values contain only strings"),
         ),
     ]);
+    if let Some(date) = episode.scene_local_date {
+        triples.extend([
+            RdfTriple::literal(
+                &subject,
+                vocab::SCENE_LOCAL_YEAR,
+                date.format("%Y").to_string(),
+            ),
+            RdfTriple::literal(
+                &subject,
+                vocab::SCENE_MONTH_DAY,
+                date.format("%m-%d").to_string(),
+            ),
+        ]);
+    }
     push_optional_literal(
         &mut triples,
         &subject,

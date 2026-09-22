@@ -358,6 +358,15 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         policy: GraphExpansionLifecyclePolicy,
     ) -> Result<Vec<MemoryId>, CustomError>;
 
+    /// Matching local calendar dates, shared occasions first, newest instant then ID.
+    async fn query_anniversaries(
+        &self,
+        date: chrono::NaiveDate,
+        participants: &[MemoryId],
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<(MemoryId, bool)>, CustomError>;
+
     /// Read recorded occasion time and retention for episode or observation references.
     async fn query_episode_occasions(
         &self,
@@ -429,6 +438,18 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
 
 #[async_trait]
 impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
+    async fn query_anniversaries(
+        &self,
+        date: chrono::NaiveDate,
+        participants: &[MemoryId],
+        limit: usize,
+        policy: GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<(MemoryId, bool)>, CustomError> {
+        (**self)
+            .query_anniversaries(date, participants, limit, policy)
+            .await
+    }
+
     async fn query_episodes_by_time(
         &self,
         start: Option<DateTime<Utc>>,

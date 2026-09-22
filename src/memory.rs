@@ -1061,7 +1061,7 @@ mod tests {
     fn warning_input(offset: u128) -> RememberInput {
         let mut episode = EpisodeDraft::new("A recorded occasion");
         episode.id = Some(Uuid::from_u128(offset));
-        episode.scene = Some(Scene::at(warning_time()));
+        episode.scene = Some(Scene::at(warning_time().fixed_offset()));
         episode.created_at = Some(warning_time());
         let mut observation =
             ObservationDraft::new(Uuid::from_u128(offset), "The observed details");
@@ -1383,7 +1383,7 @@ mod tests {
                     .await
                     .unwrap();
                 let mut input = warning_input(300);
-                let mut scene = Scene::at(warning_time());
+                let mut scene = Scene::at(warning_time().fixed_offset());
                 scene.participants = keys
                     .iter()
                     .map(|key| SceneParticipant {

@@ -99,6 +99,7 @@ where
             .participants
             .iter()
             .map(|id| CandidateRoot {
+                date_match_floor_eligible: false,
                 object_id: *id,
                 object_type: ObjectType::Entity,
                 score: 1.0,
@@ -161,6 +162,7 @@ where
                         .or_default()
                         .push(cues.participants.len() + offset);
                     explicit_roots.push(CandidateRoot {
+                        date_match_floor_eligible: false,
                         object_id: id,
                         object_type: ObjectType::DerivedMemory,
                         score: 1.0,
@@ -220,6 +222,7 @@ where
             let has_more = matches.len() > time_limit;
             explicit_roots.extend(matches.into_iter().take(time_limit).map(|object_id| {
                 CandidateRoot {
+                    date_match_floor_eligible: true,
                     object_id,
                     object_type: ObjectType::Episode,
                     score: 0.0,
@@ -234,11 +237,50 @@ where
         } else {
             None
         };
+        let resolved = cues
+            .references
+            .iter()
+            .filter_map(|reference| match reference.resolution {
+                crate::api::types::SceneReferenceResolution::Resolved { notion_id } => {
+                    Some(notion_id)
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let anniversary_limit = context.cue_floors.date_match.max(1);
+        let anniversaries = self
+            .graph_store
+            .query_anniversaries(
+                context.scene.time.date_naive(),
+                &resolved,
+                anniversary_limit.saturating_add(1),
+                GraphExpansionLifecyclePolicy {
+                    include_suppressed: context.lifecycle_policy.include_suppressed,
+                    include_superseded: context.lifecycle_policy.include_superseded,
+                },
+            )
+            .await?;
+        let anniversary_has_more = anniversaries.len() > anniversary_limit;
+        explicit_roots.extend(anniversaries.into_iter().take(anniversary_limit).map(
+            |(object_id, shared)| CandidateRoot {
+                object_id,
+                object_type: ObjectType::Episode,
+                score: 0.0,
+                source: GraphRootSource::DateMatch,
+                vector_score: None,
+                cue_kinds: BTreeSet::from([CueKind::DateMatch]),
+                full_standing_score: None,
+                full_standing_kinds: BTreeSet::new(),
+                date_match_floor_eligible: shared,
+            },
+        ));
         let recent = self
             .graph_store
             .query_episodes_by_time(
                 None,
-                context.scene.time,
+                context.scene.time.to_utc(),
                 time_limit,
                 GraphExpansionLifecyclePolicy {
                     include_suppressed: context.lifecycle_policy.include_suppressed,
@@ -247,6 +289,7 @@ where
             )
             .await?;
         explicit_roots.extend(recent.into_iter().map(|object_id| CandidateRoot {
+            date_match_floor_eligible: false,
             object_id,
             object_type: ObjectType::Episode,
             score: 0.0,
@@ -466,6 +509,7 @@ where
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_searches: cues.scene_cue_searches,
             time_range_has_more,
+            anniversary_has_more,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -634,6 +678,8 @@ impl RetrieveAssembly {
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
                     ranked.cue_kinds.extend(&kinds);
+                    ranked.date_match_floor_eligible |=
+                        candidate.date_match_floor_eligible && kinds.contains(&CueKind::DateMatch);
                     ranked.is_root |= object_ref == candidate_ref;
                     if ranked.is_root || ranked.reminder_only == reminder_only {
                         ranked.graph_component = ranked.graph_component.max(graph_component);
@@ -659,6 +705,8 @@ impl RetrieveAssembly {
                         candidate_score,
                     );
                     ranked.reminder_only = reminder_only;
+                    ranked.date_match_floor_eligible =
+                        candidate.date_match_floor_eligible && kinds.contains(&CueKind::DateMatch);
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
@@ -741,8 +789,8 @@ impl RetrieveAssembly {
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
         // Reorder only contributed-occasion slots within an equal-score/type
-        // tie: the given range precedes recency. Other objects retain the
-        // general ID order and their positions.
+        // tie: floor-eligible date matches precede recency and unshared anniversaries.
+        // Other objects retain the general ID order and their positions.
         for tied in ranked_objects.chunk_by_mut(|left, right| {
             left.rank_key().score == right.rank_key().score
                 && left.object.object_type() == right.object.object_type()
@@ -766,7 +814,7 @@ impl RetrieveAssembly {
                 .collect::<Vec<_>>();
             recent.sort_by_key(|ranked| match &ranked.object {
                 MemoryObject::Episode(episode) => (
-                    !ranked.cue_kinds.contains(&CueKind::DateMatch),
+                    !ranked.date_match_floor_eligible,
                     std::cmp::Reverse(episode.scene.time),
                     episode.id,
                 ),
@@ -801,6 +849,7 @@ struct RankedObject {
     cue_component: f32,
     cue_kinds: BTreeSet<CueKind>,
     reminder_only: bool,
+    date_match_floor_eligible: bool,
     is_root: bool,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
@@ -822,6 +871,7 @@ impl RankedObject {
             cue_component,
             cue_kinds,
             reminder_only: false,
+            date_match_floor_eligible: false,
             is_root: false,
             vector_candidate_score,
             graph_component,
@@ -892,6 +942,19 @@ struct RankKey {
 // reserves its latest occasions regardless of which other roads reached them.
 // Only roots share spare turns; other stages fill from their ranked prefix.
 // An index outside the old prefix records the floor that changed its admission.
+fn floor_kinds(
+    kinds: &BTreeSet<CueKind>,
+    date_match_eligible: bool,
+) -> std::borrow::Cow<'_, BTreeSet<CueKind>> {
+    if !date_match_eligible && kinds.contains(&CueKind::DateMatch) {
+        let mut reserved = kinds.clone();
+        reserved.remove(&CueKind::DateMatch);
+        std::borrow::Cow::Owned(reserved)
+    } else {
+        std::borrow::Cow::Borrowed(kinds)
+    }
+}
+
 fn select_with_cue_floors<'a>(
     candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>, bool)>,
     orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
@@ -1009,14 +1072,21 @@ fn build_pack(
             });
             orders.entry(kind).or_default().splice(..0, state_order);
         }
+        let reserved_kinds = candidates
+            .iter()
+            .map(|ranked| floor_kinds(&ranked.cue_kinds, ranked.date_match_floor_eligible))
+            .collect::<Vec<_>>();
         for (index, cause) in select_with_cue_floors(
-            candidates.iter().map(|ranked| {
-                (
-                    ranked.object.object_ref(),
-                    &ranked.cue_kinds,
-                    ranked.reminder_only,
-                )
-            }),
+            candidates
+                .iter()
+                .zip(&reserved_kinds)
+                .map(|(ranked, kinds)| {
+                    (
+                        ranked.object.object_ref(),
+                        kinds.as_ref(),
+                        ranked.reminder_only,
+                    )
+                }),
             &orders,
             section_limit(section, limits),
             floors,
@@ -1264,6 +1334,7 @@ struct CandidateRoot {
     cue_kinds: BTreeSet<CueKind>,
     full_standing_score: Option<f32>,
     full_standing_kinds: BTreeSet<CueKind>,
+    date_match_floor_eligible: bool,
 }
 
 impl CandidateRoot {
@@ -1273,6 +1344,7 @@ impl CandidateRoot {
         topic_score: Option<f32>,
     ) -> Self {
         Self {
+            date_match_floor_eligible: false,
             object_id: candidate.object_id,
             object_type: candidate.object_type,
             score: candidate.score,
@@ -1349,6 +1421,23 @@ fn select_candidate_roots(
             })
             .then_with(|| left.object_id.cmp(&right.object_id))
     });
+    let mut time_roots = explicit_roots
+        .iter()
+        .filter(|root| {
+            matches!(
+                root.source,
+                GraphRootSource::Recency | GraphRootSource::DateMatch
+            )
+        })
+        .collect::<Vec<_>>();
+    // Only eligible date matches lead. Recency is the newest bounded prefix;
+    // additional unshared anniversaries are older, and overlaps merge below.
+    time_roots.sort_by_key(|root| {
+        (
+            !root.date_match_floor_eligible,
+            root.source == GraphRootSource::DateMatch,
+        )
+    });
     let roots = explicit_roots
         .iter()
         .filter(|root| {
@@ -1360,17 +1449,7 @@ fn select_candidate_roots(
         .cloned()
         .chain(content)
         // Time sources use only their reservations and remaining root room.
-        .chain(
-            explicit_roots
-                .iter()
-                .filter(|root| {
-                    matches!(
-                        root.source,
-                        GraphRootSource::Recency | GraphRootSource::DateMatch
-                    )
-                })
-                .cloned(),
-        )
+        .chain(time_roots.into_iter().cloned())
         .collect::<Vec<_>>();
     let mut indices = HashMap::new();
     let mut merged: Vec<CandidateRoot> = Vec::new();
@@ -1378,6 +1457,7 @@ fn select_candidate_roots(
         let object = MemoryObjectRef::new(root.object_type, root.object_id);
         if let Some(index) = indices.get(&object).copied() {
             let existing: &mut CandidateRoot = &mut merged[index];
+            existing.date_match_floor_eligible |= root.date_match_floor_eligible;
             existing.cue_kinds.extend(root.cue_kinds);
             existing.score = existing.score.max(root.score);
             existing
@@ -1443,11 +1523,15 @@ fn select_candidate_roots(
         orders.entry(*kind).or_default().extend(order);
     }
     let unique_count = merged.len();
+    let reserved_kinds = merged
+        .iter()
+        .map(|root| floor_kinds(&root.cue_kinds, root.date_match_floor_eligible))
+        .collect::<Vec<_>>();
     let selection = select_with_cue_floors(
-        merged.iter().map(|root| {
+        merged.iter().zip(&reserved_kinds).map(|(root, kinds)| {
             (
                 MemoryObjectRef::new(root.object_type, root.object_id),
-                &root.cue_kinds,
+                kinds.as_ref(),
                 root.reminder_only(),
             )
         }),
@@ -1510,7 +1594,7 @@ fn graph_query_for_candidate(
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
-    query.participant_reference_time = context.scene.time;
+    query.participant_reference_time = context.scene.time.to_utc();
     query
 }
 
@@ -1842,16 +1926,15 @@ mod tests {
                 3 | 5 => CueKind::DateMatch,
                 _ => CueKind::Topic,
             };
-            assembly.objects.insert(
-                MemoryObjectRef::new(ObjectType::Episode, episode.id),
-                RankedObject::new(
-                    MemoryObject::Episode(episode),
-                    if n == 6 { 1.0 } else { 0.0 },
-                    BTreeSet::from([kind]),
-                    1.0,
-                    None,
-                ),
+            let mut ranked = RankedObject::new(
+                MemoryObject::Episode(episode),
+                if n == 6 { 1.0 } else { 0.0 },
+                BTreeSet::from([kind]),
+                1.0,
+                None,
             );
+            ranked.date_match_floor_eligible = kind == CueKind::DateMatch;
+            assembly.objects.insert(ranked.object.object_ref(), ranked);
         }
         assert_eq!(
             assembly
@@ -1879,6 +1962,7 @@ mod tests {
         .into_domain()
         .unwrap();
         let full = CandidateRoot {
+            date_match_floor_eligible: false,
             object_id: person.id,
             object_type: ObjectType::Entity,
             score: 1.0,
@@ -1889,6 +1973,7 @@ mod tests {
             full_standing_kinds: BTreeSet::from([CueKind::Participant]),
         };
         let recent = CandidateRoot {
+            date_match_floor_eligible: false,
             object_id: episode.id,
             object_type: ObjectType::Episode,
             score: 0.0,
@@ -3402,6 +3487,17 @@ mod tests {
 
     #[async_trait]
     impl GraphAuthorityStore for ErrorGraphStore {
+        async fn query_anniversaries(
+            &self,
+            date: chrono::NaiveDate,
+            participants: &[crate::domain::MemoryId],
+            limit: usize,
+            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+            let _ = (date, participants, limit, policy);
+            Ok(Vec::new())
+        }
+
         async fn query_episodes_by_time(
             &self,
             start: Option<chrono::DateTime<chrono::Utc>>,
