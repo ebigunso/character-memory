@@ -335,7 +335,7 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
-    /// Read only recorded time and retention for these episode references.
+    /// Read recorded occasion time and retention for episode or observation references.
     async fn query_episode_occasions(
         &self,
         episodes: &[MemoryObjectRef],

@@ -1,8 +1,8 @@
 # Plan: where and with whom, given in words, reminds the character of the last times like this, and never crowds out what is being talked about
 
-- status: in-progress
+- status: completed
 - generated: 2026-09-21
-- last_updated: 2026-09-21
+- last_updated: 2026-09-23
 - work_type: code
 
 ## Goal
@@ -214,7 +214,10 @@ One crate, shared files: sequential, one worker at a time, about 10, 12 and 4 wo
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-23 Task_1 completed at reviewed tip `610b191` ([PR 135](https://github.com/ebigunso/character-memory/pull/135)): content and scene words use separate search surfaces.
+- 2026-09-23 Task_2 completed at reviewed tip `63f176f` ([PR 137](https://github.com/ebigunso/character-memory/pull/137)): descriptions contribute recent occasions, score fills spare room, and turns remain at root selection.
+- 2026-09-23 Task_3 completed at reviewed tip `4cf9763` ([PR 141](https://github.com/ebigunso/character-memory/pull/141)): per-search best scores and shared references are traced, with consumer and schema documentation.
+- 2026-09-23 Completion value audit verdict: COMPLETE against the after-the-fix measurements. Closeout consolidates each search's kind, score, references and omission count in one trace entry, copies only returned vector candidates, and centralizes vector-root construction and the reminder-only predicate; recall behavior is preserved.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -230,6 +233,14 @@ One crate, shared files: sequential, one worker at a time, about 10, 12 and 4 wo
   - Tradeoffs considered: the returned list as the pool (no port change) against the full fetched pool; the full pool was chosen because with a label repeated more often than the limit the returned list holds the lowest ids and "the last time here" would be arbitrary. Made precise by the decider the same day: a description cue contributes only its most recent few occasions as candidates, so verbatim labels cannot crowd graded topic matches by construction; the rest of its matches are counted in the trace as left out by the cue's limit. The only stop-and-report kept is on-topic survival below the topic-alone level on the corrected overlap family.
   - User approval: ruled by the decider, 2026-09-21.
   - Record proposed: none in this slice. One proposed design record with one decision (a description never takes an identity's standing in recall) is drafted only after the fourth-pin measurement.
+
+- 2026-09-23 Decision: accept the completion audit verdict and close the scene-words plan without a similarity bound.
+  - Trigger / new insight: the public companion evaluation repository, `CharacterMemoryEvals`, provides development evidence outside the core library in [scene reminder calibration, after the fix](https://github.com/ebigunso/character-memory-evals/blob/e06c0d76c34bf5849ee70ae158e3aaec04fe4c2d/docs/evidence/calibration/scene-reminders-2026-09-21/after-the-fix.md). Under its controlled synthetic geometry, default-floor topic targets improve from 3 of 8 to the topic-alone 6 of 8 in all twelve pressure cases spanning identical/reworded descriptions, place/participant/both pressure and both native ID orders. Keyless and scene-only probes bring exactly the latest N occasions at the tested floors.
+  - Evidence boundary: the orthogonal participant/place shares of 72.7% and 50.0% become structural zeros because that corpus has no stored scene words. Separately, weak stranger and unfamiliar-place queries against populated scene stores contribute one occasion and one exclusive slot at the default floor. The unlived-topic share is 29.4% after the fix, unchanged from the intermediate pin and down from 35.3% at the before pin. These are distinct controls, not one percentage-to-slot comparison. Controlled paraphrase distributions have no separable band and are not a production-language threshold estimate, so no bound ships.
+  - Plan delta (what changed): mark completed and move this plan to the completed folder; retain the scope and reviewed task results. Consolidate the parallel trace fields while preserving the best-score reader, remove the fetched-pool copy, and use one vector-root constructor and reminder-only predicate. The proposed test-file merge is deferred to phase closeout.
+  - Tradeoffs considered: retain parallel trace summaries versus one entry per actual search; the latter keeps attribution and omission counts together. A threshold from the controlled geometry was rejected because the measurement cannot choose a production embedder's bound.
+  - Decider approval: completion accepted through the completion audit and the delegated closeout ruling, 2026-09-22.
+  - Record proposed: none in this closeout.
 
 ## Notes
 - Risks: a description brings only as many occasions as its floor value (one at a floor of zero), so in a keyless deployment with default floors the scene's share is small by design, and calibration of the floor values is what widens it; the closed pool for a label repeated for years is a few thousand refs and one bounded read, and if that read measures as costly the worker reports it and builds nothing else; tests that used appended words to make an episode findable by topic fail for a reason unrelated to their intent and are rewritten to say what they mean; embedding cost for a worded scene rises by up to two inputs per episode, not per observation.
