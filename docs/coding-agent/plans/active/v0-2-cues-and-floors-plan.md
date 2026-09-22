@@ -2,7 +2,7 @@
 
 - status: in_progress
 - generated: 2026-09-21
-- last_updated: 2026-09-21
+- last_updated: 2026-09-22
 - work_type: code
 
 ## Goal
@@ -205,6 +205,13 @@ One crate, shared files: sequential, one worker at a time, each PR stacked on th
   - Known property: at the default expansion depth a memory from the same occasion inherits the participant kind, so a topic-found memory can satisfy the participant floor on its own. That is defensible behavior and it means a reserved kind does not imply independent direct recall. The trace does not distinguish a kind a memory was found by from one it inherited; the calibration derives that from the existing candidate, root and relation traces, and a field is added only if that proves impossible.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: the measured floors, at Task_4.
+
+- 2026-09-22 Decision: retain the measured cue-floor defaults and propose their complete decision record.
+  - Trigger / new insight: the scene-overlap calibration keeps six of eight on-topic memories at the default floors, equal to the topic-alone result, while higher participant or place floors admit more weakly similar occasions at the topic's expense.
+  - Plan delta (what changed): participant, place, activity and topic floors remain one and are described as measured defaults; no executable code, configuration or tests change. The record carries forward experience-share participant reach and selection of beliefs about a named notion outside entity-root selectivity.
+  - Tradeoffs considered: raising the floors has no measured benefit in the overlap cases; a zero reservation still recalls an occasion, so a description-similarity bound is a separate decision requiring suitable evidence.
+  - Record proposed: [ADR-I-0036: Retain measured retrieval bounds with one reserved slot per cue kind](../../../decisions/implementation/ADR-I-0036-retain-measured-retrieval-bounds-with-one-reserved-slot-per-cue-kind.md), a complete replacement of ADR-I-0022. It constrains future defaults to a measured basis that preserves cue room, experience-based participant reach and recall of named-notion state; extra reserved scene room loses conversational relevance in the measured corpus.
+  - Acceptance: proposed only, pending the decider's explicit acceptance of the record. ADR-I-0022 remains accepted and unmoved until that acceptance and the atomic retirement step.
 
 ## Notes
 - Risks: admission changes move the pollution and context-size baselines of ADR-I-0022; the companion repository re-measures once, at its own closing task. A calibration corpus authored for other pressures may not isolate these three floors; Task_4 names the pressure it needs.
