@@ -176,7 +176,7 @@ impl SelectivityStatsContext {
     }
 }
 
-// Entity roots return with the scene slice; content recall no longer indexes notions.
+// Scene participants supply entity roots; content recall does not index notions.
 #[expect(
     clippy::too_many_arguments,
     reason = "identity and cue support are independent inputs to the entity policy"
