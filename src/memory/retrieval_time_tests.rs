@@ -390,6 +390,7 @@ async fn recency_public_facade_witnesses() {
     assert!(zero.pack.relevant_episodes.is_empty());
     let mut tight = three;
     tight.section_limits.relevant_episodes = 1;
+    tight.cue_floors.recency = 3;
     let tight = record(&mut rows, "revised-room3-tight", &memory, tight).await;
     assert_eq!(
         episodes(&tight),
