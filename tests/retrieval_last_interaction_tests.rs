@@ -389,13 +389,15 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         memory.close().await.unwrap();
         root.close().unwrap();
     }
+    let notion_episode =
+        RememberPlanDefaults::fixed("notion 100", reference_time()).stable_id("episode:0");
     assert_eq!(
         tight_occasions,
         vec![
             BTreeSet::from([id(401)]),
             BTreeSet::from([id(401)]),
-            BTreeSet::from([id(400), id(401)]),
-            BTreeSet::from([id(400), id(401)]),
+            BTreeSet::from([id(401), notion_episode]),
+            BTreeSet::from([id(401), notion_episode]),
         ]
     );
 }

@@ -156,7 +156,6 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) current_subject_state: bool,
     pub(crate) reminder_only: bool,
-    pub(crate) single_occasion: bool,
     pub(crate) participant_reference_time: DateTime<Utc>,
     pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
@@ -192,7 +191,6 @@ impl GraphExpansionQuery {
             fanout_overrides: Vec::new(),
             current_subject_state: false,
             reminder_only: false,
-            single_occasion: false,
             participant_reference_time: DateTime::<Utc>::MAX_UTC,
             resolved_thread_members: std::collections::HashSet::new(),
             traversal_link_ids: None,
@@ -202,17 +200,20 @@ impl GraphExpansionQuery {
         }
     }
 
-    // Reminder notions/threads are leaves; a single occasion also stops at
-    // interpreted work instead of following its other sources.
+    // Every reminder stays on its occasion; notions, threads and interpreted
+    // work are visible leaves, never routes into their other occasions.
     pub(crate) fn may_continue_from(&self, kind: ObjectType) -> bool {
-        (!self.reminder_only || !matches!(kind, ObjectType::Entity | ObjectType::MemoryThread))
-            && (!self.single_occasion || kind != ObjectType::DerivedMemory)
+        !self.reminder_only
+            || !matches!(
+                kind,
+                ObjectType::Entity | ObjectType::MemoryThread | ObjectType::DerivedMemory
+            )
     }
 
     pub(crate) fn allows_object(&self, object: MemoryObjectRef) -> bool {
         (self.allowed_object_types.is_empty()
             || self.allowed_object_types.contains(&object.object_type))
-            && (!self.single_occasion
+            && (!self.reminder_only
                 || object.object_type != ObjectType::Episode
                 || object.id == self.root_id)
     }

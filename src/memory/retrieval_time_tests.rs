@@ -336,12 +336,12 @@ fn room(cap: usize) -> ContinuitySectionLimits {
 }
 
 #[tokio::test]
-async fn recency_public_facade_witnesses() {
+async fn recency_scene_only_room_and_floor_witnesses() {
     let mut rows = Vec::new();
     let (memory, root) = open().await;
     commit(&memory, base()).await;
     let default = record(&mut rows, "1-default-room", &memory, query(false, false)).await;
-    assert_eq!(episodes(&default), [100, 700, 500, 600, 800, 801, 802, 803]);
+    assert_eq!(episodes(&default), [100, 700, 900, 600, 500, 800, 801, 802]);
     assert_eq!(
         roots(&default),
         [900, 100, 700, 600, 500, 800, 801, 802, 803, 804, 805, 806]
@@ -394,9 +394,19 @@ async fn recency_public_facade_witnesses() {
     let tight = record(&mut rows, "revised-room3-tight", &memory, tight).await;
     assert_eq!(
         episodes(&tight),
-        [100],
-        "the older salient contribution wins by score"
+        [900],
+        "the raised floor reserves the latest contribution"
     );
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}
+
+#[tokio::test]
+async fn recency_keyed_participant_witnesses() {
+    let mut rows = Vec::new();
+    let (memory, root) = open().await;
+    commit(&memory, base()).await;
     let known = record(
         &mut rows,
         "5-explicit-key-6-own-character-8-neighbor-score",
@@ -404,13 +414,13 @@ async fn recency_public_facade_witnesses() {
         query(false, true),
     )
     .await;
-    assert_eq!(episodes(&known), [100, 700, 500, 600, 900, 800, 801, 802]);
+    assert_eq!(episodes(&known), [100, 700, 900, 600, 500, 800, 801, 802]);
     assert_eq!(
         scores(&known, 900),
         SectionScoreComponents {
-            final_score: 0.612_499_95,
+            final_score: 0.737_499_95,
             cue_score: Some(0.75),
-            graph_score: Some(0.5),
+            graph_score: Some(1.0),
             salience_score: None,
         }
     );
@@ -423,6 +433,16 @@ async fn recency_public_facade_witnesses() {
     assert!(assignment(&known_single, 700)
         .cue_kinds
         .contains(&CueKind::Participant));
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}
+
+#[tokio::test]
+async fn recency_preserves_original_saturated_topic() {
+    let mut rows = Vec::new();
+    let (memory, root) = open().await;
+    commit(&memory, base()).await;
     let saturated = record(
         &mut rows,
         "7-saturated-original-store",
@@ -433,6 +453,19 @@ async fn recency_public_facade_witnesses() {
     assert_eq!(episodes(&saturated), (2000..2008).collect::<Vec<_>>());
     assert_eq!(roots(&saturated), (2000..2012).collect::<Vec<_>>());
     assert!(recency_episodes(&saturated).is_empty());
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}
+
+#[tokio::test]
+async fn recency_reference_time_and_lifecycle_witnesses() {
+    let mut rows = Vec::new();
+    let (memory, root) = open().await;
+    commit(&memory, base()).await;
+    let mut single = query(false, false);
+    single.section_limits = room(1);
+    let first = memory.retrieve(single.clone()).await.unwrap();
     let repeated = record(&mut rows, "11-identical-input", &memory, single.clone()).await;
     assert_eq!(first, repeated);
     let mut untraced = single.clone();
@@ -460,151 +493,197 @@ async fn recency_public_facade_witnesses() {
     memory.close().await.unwrap();
     root.close().unwrap();
 
-    for (case, strong, weak, overlap) in [
-        ("3-strong-spare", 2, false, false),
-        ("3-weak-descendant", 1, true, false),
-        ("7-saturated", 48, false, false),
-        ("7-topic-overlap", 2, false, true),
-    ] {
-        let (memory, root) = open().await;
-        let mut plan = episode(RememberWritePlan::new(), 900, 0, 1.0, false, overlap);
-        for index in 0..strong {
-            plan = episode(plan, 2000 + index, 2 + index as i64, 0.0, false, true);
-        }
-        if weak {
-            plan = episode(plan, 2003, 6, 0.0, false, false);
-            plan = belief(plan, 2100, &[2003], true);
-        }
-        if overlap {
-            plan = episode(plan, 750, 40, 0.0, false, false);
-            plan = belief(plan, 3200, &[900, 750], false);
-        }
-        commit(&memory, plan).await;
-        let mut context = query(true, false);
-        context.section_limits.relevant_episodes = if strong == 48 { 8 } else { 2 };
-        let result = record(&mut rows, case, &memory, context.clone()).await;
-        if strong == 2 && !overlap {
-            assert_eq!(episodes(&result), [2000, 2001]);
-            assert_eq!(scores(&result, 2000).final_score, 0.835);
-            assert_eq!(scores(&result, 2001).final_score, 0.834_35);
-            assert!(scores(&result, 2000).cue_score.unwrap() > 0.16);
-            assert!(scores(&result, 2001).cue_score.unwrap() > 0.16);
-            assert_eq!(roots(&result), [2000, 2001, 900]);
-        }
-        if weak {
-            assert_eq!(episodes(&result), [2000, 900]);
-            assert_eq!(scores(&result, 2003).final_score, 0.271_25);
-            assert_eq!(scores(&result, 900).final_score, 0.35);
-        }
-        if overlap {
-            assert_eq!(episodes(&result), [900, 2000]);
-            assert_eq!(scores(&result, 900).final_score, 0.902_500_03);
-            assert_eq!(scores(&result, 900).graph_score, Some(1.0));
-            assert!(assignment(&result, 900).cue_kinds.contains(&CueKind::Topic));
-            assert_eq!(recency_episodes(&result), [900, 2000, 2001, 750]);
-            assert!(assignment(&result, 3200)
-                .cue_kinds
-                .contains(&CueKind::Recency));
-            assert!(assignment(&result, 750)
-                .cue_kinds
-                .contains(&CueKind::Recency));
-            let mut bounded = context.clone();
-            bounded.section_limits = room(3);
-            let bounded = record(&mut rows, "7-overlap-bounded-provenance", &memory, bounded).await;
-            assert_eq!(
-                assignment(&bounded, 750).cue_kinds,
-                std::collections::BTreeSet::from([CueKind::Topic])
-            );
-            assert_eq!(roots(&bounded), [2000, 2001, 900]);
-            let root = result
-                .trace
-                .as_ref()
-                .unwrap()
-                .graph_expansions
-                .iter()
-                .find(|row| row.root.id == id(900))
-                .unwrap();
-            assert_eq!((root.object_count, root.relation_count), (3, 2));
-        }
-        if strong == 48 {
-            assert_eq!(episodes(&result), (2000..2008).collect::<Vec<_>>());
-            assert_eq!(roots(&result), (2000..2012).collect::<Vec<_>>());
-            assert_eq!(recency_episodes(&result), (2000..2012).collect::<Vec<_>>());
-            context.candidate_limits.max_graph_roots = 3;
-            let capped = record(&mut rows, "7-rootcap3", &memory, context.clone()).await;
-            assert_eq!(roots(&capped), [2000, 2001, 2002]);
-            assert_eq!(episodes(&capped), [2000, 2001, 2002]);
-            context.candidate_limits.max_graph_roots = 12;
-            context.cue_floors.recency = 1;
-            let shared_floor = record(&mut rows, "9-shared-floor1", &memory, context.clone()).await;
-            assert_eq!(episodes(&shared_floor), (2000..2008).collect::<Vec<_>>());
-            assert!(shared_floor
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}
+
+async fn pressure_witnesses(case: &str, strong: u128, weak: bool, overlap: bool) {
+    let mut rows = Vec::new();
+    let (memory, root) = open().await;
+    let mut plan = episode(RememberWritePlan::new(), 900, 0, 1.0, false, overlap);
+    for index in 0..strong {
+        plan = episode(plan, 2000 + index, 2 + index as i64, 0.0, false, true);
+    }
+    if weak {
+        plan = episode(plan, 2003, 6, 0.0, false, false);
+        plan = belief(plan, 2100, &[2003], true);
+    }
+    if overlap {
+        plan = episode(plan, 750, 40, 0.0, false, false);
+        plan = belief(plan, 3200, &[900, 750], false);
+    }
+    commit(&memory, plan).await;
+    let mut context = query(true, false);
+    context.section_limits.relevant_episodes = if strong == 48 { 8 } else { 2 };
+    let result = record(&mut rows, case, &memory, context.clone()).await;
+    if strong == 2 && !overlap {
+        assert_eq!(episodes(&result), [2000, 2001]);
+        assert_eq!(scores(&result, 2000).final_score, 0.835);
+        assert_eq!(scores(&result, 2001).final_score, 0.834_35);
+        assert!(scores(&result, 2000).cue_score.unwrap() > 0.16);
+        assert!(scores(&result, 2001).cue_score.unwrap() > 0.16);
+        assert_eq!(roots(&result), [2000, 2001, 900]);
+    }
+    if weak {
+        assert_eq!(episodes(&result), [2000, 2003]);
+        assert_eq!(scores(&result, 2003).final_score, 0.396_25);
+        assert_eq!(scores(&result, 2003).graph_score, Some(1.0));
+        assert_eq!(scores(&result, 900).final_score, 0.35);
+        let mut bounded = context.clone();
+        bounded.section_limits = room(2);
+        let bounded = record(
+            &mut rows,
+            "3-weak-descendant-without-root",
+            &memory,
+            bounded,
+        )
+        .await;
+        assert_eq!(episodes(&bounded), [2000, 900]);
+        assert_eq!(scores(&bounded, 2003).final_score, 0.271_25);
+        assert!(!roots(&bounded).contains(&2003));
+    }
+    if overlap {
+        assert_eq!(episodes(&result), [900, 2000]);
+        assert_eq!(scores(&result, 900).final_score, 0.902_500_03);
+        assert_eq!(scores(&result, 900).graph_score, Some(1.0));
+        assert!(assignment(&result, 900).cue_kinds.contains(&CueKind::Topic));
+        assert_eq!(recency_episodes(&result), [900, 2000, 2001, 750]);
+        assert!(assignment(&result, 3200)
+            .cue_kinds
+            .contains(&CueKind::Recency));
+        assert!(assignment(&result, 750)
+            .cue_kinds
+            .contains(&CueKind::Recency));
+        let mut bounded = context.clone();
+        bounded.section_limits = room(3);
+        let bounded = record(&mut rows, "7-overlap-bounded-provenance", &memory, bounded).await;
+        assert_eq!(
+            assignment(&bounded, 750).cue_kinds,
+            std::collections::BTreeSet::from([CueKind::Topic])
+        );
+        assert_eq!(roots(&bounded), [2000, 2001, 900]);
+        let root = result
+            .trace
+            .as_ref()
+            .unwrap()
+            .graph_expansions
+            .iter()
+            .find(|row| row.root.id == id(900))
+            .unwrap();
+        assert_eq!((root.object_count, root.relation_count), (3, 2));
+    }
+    if strong == 48 {
+        assert_eq!(episodes(&result), (2000..2008).collect::<Vec<_>>());
+        assert_eq!(roots(&result), (2000..2012).collect::<Vec<_>>());
+        assert_eq!(recency_episodes(&result), (2000..2012).collect::<Vec<_>>());
+        context.candidate_limits.max_graph_roots = 3;
+        let capped = record(&mut rows, "7-rootcap3", &memory, context.clone()).await;
+        assert_eq!(roots(&capped), [2000, 2001, 2002]);
+        assert_eq!(episodes(&capped), [2000, 2001, 2002]);
+        context.candidate_limits.max_graph_roots = 12;
+        context.cue_floors.recency = 1;
+        let shared_floor = record(&mut rows, "9-shared-floor1", &memory, context.clone()).await;
+        assert_eq!(
+            episodes(&shared_floor),
+            (2000..2007).chain([900]).collect::<Vec<_>>()
+        );
+        assert!(roots(&shared_floor).contains(&900));
+        assert_eq!(
+            shared_floor
                 .trace
                 .as_ref()
                 .unwrap()
                 .floor_admissions
-                .is_empty());
-            let mut recent_only = RememberWritePlan::new();
-            for n in 901..916 {
-                recent_only = episode(recent_only, n, 0, 0.0, false, false);
-            }
-            commit(&memory, recent_only).await;
-            let reserved = record(&mut rows, "9-distinct-floor1", &memory, context).await;
-            assert_eq!(
-                episodes(&reserved),
-                (2000..2007).chain([900]).collect::<Vec<_>>()
-            );
-            for stage in [
-                crate::api::types::CueFloorStage::GraphRoots,
-                crate::api::types::CueFloorStage::Section {
-                    section: ContextPackSection::RelevantEpisodes,
-                },
-            ] {
-                assert!(reserved
-                    .trace
-                    .as_ref()
-                    .unwrap()
-                    .floor_admissions
-                    .iter()
-                    .any(|row| row.object.id == id(900)
-                        && row.cue_kind == CueKind::Recency
-                        && row.stage == stage));
-            }
+                .iter()
+                .filter(|row| row.object.id == id(900) && row.cue_kind == CueKind::Recency)
+                .count(),
+            2
+        );
+        let mut recent_only = RememberWritePlan::new();
+        for n in 901..916 {
+            recent_only = episode(recent_only, n, 0, 0.0, false, false);
         }
-        if strong == 2 && !overlap {
-            let mut plan = episode(RememberWritePlan::new(), 800, 45, 0.0, false, false);
-            plan = belief(plan, 3100, &[900, 800], false);
-            commit(&memory, plan).await;
-            let additions = record(
-                &mut rows,
-                "10-topic-spare-additions",
-                &memory,
-                query(true, false),
-            )
-            .await;
-            assert_eq!(episodes(&additions), [2000, 2001, 900, 800]);
-            assert_eq!(recency_episodes(&additions), [2000, 2001, 900, 800]);
-            let mut bounded = query(true, false);
-            bounded.section_limits = room(3);
-            let bounded = record(&mut rows, "10-bounded-additions", &memory, bounded).await;
-            assert_eq!(episodes(&bounded), [2000, 2001, 900]);
-            assert!(!recency_episodes(&bounded).contains(&800));
-            assert_eq!(
-                additions
-                    .pack
-                    .derived_memories
-                    .iter()
-                    .map(|row| row.memory.id.as_u128())
-                    .collect::<Vec<_>>(),
-                [3100]
-            );
-            assert!(assignment(&additions, 3100)
-                .cue_kinds
-                .contains(&CueKind::Recency));
+        commit(&memory, recent_only).await;
+        let reserved = record(&mut rows, "9-distinct-floor1", &memory, context).await;
+        assert_eq!(
+            episodes(&reserved),
+            (2000..2007).chain([900]).collect::<Vec<_>>()
+        );
+        for stage in [
+            crate::api::types::CueFloorStage::GraphRoots,
+            crate::api::types::CueFloorStage::Section {
+                section: ContextPackSection::RelevantEpisodes,
+            },
+        ] {
+            assert!(reserved
+                .trace
+                .as_ref()
+                .unwrap()
+                .floor_admissions
+                .iter()
+                .any(|row| row.object.id == id(900)
+                    && row.cue_kind == CueKind::Recency
+                    && row.stage == stage));
         }
-        memory.close().await.unwrap();
-        root.close().unwrap();
     }
+    if strong == 2 && !overlap {
+        let mut plan = episode(RememberWritePlan::new(), 800, 45, 0.0, false, false);
+        plan = belief(plan, 3100, &[900, 800], false);
+        commit(&memory, plan).await;
+        let additions = record(
+            &mut rows,
+            "10-topic-spare-additions",
+            &memory,
+            query(true, false),
+        )
+        .await;
+        assert_eq!(episodes(&additions), [2000, 2001, 900, 800]);
+        assert_eq!(recency_episodes(&additions), [2000, 2001, 900, 800]);
+        let mut bounded = query(true, false);
+        bounded.section_limits = room(3);
+        let bounded = record(&mut rows, "10-bounded-additions", &memory, bounded).await;
+        assert_eq!(episodes(&bounded), [2000, 2001, 900]);
+        assert!(!recency_episodes(&bounded).contains(&800));
+        assert_eq!(
+            additions
+                .pack
+                .derived_memories
+                .iter()
+                .map(|row| row.memory.id.as_u128())
+                .collect::<Vec<_>>(),
+            [3100]
+        );
+        assert!(assignment(&additions, 3100)
+            .cue_kinds
+            .contains(&CueKind::Recency));
+    }
+    memory.close().await.unwrap();
+    root.close().unwrap();
+    println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
+}
+
+#[tokio::test]
+async fn recency_strong_spare_witnesses() {
+    pressure_witnesses("3-strong-spare", 2, false, false).await;
+}
+
+#[tokio::test]
+async fn recency_weak_descendant_witnesses() {
+    pressure_witnesses("3-weak-descendant", 1, true, false).await;
+}
+
+#[tokio::test]
+async fn recency_saturated_witnesses() {
+    pressure_witnesses("7-saturated", 48, false, false).await;
+}
+
+#[tokio::test]
+async fn recency_topic_overlap_witnesses() {
+    pressure_witnesses("7-topic-overlap", 2, false, true).await;
+}
+
+#[tokio::test]
+async fn recency_fractional_recorded_time_witnesses() {
+    let mut rows = Vec::new();
     let (memory, root) = open().await;
     let plan = episode(
         episode(RememberWritePlan::new(), 900, 0, 0.0, false, false),
@@ -634,7 +713,6 @@ async fn recency_public_facade_witnesses() {
     root.close().unwrap();
     println!("TIME_WITNESSES={}", serde_json::to_string(&rows).unwrap());
 }
-
 #[tokio::test]
 async fn recency_stops_at_interpreted_memory_sources() {
     let mut rows = Vec::new();
@@ -817,4 +895,212 @@ async fn recency_stops_at_interpreted_memory_sources() {
         [true, true],
         "time-only exclusion and Topic-only provenance"
     );
+}
+
+fn description_fixture(person: bool) -> RememberWritePlan {
+    let mut plan = RememberWritePlan::new();
+    if person {
+        let mut entity = EntityDraft::new();
+        entity.id = Some(id(7));
+        entity.created_at = Some(time());
+        entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+        plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+            entity,
+            provenance(),
+        )));
+    }
+    let mut latest = EpisodeDraft::new("The described studio this evening");
+    latest.id = Some(id(900));
+    latest.created_at = Some(time());
+    latest.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+    let mut scene = Scene::at(time());
+    scene.setting.words = Some("studio".to_owned());
+    if person {
+        scene.participants.push(keyed());
+    }
+    latest.scene = Some(scene);
+    plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+        latest,
+        provenance(),
+    )));
+    plan = indexed(plan, ObjectType::Episode, 900);
+    if person {
+        plan = link(
+            plan,
+            ObjectType::Episode,
+            900,
+            ObjectType::Entity,
+            7,
+            RelationType::Involves,
+        );
+    }
+    belief(
+        episode(plan, 700, 40, 1.0, false, false),
+        300,
+        &[900, 700],
+        false,
+    )
+}
+
+#[tokio::test]
+async fn tier_a_description_stops_at_shared_interpretation() {
+    let (memory, temp) = open().await;
+    commit(&memory, description_fixture(false)).await;
+    let mut context = query(false, false);
+    context.scene.setting.words = Some("studio".to_owned());
+    context.section_limits = room(2);
+    context.candidate_limits.max_graph_roots = 1;
+    let mut rows = Vec::new();
+    let result = record(&mut rows, "description-leaf", &memory, context).await;
+    println!(
+        "TIER_A_DESCRIPTION={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    assert_eq!(roots(&result), [900]);
+    assert_eq!(episodes(&result), [900]);
+    assert!(!result
+        .trace
+        .as_ref()
+        .unwrap()
+        .section_assignments
+        .iter()
+        .any(|row| row.object.id == id(700)));
+    assert!(assignment(&result, 300).cue_kinds.contains(&CueKind::Place));
+}
+
+#[tokio::test]
+async fn tier_a_description_root_keeps_best_proximity() {
+    let (memory, temp) = open().await;
+    commit(&memory, description_fixture(true)).await;
+    let mut context = query(false, true);
+    context.scene.setting.words = Some("studio".to_owned());
+    context.section_limits = room(2);
+    context.candidate_limits.max_graph_roots = 2;
+    let mut rows = Vec::new();
+    let result = record(&mut rows, "description-root-proximity", &memory, context).await;
+    println!("TIER_A_PROXIMITY={}", serde_json::to_string(&rows).unwrap());
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    assert_eq!(roots(&result), [7, 900]);
+    assert_eq!(scores(&result, 300).graph_score, Some(1.0 / 3.0));
+    assert_eq!(scores(&result, 900).graph_score, Some(1.0));
+}
+
+#[tokio::test]
+async fn tier_a_recency_floor_reserves_latest_before_score_fill() {
+    let (memory, temp) = open().await;
+    commit(
+        &memory,
+        episode(
+            episode(RememberWritePlan::new(), 900, 0, 0.0, false, false),
+            100,
+            1,
+            1.0,
+            false,
+            false,
+        ),
+    )
+    .await;
+    let mut context = query(false, false);
+    context.section_limits = room(2);
+    context.section_limits.relevant_episodes = 1;
+    let mut rows = Vec::new();
+    let zero = record(&mut rows, "floor-zero-score", &memory, context.clone()).await;
+    context.cue_floors.recency = 1;
+    let reserved = record(&mut rows, "floor-one-latest", &memory, context).await;
+    println!("TIER_A_FLOOR={}", serde_json::to_string(&rows).unwrap());
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    assert_eq!(episodes(&zero), [100]);
+    assert_eq!(episodes(&reserved), [900]);
+    assert!(reserved
+        .trace
+        .as_ref()
+        .unwrap()
+        .floor_admissions
+        .iter()
+        .any(|row| row.object.id == id(900)
+            && row.cue_kind == CueKind::Recency
+            && matches!(row.stage, crate::api::types::CueFloorStage::Section { .. })));
+}
+
+#[tokio::test]
+async fn tier_a_explicit_recency_floor_reserves_under_topic_pressure() {
+    let (memory, temp) = open().await;
+    let mut plan = episode(RememberWritePlan::new(), 900, 0, 0.0, false, false);
+    for index in 0..48 {
+        plan = episode(plan, 2000 + index, 2 + index as i64, 0.0, false, true);
+    }
+    commit(&memory, plan).await;
+    let mut context = query(true, false);
+    context.cue_floors.recency = 1;
+    let mut rows = Vec::new();
+    let result = record(&mut rows, "explicit-floor-topic-pressure", &memory, context).await;
+    println!(
+        "TIER_A_ROOT_FLOOR={}",
+        serde_json::to_string(&rows).unwrap()
+    );
+    memory.close().await.unwrap();
+    temp.close().unwrap();
+    assert!(roots(&result).contains(&900));
+    assert!(episodes(&result).contains(&900));
+    for stage in [
+        crate::api::types::CueFloorStage::GraphRoots,
+        crate::api::types::CueFloorStage::Section {
+            section: ContextPackSection::RelevantEpisodes,
+        },
+    ] {
+        assert!(result
+            .trace
+            .as_ref()
+            .unwrap()
+            .floor_admissions
+            .iter()
+            .any(|row| row.object.id == id(900)
+                && row.cue_kind == CueKind::Recency
+                && row.stage == stage));
+    }
+}
+
+#[tokio::test]
+async fn tier_a_equal_score_recent_occasions_ignore_id_order() {
+    let mut rows = Vec::new();
+    let mut recalled_times = Vec::new();
+    for reverse in [false, true] {
+        let (memory, temp) = open().await;
+        let mut plan = RememberWritePlan::new();
+        for index in 0..20 {
+            let n = if reverse { 2019 - index } else { 1000 + index };
+            plan = episode(plan, n, 20 - index as i64, 0.0, false, false);
+        }
+        commit(&memory, plan).await;
+        let result = record(
+            &mut rows,
+            if reverse {
+                "reverse-ids"
+            } else {
+                "forward-ids"
+            },
+            &memory,
+            query(false, false),
+        )
+        .await;
+        recalled_times.push(
+            result
+                .pack
+                .relevant_episodes
+                .iter()
+                .map(|episode| episode.scene.time)
+                .collect::<Vec<_>>(),
+        );
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+    println!("TIER_A_TIES={}", serde_json::to_string(&rows).unwrap());
+    let latest = (1..=8)
+        .map(|days| time() - Duration::days(days))
+        .collect::<Vec<_>>();
+    assert_eq!(recalled_times, [latest.clone(), latest]);
 }

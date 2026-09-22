@@ -328,7 +328,12 @@ async fn scene_reminders_and_state_score_fill_preserve_their_witnesses() {
                 "{case}"
             );
         } else if case.starts_with("descriptions-only") {
-            let expected = [1000, 1001, 1002, 1003, 2000, 2001, 2002, 2003].map(id);
+            let expected = if case.ends_with("floor-3") {
+                [1000, 1001, 1002, 2000, 2001, 2002, 2003, 2004]
+            } else {
+                [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
+            }
+            .map(id);
             assert_eq!(row["episode_ids"], json!(expected), "{case}");
             for episode in expected {
                 let assignment = row["assignments"]

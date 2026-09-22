@@ -903,7 +903,7 @@ async fn participant_and_place_keep_room_without_a_topic() {
         .iter()
         .map(|object| object.id.as_u128())
         .collect::<Vec<_>>();
-    assert_eq!(selected, [3000, 2000, 1, 1000, 1001, 1002]);
+    assert_eq!(selected, [3000, 2000, 1, 1000, 4000, 1001]);
     assert!(result.trace.unwrap().floor_admissions.is_empty());
     memory.close().await.unwrap();
 }
@@ -963,10 +963,9 @@ async fn single_kind_keeps_section_ids_and_order() {
                 [first]
                     .into_iter()
                     .chain(
-                        [1, 1000, 1001, 1002, 1003, 2000, 2001, 2002]
+                        [1, 1000, 2000, 3000, 4000, 1001, 2001, 3001]
                             .into_iter()
-                            // The explicit activity thread spends one root slot of its own.
-                            .filter(|&id| id != first && (kind != CueKind::Activity || id != 1003)),
+                            .filter(|&id| id != first),
                     )
                     .take(section)
                     .collect()
@@ -1092,7 +1091,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             .iter()
             .map(|object| object.id.as_u128())
             .collect::<Vec<_>>(),
-        [4000, 1, 1000, 1001, 1002, 2000, 2001, 2002]
+        [4000, 1, 1000, 2000, 3000, 1001, 2001, 3001]
     );
     memory.close().await.unwrap();
 }

@@ -370,8 +370,6 @@ where
         for (kind, order) in root_selection.orders {
             section_orders.entry(kind).or_default().extend(order);
         }
-        // Recency limits which occasions contribute; their sections keep score order.
-        section_orders.remove(&CueKind::Recency);
         let mut details = RetrievalDetails {
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
@@ -530,34 +528,6 @@ impl RetrieveAssembly {
             HashSet::new()
         };
 
-        // On a shared root, time provenance stops where the time-only expansion
-        // would stop, even though another road may continue through older sources.
-        let recency_reached = if candidate.cue_kinds.contains(&CueKind::Recency)
-            && !query.single_occasion
-            && expansion
-                .objects
-                .iter()
-                .any(|object| object.object_ref() == candidate_ref)
-        {
-            let mut recency_query = query.clone();
-            recency_query.reminder_only = true;
-            recency_query.single_occasion = true;
-            Some(
-                crate::policy::graph_expansion::bounded_expansion(
-                    &recency_query,
-                    expansion.objects.clone(),
-                    expansion.links.clone(),
-                    &crate::policy::graph_expansion::ParticipantOccasions::new(),
-                )?
-                .objects
-                .into_iter()
-                .map(|object| object.object_ref())
-                .collect::<HashSet<_>>(),
-            )
-        } else {
-            None
-        };
-
         for relation in &expansion.relations {
             if relation.relation == RelationType::Supersedes
                 && relation.from.object_type == ObjectType::DerivedMemory
@@ -619,13 +589,7 @@ impl RetrieveAssembly {
             } else {
                 score * 0.75
             };
-            let mut kinds = kinds.clone();
-            if recency_reached
-                .as_ref()
-                .is_some_and(|reached| !reached.contains(&object_ref))
-            {
-                kinds.remove(&CueKind::Recency);
-            }
+            let kinds = kinds.clone();
             let reminder_only = candidate.reminder_only();
             let candidate_score = candidate
                 .vector_score
@@ -636,7 +600,8 @@ impl RetrieveAssembly {
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
                     ranked.cue_kinds.extend(&kinds);
-                    if ranked.reminder_only == reminder_only {
+                    ranked.is_root |= object_ref == candidate_ref;
+                    if ranked.is_root || ranked.reminder_only == reminder_only {
                         ranked.graph_component = ranked.graph_component.max(graph_component);
                     } else if ranked.reminder_only {
                         ranked.graph_component = graph_component;
@@ -660,6 +625,7 @@ impl RetrieveAssembly {
                         candidate_score,
                     );
                     ranked.reminder_only = reminder_only;
+                    ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
             if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
@@ -740,6 +706,38 @@ impl RetrieveAssembly {
         }
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
+        // Reorder only contributed-occasion slots within an equal-score/type
+        // tie. Other objects retain the general ID order and their positions.
+        for tied in ranked_objects.chunk_by_mut(|left, right| {
+            left.rank_key().score == right.rank_key().score
+                && left.object.object_type() == right.object.object_type()
+        }) {
+            let positions = tied
+                .iter()
+                .enumerate()
+                .filter_map(|(index, ranked)| {
+                    (matches!(ranked.object, MemoryObject::Episode(_))
+                        && ranked.cue_kinds.contains(&CueKind::Recency))
+                    .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            if positions.len() < 2 {
+                continue;
+            }
+            let mut recent = positions
+                .iter()
+                .map(|&index| tied[index].clone())
+                .collect::<Vec<_>>();
+            recent.sort_by_key(|ranked| match &ranked.object {
+                MemoryObject::Episode(episode) => {
+                    (std::cmp::Reverse(episode.scene.time), episode.id)
+                }
+                _ => unreachable!("only contributed episodes occupy these slots"),
+            });
+            for (position, ranked) in positions.into_iter().zip(recent) {
+                tied[position] = ranked;
+            }
+        }
         self.stale_omissions.sort_by_key(|omission| {
             (
                 omission.candidate.id,
@@ -765,6 +763,7 @@ struct RankedObject {
     cue_component: f32,
     cue_kinds: BTreeSet<CueKind>,
     reminder_only: bool,
+    is_root: bool,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
     salience_component: f32,
@@ -785,6 +784,7 @@ impl RankedObject {
             cue_component,
             cue_kinds,
             reminder_only: false,
+            is_root: false,
             vector_candidate_score,
             graph_component,
             salience_component,
@@ -850,7 +850,8 @@ struct RankKey {
 
 // Only a kind's own queue head credits its turn, even if already selected.
 // Direct selector/search order precedes inherited-only members in stage order.
-// Floors take full-standing members before reminders, in each kind's own order.
+// Given-kind floors take full-standing members first. An explicit time floor
+// reserves its latest occasions regardless of which other roads reached them.
 // Only roots share spare turns; other stages fill from their ranked prefix.
 // An index outside the old prefix records the floor that changed its admission.
 fn select_with_cue_floors<'a>(
@@ -889,7 +890,7 @@ fn select_with_cue_floors<'a>(
             .collect::<Vec<_>>();
         queue.sort_by_key(|&index| {
             (
-                candidates[index].2,
+                kind != CueKind::Recency && candidates[index].2,
                 ranks
                     .get(&candidates[index].0)
                     .copied()
@@ -1376,7 +1377,9 @@ fn select_candidate_roots(
         })
         .collect::<HashMap<_, _>>();
     for (kind, order) in &mut orders {
-        order.sort_by_key(|object| root_positions[object]);
+        if *kind != CueKind::Recency {
+            order.sort_by_key(|object| root_positions[object]);
+        }
         let mut seen = HashSet::new();
         order.retain(|object| seen.insert(*object));
         let own_scopes = state::scopes_for_kind(scopes, scope_kinds, *kind);
@@ -1458,7 +1461,6 @@ fn graph_query_for_candidate(
     query.current_subject_state = candidate.object_type == ObjectType::Entity
         && candidate.source == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
-    query.single_occasion = candidate.cue_kinds == BTreeSet::from([CueKind::Recency]);
     query.participant_reference_time = context.scene.time;
     query
 }
@@ -1749,7 +1751,36 @@ mod tests {
     }
 
     #[test]
-    fn full_standing_proximity_wins_in_either_expansion_order() {
+    fn recent_ties_keep_uncontributed_positions_and_general_id_order() {
+        let fixtures = representative_fixtures();
+        let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
+        for n in 1..=3 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(n);
+            episode.salience_score = 0.0;
+            episode.scene.time += chrono::Duration::days(n as i64);
+            let kinds = BTreeSet::from([if n == 2 {
+                CueKind::Topic
+            } else {
+                CueKind::Recency
+            }]);
+            assembly.objects.insert(
+                MemoryObjectRef::new(ObjectType::Episode, episode.id),
+                RankedObject::new(MemoryObject::Episode(episode), 0.0, kinds, 1.0, None),
+            );
+        }
+        assert_eq!(
+            assembly
+                .ranked_objects()
+                .iter()
+                .map(|ranked| ranked.object.id().as_u128())
+                .collect::<Vec<_>>(),
+            [3, 2, 1]
+        );
+    }
+
+    #[test]
+    fn expanded_root_keeps_best_proximity_in_either_expansion_order() {
         let fixtures = representative_fixtures();
         let mut episode = fixtures.episode.clone();
         episode.salience_score = 0.0;
@@ -1804,8 +1835,8 @@ mod tests {
                 assembly.absorb_expansion(root, &query, expansion).unwrap();
             }
             let ranked = &assembly.objects[&MemoryObjectRef::new(ObjectType::Episode, episode.id)];
-            assert_eq!(ranked.graph_component, 0.5);
-            assert_eq!(ranked.final_score(), 0.612_499_95);
+            assert_eq!(ranked.graph_component, 1.0);
+            assert_eq!(ranked.final_score(), 0.737_499_95);
             assert!(!ranked.reminder_only);
             assert_eq!(
                 ranked.cue_kinds,

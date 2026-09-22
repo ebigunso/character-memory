@@ -727,14 +727,15 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 .iter()
                 .map(|episode| episode.id)
                 .collect::<Vec<_>>(),
-            [if include_suppressed {
-                latest_episode
-            } else {
-                MemoryId::from_u128(50_080)
-            }]
-            .into_iter()
-            .chain((0..7).map(|index| MemoryId::from_u128(50_000 + index * 10)))
-            .collect::<Vec<_>>()
+            (0..8)
+                .map(|index| MemoryId::from_u128(
+                    (if include_suppressed {
+                        latest_episode.as_u128()
+                    } else {
+                        50_080
+                    }) - index * 10
+                ))
+                .collect::<Vec<_>>()
         );
     }
     // Even when many excluded occasions precede the survivor (or none survives),
