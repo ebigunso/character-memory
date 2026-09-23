@@ -108,7 +108,7 @@ mod road_behavior {
     }
 
     #[tokio::test]
-    async fn admitted_memories_report_their_cues_without_a_trace() {
+    async fn admitted_memories_report_their_roads_without_a_trace() {
         for reverse in [false, true] {
             let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
             let mut plan = episode(RememberWritePlan::new(), 100, 20, 0.5, None, reverse);
@@ -173,7 +173,7 @@ mod road_behavior {
                     "faint topic",
                     ObjectType::Episode,
                     101,
-                    vec![AdmissionRoad::Topic],
+                    vec![AdmissionRoad::Topic, AdmissionRoad::Recency],
                 ),
                 (
                     "quiet",
@@ -251,10 +251,9 @@ mod road_behavior {
                     .iter()
                     .find(|entry| entry.memory == witness)
                     .unwrap();
-                assert!(
-                    expected
-                        .iter()
-                        .all(|kind| admitted.admitted_by.contains(kind)),
+                assert_eq!(
+                    admitted.admitted_by,
+                    expected.into_iter().collect(),
                     "{case}: {admitted:?}"
                 );
                 if case == "faint topic" {
@@ -268,6 +267,87 @@ mod road_behavior {
                         .unwrap()
                         .score;
                     assert!(score > 0.0 && score < 0.1, "faint topic score: {score}");
+                }
+            }
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn descriptions_and_anniversaries_report_their_own_roads() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = episode(
+                RememberWritePlan::new(),
+                500,
+                15,
+                0.5,
+                Some("quiet afternoon"),
+                reverse,
+            );
+            for candidate in &mut plan.candidates {
+                if let MemoryCandidate::Episode(candidate) = candidate {
+                    let scene = candidate.draft.scene.as_mut().unwrap();
+                    scene.setting.words = Some("botanist astronomer".into());
+                    scene.participants.push(SceneParticipant {
+                        description: Some("botanist astronomer".into()),
+                        ..Default::default()
+                    });
+                }
+            }
+            plan = episode(plan, 600, 365, 0.5, None, reverse);
+            plan = episode(plan, 601, 20, 0.5, None, reverse);
+            commit(&memory, plan).await;
+            for (case, expected) in [
+                ("person description", AdmissionRoad::PersonDescription),
+                ("setting words", AdmissionRoad::SettingWords),
+                ("anniversary with range", AdmissionRoad::Anniversary),
+            ] {
+                let mut context = query(None, 8, 8);
+                // An empty explicit range isolates description recall from recency.
+                let days = if case == "anniversary with range" {
+                    20
+                } else {
+                    60
+                };
+                context = context
+                    .with_time_range(time() - Duration::days(days), time() - Duration::days(days));
+                match case {
+                    "person description" => context.scene.participants.push(SceneParticipant {
+                        description: Some("botanist".into()),
+                        ..Default::default()
+                    }),
+                    "setting words" => context.scene.setting.words = Some("botanist".into()),
+                    _ => {}
+                }
+                let traced = memory.retrieve(context.clone()).await.unwrap();
+                context.include_trace = false;
+                let untraced = memory.retrieve(context).await.unwrap();
+                assert!(untraced.trace.is_none());
+                assert_eq!(traced.pack, untraced.pack);
+                assert_eq!(traced.memory_scenes, untraced.memory_scenes);
+                let witness = if case == "anniversary with range" {
+                    600
+                } else {
+                    500
+                };
+                let admitted = untraced
+                    .memory_scenes
+                    .iter()
+                    .find(|entry| entry.memory.id == id(witness, reverse))
+                    .unwrap();
+                assert_eq!(
+                    admitted.admitted_by,
+                    [expected].into(),
+                    "{case}: {admitted:?}"
+                );
+                if case == "anniversary with range" {
+                    let in_range = untraced
+                        .memory_scenes
+                        .iter()
+                        .find(|entry| entry.memory.id == id(601, reverse))
+                        .unwrap();
+                    assert_eq!(in_range.admitted_by, [AdmissionRoad::Range].into());
                 }
             }
             test_support::close_and_remove_root(memory, root).await;
