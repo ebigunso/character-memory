@@ -129,18 +129,12 @@ impl SelectivityStatsContext {
         let health = match stats_store.health().await {
             Ok(health) => health,
             Err(error) => {
-                let cause = RetrievalStatsHealthCause::HealthCheck {
-                    error: error.clone(),
-                };
-                let _ = stats_store.mark_unhealthy(cause.clone()).await;
-                return Ok(Self {
-                    health: RetrievalStatsHealth {
-                        state: RetrievalStatsHealthState::Unhealthy,
-                        last_error_cause: Some(cause),
-                    },
+                return Ok(Self::failed(
+                    stats_store,
                     specs,
-                    global_counters: HashMap::new(),
-                });
+                    RetrievalStatsHealthCause::HealthCheck { error },
+                )
+                .await);
             }
         };
         let mut global_counters = HashMap::new();
@@ -158,18 +152,12 @@ impl SelectivityStatsContext {
                 let global_counter = match counter {
                     Ok(counter) => counter,
                     Err(error) => {
-                        let cause = RetrievalStatsHealthCause::GlobalCounterRead {
-                            error: error.clone(),
-                        };
-                        let _ = stats_store.mark_unhealthy(cause.clone()).await;
-                        return Ok(Self {
-                            health: RetrievalStatsHealth {
-                                state: RetrievalStatsHealthState::Unhealthy,
-                                last_error_cause: Some(cause),
-                            },
+                        return Ok(Self::failed(
+                            stats_store,
                             specs,
-                            global_counters: HashMap::new(),
-                        });
+                            RetrievalStatsHealthCause::GlobalCounterRead { error },
+                        )
+                        .await);
                     }
                 };
                 global_counters.insert(bucket, global_counter);
@@ -180,6 +168,22 @@ impl SelectivityStatsContext {
             specs,
             global_counters,
         })
+    }
+
+    async fn failed(
+        stats_store: &dyn RetrievalStatsStore,
+        specs: Vec<FanoutSpec>,
+        cause: RetrievalStatsHealthCause,
+    ) -> Self {
+        let _ = stats_store.mark_unhealthy(cause.clone()).await;
+        Self {
+            health: RetrievalStatsHealth {
+                state: RetrievalStatsHealthState::Unhealthy,
+                last_error_cause: Some(cause),
+            },
+            specs,
+            global_counters: HashMap::new(),
+        }
     }
 
     fn global_counter(
