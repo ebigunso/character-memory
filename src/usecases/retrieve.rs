@@ -1984,6 +1984,61 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn clamped_topic_roots_keep_the_raw_search_head() {
+        let graph = graph_with(&[], &[]).await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        for (near, far) in [(2, 1), (1, 2)] {
+            let vector = TemporaryVectorCandidateStore::open(2).await;
+            for (id, score) in [(near, -0.25_f32), (far, -0.75)] {
+                let mut memory = representative_fixtures().user_preference;
+                memory.id = MemoryId::from_u128(id);
+                let object = MemoryObject::DerivedMemory(memory);
+                let record = crate::policy::memory_object_vector_record(&object).unwrap();
+                vector
+                    .upsert_vector_records(&[VectorRecordEmbedding::new(
+                        &record,
+                        &[score, (1.0 - score * score).sqrt()],
+                    )])
+                    .await
+                    .unwrap();
+            }
+            let raw = vector
+                .search_candidates(&VectorCandidateSearch::new(
+                    vec![1.0, 0.0],
+                    2,
+                    vec![ObjectType::DerivedMemory],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                raw.candidates.iter().next().unwrap().object_id,
+                MemoryId::from_u128(near)
+            );
+            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
+                .recall_cues(&RetrievalContext::new("unmatched topic"))
+                .await
+                .unwrap();
+            assert!(cues
+                .candidates
+                .iter()
+                .all(|candidate| candidate.score.to_bits() == 0));
+            let selected = select_candidate_roots(
+                cues.roots,
+                &[],
+                &cues.orders,
+                1,
+                RetrievalCueFloors {
+                    topic: 1,
+                    ..Default::default()
+                },
+                (&HashMap::new(), &HashMap::new(), &[]),
+            );
+            assert_eq!(selected.roots[0].object.id, MemoryId::from_u128(near));
+            vector.close().await.unwrap();
+        }
+    }
+
     #[test]
     fn resolution_metadata_stays_on_derived_memory_when_ids_collide() {
         let fixtures = representative_fixtures();

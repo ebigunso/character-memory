@@ -236,15 +236,13 @@ where
                     }
                     eligible
                 };
+                // Clamping changes strength, not this road's raw search order.
                 for candidate in &mut candidates {
                     candidate.score = if candidate.score > 0.0 {
                         candidate.score
                     } else {
                         0.0
                     };
-                }
-                if road == RecallRoad::Topic {
-                    candidates = CanonicalCandidates::new(candidates).to_vec();
                 }
                 all_candidates.extend(candidates.iter().cloned());
                 searches.insert(key.clone(), candidates);
