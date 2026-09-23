@@ -224,8 +224,8 @@ pub enum VectorIndexingCause {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "cause", rename_all = "snake_case")]
 pub enum StatsUpdateCause {
-    #[error("stats endpoint hydration failed: {error}")]
-    EndpointHydration { error: GraphQueryError },
+    #[error("graph read for stats projection failed: {error}")]
+    GraphRead { error: GraphQueryError },
     #[error("stats edge write failed: {error}")]
     EdgeWrite { error: RetrievalStatsStoreError },
     #[error("stats object-state write failed: {error}")]
@@ -274,8 +274,8 @@ pub enum RetrievalStatsStoreError {
 pub enum RetrievalStatsHealthCause {
     #[error("stats store initialization failed: {error}")]
     StoreInitialization { error: RetrievalStatsStoreError },
-    #[error("stats endpoint hydration failed: {error}")]
-    EndpointHydration { error: GraphQueryError },
+    #[error("graph read for stats projection failed: {error}")]
+    GraphRead { error: GraphQueryError },
     #[error("stats edge write failed: {error}")]
     EdgeWrite { error: RetrievalStatsStoreError },
     #[error("stats object-state write failed: {error}")]
@@ -291,11 +291,9 @@ pub enum RetrievalStatsHealthCause {
 impl StatsUpdateCause {
     pub(crate) fn health_cause(&self) -> Option<RetrievalStatsHealthCause> {
         match self {
-            Self::EndpointHydration { error } => {
-                Some(RetrievalStatsHealthCause::EndpointHydration {
-                    error: error.clone(),
-                })
-            }
+            Self::GraphRead { error } => Some(RetrievalStatsHealthCause::GraphRead {
+                error: error.clone(),
+            }),
             Self::EdgeWrite { error } => Some(RetrievalStatsHealthCause::EdgeWrite {
                 error: error.clone(),
             }),

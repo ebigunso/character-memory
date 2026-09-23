@@ -431,13 +431,30 @@ mod tests {
             outcome
                 .stats_update_status
                 .failure
+                .as_ref()
                 .unwrap()
                 .causes
                 .as_slice(),
-            [StatsUpdateCause::EndpointHydration {
+            [StatsUpdateCause::GraphRead {
                 error: crate::errors::GraphQueryError::Selection { .. }
             }]
         ));
+        assert_eq!(
+            serde_json::to_value(&outcome.stats_update_status.failure.as_ref().unwrap().causes[0])
+                .unwrap()["cause"],
+            "graph_read"
+        );
+        let health_cause = stats.health().await.unwrap().last_error_cause.unwrap();
+        assert!(matches!(
+            health_cause,
+            RetrievalStatsHealthCause::GraphRead {
+                error: crate::errors::GraphQueryError::Selection { .. }
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(&health_cause).unwrap()["operation"],
+            "graph_read"
+        );
         assert!(outcome
             .repair_needed
             .iter()
@@ -901,7 +918,7 @@ mod tests {
         assert!(matches!(
             failure.causes.as_slice(),
             [
-                StatsUpdateCause::EndpointHydration { .. },
+                StatsUpdateCause::GraphRead { .. },
                 StatsUpdateCause::EdgeWrite { .. }
             ]
         ));
@@ -1315,8 +1332,9 @@ mod tests {
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
+            limit: usize,
         ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            self.store.query_scope_state(key, policy).await
+            self.store.query_scope_state(key, policy, limit).await
         }
 
         async fn expand_bounded(
@@ -1384,7 +1402,7 @@ mod tests {
             })
         }
 
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             Ok(())
         }
     }

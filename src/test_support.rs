@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
 use crate::domain::{
-    DerivedMemory, DerivedType, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryThread,
-    Modality, ObjectType, Observation, RelationType, RetentionState, ThreadStatus,
-    DEFAULT_SCHEMA_VERSION,
+    DerivedMemory, DerivedType, Entity, Episode, MemoryId, MemoryLink, MemoryObject,
+    MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
+    ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{
@@ -98,8 +98,8 @@ impl VectorCandidateStore for TemporaryVectorCandidateStore {
         self.store().search_candidates(query).await
     }
 
-    async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-        self.store().delete_candidates(object_ids).await
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        self.store().delete_candidates(objects).await
     }
 }
 

@@ -38,6 +38,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn by_refs_hydration_reads_only_requested_graphs_in_a_large_store() {
+        use super::super::shared::RDF_QUADS_READ;
+        use crate::domain::graph_uri;
+        use oxigraph::model::{GraphNameRef, NamedNode};
+
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let mut fixtures = representative_fixtures();
+        fixtures.user_preference.entity_ids = vec![fixtures.user_entity.id];
+        fixtures.user_preference.assertions = vec![crate::domain::BeliefAssertion {
+            subject: fixtures.user_entity.id,
+            predicate: crate::domain::BeliefPredicate::KnownAs {
+                name: "A reader".to_owned(),
+            },
+        }];
+        let expected = fixtures.objects();
+        store.upsert_objects(&expected).await.unwrap();
+        let refs = expected
+            .iter()
+            .map(MemoryObject::object_ref)
+            .collect::<Vec<_>>();
+        let budget = refs
+            .iter()
+            .map(|object| {
+                let graph = NamedNode::new(graph_uri(object.object_type, object.id)).unwrap();
+                store
+                    .store
+                    .quads_for_pattern(
+                        None,
+                        None,
+                        None,
+                        Some(GraphNameRef::NamedNode(graph.as_ref())),
+                    )
+                    .count()
+            })
+            .sum::<usize>();
+        for unrelated in [0, 2000] {
+            let extras = (0..unrelated)
+                .map(|index| {
+                    let mut entity = fixtures.user_entity.clone();
+                    entity.id = MemoryId::from_u128(100_000 + index);
+                    MemoryObject::Entity(entity)
+                })
+                .collect::<Vec<_>>();
+            store.upsert_objects(&extras).await.unwrap();
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let objects = store
+                .query_objects(&GraphObjectQuery::by_refs(refs.clone()))
+                .await
+                .unwrap();
+            let read = RDF_QUADS_READ.with(|count| count.get());
+            assert_eq!(objects.len(), expected.len());
+            for object in &expected {
+                assert!(objects.contains(object));
+            }
+            assert_eq!(
+                read, budget,
+                "unrelated={unrelated}, read={read}, budget={budget}"
+            );
+        }
+        RDF_QUADS_READ.with(|count| count.set(0));
+        assert!(store
+            .query_objects(&GraphObjectQuery::by_refs(Vec::new()))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
     async fn oxigraph_store_upserts_and_queries_canonical_objects() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
@@ -1144,6 +1213,525 @@ mod tests {
             CustomError::GraphExpansionBounded(trace)
                 if trace.reason == crate::domain::GraphExpansionBoundedReason::HubLimit
         ));
+    }
+
+    #[tokio::test]
+    async fn retrieval_selectors_bound_state_and_occasion_prefixes() {
+        use super::super::shared::RDF_QUADS_READ;
+        use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS, SELECT_CALLS};
+        use crate::domain::{graph_uri, ScopeKey};
+        use oxigraph::model::{GraphNameRef, NamedNode};
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let key = ScopeKey::Setting("home".to_owned());
+        let mut objects = vec![
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+            MemoryObject::MemoryThread(fixtures.soft_thread.clone()),
+        ];
+        let mut links = Vec::new();
+        let mut expected_state = Vec::new();
+        let mut expected_subject = Vec::new();
+        let mut neighbors = Vec::new();
+        for index in 0..20_u128 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(10_000 + index);
+            memory.created_at += chrono::Duration::minutes(index as i64);
+            memory.salience_score = (index % 7) as f32 / 10.0;
+            memory.entity_ids = vec![fixtures.hub_entity.id];
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.scope_keys = vec![key.clone()];
+            if index % 5 == 0 {
+                memory.retention_state = RetentionState::Suppressed;
+            }
+            if index % 5 >= 3 {
+                expected_state.push(memory.clone());
+                if index % 13 != 0 {
+                    expected_subject.push(memory.clone());
+                }
+            }
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(100_000 + index);
+            link.from_id = memory.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = fixtures.hub_entity.id;
+            link.to_type = ObjectType::Entity;
+            link.relation = RelationType::About;
+            if index % 13 != 0 {
+                links.push(link.clone());
+            }
+            if matches!(index % 5, 1 | 2) {
+                link.id = MemoryId::from_u128(110_000 + index);
+                link.to_id = memory.id;
+                link.to_type = ObjectType::DerivedMemory;
+                link.from_id = fixtures.correction.id;
+                link.relation = if index % 5 == 1 {
+                    RelationType::Resolves
+                } else {
+                    RelationType::Supersedes
+                };
+                links.push(link);
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+
+        for index in 0..10_u128 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(20_000 + index);
+            episode.scene.time += chrono::Duration::minutes(index as i64);
+            if index % 2 == 0 {
+                episode.retention_state = RetentionState::Suppressed;
+            }
+            neighbors.push(MemoryObjectRef::new(ObjectType::Episode, episode.id));
+            objects.push(MemoryObject::Episode(episode.clone()));
+            for offset in 0..2 {
+                let mut observation = fixtures.salient_observation.clone();
+                observation.id = MemoryId::from_u128(30_000 + 2 * index + offset);
+                observation.episode_id = episode.id;
+                neighbors.push(MemoryObjectRef::new(
+                    ObjectType::Observation,
+                    observation.id,
+                ));
+                objects.push(MemoryObject::Observation(observation));
+            }
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let policy = GraphExpansionLifecyclePolicy::default();
+        let selectors = SparqlGraphSelectors::new(&store.store);
+        let (scope, scope_filtered) = selectors.select_scope_state(&key, policy, 3).unwrap();
+        let (subject, subject_filtered) = selectors
+            .select_subject_state(fixtures.hub_entity.id, policy, 3, false)
+            .unwrap();
+        let quad_budget = |ids: &[MemoryId]| {
+            ids.iter()
+                .map(|id| {
+                    let graph = NamedNode::new(graph_uri(ObjectType::DerivedMemory, *id)).unwrap();
+                    store
+                        .store
+                        .quads_for_pattern(
+                            None,
+                            None,
+                            None,
+                            Some(GraphNameRef::NamedNode(graph.as_ref())),
+                        )
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        // Rank scans may read all keyed IDs. Full objects and exclusion evidence
+        // remain bounded before canonical RDF hydration.
+        for (ids, filtered) in [(&scope, &scope_filtered), (&subject, &subject_filtered)] {
+            let bounded = ids
+                .iter()
+                .copied()
+                .chain(filtered.iter().map(|entry| entry.object_ref.id))
+                .collect::<Vec<_>>();
+            assert_eq!(bounded.len(), 6);
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let hydrated = store
+                .query_objects(&GraphObjectQuery::by_refs(
+                    bounded
+                        .iter()
+                        .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
+                        .collect(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(hydrated.len(), 6);
+            assert_eq!(
+                RDF_QUADS_READ.with(|count| count.get()),
+                quad_budget(&bounded)
+            );
+        }
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let mut query = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        query.current_state_limit = Some(3);
+        let (mut thread, thread_filtered) = store
+            .query_derived_memories_by_thread(&query)
+            .await
+            .unwrap();
+        thread.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
+        assert_eq!(
+            RDF_QUADS_READ.with(|count| count.get()),
+            quad_budget(&thread.iter().map(|memory| memory.id).collect::<Vec<_>>())
+        );
+        let mut occasion_query =
+            GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                .with_fanout_overrides(vec![
+                    GraphExpansionFanoutOverride {
+                        relation: RelationType::Involves,
+                        object_type: ObjectType::Episode,
+                        max_fanout: 3,
+                    },
+                    GraphExpansionFanoutOverride {
+                        relation: RelationType::Mentions,
+                        object_type: ObjectType::Observation,
+                        max_fanout: 3,
+                    },
+                ]);
+        occasion_query.current_subject_state = true;
+        occasion_query.participant_reference_time =
+            fixtures.episode.scene.time.to_utc() + chrono::Duration::minutes(8);
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        SELECT_CALLS.with(|count| count.set(0));
+        let occasions = selectors
+            .select_bounded_participant_occasions(&neighbors, &occasion_query)
+            .unwrap();
+        assert_eq!(SELECT_CALLS.with(|count| count.get()), 1);
+        assert_eq!(MAX_SELECT_ROWS.with(|count| count.get()), neighbors.len());
+        let occasion_refs = occasions.keys().copied().collect::<Vec<_>>();
+        let occasion_quad_budget = occasion_refs
+            .iter()
+            .map(|object| {
+                let graph = NamedNode::new(graph_uri(object.object_type, object.id)).unwrap();
+                store
+                    .store
+                    .quads_for_pattern(
+                        None,
+                        None,
+                        None,
+                        Some(GraphNameRef::NamedNode(graph.as_ref())),
+                    )
+                    .count()
+            })
+            .sum::<usize>();
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let hydrated_occasions = store
+            .query_objects(&GraphObjectQuery::by_refs(occasion_refs))
+            .await
+            .unwrap();
+        assert_eq!(hydrated_occasions.len(), 12);
+        assert_eq!(
+            RDF_QUADS_READ.with(|count| count.get()),
+            occasion_quad_budget
+        );
+        for entries in [&scope_filtered, &subject_filtered, &thread_filtered] {
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.object_ref.id)
+                    .collect::<Vec<_>>(),
+                [10017, 10016, 10015].map(MemoryId::from_u128)
+            );
+        }
+        for (eligible, indices) in [(true, [7, 5, 3]), (false, [8, 6, 4])] {
+            let ids = occasions
+                .iter()
+                .filter(|(neighbor, occasion)| {
+                    occasion.filtered_reason(**neighbor, policy).is_none() == eligible
+                })
+                .map(|(_, occasion)| occasion.episode_id)
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                ids,
+                indices
+                    .map(|index| MemoryId::from_u128(20_000 + index))
+                    .into_iter()
+                    .collect()
+            );
+        }
+        for memories in [&mut expected_state, &mut expected_subject] {
+            memories.sort_by(|a, b| {
+                b.salience_score
+                    .total_cmp(&a.salience_score)
+                    .then_with(|| b.created_at.cmp(&a.created_at))
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
+        assert_eq!(
+            &scope[..3],
+            &expected_state
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        let traversable = subject
+            .iter()
+            .copied()
+            .filter(|id| expected_subject.iter().any(|memory| memory.id == *id))
+            .take(3)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            traversable,
+            expected_subject
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        expected_state.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
+        assert_eq!(
+            thread
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>(),
+            expected_state
+                .iter()
+                .take(3)
+                .map(|memory| memory.id)
+                .collect::<Vec<_>>()
+        );
+        let counts = [
+            scope.len(),
+            scope_filtered.len(),
+            subject.len(),
+            subject_filtered.len(),
+            thread.len(),
+            thread_filtered.len(),
+            occasions.len(),
+        ];
+        assert_eq!(counts, [3, 3, 3, 3, 3, 3, 12]);
+        let observation_ids = occasions
+            .keys()
+            .filter(|neighbor| neighbor.object_type == ObjectType::Observation)
+            .map(|neighbor| neighbor.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            observation_ids,
+            [7, 5, 3, 8, 6, 4]
+                .map(|index| MemoryId::from_u128(30_000 + 2 * index))
+                .into_iter()
+                .collect()
+        );
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        assert!(selectors
+            .select_scope_state(&key, policy, 0)
+            .unwrap()
+            .0
+            .is_empty());
+        assert!(selectors
+            .select_subject_state(fixtures.hub_entity.id, policy, 0, false)
+            .unwrap()
+            .0
+            .is_empty());
+        query.current_state_limit = Some(0);
+        assert!(store
+            .query_derived_memories_by_thread(&query)
+            .await
+            .unwrap()
+            .0
+            .is_empty());
+        occasion_query.max_fanout_per_node = 0;
+        assert!(selectors
+            .select_bounded_participant_occasions(&neighbors, &occasion_query)
+            .unwrap()
+            .is_empty());
+        assert_eq!(MAX_SELECT_ROWS.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
+    async fn participant_hub_limit_counts_only_the_admitted_occasion_prefix() {
+        use crate::ports::graph_authority::TraceMode;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = vec![MemoryObject::Entity(fixtures.hub_entity.clone())];
+        let mut links = Vec::new();
+        for index in 0..4_u128 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(20_000 + index);
+            episode.scene.time += chrono::Duration::minutes(index as i64);
+            links.push(
+                crate::MemoryLinkDraft::new(
+                    ObjectType::Episode,
+                    episode.id,
+                    RelationType::Involves,
+                    ObjectType::Entity,
+                    fixtures.hub_entity.id,
+                )
+                .into_domain()
+                .unwrap(),
+            );
+            objects.push(MemoryObject::Episode(episode));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let mut outputs = Vec::new();
+        for trace in [TraceMode::Disabled, TraceMode::Enabled] {
+            let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                .with_max_hub_edges(1)
+                .with_max_fanout_per_node(1)
+                .with_failure_policy(GraphExpansionFailurePolicy {
+                    timeout_ms: None,
+                    mode: crate::domain::GraphFailureMode::FailClosed,
+                })
+                .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
+                    relation: RelationType::Involves,
+                    object_type: ObjectType::Episode,
+                    max_fanout: 1,
+                }])
+                .with_fanout_utilization_recording(trace);
+            let expansion = store.expand_bounded(&query).await.unwrap();
+            assert!(expansion.bounded_failure.is_none());
+            assert!(expansion
+                .objects
+                .iter()
+                .any(|object| object.id() == MemoryId::from_u128(20_003)));
+            outputs.push((
+                expansion.objects,
+                expansion.links,
+                expansion.selection_order,
+            ));
+        }
+        assert_eq!(outputs[0], outputs[1]);
+    }
+
+    #[tokio::test]
+    async fn forget_cascade_reads_only_affected_object_and_link_graphs() {
+        use super::super::shared::RDF_QUADS_READ;
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = Vec::new();
+        for index in 0..3_u128 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(50 + index);
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.derived_from_episode_ids = vec![fixtures.episode.id];
+            memory.derived_from_observation_ids.clear();
+            if index == 2 {
+                memory.retention_state = RetentionState::Suppressed;
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        // Lifecycle links still count when their source object is absent.
+        let links =
+            [(RelationType::Resolves, 50), (RelationType::Supersedes, 51)].map(|(relation, id)| {
+                let mut link = fixtures.soft_thread_link.clone();
+                link.id = MemoryId::from_u128(900 + id);
+                link.from_type = ObjectType::DerivedMemory;
+                link.from_id = MemoryId::from_u128(999);
+                link.to_type = ObjectType::DerivedMemory;
+                link.to_id = MemoryId::from_u128(id);
+                link.relation = relation;
+                link
+            });
+        store.upsert_links(&links).await.unwrap();
+        let thread_query = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        let provenance_query =
+            GraphDerivedMemoryProvenanceQuery::by_sources(vec![fixtures.episode.id], Vec::new());
+        let mut reads = Vec::new();
+        for unrelated in [false, true] {
+            if unrelated {
+                let mut extra_objects = Vec::new();
+                let mut extra_links = Vec::new();
+                for n in 0..12_u128 {
+                    let mut entity = fixtures.hub_entity.clone();
+                    entity.id = MemoryId::from_u128(1000 + n);
+                    extra_links.push(
+                        crate::MemoryLinkDraft::new(
+                            ObjectType::Entity,
+                            entity.id,
+                            RelationType::AssociatedWith,
+                            ObjectType::Entity,
+                            fixtures.hub_entity.id,
+                        )
+                        .into_domain()
+                        .unwrap(),
+                    );
+                    extra_objects.push(MemoryObject::Entity(entity));
+                }
+                store.upsert_objects(&extra_objects).await.unwrap();
+                store.upsert_links(&extra_links).await.unwrap();
+            }
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let (thread, filtered) = store
+                .query_derived_memories_by_thread(&thread_query)
+                .await
+                .unwrap();
+            let thread_reads = RDF_QUADS_READ.with(|count| count.get());
+            RDF_QUADS_READ.with(|count| count.set(0));
+            let provenance = store
+                .query_derived_memories_by_provenance(&provenance_query)
+                .await
+                .unwrap();
+            reads.push((thread_reads, RDF_QUADS_READ.with(|count| count.get())));
+            for memories in [thread, provenance] {
+                assert_eq!(
+                    memories.iter().map(|memory| memory.id).collect::<Vec<_>>(),
+                    vec![MemoryId::from_u128(50)]
+                );
+            }
+            assert!(filtered.is_empty());
+        }
+        assert_eq!(
+            reads[0], reads[1],
+            "unrelated graphs must not increase either cascade read: {reads:?}"
+        );
+        RDF_QUADS_READ.with(|count| count.set(0));
+        store
+            .query_derived_memories_by_thread(
+                &GraphDerivedMemoryThreadQuery::by_threads(Vec::new()),
+            )
+            .await
+            .unwrap();
+        store
+            .query_derived_memories_by_provenance(&GraphDerivedMemoryProvenanceQuery::by_sources(
+                Vec::new(),
+                Vec::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+    }
+
+    #[tokio::test]
+    async fn thread_expansion_excludes_resolved_members_outside_its_trace_prefix() {
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut objects = vec![MemoryObject::MemoryThread(fixtures.soft_thread.clone())];
+        let mut links = Vec::new();
+        for index in 0..8 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(5000 + index);
+            memory.thread_ids = vec![fixtures.soft_thread.id];
+            memory.created_at += chrono::Duration::minutes(index as i64);
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(6000 + index);
+            link.from_id = memory.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = fixtures.soft_thread.id;
+            link.to_type = ObjectType::MemoryThread;
+            link.relation = RelationType::PartOfThread;
+            links.push(link.clone());
+            if [0, 1, 6].contains(&index) {
+                link.id = MemoryId::from_u128(7000 + index);
+                link.from_id = fixtures.correction.id;
+                link.to_id = memory.id;
+                link.to_type = ObjectType::DerivedMemory;
+                link.relation = RelationType::Resolves;
+                links.push(link);
+            }
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let mut state = GraphDerivedMemoryThreadQuery::by_threads(vec![fixtures.soft_thread.id]);
+        state.current_state_limit = Some(1);
+        let (_, excluded) = store
+            .query_derived_memories_by_thread(&state)
+            .await
+            .unwrap();
+        assert_eq!(
+            excluded
+                .iter()
+                .map(|row| row.object_ref.id)
+                .collect::<Vec<_>>(),
+            [MemoryId::from_u128(5006)]
+        );
+        let mut query =
+            GraphExpansionQuery::new(fixtures.soft_thread.id, ObjectType::MemoryThread, 1, 3)
+                .with_max_fanout_per_node(1);
+        query.current_thread_state = true;
+        let expansion = store.expand_bounded(&query).await.unwrap();
+        let members = expansion
+            .objects
+            .iter()
+            .filter(|object| object.object_type() == ObjectType::DerivedMemory)
+            .map(MemoryObject::id)
+            .collect::<Vec<_>>();
+        assert_eq!(members, [MemoryId::from_u128(5002)]);
     }
 
     #[tokio::test]

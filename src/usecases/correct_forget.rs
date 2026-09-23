@@ -3446,7 +3446,7 @@ mod tests {
         GraphLinks(Vec<(MemoryId, MemoryId)>),
         EmbedBatch(Vec<MemoryId>),
         VectorUpsert(Vec<MemoryId>),
-        VectorDelete(Vec<MemoryId>),
+        VectorDelete(Vec<MemoryObjectRef>),
         StatsEdges(usize),
         StatsObjectStates(usize),
         StatsUnhealthy,
@@ -3632,8 +3632,9 @@ mod tests {
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
+            limit: usize,
         ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            self.store.query_scope_state(key, policy).await
+            self.store.query_scope_state(key, policy, limit).await
         }
 
         async fn expand_bounded(
@@ -3693,8 +3694,8 @@ mod tests {
             })
         }
 
-        async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-            lock(&self.calls).push(StoreCall::VectorDelete(object_ids.to_vec()));
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            lock(&self.calls).push(StoreCall::VectorDelete(objects.to_vec()));
             if self.fail_delete {
                 return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
                     "test",
@@ -3828,7 +3829,7 @@ mod tests {
             self.inner.search_candidates(query).await
         }
 
-        async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             if std::mem::take(&mut *lock(&self.fail_next_delete)) {
                 return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
                     "test",
@@ -3837,7 +3838,7 @@ mod tests {
                     "one-shot vector delete failed",
                 )));
             }
-            self.inner.delete_candidates(object_ids).await
+            self.inner.delete_candidates(objects).await
         }
     }
 
@@ -3938,7 +3939,7 @@ mod tests {
             self.inner.search_candidates(query).await
         }
 
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
                 "test",
                 VectorDatabaseErrorKind::Response,

@@ -133,6 +133,7 @@ where
                             include_suppressed: context.lifecycle_policy.include_suppressed,
                             include_superseded: context.lifecycle_policy.include_superseded,
                         },
+                        context.candidate_limits.max_graph_roots,
                     )
                     .await?;
                 assembly
@@ -144,12 +145,7 @@ where
                             &entry.superseded_by,
                         )
                     }));
-                // Lifecycle filtering and successor deduplication precede this cap.
-                for (rank, id) in ids
-                    .into_iter()
-                    .take(context.candidate_limits.max_graph_roots)
-                    .enumerate()
-                {
+                for (rank, id) in ids.into_iter().enumerate() {
                     root_order.insert(
                         (
                             cues.participants.len() + offset,
@@ -176,10 +172,6 @@ where
             }
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
-        let resolved_thread_members = filtered
-            .iter()
-            .map(|entry| entry.object_ref)
-            .collect::<HashSet<_>>();
         assembly
             .lifecycle_decisions
             .extend(filtered.into_iter().map(|entry| {
@@ -369,8 +361,8 @@ where
             if context.activity == Some(crate::api::types::ActivityRef::Thread(candidate.object_id))
                 && candidate.object_type == ObjectType::MemoryThread
             {
-                // Reuse the activity selector's omitted members; no second state read.
-                query.resolved_thread_members = resolved_thread_members.clone();
+                // Filter traversal itself: the bounded audit cannot list every resolved member.
+                query.current_thread_state = true;
             }
             graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
@@ -714,10 +706,12 @@ impl RetrieveAssembly {
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
-            if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
-                ranked.resolved_by.extend(resolvers);
-                ranked.resolved_by.sort_unstable();
-                ranked.resolved_by.dedup();
+            if object_ref.object_type == ObjectType::DerivedMemory {
+                if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
+                    ranked.resolved_by.extend(resolvers);
+                    ranked.resolved_by.sort_unstable();
+                    ranked.resolved_by.dedup();
+                }
             }
         }
 
@@ -1864,6 +1858,49 @@ mod tests {
         high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
+
+    #[test]
+    fn resolution_metadata_stays_on_derived_memory_when_ids_collide() {
+        let fixtures = representative_fixtures();
+        let entity = fixtures.hub_entity;
+        let mut memory = fixtures.open_loop;
+        memory.id = entity.id;
+        let resolver = fixtures.correction.id;
+        let candidate = CandidateRoot {
+            object_id: entity.id,
+            object_type: ObjectType::Entity,
+            score: 1.0,
+            source: GraphRootSource::Participant,
+            vector_score: None,
+            cue_kinds: BTreeSet::from([CueKind::Participant]),
+            full_standing_score: Some(1.0),
+            full_standing_kinds: BTreeSet::from([CueKind::Participant]),
+            date_match_floor_eligible: false,
+        };
+        let query = GraphExpansionQuery::new(entity.id, ObjectType::Entity, 1, 2);
+        let mut expansion = GraphExpansion::new(
+            vec![
+                MemoryObject::Entity(entity.clone()),
+                MemoryObject::DerivedMemory(memory),
+            ],
+            Vec::new(),
+        );
+        expansion.resolved_by.insert(entity.id, vec![resolver]);
+        let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
+        assembly
+            .absorb_expansion(&candidate, &query, expansion)
+            .unwrap();
+        assert!(
+            assembly.objects[&MemoryObjectRef::new(ObjectType::Entity, entity.id)]
+                .resolved_by
+                .is_empty()
+        );
+        assert_eq!(
+            assembly.objects[&MemoryObjectRef::new(ObjectType::DerivedMemory, entity.id)]
+                .resolved_by,
+            vec![resolver]
+        );
+    }
 
     #[test]
     fn single_kind_reserves_own_head_then_fills_final_ranked_room() {
@@ -3481,8 +3518,8 @@ mod tests {
             Ok(recall)
         }
 
-        async fn delete_candidates(&self, object_ids: &[MemoryId]) -> Result<(), CustomError> {
-            self.inner.delete_candidates(object_ids).await
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            self.inner.delete_candidates(objects).await
         }
     }
 
@@ -3602,8 +3639,9 @@ mod tests {
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
+            limit: usize,
         ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            let _ = (key, policy);
+            let _ = (key, policy, limit);
             unreachable!("scope selector is not used by this failure fixture")
         }
 

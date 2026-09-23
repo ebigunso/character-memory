@@ -159,7 +159,7 @@
   - `src/usecases/write_planning.rs`: the hint loop 354-371; the commit derivation of Involves 1261-1311.
   - `src/api/types/retrieval.rs`: `RetrievalContext` 14; `RetrievalCueFloors` 127; `MemoryScenes` 248; `SceneReferenceResolution` 302.
 - Rulings: the load-bearing decisions log, items 39 to 61, and the coordinator's rulings of 2026-09-23 recorded in this plan's Decision Log.
-- Neighbour plans: the time plan (`docs/coding-agent/plans/active/v0-2-time-plan.md` in the time-plan checkout); the prospective and renderer plans (`v0-2-prospective-plan.md` and `v0-2-renderer-plan.md`, on their own plan branches, held until this slice lands); the phase fixes brief `.agent-work/orchestrator/phase-correctness-fixes-dispatch.txt`.
+- Neighbour plans: the time plan (`docs/coding-agent/plans/completed/v0-2-time-plan.md`); the prospective and renderer plans (`v0-2-prospective-plan.md` and `v0-2-renderer-plan.md`, on their own plan branches, held until this slice lands); the phase fixes brief `.agent-work/orchestrator/phase-correctness-fixes-dispatch.txt`.
 - Design records consulted, and deviations from their acceptance: ADR-D-0018, D-0022, D-0023, D-0024, D-0029, D-0038, ADR-I-0022, I-0036. ADR-I-0036 is corrected in Task_8. There is no other deviation. ADR-D-0024's invariant holds, and the new record depends on it.
 
 ## Open Questions (max 3)
