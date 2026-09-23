@@ -73,14 +73,12 @@ mod scene_offset_behavior {
             for saved in [before, after] {
                 assert_eq!(saved.naive_utc(), given.naive_utc());
                 assert_eq!(saved.offset(), given.offset());
-                assert_eq!(saved.date_naive(), given.date_naive());
             }
         }
     }
 
     #[tokio::test]
     async fn same_instant_with_another_offset_is_an_episode_collision() {
-        let mut readings = Vec::new();
         for (hours, other) in [(9, 10), (23, 22), (-23, -22)] {
             let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
             let time = "2025-09-21T12:30:00.123456789Z"
@@ -100,10 +98,9 @@ mod scene_offset_behavior {
                 .await;
             let collision = matches!(result, Err(CustomError::DeterministicIdCollision { object })
                 if object == MemoryObjectRef::new(ObjectType::Episode, id));
-            readings.push((hours, other, collision));
             test_support::close_and_remove_root(memory, root).await;
+            assert!(collision, "offset pair {hours} -> {other}");
         }
-        assert!(readings.iter().all(|(_, _, collision)| *collision));
     }
 
     #[tokio::test]

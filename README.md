@@ -116,7 +116,7 @@ let context = RetrievalContext::new("What happened last Tuesday?")
 
 Date match contributes the newest recallable episodes inside the range, including both endpoints, up to the largest requested section cap. All-zero section caps contribute none. Its provisional floor is one and only sets the reservation at roots and sections; it takes no spare root turn. Other cues can still recall episodes outside the range, and a shared hit keeps its score and standing. The reference scene time does not shorten the span. An inverted range matches nothing and is echoed unchanged, as every supplied range is, even with tracing off. With tracing enabled, `time_range_has_more` says whether the range contained more eligible occasions than this source contributed; later caps can still omit those contributions. It reads one extra ID and performs no count query. A crowded range is not a filtered topic search: an older topical memory inside it can still be missed when the unrestricted topic search ranks it below its cap.
 
-A scene time reads back with the instant, fractional precision and offset supplied by the application. Anniversaries match the local calendar day of the offset each experience was written with against the retrieval scene's local day. Replaying the same ID and instant with a different offset is a collision, even when the local day is unchanged.
+A scene time reads back with the instant, fractional precision and offset supplied by the application. Anniversaries match the local calendar day of the offset each experience was written with against the retrieval scene's local day; library-generated scene times use UTC. Replaying the same ID and instant with a different offset is a collision, even when the local day is unchanged.
 
 The same local month and day in an earlier local year contributes anniversary occasions as date matches, with February 29 matching only February 29. Shared and unshared anniversaries each contribute their own newest-first list, up to the room. An anniversary reserves room only when it was shared with a notion that the present scene resolves to one identity; an ambiguous name grants no reservation. The range and shared anniversaries share one date-match floor. Unshared anniversaries compete for unclaimed room by the root key: among zero-score roots, salience first, then newest. An ordinary anniversary therefore loses to a recent occasion of equal salience; a more salient one can come to mind.
 
@@ -239,7 +239,7 @@ Character Memory separates planning from persistence. Use `prepare` to build an 
 ```rust
 use character_memory::{Scene, SceneParticipant};
 
-let mut scene = Scene::now();
+let mut scene = Scene::now(); // UTC; use Scene::at(application_time) to supply a local offset.
 scene.participants.push(SceneParticipant {
     description: Some("a visitor".to_owned()),
     ..Default::default()
@@ -259,7 +259,7 @@ if validation.iter().all(|candidate| candidate.status == CandidateValidationStat
 
 For callers that want the standard write lifecycle in one call, `remember(RememberInput, RememberOptions)` composes `prepare`, `validate_plan`, and `commit` over the same graph-authoritative machinery.
 
-An episode stores one `Scene` with its time, participants, setting and custom values. Setting and participant words have separate optional embeddings beside its summary; keys and custom values are excluded. If the input and episode draft omit the scene, `prepare` fixes the current time once; a caller-built episode must supply its scene. Participant keys must identify existing or same-plan notions.
+An episode stores one `Scene` with its time, participants, setting and custom values. Setting and participant words have separate optional embeddings beside its summary; keys and custom values are excluded. If the input and episode draft omit the scene, `prepare` fixes the current UTC time once. `Scene::now()` and the default retrieval scene also use UTC. For anniversaries on the character's local day, the application supplies that offset in both write and retrieval scenes. A caller-built episode must supply its scene. Participant keys must identify existing or same-plan notions.
 
 The write path is deliberately not an extraction system. Character Memory core does not infer preferences, commitments, corrections, character signals, thread membership, or entity identity from raw text. It does not store raw logs, and `raw_ref` values remain opaque caller-managed provenance pointers. Candidates in a `RememberWritePlan` are not memory until a valid plan is committed.
 

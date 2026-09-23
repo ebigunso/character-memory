@@ -1952,21 +1952,6 @@ async fn scene_offset_is_persisted_content() {
     assert!(
         matches!(collision, Err(CustomError::DeterministicIdCollision { object }) if object.id == id(900))
     );
-    let collision = memory
-        .commit(
-            ann_episode(
-                RememberWritePlan::new(),
-                900,
-                "2025-09-21T09:00:00.123456789+10:00",
-                false,
-                false,
-            ),
-            CommitOptions::default(),
-        )
-        .await;
-    assert!(
-        matches!(collision, Err(CustomError::DeterministicIdCollision { object }) if object.id == id(900))
-    );
     let context = ann_query("2026-09-21T20:00:00+09:00", false, false, 8);
     let result = memory.retrieve(context.clone()).await.unwrap();
     let saved = &result.pack.relevant_episodes[0];
