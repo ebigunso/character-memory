@@ -837,9 +837,9 @@ struct RankKey {
 
 // A reservation credits its road's own head, even if already selected. Only
 // expanding roads can take a spare turn at roots; other stages fill ranked room.
-fn select_with_cue_floors(
+fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
     candidates: impl IntoIterator<Item = (MemoryObjectRef, BTreeSet<RecallRoad>)>,
-    orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
+    orders: impl Fn(RecallRoad) -> I,
     limit: usize,
     floors: RetrievalCueFloors,
     stage: CueFloorStage,
@@ -876,8 +876,8 @@ fn select_with_cue_floors(
             .filter(|road| road.rule().kind == kind && road.rule().reserves)
         {
             let mut ranks = HashMap::new();
-            for (rank, object) in orders.get(road).into_iter().flatten().enumerate() {
-                ranks.entry(*object).or_insert(rank);
+            for (rank, object) in orders(*road).into_iter().enumerate() {
+                ranks.entry(object).or_insert(rank);
             }
             let mut members = candidates
                 .iter()
@@ -961,7 +961,7 @@ fn build_pack(
             .collect::<Vec<_>>();
         // Section state already has its scope/score order; root recency must not
         // become the section floor order. Reuse this prefix without re-sorting it.
-        let mut orders = orders.clone();
+        let mut state_orders = BTreeMap::new();
         for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
             let state_order = candidates
                 .iter()
@@ -975,17 +975,21 @@ fn build_pack(
                     })
                 })
                 .collect::<Vec<_>>();
-            for (road, order) in &mut orders {
-                if road.rule().kind == kind && road.rule().expands {
-                    order.splice(..0, state_order.iter().copied());
-                }
-            }
+            state_orders.insert(kind, state_order);
         }
         for (index, cause) in select_with_cue_floors(
             candidates
                 .iter()
                 .map(|ranked| (ranked.object.object_ref(), ranked.roads.clone())),
-            &orders,
+            |road| {
+                state_orders
+                    .get(&road.rule().kind)
+                    .filter(|_| road.rule().expands && orders.contains_key(&road))
+                    .into_iter()
+                    .flatten()
+                    .chain(orders.get(&road).into_iter().flatten())
+                    .copied()
+            },
             section_limit(section, limits),
             floors,
             CueFloorStage::Section { section },
@@ -1547,7 +1551,7 @@ fn select_candidate_roots(
     let unique_count = merged.len();
     let selection = select_with_cue_floors(
         merged.iter().map(|root| (root.object, root.road_set())),
-        &orders,
+        |road| orders.get(&road).into_iter().flatten().copied(),
         max_graph_roots,
         floors,
         CueFloorStage::GraphRoots,
@@ -1993,7 +1997,7 @@ mod tests {
         )]);
         let selected = select_with_cue_floors(
             objects.into_iter().map(|object| (object, kinds.clone())),
-            &orders,
+            |road| orders.get(&road).into_iter().flatten().copied(),
             2,
             RetrievalCueFloors {
                 participant: 1,

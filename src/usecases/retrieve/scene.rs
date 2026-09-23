@@ -286,7 +286,7 @@ where
             })
             .cloned()
             .collect::<Vec<_>>();
-        let orders = candidates_by_kind
+        let orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>> = candidates_by_kind
             .into_iter()
             .map(|(kind, candidates)| {
                 let mut seen = HashSet::new();
@@ -314,7 +314,7 @@ where
             .collect::<Vec<_>>();
         let selection = select_with_cue_floors(
             roots.iter().map(|root| (root.object, root.road_set())),
-            &orders,
+            |road| orders.get(&road).into_iter().flatten().copied(),
             RecallRoad::Topic.contribution(context),
             context.cue_floors,
             CueFloorStage::CandidateMerge,
