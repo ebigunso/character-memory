@@ -448,7 +448,16 @@ fn bounded_expansion_plan<'a>(
 
     while let Some((object_ref, depth)) = queue.pop_front() {
         queued.remove(&object_ref);
-        if visited.contains(&object_ref) || future_memories.contains(&object_ref) {
+        if visited.contains(&object_ref) {
+            continue;
+        }
+        if future_memories.contains(&object_ref) {
+            push_filtered_node(
+                &mut filtered_nodes,
+                object_ref,
+                GraphExpansionFilteredReason::LaterThanReferenceTime,
+                &superseded,
+            );
             continue;
         }
         if visited.len() >= query.max_nodes {
@@ -486,14 +495,21 @@ fn bounded_expansion_plan<'a>(
             .filter(|link| relation_allowed(query, link.relation))
             .filter_map(|link| {
                 let neighbor = other_endpoint(link, object_ref)?;
-                if object_refs.contains(&neighbor)
-                    && !future_memories.contains(&neighbor)
-                    && query.allows_incident_link(object_ref, link.relation, neighbor)
+                if !object_refs.contains(&neighbor)
+                    || !query.allows_incident_link(object_ref, link.relation, neighbor)
                 {
-                    Some((*link, neighbor))
-                } else {
-                    None
+                    return None;
                 }
+                if future_memories.contains(&neighbor) {
+                    push_filtered_node(
+                        &mut filtered_nodes,
+                        neighbor,
+                        GraphExpansionFilteredReason::LaterThanReferenceTime,
+                        &superseded,
+                    );
+                    return None;
+                }
+                Some((*link, neighbor))
             })
             .collect::<Vec<_>>();
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));

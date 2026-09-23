@@ -1,6 +1,96 @@
 use super::*;
 
 #[tokio::test]
+async fn as_of_omissions_report_time_for_roots_and_expanded_memories() {
+    for direct_roots in [true, false] {
+        let (memory, temp) = open().await;
+        let mut plan = episode(RememberWritePlan::new(), 900, 1, 0.5, false, true);
+        plan = episode(plan, 100, -1, 0.5, false, direct_roots);
+        for (n, parent, observed_at) in [
+            (200, 900, Some(time() + Duration::days(1))),
+            (300, 100, None),
+            (500, 900, None),
+        ] {
+            let mut draft = ObservationDraft::new(id(parent), format!("Strong {n}"));
+            draft.id = Some(id(n));
+            draft.created_at = Some(time());
+            draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            draft.observed_at = observed_at;
+            plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+                draft,
+                provenance(),
+            )));
+            if direct_roots && n != 500 {
+                plan = indexed(plan, ObjectType::Observation, n);
+            }
+        }
+        for (kind, n) in [(ObjectType::Episode, 100), (ObjectType::Observation, 300)] {
+            plan = link(
+                plan,
+                ObjectType::Episode,
+                900,
+                kind,
+                n,
+                RelationType::AssociatedWith,
+            );
+        }
+        commit(&memory, plan).await;
+        let context = query(true, false);
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        assert_eq!(episodes(&result), [900]);
+        assert_eq!(
+            result
+                .pack
+                .salient_observations
+                .iter()
+                .map(|o| o.id)
+                .collect::<Vec<_>>(),
+            [id(500)]
+        );
+        let mut untraced_context = context;
+        untraced_context.include_trace = false;
+        let untraced = memory.retrieve(untraced_context).await.unwrap();
+        assert_eq!(untraced.pack, result.pack);
+        assert_eq!(untraced.memory_scenes, result.memory_scenes);
+        let trace = result.trace.as_ref().unwrap();
+        for (kind, n) in [
+            (ObjectType::Episode, 100),
+            (ObjectType::Observation, 200),
+            (ObjectType::Observation, 300),
+        ] {
+            let object = MemoryObjectRef::new(kind, id(n));
+            let reasons = trace
+                .lifecycle_filter_decisions
+                .iter()
+                .filter(|decision| decision.object == object)
+                .map(|decision| serde_json::to_value(decision.reason).unwrap())
+                .collect::<Vec<_>>();
+            assert!(
+                !reasons.is_empty()
+                    && reasons
+                        .iter()
+                        .all(|reason| reason == &json!("later_than_reference_time")),
+                "{direct_roots}: {object:?}: {reasons:?}"
+            );
+            let omissions = trace
+                .stale_candidate_omissions
+                .iter()
+                .filter(|omission| omission.candidate == object)
+                .map(|omission| serde_json::to_value(omission.reason).unwrap())
+                .collect::<Vec<_>>();
+            let expected = if direct_roots {
+                vec![json!("later_than_reference_time")]
+            } else {
+                vec![]
+            };
+            assert_eq!(omissions, expected, "{direct_roots}: {object:?}");
+        }
+        memory.close().await.unwrap();
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
 async fn recency_scene_only_room_and_floor_witnesses() {
     let (memory, root) = open().await;
     commit(&memory, base()).await;
