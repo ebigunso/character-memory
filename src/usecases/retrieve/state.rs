@@ -62,13 +62,18 @@ pub(super) fn order_section_state(
     objects: &mut [RankedObject],
     section: ContextPackSection,
     scopes: &StateScopes,
+    kinds: &[CueKind],
 ) {
-    order_state(
-        objects,
-        scopes,
-        |object| (section_for_object(object) == Some(section)).then(|| object.object.object_ref()),
-        |_, _| 0,
-    );
+    for kind in kinds.iter().copied().collect::<BTreeSet<_>>() {
+        order_state(
+            objects,
+            &scopes_for_kind(scopes, kinds, kind),
+            |object| {
+                (section_for_object(object) == Some(section)).then(|| object.object.object_ref())
+            },
+            |_, _| 0,
+        );
+    }
 }
 
 pub(super) fn order_state<T: Clone>(

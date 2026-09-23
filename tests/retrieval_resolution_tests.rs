@@ -180,6 +180,10 @@ async fn resolution_leaves_all_state_routes_before_their_caps() {
         let mut request = request(route).with_trace();
         request.candidate_limits.max_graph_roots = if route.starts_with("thread") { 3 } else { 2 };
         request.graph_limits.max_fanout_per_node = 2;
+        if matches!(route, "setting" | "custom") {
+            // Ruling 59: place reminders need two reserved seats to isolate state filtering.
+            request.cue_floors.place = 2;
+        }
         let result = memory.retrieve(request).await.unwrap();
         assert_eq!(
             result

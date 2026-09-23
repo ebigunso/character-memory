@@ -50,7 +50,7 @@ Retrieval is graph-authoritative and hybrid:
 - **Entity-based retrieval:** includes memories involving the same people, projects, places, or concepts
 - **Continuity retrieval:** returns a structured `ContinuityContextPack` rather than a generic ranked list
 
-`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. The topic recalls what happened or was learned, while descriptions recall occasions with similar surroundings or people. A setting key or custom value recalls current beliefs grounded in experiences with that context; beliefs with several sources can return in any of their recorded places or named contexts. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
+`RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. The topic recalls what happened or was learned, while descriptions recall occasions with similar surroundings or people. A setting key or custom value brings what was formed there as a reminder, newest first. It reserves the place floor, then competes for unclaimed room at a cue score of zero, without opening history or taking turns from the people present. Beliefs with several sources can return in any of their recorded places or named contexts. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
 
 For an admitted interpreted memory, `memory_scenes[].seconds_since_support` reports whole seconds since its latest supporting experience at or before the reference scene time, even with tracing off. An observation uses its own observed time, falling back to its parent scene time. Suppressed sources count only when `include_suppressed` is enabled; an active observation still counts after its parent episode is forgotten. No eligible support, including application-given beliefs without experiences and future-only support, reports `None` (`null` in JSON). A correction uses its replacement's own sources. This age never changes selection, order or scores.
 
@@ -58,14 +58,14 @@ An episode has a content search surface for its summary and up to two separate s
 
 For each recognized participant, `last_interactions` says when the character last met them and how much time has passed. If a name could mean several participants, each has its own answer. No eligible encounter at or before the scene time means never met. These facts remain available even when no memories fit the requested amount. Forgotten encounters count only when `include_suppressed` is enabled.
 
-Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
+Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Give an ongoing project as the activity; custom values describe the context in which memories were formed. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
 
 Each way of reaching a memory is a **road**. One memory can be reached by several roads. The same table controls what each road reports, whether it opens history, its reservation, and how many roots it contributes:
 
 | Road | Reported kind | Opens history | Reserves room | Contributes |
 | --- | --- | --- | --- | --- |
 | Participant key or name | Participant | Yes | Yes | The recognized notion, expanded |
-| Setting key or custom value | Place | Yes | Yes | Current state, up to the root cap |
+| Setting key or custom value | Place | No | Yes | Up to the root cap, newest first by memory time |
 | Activity | Activity | Yes | Yes | The thread's members |
 | Topic | Topic | Yes | Yes | Up to the candidate cap |
 | Participant description | Participant | No | Yes | The larger of one and the participant floor |
@@ -80,10 +80,10 @@ The room is the largest requested section cap. Five principles govern these road
 1. **Reserve from each road's own order.** Within a kind, roads that open history come first. A description sharing that kind does not jump ahead because another road also reached its memory.
 2. **Contribute only the table's amount.** Every search score enters as the larger of zero and its similarity. Contributing a candidate does not guarantee a place in the result.
 3. **A range is recency's window.** One time read uses the supplied span, or otherwise ends at the scene time. A supplied range reports date matches and contributes no recency outside it.
-4. **Recall the strongest matches first.** Among memories that nothing matched, the more significant come first, then the newer. When a section fills, equally strong memories favor the newer one. After reservations, only roads that open history share spare turns as roots are chosen; other stages fill the remaining room in order. Several people or contexts of one given kind retain their own turns.
+4. **Recall the strongest matches first.** Among memories that nothing matched, the more significant come first, then the newer. When a section fills, equally strong memories favor the newer one. After reservations, only roads that open history share spare turns as roots are chosen; other stages fill the remaining room in order. Several people present retain rounds among their own memories.
 5. **A road determines what opens.** A memory keeps its best score from all roads. Beyond a reminder's leaf reach, only expanding roads pass on their score and kind. Reminder proximity applies where no expanding road reached; a memory that expands as a root retains its own best strength and proximity.
 
-Memory time is an episode's scene time, an observation's observed time or parent scene time, and creation time for other objects. Root scores of one from a key, name or activity stay ahead of zero-score time reminders. Among zero-score time roots, stored salience comes first, then the newest memory time.
+Memory time is an episode's scene time, an observation's observed time or parent scene time, and creation time for other objects. Root scores of one from a participant key, name or activity stay ahead of zero-score place and time reminders. Among zero-score place and time roots, stored salience comes first, then the newest memory time.
 
 For a question about a span of time, the application supplies both endpoints with `.with_time_range(start, end)`. The library does not parse dates from the topic or call a model to determine the span. The range can accompany a topic and an activity:
 

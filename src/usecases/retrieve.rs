@@ -113,7 +113,6 @@ where
         let mut root_order = HashMap::new();
         let keys = context.scene.scope_keys();
         let scope_kinds = std::iter::repeat_n(CueKind::Participant, cues.participants.len())
-            .chain(std::iter::repeat_n(CueKind::Place, keys.len()))
             .chain([CueKind::Activity])
             .collect::<Vec<_>>();
         if context.graph_limits.allowed_object_types.is_empty()
@@ -122,7 +121,7 @@ where
                 .allowed_object_types
                 .contains(&ObjectType::DerivedMemory)
         {
-            for (offset, key) in keys.iter().enumerate() {
+            for key in &keys {
                 let (ids, filtered) = self
                     .graph_store
                     .query_scope_state(
@@ -144,23 +143,11 @@ where
                         )
                     }));
                 for (rank, row) in ids.into_iter().enumerate() {
-                    let id = row.id;
-                    root_order.insert(
-                        (
-                            cues.participants.len() + offset,
-                            MemoryObjectRef::new(ObjectType::DerivedMemory, id),
-                        ),
-                        rank,
-                    );
-                    state_scopes
-                        .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, id))
-                        .or_default()
-                        .push(cues.participants.len() + offset);
                     explicit_roots.push(CandidateRoot::from_rank(
                         row,
                         ObjectType::DerivedMemory,
                         RecallRoad::Place,
-                        1.0,
+                        0.0,
                         rank,
                     ));
                 }
@@ -174,11 +161,11 @@ where
             }));
         for (rank, root) in activity_roots.iter().enumerate() {
             if root.object.object_type == ObjectType::DerivedMemory {
-                root_order.insert((cues.participants.len() + keys.len(), root.object), rank);
+                root_order.insert((cues.participants.len(), root.object), rank);
                 state_scopes
                     .entry(root.object)
                     .or_default()
-                    .push(cues.participants.len() + keys.len());
+                    .push(cues.participants.len());
             }
         }
         explicit_roots.extend(activity_roots);
@@ -1000,7 +987,7 @@ fn build_pack(
     let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
-        state::order_section_state(&mut ranked_objects, section, state_scopes);
+        state::order_section_state(&mut ranked_objects, section, state_scopes, scope_kinds);
         let candidates = ranked_objects
             .iter()
             .filter(|ranked| section_for_object(ranked) == Some(section))
@@ -1315,7 +1302,7 @@ impl RecallRoad {
             Self::Place => (
                 CueKind::Place,
                 GraphRootSource::Place,
-                true,
+                false,
                 true,
                 RootCap,
                 true,

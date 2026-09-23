@@ -1449,14 +1449,14 @@ mod tests {
                     .collect()
             );
         }
-        for memories in [&mut expected_state, &mut expected_subject] {
-            memories.sort_by(|a, b| {
-                b.salience_score
-                    .total_cmp(&a.salience_score)
-                    .then_with(|| b.created_at.cmp(&a.created_at))
-                    .then_with(|| a.id.cmp(&b.id))
-            });
-        }
+        // Place reminders offer newest first; a participant still chooses salient state.
+        expected_state.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
+        expected_subject.sort_by(|a, b| {
+            b.salience_score
+                .total_cmp(&a.salience_score)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
         assert_eq!(
             &scope[..3],
             &expected_state
@@ -1479,7 +1479,6 @@ mod tests {
                 .map(|memory| memory.id)
                 .collect::<Vec<_>>()
         );
-        expected_state.sort_by_key(|memory| (std::cmp::Reverse(memory.created_at), memory.id));
         assert_eq!(
             thread
                 .iter()
