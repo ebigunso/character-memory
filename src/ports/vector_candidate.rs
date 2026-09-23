@@ -45,28 +45,3 @@ pub(crate) trait VectorCandidateStore: Send + Sync {
     /// Deletes every surface of each typed object, preserving other object types with the same ID.
     async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError>;
 }
-
-#[async_trait]
-impl<T: VectorCandidateStore + ?Sized> VectorCandidateStore for Box<T> {
-    async fn close(&self) -> Result<(), CustomError> {
-        (**self).close().await
-    }
-
-    async fn upsert_vector_records(
-        &self,
-        records: &[VectorRecordEmbedding<'_>],
-    ) -> Result<(), CustomError> {
-        (**self).upsert_vector_records(records).await
-    }
-
-    async fn search_candidates(
-        &self,
-        query: &VectorCandidateSearch,
-    ) -> Result<VectorCandidateRecall, CustomError> {
-        (**self).search_candidates(query).await
-    }
-
-    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-        (**self).delete_candidates(objects).await
-    }
-}

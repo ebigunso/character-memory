@@ -2,36 +2,34 @@ mod activity;
 mod scene;
 mod state;
 
-// Continuity retrieval pipeline used by the public facade and internal tests.
-// Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::api::types::{
     AdmissionRoad, ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage,
     CueKind, FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry,
-    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext,
-    RetrievalCueFloors, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
-    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
-    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, VectorCandidateTrace,
+    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterDecision,
+    LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
+    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
-    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
+    MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
-use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
+use crate::policy::graph_expansion::{fail_if_closed, graph_expansion_bounded_failure_trace};
 use crate::policy::{
     selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailureReason,
+    GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 #[cfg(test)]
@@ -128,10 +126,7 @@ where
                     .graph_store
                     .query_scope_state(
                         key,
-                        GraphExpansionLifecyclePolicy {
-                            include_suppressed: context.lifecycle_policy.include_suppressed,
-                            include_superseded: context.lifecycle_policy.include_superseded,
-                        },
+                        GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
                         contribution,
                     )
                     .await?;
@@ -191,10 +186,7 @@ where
                     .time_range
                     .map_or(context.scene.time.to_utc(), |range| range.end),
                 read_limit,
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
             )
             .await?;
         let time_range_has_more = context.time_range.map(|_| window.len() > contribution);
@@ -229,10 +221,7 @@ where
                     .map(|road| road.contribution(&context))
                     .max()
                     .unwrap_or(0),
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
             )
             .await?;
         for road in anniversary_roads {
@@ -299,7 +288,6 @@ where
                     stats_context,
                     context.lifecycle_policy,
                     trace_mode,
-                    candidate.source() == GraphRootSource::Participant,
                 )
                 .await?
             } else {
@@ -330,9 +318,7 @@ where
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
-                        if context.graph_limits.failure_mode == GraphFailureMode::FailClosed {
-                            return Err(bounded_failure_error(failure));
-                        }
+                        fail_if_closed(context.graph_limits.failure_mode, failure)?;
                     }
                     if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
@@ -367,7 +353,10 @@ where
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
-                    assembly.omit_missing_candidate(candidate)
+                    assembly.omit_unverified_candidate(
+                        candidate,
+                        StaleCandidateReason::GraphObjectMissing,
+                    )
                 }
                 Err(error) => return Err(error),
             }
@@ -530,7 +519,6 @@ struct RetrievalDetails {
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
     objects: HashMap<MemoryObjectRef, RankedObject>,
-    superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
     graph_relations: Option<Vec<crate::api::types::GraphRelationTrace>>,
@@ -577,18 +565,6 @@ impl RetrieveAssembly {
         } else {
             HashSet::new()
         };
-
-        for relation in &expansion.relations {
-            if relation.relation == RelationType::Supersedes
-                && relation.from.object_type == ObjectType::DerivedMemory
-                && relation.to.object_type == ObjectType::DerivedMemory
-            {
-                self.superseded_by
-                    .entry(relation.to.id)
-                    .or_default()
-                    .push(relation.from.id);
-            }
-        }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
@@ -678,12 +654,10 @@ impl RetrieveAssembly {
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
-            if object_ref.object_type == ObjectType::DerivedMemory {
-                if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
-                    ranked.resolved_by.extend(resolvers);
-                    ranked.resolved_by.sort_unstable();
-                    ranked.resolved_by.dedup();
-                }
+            if let Some(resolvers) = expansion.resolved_by.get(&object_ref) {
+                ranked.resolved_by.extend(resolvers);
+                ranked.resolved_by.sort_unstable();
+                ranked.resolved_by.dedup();
             }
         }
 
@@ -707,51 +681,42 @@ impl RetrieveAssembly {
         }
 
         if !root_filtered && !root_verified && !self.objects.contains_key(&candidate_ref) {
-            if bounded_failure.is_some() {
-                self.omit_bounded_candidate(candidate);
+            let reason = if bounded_failure.is_some() {
+                StaleCandidateReason::GraphExpansionBounded
             } else {
-                self.omit_missing_candidate(candidate);
-            }
+                StaleCandidateReason::GraphObjectMissing
+            };
+            self.omit_unverified_candidate(candidate, reason);
         }
         Ok(())
     }
 
-    fn omit_bounded_candidate(&mut self, candidate: &CandidateRoot) {
+    fn omit_unverified_candidate(
+        &mut self,
+        candidate: &CandidateRoot,
+        reason: StaleCandidateReason,
+    ) {
         self.stale_omissions.push(StaleCandidateOmission {
             candidate: candidate.object,
             vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphExpansionBounded,
+            reason,
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: candidate.object,
-            retention_state: None,
             superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
-            reason: LifecycleFilterReason::GraphExpansionBounded,
-        });
-    }
-
-    fn omit_missing_candidate(&mut self, candidate: &CandidateRoot) {
-        self.stale_omissions.push(StaleCandidateOmission {
-            candidate: candidate.object,
-            vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphObjectMissing,
-        });
-        self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: candidate.object,
-            retention_state: None,
-            superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
-            reason: LifecycleFilterReason::GraphObjectMissing,
+            reason: match reason {
+                StaleCandidateReason::GraphExpansionBounded => {
+                    LifecycleFilterReason::GraphExpansionBounded
+                }
+                StaleCandidateReason::GraphObjectMissing => {
+                    LifecycleFilterReason::GraphObjectMissing
+                }
+                _ => unreachable!("unverified candidates are missing or bounded"),
+            },
         });
     }
 
     fn ranked_objects(&mut self) -> Vec<RankedObject> {
-        for superseded in self.superseded_by.values_mut() {
-            superseded.sort();
-            superseded.dedup();
-        }
-
         let mut ranked_objects = Vec::new();
         for (_, ranked) in std::mem::take(&mut self.objects) {
             ranked_objects.push(ranked);
@@ -886,9 +851,9 @@ struct RankKey {
 
 // A reservation credits its road's own head, even if already selected. Only
 // expanding roads can take a spare turn at roots; other stages fill ranked room.
-fn select_with_cue_floors(
+fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
     candidates: impl IntoIterator<Item = (MemoryObjectRef, BTreeSet<RecallRoad>)>,
-    orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
+    orders: impl Fn(RecallRoad) -> I,
     limit: usize,
     floors: RetrievalCueFloors,
     stage: CueFloorStage,
@@ -925,8 +890,8 @@ fn select_with_cue_floors(
             .filter(|road| road.rule().kind == kind && road.rule().reserves)
         {
             let mut ranks = HashMap::new();
-            for (rank, object) in orders.get(road).into_iter().flatten().enumerate() {
-                ranks.entry(*object).or_insert(rank);
+            for (rank, object) in orders(*road).into_iter().enumerate() {
+                ranks.entry(object).or_insert(rank);
             }
             let mut members = candidates
                 .iter()
@@ -993,7 +958,6 @@ fn build_pack(
     section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
-    let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
         state::order_state_per_kind(
@@ -1011,7 +975,7 @@ fn build_pack(
             .collect::<Vec<_>>();
         // Section state already has its scope/score order; root recency must not
         // become the section floor order. Reuse this prefix without re-sorting it.
-        let mut orders = orders.clone();
+        let mut state_orders = BTreeMap::new();
         for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
             let state_order = candidates
                 .iter()
@@ -1025,17 +989,21 @@ fn build_pack(
                     })
                 })
                 .collect::<Vec<_>>();
-            for (road, order) in &mut orders {
-                if road.rule().kind == kind && road.rule().expands {
-                    order.splice(..0, state_order.iter().copied());
-                }
-            }
+            state_orders.insert(kind, state_order);
         }
         for (index, cause) in select_with_cue_floors(
             candidates
                 .iter()
                 .map(|ranked| (ranked.object.object_ref(), ranked.roads.clone())),
-            &orders,
+            |road| {
+                state_orders
+                    .get(&road.rule().kind)
+                    .filter(|_| road.rule().expands && orders.contains_key(&road))
+                    .into_iter()
+                    .flatten()
+                    .chain(orders.get(&road).into_iter().flatten())
+                    .copied()
+            },
             section_limit(section, limits),
             floors,
             CueFloorStage::Section { section },
@@ -1069,9 +1037,9 @@ fn build_pack(
             continue;
         };
 
-        let count = section_counts.count_mut(section);
+        let pressure = section_pressure_for(section_pressure, section);
         if !selected.contains(&ranked.object.object_ref()) {
-            increment_section_omitted_by_limit(section_pressure, section);
+            pressure.omitted_by_limit_count += 1;
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
@@ -1092,9 +1060,8 @@ fn build_pack(
             continue;
         }
 
-        *count += 1;
-        increment_section_included(section_pressure, section);
-        let rank = *count;
+        pressure.included_count += 1;
+        let rank = pressure.included_count;
         details.admitted_by.insert(
             ranked.object.object_ref(),
             ranked
@@ -1162,73 +1129,52 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
     ]
 }
 
-fn increment_section_included(
+fn section_pressure_for(
     section_pressure: &mut [SectionPressureSummary],
     section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
+) -> &mut SectionPressureSummary {
+    section_pressure
         .iter_mut()
         .find(|summary| summary.section == section)
-    {
-        summary.included_count += 1;
-    }
+        .expect("every pack section has a pressure summary")
 }
 
-fn increment_section_omitted_by_limit(
-    section_pressure: &mut [SectionPressureSummary],
-    section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
-        .iter_mut()
-        .find(|summary| summary.section == section)
-    {
-        summary.omitted_by_limit_count += 1;
+fn count_reasons<R: Copy + Eq>(
+    reasons: impl Iterator<Item = R>,
+    rank: impl Fn(R) -> u8,
+) -> impl Iterator<Item = (R, usize)> {
+    let mut counts = Vec::<(R, usize)>::new();
+    for reason in reasons {
+        if let Some((_, count)) = counts.iter_mut().find(|(value, _)| *value == reason) {
+            *count += 1;
+        } else {
+            counts.push((reason, 1));
+        }
     }
+    counts.sort_by_key(|(reason, _)| rank(*reason));
+    counts.into_iter()
 }
 
 fn summarize_stale_candidate_omissions(
     omissions: &[StaleCandidateOmission],
 ) -> Vec<StaleCandidateOmissionSummary> {
-    let mut summaries = Vec::<StaleCandidateOmissionSummary>::new();
-    for omission in omissions {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == omission.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(StaleCandidateOmissionSummary {
-                reason: omission.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| stale_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        omissions.iter().map(|entry| entry.reason),
+        stale_reason_rank,
+    )
+    .map(|(reason, count)| StaleCandidateOmissionSummary { reason, count })
+    .collect()
 }
 
 fn summarize_lifecycle_omissions(
     decisions: &[LifecycleFilterDecision],
 ) -> Vec<LifecycleOmissionSummary> {
-    let mut summaries = Vec::<LifecycleOmissionSummary>::new();
-    for decision in decisions
-        .iter()
-        .filter(|decision| decision.action == LifecycleFilterAction::Omitted)
-    {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == decision.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(LifecycleOmissionSummary {
-                reason: decision.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| lifecycle_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        decisions.iter().map(|entry| entry.reason),
+        lifecycle_reason_rank,
+    )
+    .map(|(reason, count)| LifecycleOmissionSummary { reason, count })
+    .collect()
 }
 
 fn push_derived(
@@ -1247,36 +1193,6 @@ fn push_derived(
         ContextPackSection::CharacterSignals => pack.character_signals.push(included),
         ContextPackSection::DerivedMemories => pack.derived_memories.push(included),
         _ => unreachable!("derived memories require a derived-memory pack section"),
-    }
-}
-
-#[derive(Debug, Default)]
-struct SectionCounts {
-    active_threads: usize,
-    relevant_episodes: usize,
-    salient_observations: usize,
-    derived_memories: usize,
-    preferences: usize,
-    relationship_notes: usize,
-    open_loops: usize,
-    commitments: usize,
-    character_signals: usize,
-}
-
-impl SectionCounts {
-    fn count_mut(&mut self, section: ContextPackSection) -> &mut usize {
-        match section {
-            ContextPackSection::ActiveThreads => &mut self.active_threads,
-            ContextPackSection::RelevantEpisodes => &mut self.relevant_episodes,
-            ContextPackSection::SalientObservations => &mut self.salient_observations,
-            ContextPackSection::DerivedMemories => &mut self.derived_memories,
-            ContextPackSection::Preferences => &mut self.preferences,
-            ContextPackSection::RelationshipNotes => &mut self.relationship_notes,
-            ContextPackSection::OpenLoops => &mut self.open_loops,
-            ContextPackSection::Commitments => &mut self.commitments,
-            ContextPackSection::CharacterSignals => &mut self.character_signals,
-            ContextPackSection::Omitted => unreachable!("omitted is not a pack section counter"),
-        }
     }
 }
 
@@ -1654,7 +1570,7 @@ fn select_candidate_roots(
     let unique_count = merged.len();
     let selection = select_with_cue_floors(
         merged.iter().map(|root| (root.object, root.road_set())),
-        &orders,
+        |road| orders.get(&road).into_iter().flatten().copied(),
         max_graph_roots,
         floors,
         CueFloorStage::GraphRoots,
@@ -1702,10 +1618,9 @@ fn graph_query_for_candidate(
     .with_fanout_overrides(fanout_overrides)
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
-    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-        include_suppressed: context.lifecycle_policy.include_suppressed,
-        include_superseded: context.lifecycle_policy.include_superseded,
-    })
+    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
+        context.lifecycle_policy,
+    ))
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,
@@ -1725,10 +1640,6 @@ fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &Selecti
     total.low_selectivity_supported_count += next.low_selectivity_supported_count;
     total.low_selectivity_rejected_count += next.low_selectivity_rejected_count;
     total.fallback_count += next.fallback_count;
-}
-
-fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
 }
 
 fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
@@ -1824,9 +1735,7 @@ fn filtered_lifecycle_decision(
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
         object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
-        retention_state: None,
         superseded_by: superseded_by.to_vec(),
-        action: LifecycleFilterAction::Omitted,
         reason: match reason {
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
@@ -1925,9 +1834,6 @@ fn salience_component(object: &MemoryObject) -> f32 {
 
 fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
-        LifecycleFilterReason::Active => 0,
-        LifecycleFilterReason::SuppressedIncludedByPolicy => 2,
-        LifecycleFilterReason::SupersededIncludedByPolicy => 5,
         LifecycleFilterReason::SuppressedOmitted => 7,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
@@ -1960,6 +1866,7 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::GraphFailureMode;
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
@@ -1968,18 +1875,12 @@ mod tests {
     use async_trait::async_trait;
     use uuid::Uuid;
 
-    use chrono::{DateTime, Utc};
-
-    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::ContinuitySectionLimits;
     use crate::domain::RetentionState;
     use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
-    use crate::policy::RetrievalSelectivityPolicy;
-    use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
-        high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
-        TemporaryVectorCandidateStore,
+        in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
 
     #[tokio::test]
@@ -2084,7 +1985,10 @@ mod tests {
             ],
             Vec::new(),
         );
-        expansion.resolved_by.insert(entity.id, vec![resolver]);
+        expansion.resolved_by.insert(
+            MemoryObjectRef::new(ObjectType::DerivedMemory, entity.id),
+            vec![resolver],
+        );
         let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
         assembly
             .absorb_expansion(&candidate, &query, expansion)
@@ -2112,7 +2016,7 @@ mod tests {
         )]);
         let selected = select_with_cue_floors(
             objects.into_iter().map(|object| (object, kinds.clone())),
-            &orders,
+            |road| orders.get(&road).into_iter().flatten().copied(),
             2,
             RetrievalCueFloors {
                 participant: 1,
@@ -2572,67 +2476,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn entity_neutral_selectivity_rejects_low_selectivity_concept_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &fixture
-                .derived_memories
-                .iter()
-                .map(|memory| memory.id)
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan
-            .traces
-            .iter()
-            .any(|decision| decision.relation == RelationType::About
-                && decision.object_type == ObjectType::DerivedMemory
-                && decision.chosen_fanout == 0
-                && decision.decision
-                    == crate::api::types::SelectivityDecision::LowSelectivityRejected));
-        assert!(!expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap == 0
-                && entry.retained_count == 0
-                && entry.omitted_by_fanout_count > 0));
-    }
-
-    #[tokio::test]
     async fn retrieval_telemetry_preserves_vector_recall_completeness() {
         let cases = [
             VectorRecallCompleteness::NotRequested,
@@ -2664,55 +2507,6 @@ mod tests {
                 0
             );
         }
-    }
-
-    #[tokio::test]
-    async fn selectivity_allows_high_selectivity_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &[fixture.derived_memories[0].id],
-        )
-        .await;
-        record_other_about_edges(&stats, 80).await;
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan.telemetry.high_selectivity_count > 0);
-        assert!(expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap <= entry.configured_cap
-                && entry.retained_count > 0));
     }
 
     #[tokio::test]
@@ -2767,8 +2561,7 @@ mod tests {
         assert!(trace
             .lifecycle_filter_decisions
             .iter()
-            .any(|decision| decision.object.id == fixtures.suppressed_seed.id
-                && decision.action == LifecycleFilterAction::Omitted));
+            .any(|decision| decision.object.id == fixtures.suppressed_seed.id));
     }
 
     #[tokio::test]
@@ -3563,10 +3356,10 @@ mod tests {
                 candidate.object.id == missing_vector_only_id
                     && candidate.object.object_type == ObjectType::DerivedMemory
             }));
-            assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
-                decision.object.id == fixtures.suppressed_seed.id
-                    && decision.action == LifecycleFilterAction::Omitted
-            }));
+            assert!(trace
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|decision| { decision.object.id == fixtures.suppressed_seed.id }));
         }
     }
 
@@ -3588,52 +3381,6 @@ mod tests {
         graph.upsert_objects(objects).await.unwrap();
         graph.upsert_links(links).await.unwrap();
         graph
-    }
-
-    async fn record_about_edges(
-        stats: &InMemoryRetrievalStatsStore,
-        entity_id: MemoryId,
-        derived_memory_ids: &[MemoryId],
-    ) {
-        let edges = derived_memory_ids
-            .iter()
-            .map(|object_id| stats_edge(entity_id, *object_id))
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    async fn record_other_about_edges(stats: &InMemoryRetrievalStatsStore, count: u128) {
-        let edges = (0..count)
-            .map(|offset| {
-                stats_edge(
-                    Uuid::from_u128(0x650e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                    Uuid::from_u128(0x750e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                )
-            })
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    fn stats_edge(entity_id: MemoryId, object_id: MemoryId) -> RetrievalStatsEdge {
-        let observed_at = timestamp();
-        RetrievalStatsEdge {
-            edge_key: format!("{}:about:derived_memory:{}", entity_id, object_id),
-            entity_id,
-            relation_kind: RelationType::About,
-            object_id,
-            object_type: ObjectType::DerivedMemory,
-            retention_state: RetentionState::Active,
-            is_current: true,
-            first_seen_at: observed_at,
-            last_seen_at: observed_at,
-            source_observation: None,
-        }
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 
     fn vector_candidate(

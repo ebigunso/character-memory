@@ -1290,21 +1290,6 @@ mod tests {
                 .candidates
                 .iter()
                 .any(|candidate| candidate.object_id == predecessor_id));
-            let predecessor_counter = RetrievalStatsCounterKey {
-                entity_id: fixtures.user_entity.id,
-                relation_kind: RelationType::About,
-                object_type: ObjectType::DerivedMemory,
-            };
-            assert_eq!(
-                stats
-                    .counter(&predecessor_counter)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .current_count,
-                1
-            );
-
             // No caller-authored link and no predecessor object in this plan.
             let successor_plan = plan_for(
                 successor_id,
@@ -1343,26 +1328,6 @@ mod tests {
                     .await
                     .unwrap(),
                 vec![predecessor_id]
-            );
-            assert_eq!(
-                stats.counter(&predecessor_counter).await.unwrap().unwrap(),
-                RetrievalStatsCounter {
-                    total_count: 1,
-                    active_count: 1,
-                    current_count: 0
-                }
-            );
-            assert_eq!(
-                stats
-                    .global_counter(RelationType::About, ObjectType::DerivedMemory)
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                RetrievalStatsCounter {
-                    total_count: 2,
-                    active_count: 2,
-                    current_count: 1
-                }
             );
             let retrieve = RetrievePipeline::new(&graph, &vector, &embedder);
             let normal = retrieve
@@ -1452,27 +1417,6 @@ mod tests {
                     .await
                     .unwrap(),
                 predecessor
-            );
-            assert_eq!(
-                stats
-                    .counter(&predecessor_counter)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .current_count,
-                0
-            );
-            assert_eq!(
-                stats
-                    .global_counter(RelationType::About, ObjectType::DerivedMemory)
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                RetrievalStatsCounter {
-                    total_count: 2,
-                    active_count: 1,
-                    current_count: 0
-                }
             );
             let expansion = graph
                 .expand_bounded(&GraphExpansionQuery::new(
@@ -1896,12 +1840,6 @@ mod tests {
             .await
             .expect("first correction should preserve stats failure in its outcome");
         assert!(first.stats_update_status.failure.is_some());
-        let counter_key = RetrievalStatsCounterKey {
-            entity_id,
-            relation_kind: RelationType::About,
-            object_type: ObjectType::DerivedMemory,
-        };
-        assert!(stats.counter(&counter_key).await.unwrap().is_none());
         let graph_writes_after_first = graph_write_count(&graph.calls());
 
         let retry = pipeline
@@ -1924,14 +1862,6 @@ mod tests {
             .causes
             .iter()
             .any(|cause| matches!(cause, StatsUpdateCause::StoreUnhealthy { .. })));
-        let counter = stats
-            .counter(&counter_key)
-            .await
-            .unwrap()
-            .expect("retry should rebuild the dropped stats edges");
-        assert_eq!(counter.total_count, 2);
-        assert_eq!(counter.active_count, 2);
-        assert_eq!(counter.current_count, 1);
     }
 
     #[tokio::test]

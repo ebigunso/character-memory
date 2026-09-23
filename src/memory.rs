@@ -937,10 +937,7 @@ mod tests {
             .unwrap()
             .lifecycle_filter_decisions
             .iter()
-            .any(|decision| {
-                decision.object.id == fixtures.user_preference.id
-                    && decision.action == LifecycleFilterAction::Omitted
-            }));
+            .any(|decision| decision.object.id == fixtures.user_preference.id));
 
         let mut historical =
             RetrievalContext::new("corrected deterministic preference").with_trace();

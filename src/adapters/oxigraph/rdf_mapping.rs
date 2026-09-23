@@ -441,7 +441,7 @@ fn score(value: f32) -> String {
     value.to_string()
 }
 
-fn enum_value(value: impl Serialize) -> String {
+pub(super) fn enum_value(value: impl Serialize) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|value| value.as_str().map(ToOwned::to_owned))

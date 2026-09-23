@@ -12,7 +12,6 @@ use crate::errors::{ConfigValidationError, ConfigValidationReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
-    #[serde(default = "Scene::now")]
     pub scene: Scene,
     pub topic: Option<String>,
     pub activity: Option<ActivityRef>,
@@ -229,6 +228,17 @@ impl RetrievalLifecyclePolicy {
     }
 }
 
+impl From<RetrievalLifecyclePolicy>
+    for crate::ports::graph_authority::GraphExpansionLifecyclePolicy
+{
+    fn from(policy: RetrievalLifecyclePolicy) -> Self {
+        Self {
+            include_suppressed: policy.include_suppressed,
+            include_superseded: policy.include_superseded,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrieveOutcome {
     /// An unset or empty part means not given. A scene is never complete: people
@@ -332,7 +342,7 @@ pub enum SceneReferenceResolution {
     /// For a name, no notion is currently known by exactly this name, nothing more.
     /// For a key, no notion currently exists at that key.
     Unknown,
-    ContentCue,
+    Reminder,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -732,25 +742,13 @@ pub enum GraphExpansionOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleFilterDecision {
     pub object: MemoryObjectRef,
-    pub retention_state: Option<RetentionState>,
     pub superseded_by: Vec<MemoryId>,
-    pub action: LifecycleFilterAction,
     pub reason: LifecycleFilterReason,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LifecycleFilterAction {
-    Included,
-    Omitted,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum LifecycleFilterReason {
-    Active,
-    SuppressedIncludedByPolicy,
-    SupersededIncludedByPolicy,
     SuppressedOmitted,
     SupersededOmitted,
     GraphObjectMissing,

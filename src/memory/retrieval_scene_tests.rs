@@ -317,27 +317,8 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
     memory.close().await.unwrap();
 }
 
-async fn mention_counts(memory: &CharacterMemory, participant: MemoryId) -> (u64, u64) {
-    let stats = &memory.memory_composition.stats_store;
-    let entity = stats
-        .counter(&crate::ports::retrieval_stats::RetrievalStatsCounterKey {
-            entity_id: participant,
-            relation_kind: RelationType::Mentions,
-            object_type: ObjectType::Observation,
-        })
-        .await
-        .unwrap()
-        .unwrap_or_default();
-    let global = stats
-        .global_counter(RelationType::Mentions, ObjectType::Observation)
-        .await
-        .unwrap()
-        .unwrap_or_default();
-    (entity.current_count, global.current_count)
-}
-
 #[tokio::test]
-async fn observation_forget_recounts_mentions_without_removing_presence() {
+async fn observation_forget_preserves_episode_presence() {
     for sqlite in [false, true] {
         for (in_scene, direct_link) in [(false, false), (true, false), (false, true)] {
             let directory = tempfile::tempdir().unwrap();
@@ -397,7 +378,7 @@ async fn observation_forget_recounts_mentions_without_removing_presence() {
             }
             let mut context = RetrievalContext::default().with_trace();
             context.scene.participants.push(keyed(100));
-            for (forgotten, expected) in [(None, 2), (Some(30_001), 1), (Some(30_002), 0)] {
+            for forgotten in [None, Some(30_001), Some(30_002)] {
                 if let Some(id) = forgotten {
                     memory
                         .forget(ForgetMemoryDraft::suppress(
@@ -409,13 +390,11 @@ async fn observation_forget_recounts_mentions_without_removing_presence() {
                 }
                 let result = memory.retrieve(context.clone()).await.unwrap();
                 let decisions = result.trace.unwrap().selectivity_decisions;
-                // Present-subject aboutness bypasses selectivity; counters still follow retention.
+                // Present-subject aboutness bypasses selectivity.
                 assert!(decisions
                     .iter()
                     .all(|row| row.relation != RelationType::Mentions));
-                assert_eq!(mention_counts(&memory, MemoryId::from_u128(100)).await, (expected, expected),
-                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}");
-                // Mentions tracks remarks; presence is independent of their retention.
+                // Episode presence is independent of the remarks retention.
                 let presence = decisions
                     .iter()
                     .find(|row| row.relation == RelationType::Involves)
@@ -431,7 +410,7 @@ async fn observation_forget_recounts_mentions_without_removing_presence() {
 }
 
 #[tokio::test]
-async fn mentions_count_observations_independently_of_parent_lifecycle() {
+async fn mentions_recall_observations_independently_of_parent_lifecycle() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
     let participant = MemoryId::from_u128(100);
@@ -481,7 +460,7 @@ async fn mentions_count_observations_independently_of_parent_lifecycle() {
         ..Default::default()
     }];
     let result = memory.retrieve(context.clone()).await.unwrap();
-    assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+
     // One subject aboutness budget admits both remarks despite their ubiquity.
     assert_eq!(participant_observations(&result).len(), 2);
     assert!(result
@@ -501,7 +480,7 @@ async fn mentions_count_observations_independently_of_parent_lifecycle() {
     for include_suppressed in [false, true] {
         context.lifecycle_policy.include_suppressed = include_suppressed;
         let result = memory.retrieve(context.clone()).await.unwrap();
-        assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+
         assert_eq!(participant_observations(&result).len(), 2);
     }
     memory.close().await.unwrap();
@@ -1531,7 +1510,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     assert!(description_only
         .scene_references
         .iter()
-        .all(|reference| reference.resolution == SceneReferenceResolution::ContentCue));
+        .all(|reference| reference.resolution == SceneReferenceResolution::Reminder));
 
     let named_belief = MemoryObjectRef::new(ObjectType::DerivedMemory, MemoryId::from_u128(1100));
     let topic_only = memory
@@ -1585,7 +1564,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         &place_result.scene_references[0],
         SceneReferenceResult {
             reference: SceneReference::SettingWords,
-            resolution: SceneReferenceResolution::ContentCue,
+            resolution: SceneReferenceResolution::Reminder,
             ..
         }
     ));
