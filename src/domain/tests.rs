@@ -76,7 +76,6 @@ fn canonical_identity_and_order_ranks_are_stable() {
 
 fn representative_episode() -> Episode {
     Episode {
-        scene_local_date: None,
         id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,

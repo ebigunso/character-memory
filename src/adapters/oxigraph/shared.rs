@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use oxigraph::model::{GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
@@ -319,7 +319,7 @@ pub(super) fn memory_object_from_rdf(
             modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
             scene: crate::domain::Scene {
                 time: timestamp_literal(subject, values, super::vocabulary::SCENE_TIME)?
-                    .fixed_offset(),
+                    .with_timezone(&scene_offset_literal(subject, values)?),
                 participants: serde_json::from_str(
                     &values.literal(subject, super::vocabulary::SCENE_PARTICIPANTS)?,
                 )
@@ -337,15 +337,6 @@ pub(super) fn memory_object_from_rdf(
                     rdf_parse_error(subject, super::vocabulary::SCENE_CUSTOM_VALUES, error)
                 })?,
             },
-            scene_local_date: values
-                .optional_literal(super::vocabulary::SCENE_LOCAL_YEAR)
-                .map(|year| {
-                    let month_day = values.literal(subject, super::vocabulary::SCENE_MONTH_DAY)?;
-                    format!("{year}-{month_day}").parse().map_err(|error| {
-                        rdf_parse_error(subject, super::vocabulary::SCENE_LOCAL_YEAR, error)
-                    })
-                })
-                .transpose()?,
             ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
             summary: values.literal(subject, super::vocabulary::SUMMARY)?,
             raw_ref: values.optional_literal(super::vocabulary::RAW_REF),
@@ -548,6 +539,19 @@ pub(super) fn f32_literal(
         .literal(subject, predicate)?
         .parse()
         .map_err(|error| rdf_parse_error(subject, predicate, error))
+}
+
+fn scene_offset_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+) -> Result<FixedOffset, CustomError> {
+    let predicate = super::vocabulary::SCENE_OFFSET_SECONDS;
+    let seconds = values
+        .literal(subject, predicate)?
+        .parse()
+        .map_err(|error| rdf_parse_error(subject, predicate, error))?;
+    FixedOffset::east_opt(seconds)
+        .ok_or_else(|| rdf_parse_error(subject, predicate, "offset must be less than 24 hours"))
 }
 
 pub(super) fn timestamp_literal(

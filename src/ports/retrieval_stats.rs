@@ -746,7 +746,6 @@ mod tests {
         let memory_id = id("550e8400-e29b-41d4-a716-446655460023");
         let objects = vec![
             MemoryObject::Episode(Episode {
-                scene_local_date: None,
                 id: episode_id,
                 object_type: ObjectType::Episode,
                 modality: Modality::Chat,

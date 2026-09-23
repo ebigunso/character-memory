@@ -200,31 +200,68 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn anniversary_selector_reads_metadata_and_skips_legacy_episodes() {
+    async fn scene_hydration_requires_a_valid_stored_offset() {
+        use super::super::vocabulary as vocab;
+        use oxigraph::model::{Literal, Quad};
+        for value in [None, Some("invalid"), Some("86400"), Some("-86400")] {
+            let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+            let episode = representative_fixtures().episode;
+            store
+                .upsert_objects(&[MemoryObject::Episode(episode.clone())])
+                .await
+                .unwrap();
+            let offset = store
+                .store
+                .iter()
+                .map(Result::unwrap)
+                .find(|quad| quad.predicate.as_str() == vocab::SCENE_OFFSET_SECONDS)
+                .unwrap();
+            store.store.remove(&offset).unwrap();
+            if let Some(value) = value {
+                store
+                    .store
+                    .insert(&Quad::new(
+                        offset.subject,
+                        offset.predicate,
+                        Literal::new_simple_literal(value),
+                        offset.graph_name,
+                    ))
+                    .unwrap();
+            }
+            let result = store
+                .query_objects(&GraphObjectQuery::by_ids(vec![episode.id]))
+                .await;
+            assert!(
+                matches!(result, Err(crate::errors::GraphQueryError::Hydration { detail }) if detail.contains(vocab::SCENE_OFFSET_SECONDS))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anniversary_selector_reads_local_calendar_metadata_without_hydrating_content() {
         use super::super::vocabulary as vocab;
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let legacy = representative_fixtures().episode;
-        assert_eq!(legacy.scene_local_date, None);
-        let mut dated = legacy.clone();
+        let other = representative_fixtures().episode;
+        let mut dated = other.clone();
         dated.id = MemoryId::from_u128(900);
-        dated.scene_local_date = Some("2025-09-21".parse().unwrap());
+        dated.scene.time = "2025-09-21T00:30:00+09:00".parse().unwrap();
         dated.scene.participants = vec![crate::SceneParticipant {
             key: Some(MemoryId::from_u128(7)),
             ..Default::default()
         }];
         store
             .upsert_objects(&[
-                MemoryObject::Episode(legacy.clone()),
+                MemoryObject::Episode(other.clone()),
                 MemoryObject::Episode(dated.clone()),
             ])
             .await
             .unwrap();
         assert_eq!(
             store
-                .query_objects(&GraphObjectQuery::by_ids(vec![legacy.id]))
+                .query_objects(&GraphObjectQuery::by_ids(vec![other.id]))
                 .await
                 .unwrap(),
-            [MemoryObject::Episode(legacy)]
+            [MemoryObject::Episode(other)]
         );
         // A selector must not need the episode's content to find a match.
         for quad in store.store.iter().map(Result::unwrap).collect::<Vec<_>>() {

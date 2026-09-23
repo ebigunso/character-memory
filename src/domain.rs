@@ -298,9 +298,6 @@ pub struct Episode {
     pub object_type: ObjectType,
     pub modality: Modality,
     pub scene: Scene,
-    /// Calendar date at the supplied scene offset, derived when the episode is built.
-    /// Episodes stored without this derivation have no anniversary date.
-    pub scene_local_date: Option<chrono::NaiveDate>,
     pub ended_at: Option<DateTime<Utc>>,
     pub summary: String,
     pub raw_ref: Option<String>,

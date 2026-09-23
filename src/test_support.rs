@@ -406,7 +406,6 @@ pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
 
 pub(crate) fn simple_episode() -> Episode {
     Episode {
-        scene_local_date: None,
         id: fixture_id(10),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,

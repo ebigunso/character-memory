@@ -3292,7 +3292,6 @@ mod tests {
 
     fn source_episode(ids: &FixedIds) -> Episode {
         Episode {
-            scene_local_date: None,
             id: ids.episode,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,

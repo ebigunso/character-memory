@@ -6,14 +6,30 @@ use serde::{Deserialize, Serialize};
 use super::MemoryId;
 
 /// The situation as perceived. Omitted participants do not mean nobody was present.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct Scene {
-    /// Use the same offset for retrieval as for writes when matching anniversaries.
-    /// The recorded local day is stored on `Episode::scene_local_date`.
+    /// The supplied instant and offset are preserved; anniversaries use its local day.
     pub time: DateTime<FixedOffset>,
     pub participants: Vec<SceneParticipant>,
     pub setting: SceneSetting,
     pub custom_values: BTreeMap<String, String>,
+}
+
+impl PartialEq for Scene {
+    fn eq(&self, other: &Self) -> bool {
+        // DateTime compares only instants; the perceived offset is content too.
+        let Self {
+            time,
+            participants,
+            setting,
+            custom_values,
+        } = self;
+        time == &other.time
+            && time.offset() == other.time.offset()
+            && participants == &other.participants
+            && setting == &other.setting
+            && custom_values == &other.custom_values
+    }
 }
 
 impl Scene {
