@@ -107,6 +107,165 @@ mod road_behavior {
             .collect()
     }
 
+    #[tokio::test]
+    async fn admitted_memories_report_their_cues_without_a_trace() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = episode(RememberWritePlan::new(), 100, 20, 0.5, None, reverse);
+            let faint = format!("ferry {}", "noise ".repeat(40));
+            plan = episode(plan, 101, 10, 0.5, Some(&faint), reverse);
+            plan = episode(plan, 102, 1, 0.5, None, reverse);
+            plan = episode(plan, 103, 2, 0.5, None, reverse);
+            if let MemoryCandidate::Episode(candidate) = plan.candidates.last_mut().unwrap() {
+                candidate.draft.scene.as_mut().unwrap().setting.key = Some("office".into());
+            }
+            let mut person = EntityDraft::new();
+            person.id = Some(id(10, reverse));
+            let mut thread = MemoryThreadDraft::new("ferry project", "ongoing ferry work");
+            thread.id = Some(id(300, reverse));
+            let mut source = EpisodeDraft::new("ferry");
+            source.id = Some(id(104, reverse));
+            source.scene = Some(Scene {
+                participants: vec![SceneParticipant {
+                    key: person.id,
+                    ..Default::default()
+                }],
+                ..Scene::at((time() - Duration::days(3)).fixed_offset())
+            });
+            let mut observation = ObservationDraft::new(id(104, reverse), "noticed the ferry");
+            observation.id = Some(id(201, reverse));
+            let mut belief =
+                DerivedMemoryDraft::new(DerivedType::Claim, "ferry service is reliable")
+                    .with_source_episode(id(104, reverse));
+            belief.id = Some(id(200, reverse));
+            belief.entity_ids.push(id(10, reverse));
+            belief.thread_ids.push(id(300, reverse));
+            plan.candidates.extend(
+                RememberInput::new("ferry")
+                    .with_entity(person)
+                    .with_memory_thread(thread)
+                    .with_episode(source)
+                    .with_observation(observation)
+                    .with_derived_memory(belief)
+                    .prepare_write_plan(&RememberPlanDefaults::fixed("admitted cues", time()))
+                    .candidates,
+            );
+            let mut place_memory =
+                DerivedMemoryDraft::new(DerivedType::Claim, "the office closes early")
+                    .with_source_episode(id(103, reverse));
+            place_memory.id = Some(id(202, reverse));
+            place_memory.created_at = Some(time() - Duration::days(2));
+            place_memory.updated_at = place_memory.created_at;
+            place_memory.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            plan = plan.with_candidate(MemoryCandidate::DerivedMemory(
+                DerivedMemoryCandidate::new(place_memory, provenance()),
+            ));
+            commit(&memory, plan).await;
+
+            for (case, kind, n, expected) in [
+                ("range", ObjectType::Episode, 100, vec![CueKind::DateMatch]),
+                (
+                    "faint topic",
+                    ObjectType::Episode,
+                    101,
+                    vec![CueKind::Topic],
+                ),
+                ("quiet", ObjectType::Episode, 102, vec![CueKind::Recency]),
+                (
+                    "keyed place",
+                    ObjectType::DerivedMemory,
+                    202,
+                    vec![CueKind::Place],
+                ),
+                (
+                    "overlap",
+                    ObjectType::DerivedMemory,
+                    200,
+                    vec![CueKind::Participant, CueKind::Topic],
+                ),
+                (
+                    "activity",
+                    ObjectType::MemoryThread,
+                    300,
+                    vec![CueKind::Activity],
+                ),
+            ] {
+                let mut context = query(None, 8, 8);
+                context.graph_limits.max_depth = 2;
+                match case {
+                    "range" => {
+                        context = context.with_time_range(
+                            time() - Duration::days(20),
+                            time() - Duration::days(20),
+                        )
+                    }
+                    "faint topic" => context.topic = Some("ferry".into()),
+                    "keyed place" => context.scene.setting.key = Some("office".into()),
+                    "overlap" => {
+                        context.topic = Some("ferry".into());
+                        context.scene.participants.push(SceneParticipant {
+                            key: Some(id(10, reverse)),
+                            ..Default::default()
+                        });
+                    }
+                    "activity" => context.activity = Some(ActivityRef::Thread(id(300, reverse))),
+                    _ => {}
+                }
+                let traced = memory.retrieve(context.clone()).await.unwrap();
+                context.include_trace = false;
+                let untraced = memory.retrieve(context).await.unwrap();
+                assert!(untraced.trace.is_none());
+                assert_eq!(traced.pack, untraced.pack);
+                assert_eq!(traced.memory_scenes, untraced.memory_scenes);
+                assert_eq!(traced.rationale, untraced.rationale);
+                let assignments = &traced.trace.as_ref().unwrap().section_assignments;
+                assert_eq!(
+                    untraced.memory_scenes.len(),
+                    assignments.iter().filter(|row| row.rank.is_some()).count()
+                );
+                for entry in &untraced.memory_scenes {
+                    let assignment = assignments
+                        .iter()
+                        .find(|row| row.object == entry.memory && row.rank.is_some())
+                        .unwrap();
+                    assert_eq!(entry.admitted_by, assignment.cue_kinds);
+                    assert!(!entry.admitted_by.is_empty());
+                }
+                let json = serde_json::to_value(&untraced).unwrap();
+                assert!(json["memory_scenes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|entry| entry["admitted_by"].is_array()));
+                let witness = MemoryObjectRef::new(kind, id(n, reverse));
+                let admitted = untraced
+                    .memory_scenes
+                    .iter()
+                    .find(|entry| entry.memory == witness)
+                    .unwrap();
+                assert!(
+                    expected
+                        .iter()
+                        .all(|kind| admitted.admitted_by.contains(kind)),
+                    "{case}: {admitted:?}"
+                );
+                if case == "faint topic" {
+                    let score = traced
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .vector_candidates
+                        .iter()
+                        .find(|row| row.object == witness)
+                        .unwrap()
+                        .score;
+                    assert!(score > 0.0 && score < 0.1, "faint topic score: {score}");
+                }
+            }
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
     async fn presence_and_mentions(
         remarks: u128,
         reverse: bool,
@@ -1417,7 +1576,15 @@ mod road_behavior {
             assert_eq!(before.activity, after.activity);
             assert_eq!(before.time_range, after.time_range);
             assert_eq!(before.scene_references, after.scene_references);
-            assert_eq!(before.memory_scenes, after.memory_scenes);
+            // The new day takes the second recency contribution, without changing the pack.
+            let mut scenes = before.memory_scenes.clone();
+            if let Some(entry) = scenes
+                .iter_mut()
+                .find(|entry| entry.memory.id == id(101, reverse))
+            {
+                assert!(entry.admitted_by.remove(&CueKind::Recency));
+            }
+            assert_eq!(scenes, after.memory_scenes);
             let scores = |result: &RetrieveOutcome| {
                 result
                     .trace

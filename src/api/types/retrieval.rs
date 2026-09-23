@@ -247,6 +247,8 @@ pub struct RetrieveOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryScenes {
     pub memory: MemoryObjectRef,
+    /// Cue kinds that brought this admitted memory to mind, with or without a trace.
+    pub admitted_by: BTreeSet<CueKind>,
     /// Empty means no recorded experience; unavailable sources are explicit entries.
     pub sources: Vec<SourceScene>,
     /// Whole seconds since this interpreted memory's latest eligible support

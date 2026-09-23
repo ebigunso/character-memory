@@ -473,6 +473,14 @@ where
             selectivity: selectivity_telemetry,
             section_pressure,
         };
+        let memory_scenes = self
+            .memory_scenes(
+                &pack,
+                &details.section_assignments,
+                context.lifecycle_policy.include_suppressed,
+                context.scene.time.to_utc(),
+            )
+            .await?;
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_searches: cues.scene_cue_searches,
             time_range_has_more,
@@ -496,13 +504,6 @@ where
             section_assignments: details.section_assignments,
         });
 
-        let memory_scenes = self
-            .memory_scenes(
-                &pack,
-                context.lifecycle_policy.include_suppressed,
-                context.scene.time.to_utc(),
-            )
-            .await?;
         Ok(RetrieveOutcome {
             scene: context.scene,
             activity,
