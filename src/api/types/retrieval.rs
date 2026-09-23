@@ -8,7 +8,7 @@ use crate::domain::{
     GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
     RelationType, RetentionState, Scene, ThreadStatus, VectorSurface,
 };
-use crate::errors::{ConfigValidationError, ConfigValidationReason};
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
@@ -58,7 +58,8 @@ impl RetrievalContext {
         self
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
+    pub(crate) fn validate(&self) -> Result<(), CustomError> {
+        self.scene.validate_time()?;
         if self.object_type_defaults.is_empty() {
             return Err(ConfigValidationError {
                 keys: vec!["object_type_defaults"],
@@ -66,7 +67,8 @@ impl RetrievalContext {
                     expected: "at least one retrieval object type",
                     actual: "[]".to_owned(),
                 },
-            });
+            }
+            .into());
         }
 
         Ok(())

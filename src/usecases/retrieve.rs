@@ -86,7 +86,6 @@ where
         &self,
         mut context: RetrievalContext,
     ) -> Result<RetrieveOutcome, CustomError> {
-        context.scene.validate_time()?;
         context.scene = context.scene.without_blank_participants();
         context.validate()?;
         let cues = self.recall_cues(&context).await?;
