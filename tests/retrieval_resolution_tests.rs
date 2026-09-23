@@ -1,24 +1,15 @@
 use character_memory::{
     ActivityRef, CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EntityDraft,
-    EpisodeDraft, ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryId,
-    MemoryLinkDraft, MemoryThreadDraft, ObjectType, RelationType, RememberInput,
-    RememberPlanDefaults, RetentionState, RetrievalContext, RetrieveOutcome, Scene,
-    SceneParticipant,
+    EpisodeDraft, ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryLinkDraft,
+    MemoryThreadDraft, ObjectType, RelationType, RememberInput, RememberPlanDefaults,
+    RetentionState, RetrievalContext, RetrieveOutcome, Scene, SceneParticipant,
 };
-use chrono::{DateTime, Utc};
+use test_support::id;
+use test_support::time_at_minute as at;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
 
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
-fn at(n: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + chrono::Duration::minutes(n)
-}
 async fn commit(memory: &CharacterMemory, input: RememberInput) {
     let defaults = RememberPlanDefaults::fixed(&input.content, at(0));
     memory
@@ -180,6 +171,10 @@ async fn resolution_leaves_all_state_routes_before_their_caps() {
         let mut request = request(route).with_trace();
         request.candidate_limits.max_graph_roots = if route.starts_with("thread") { 3 } else { 2 };
         request.graph_limits.max_fanout_per_node = 2;
+        if matches!(route, "setting" | "custom") {
+            // Ruling 59: place reminders need two reserved seats to isolate state filtering.
+            request.cue_floors.place = 2;
+        }
         let result = memory.retrieve(request).await.unwrap();
         assert_eq!(
             result

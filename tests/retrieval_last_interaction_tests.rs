@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use test_support::{id, keyed};
 
 use character_memory::{
     BeliefAssertion, BeliefPredicate, CandidateProvenance, CharacterMemory, CommitOptions,
@@ -14,20 +15,12 @@ use chrono::{DateTime, Duration, Utc};
 #[path = "support/mod.rs"]
 pub mod test_support;
 
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
 fn reference_time() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-21T12:00:00.750Z")
         .unwrap()
         .with_timezone(&Utc)
 }
-fn keyed(n: u128) -> SceneParticipant {
-    SceneParticipant {
-        key: Some(id(n)),
-        ..Default::default()
-    }
-}
+
 fn request(participants: Vec<SceneParticipant>) -> RetrievalContext {
     let mut scene = Scene::at((reference_time()).fixed_offset());
     scene.participants = participants;
@@ -141,13 +134,13 @@ async fn identity_reports_last_interaction_without_trace_or_pack_room() {
         for days in [365, 30, 1] {
             experience(
                 &memory,
-                (10000 + days) as u128,
+                (20000 - days) as u128,
                 reference_time() - Duration::days(days),
                 caller,
             )
             .await;
         }
-        let expected = fact(10001, reference_time() - Duration::days(1));
+        let expected = fact(19999, reference_time() - Duration::days(1));
         for participant in [
             keyed(100),
             SceneParticipant {
@@ -158,12 +151,12 @@ async fn identity_reports_last_interaction_without_trace_or_pack_room() {
             let result = memory.retrieve(request(vec![participant])).await.unwrap();
             assert!(result.trace.is_none());
             assert_eq!(last(&result), Some(&expected));
-            assert!(occasions(&result).contains(&id(10001)));
+            assert!(occasions(&result).contains(&id(19999)));
         }
         experience(&memory, 9999, reference_time() + Duration::days(1), caller).await;
         let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
         assert_eq!(last(&result), Some(&expected));
-        assert!(occasions(&result).contains(&id(10001)));
+        assert!(occasions(&result).contains(&id(19999)));
         assert!(!occasions(&result).contains(&id(9999)));
 
         let mut no_room = request(vec![keyed(100), keyed(200)]);
@@ -332,14 +325,28 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         )
         .await;
         let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
-        assert_eq!(last(&result), Some(&fact(401, recent)));
+        // Talking about someone does not establish an interaction with them.
+        assert_eq!(last(&result), (!mentions).then_some(&fact(401, recent)));
         assert!(occasions(&result).contains(&id(401)));
         assert!(!occasions(&result).contains(&id(499)));
+        let mut ranged = request(vec![keyed(100)]);
+        ranged.time_range = Some(character_memory::api::types::TimeRange {
+            start: old,
+            end: recent,
+        });
+        let ranged = memory.retrieve(ranged).await.unwrap();
+        assert!(
+            !occasions(&ranged).contains(&id(499)),
+            "a range does not exempt ordinary expansion"
+        );
         let mut tight = request(vec![keyed(100)]);
         tight.section_limits.relevant_episodes = 1;
         tight.section_limits.salient_observations = 1;
         let tight_result = memory.retrieve(tight).await.unwrap();
-        assert_eq!(last(&tight_result), Some(&fact(401, recent)));
+        assert_eq!(
+            last(&tight_result),
+            (!mentions).then_some(&fact(401, recent))
+        );
         tight_occasions.push(occasions(&tight_result));
         let target = if mentions {
             LifecycleTargetRef::observation(id(1401))
@@ -360,7 +367,7 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
             } else {
                 fact(400, old)
             };
-            assert_eq!(last(&result), Some(&expected));
+            assert_eq!(last(&result), (!mentions).then_some(&expected));
             assert!(occasions(&result).contains(&expected.episode_id));
         }
         if mentions {
@@ -382,7 +389,7 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
                 } else {
                     fact(400, old)
                 };
-                assert_eq!(last(&result), Some(&expected));
+                assert_eq!(last(&result), (!mentions).then_some(&expected));
                 assert!(occasions(&result).contains(&expected.episode_id));
             }
         }
@@ -394,10 +401,12 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
     assert_eq!(
         tight_occasions,
         vec![
-            BTreeSet::from([id(401)]),
-            BTreeSet::from([id(401)]),
+            // Rulings 46 and 69: recency brings the notion-creation observation.
             BTreeSet::from([id(401), notion_episode]),
             BTreeSet::from([id(401), notion_episode]),
+            // Bounded aboutness now brings the remark and its occasion before recency.
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401)]),
         ]
     );
 }

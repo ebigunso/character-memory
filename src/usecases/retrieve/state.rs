@@ -58,17 +58,21 @@ pub(super) fn record_subject_state(
     }
 }
 
-pub(super) fn order_section_state(
-    objects: &mut [RankedObject],
-    section: ContextPackSection,
+pub(super) fn order_state_per_kind<T: Clone>(
+    objects: &mut [T],
     scopes: &StateScopes,
+    kinds: &[CueKind],
+    reference: impl Fn(&T) -> Option<MemoryObjectRef>,
+    priority: impl Fn(usize, &T) -> usize,
 ) {
-    order_state(
-        objects,
-        scopes,
-        |object| (section_for_object(object) == Some(section)).then(|| object.object.object_ref()),
-        |_, _| 0,
-    );
+    for kind in kinds.iter().copied().collect::<BTreeSet<_>>() {
+        order_state(
+            objects,
+            &scopes_for_kind(scopes, kinds, kind),
+            &reference,
+            &priority,
+        );
+    }
 }
 
 pub(super) fn order_state<T: Clone>(

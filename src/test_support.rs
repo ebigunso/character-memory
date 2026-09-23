@@ -107,31 +107,35 @@ pub(crate) fn in_memory_graph_store() -> OxigraphGraphAuthorityStore {
     OxigraphGraphAuthorityStore::new_in_memory().expect("in-memory graph store")
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DeterministicMemoryEmbedder {
-    dimensions: usize,
-}
-
-impl DeterministicMemoryEmbedder {
-    pub(crate) fn new(dimensions: usize) -> Self {
-        Self { dimensions }
-    }
-}
+pub(crate) struct TestEmbedder<F>(pub(crate) F);
 
 #[async_trait]
-impl MemoryEmbedder for DeterministicMemoryEmbedder {
+impl<F> MemoryEmbedder for TestEmbedder<F>
+where
+    F: Fn(&EmbeddingInput) -> Vec<f32> + Send + Sync,
+{
     async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-        Ok(deterministic_embedding(input, self.dimensions))
+        Ok((self.0)(input))
     }
 
     async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
-        let embeddings = inputs
-            .iter()
-            .map(|input| deterministic_embedding(input, self.dimensions))
-            .collect();
-
-        Ok(embeddings)
+        Ok(inputs.iter().map(&self.0).collect())
     }
+}
+
+pub(crate) fn deterministic_embedder(dimensions: usize) -> impl MemoryEmbedder {
+    TestEmbedder(move |input: &EmbeddingInput| deterministic_embedding(input, dimensions))
+}
+
+pub(crate) async fn memory_with_embedder(
+    dimensions: usize,
+    embedder: impl MemoryEmbedder + 'static,
+) -> crate::CharacterMemory {
+    crate::CharacterMemory::from_parts(
+        Box::new(in_memory_graph_store()),
+        Box::new(TemporaryVectorCandidateStore::open(dimensions).await),
+        Box::new(embedder),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -406,7 +410,6 @@ pub(crate) fn high_fanout_graph_fixture() -> HighFanoutGraphFixture {
 
 pub(crate) fn simple_episode() -> Episode {
     Episode {
-        scene_local_date: None,
         id: fixture_id(10),
         object_type: ObjectType::Episode,
         modality: Modality::Chat,
@@ -541,7 +544,7 @@ fn fixture_id(suffix: u128) -> MemoryId {
     Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0000 + suffix)
 }
 
-fn timestamp(value: &str) -> DateTime<Utc> {
+pub(crate) fn timestamp(value: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(value)
         .unwrap()
         .with_timezone(&Utc)
@@ -574,6 +577,27 @@ fn deterministic_embedding(input: &EmbeddingInput, dimensions: usize) -> Vec<f32
     embedding
 }
 
+pub(crate) fn parse_id(value: &str) -> MemoryId {
+    MemoryId::parse_str(value).unwrap()
+}
+pub(crate) fn write_time() -> DateTime<Utc> {
+    timestamp("2026-04-28T12:00:00Z")
+}
+
+pub(crate) fn pack_contains_derived_memory(
+    pack: &crate::ContinuityContextPack,
+    memory_id: MemoryId,
+) -> bool {
+    pack.derived_memories
+        .iter()
+        .chain(pack.preferences.iter())
+        .chain(pack.relationship_notes.iter())
+        .chain(pack.open_loops.iter())
+        .chain(pack.commitments.iter())
+        .chain(pack.character_signals.iter())
+        .any(|included| included.memory.id == memory_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,7 +615,7 @@ mod tests {
 
     #[tokio::test]
     async fn deterministic_embedder_uses_explicit_text_without_external_services() {
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let input = EmbeddingInput::new(
             Some(fixture_id(20)),
             Some(ObjectType::Observation),

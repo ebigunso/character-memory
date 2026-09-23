@@ -4,10 +4,11 @@ use character_memory::{
     RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
     DEFAULT_SCHEMA_VERSION,
 };
-use chrono::{DateTime, Utc};
+use test_support::time_at_minute as time;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
+use test_support::derived_ids as ids;
 
 async fn commit_input(memory: &CharacterMemory, input: RememberInput) {
     let defaults = RememberPlanDefaults::fixed(&input.content, time(0));
@@ -18,13 +19,6 @@ async fn commit_input(memory: &CharacterMemory, input: RememberInput) {
         )
         .await
         .unwrap();
-}
-
-fn time(offset: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + chrono::Duration::minutes(offset)
 }
 
 fn entity(id: u128) -> EntityDraft {
@@ -110,15 +104,6 @@ async fn write_many(
     commit_input(memory, input).await;
 }
 
-fn ids(result: &character_memory::RetrieveOutcome) -> Vec<MemoryId> {
-    result
-        .pack
-        .derived_memories
-        .iter()
-        .map(|x| x.memory.id)
-        .collect()
-}
-
 #[tokio::test]
 async fn named_people_share_section_room_in_scope_rounds() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
@@ -177,17 +162,18 @@ async fn named_people_share_section_room_in_scope_rounds() {
             .filter(|id| id.as_u128() != 9500)
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
-        assert_eq!(&states[..6], &[1184, 9000, 9001, 9002, 9003, 9004]);
+        // Principle 4 serves the newest equal-score state in each person's scope.
+        assert_eq!(&states[..6], &[1199, 9100, 9001, 9002, 9003, 9004]);
         if topic.is_some() {
             assert_eq!(
                 ids(&result)
                     .iter()
                     .map(|id| id.as_u128())
                     .collect::<Vec<_>>(),
-                [9500, 1184, 9000, 9001, 9002, 9003, 9004, 1185, 9100, 1186, 1187, 1188]
+                [9500, 1199, 9100, 9001, 9002, 9003, 9004, 1198, 9000, 1197, 1196, 1195]
             );
         } else {
-            assert_eq!(&states[6..8], &[1185, 9100]);
+            assert_eq!(&states[6..8], &[1198, 9000]);
         }
         assert_eq!(result.pack.derived_memories.len(), 12);
         let telemetry = &result.rationale.telemetry.selectivity;
@@ -289,12 +275,10 @@ async fn named_subject_fanout_selects_current_salient_then_recent_state() {
             .filter(|id| id.as_u128() != 9500)
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
+        // Presence takes two of the sixteen turns; state stays salient then recent.
         assert_eq!(
-            &states[..16],
-            &[
-                2003, 2017, 2022, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2018, 2019, 2020, 2021,
-                2023, 2024
-            ]
+            &states[..14],
+            &[2003, 2017, 2022, 2023, 2024, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012]
         );
         assert!(states.iter().all(|id| !(1980..1996).contains(id)));
     }

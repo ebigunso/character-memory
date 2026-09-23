@@ -164,7 +164,7 @@ impl RememberInput {
             )));
         }
 
-        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id, &scene) {
+        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id) {
             plan = plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
                 link,
                 self.helper_provenance()
@@ -335,7 +335,6 @@ impl RememberInput {
         defaults: &RememberPlanDefaults,
         episode_id: MemoryId,
         observation_id: MemoryId,
-        scene: &Scene,
     ) -> Vec<MemoryLinkDraft> {
         let mut links = Vec::new();
         for (index, entity_id) in self.entity_ids.iter().copied().enumerate() {
@@ -349,24 +348,6 @@ impl RememberInput {
                 ),
                 defaults,
                 defaults.stable_id(format!("hint-link:entity:{index}")),
-            ));
-        }
-        let mut seen = HashSet::new();
-        for (index, participant_id) in scene
-            .participant_keys()
-            .filter(|id| seen.insert(*id))
-            .enumerate()
-        {
-            links.push(complete_link_draft(
-                MemoryLinkDraft::new(
-                    ObjectType::Observation,
-                    observation_id,
-                    RelationType::Mentions,
-                    ObjectType::Entity,
-                    participant_id,
-                ),
-                defaults,
-                defaults.stable_id(format!("hint-link:participant:{index}")),
             ));
         }
         for (index, thread_id) in self.thread_ids.iter().copied().enumerate() {
@@ -528,15 +509,7 @@ mod construction_tests {
     use super::*;
     use crate::domain::DerivedType;
 
-    fn timestamp(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value)
-            .unwrap()
-            .with_timezone(&Utc)
-    }
-
-    fn memory_id(value: &str) -> MemoryId {
-        uuid::Uuid::parse_str(value).unwrap()
-    }
+    use crate::test_support::{parse_id as memory_id, timestamp};
 
     #[test]
     fn same_input_and_fixed_defaults_prepare_identical_plan() {
@@ -820,6 +793,12 @@ impl PlanValidationContext {
 
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
+            MemoryCandidate::Observation(candidate) => {
+                self.add_ref_to_check(MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    candidate.draft.episode_id,
+                ));
+            }
             MemoryCandidate::Episode(candidate) => {
                 if let Some(scene) = &candidate.draft.scene {
                     for id in scene.participant_keys() {
@@ -933,6 +912,10 @@ impl PlanValidationContext {
             }
             MemoryCandidate::Observation(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
+                errors.extend(self.validate_graph_authoritative_ref(
+                    MemoryObjectRef::new(ObjectType::Episode, candidate.draft.episode_id),
+                    CandidateReferenceRole::ObservationEpisode,
+                ));
                 errors.extend(validate_required_candidate_identity(
                     "observation candidate",
                     candidate.draft.id,
@@ -1329,25 +1312,45 @@ impl WritePlanCommitValues {
         for object in &objects {
             match object {
                 MemoryObject::DerivedMemory(memory) => links.extend(derived_memory_links(memory)),
+                MemoryObject::Observation(observation) => {
+                    if !links.iter().any(|link| {
+                        let from = MemoryObjectRef::new(link.from_type, link.from_id);
+                        let to = MemoryObjectRef::new(link.to_type, link.to_id);
+                        let observation_ref = object.object_ref();
+                        let episode_ref =
+                            MemoryObjectRef::new(ObjectType::Episode, observation.episode_id);
+                        link.relation == RelationType::ObservedIn
+                            && ((from == observation_ref && to == episode_ref)
+                                || (to == observation_ref && from == episode_ref))
+                    }) {
+                        links.push(MemoryLink {
+                            id: deterministic_uuid(&[
+                                b"character_memory.observation.episode_link",
+                                observation.id.as_bytes(),
+                                observation.episode_id.as_bytes(),
+                            ]),
+                            object_type: ObjectType::MemoryLink,
+                            from_id: observation.id,
+                            from_type: ObjectType::Observation,
+                            to_id: observation.episode_id,
+                            to_type: ObjectType::Episode,
+                            relation: RelationType::ObservedIn,
+                            rationale: None,
+                            created_at: observation.created_at,
+                            schema_version: observation.schema_version.clone(),
+                        });
+                    }
+                }
                 MemoryObject::Episode(episode) => {
-                    let sources = std::iter::once(object.object_ref())
-                        .chain(objects.iter().filter_map(|object| match object {
-                            MemoryObject::Observation(observation)
-                                if observation.episode_id == episode.id =>
-                            {
-                                Some(object.object_ref())
-                            }
-                            _ => None,
-                        }))
-                        .collect::<HashSet<_>>();
                     let mut linked = links
                         .iter()
+                        .filter(|link| link.relation == RelationType::Involves)
                         .filter_map(|link| {
                             let from = MemoryObjectRef::new(link.from_type, link.from_id);
                             let to = MemoryObjectRef::new(link.to_type, link.to_id);
-                            if sources.contains(&from) && to.object_type == ObjectType::Entity {
+                            if from == object.object_ref() && to.object_type == ObjectType::Entity {
                                 Some(to.id)
-                            } else if sources.contains(&to)
+                            } else if to == object.object_ref()
                                 && from.object_type == ObjectType::Entity
                             {
                                 Some(from.id)
@@ -1618,6 +1621,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
         DomainValidationError::MissingScene => CandidateValidationIssue::MissingScene,
+        DomainValidationError::InvalidSceneTimeOffset { offset_seconds } => {
+            CandidateValidationIssue::InvalidSceneTimeOffset { offset_seconds }
+        }
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }
@@ -1689,8 +1695,8 @@ fn schema_version(object: &MemoryObject) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::parse_id as id;
     use chrono::{DateTime, Utc};
-    use uuid::Uuid;
 
     use super::RememberPlanDefaults;
     use crate::api::types::{
@@ -1703,7 +1709,7 @@ mod tests {
         DEFAULT_SCHEMA_VERSION,
     };
     use crate::test_support::{
-        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
+        deterministic_embedder, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
     use crate::usecases::RememberPipeline;
@@ -1997,7 +2003,7 @@ mod tests {
         assert_eq!(verdict.validations, expected);
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let error = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
@@ -2543,7 +2549,7 @@ mod tests {
         );
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(
                 plan,
@@ -2636,7 +2642,7 @@ mod tests {
         );
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(
                 plan,
@@ -2766,9 +2772,5 @@ mod tests {
         DateTime::parse_from_rfc3339("2026-07-03T12:00:00Z")
             .unwrap()
             .with_timezone(&Utc)
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
     }
 }

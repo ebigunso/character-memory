@@ -1,13 +1,14 @@
 use std::sync::{Arc, Mutex};
+use test_support::id;
+use test_support::scene_time as time;
 
 use async_trait::async_trait;
 use character_memory::{
     CharacterMemory, CommitOptions, EmbeddingError, EmbeddingProvider, EpisodeDraft,
-    ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObjectType, RememberInput, RememberOptions,
+    ForgetMemoryDraft, LifecycleTargetRef, ObjectType, RememberInput, RememberOptions,
     RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant, Settings,
 };
 use character_memory::{CueKind, VectorRecallCompleteness, VectorSurface};
-use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 
 #[path = "support/mod.rs"]
@@ -65,12 +66,6 @@ impl EmbeddingProvider for Provider {
     }
 }
 
-fn time() -> DateTime<Utc> {
-    "2026-09-21T12:00:00Z".parse().unwrap()
-}
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
 fn scene(setting: Option<&str>, participants: &[&str]) -> Scene {
     let mut scene = Scene::at((time()).fixed_offset());
     scene.setting.words = setting.map(str::to_owned);
@@ -86,29 +81,7 @@ fn scene(setting: Option<&str>, participants: &[&str]) -> Scene {
 
 async fn open(service: bool) -> (CharacterMemory, Arc<Calls>, tempfile::TempDir, String) {
     let root = tempfile::tempdir().unwrap();
-    let mut builder = config::Config::builder()
-        .set_override(
-            "vector_store_path",
-            root.path().join("vectors").to_string_lossy().into_owned(),
-        )
-        .unwrap()
-        .set_override("graph_store_mode", "persistent")
-        .unwrap()
-        .set_override(
-            "oxigraph_path",
-            root.path().join("graph").to_string_lossy().into_owned(),
-        )
-        .unwrap()
-        .set_override("retrieval_stats_store_mode", "sqlite")
-        .unwrap()
-        .set_override(
-            "retrieval_stats_path",
-            root.path()
-                .join("stats.sqlite3")
-                .to_string_lossy()
-                .into_owned(),
-        )
-        .unwrap();
+    let mut builder = test_support::persistent_settings(root.path());
     if service {
         dotenvy::dotenv().ok();
         builder = builder

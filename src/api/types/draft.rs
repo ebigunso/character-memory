@@ -154,7 +154,6 @@ impl EpisodeDraft {
             id: defaults.id(self.id),
             object_type: ObjectType::Episode,
             modality: self.modality,
-            scene_local_date: Some(scene.time.date_naive()),
             scene,
             ended_at: self.ended_at,
             summary: self.summary,

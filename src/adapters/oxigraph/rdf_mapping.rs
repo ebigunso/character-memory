@@ -141,6 +141,21 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
         ),
         RdfTriple::literal(
             &subject,
+            vocab::SCENE_OFFSET_SECONDS,
+            episode.scene.time.offset().local_minus_utc().to_string(),
+        ),
+        RdfTriple::literal(
+            &subject,
+            vocab::SCENE_LOCAL_YEAR,
+            episode.scene.time.date_naive().format("%Y").to_string(),
+        ),
+        RdfTriple::literal(
+            &subject,
+            vocab::SCENE_MONTH_DAY,
+            episode.scene.time.date_naive().format("%m-%d").to_string(),
+        ),
+        RdfTriple::literal(
+            &subject,
             vocab::SCENE_PARTICIPANTS,
             serde_json::to_string(&episode.scene.participants)
                 .expect("scene participants contain only strings and UUIDs"),
@@ -152,20 +167,6 @@ fn episode_triples(episode: &Episode) -> Vec<RdfTriple> {
                 .expect("scene custom values contain only strings"),
         ),
     ]);
-    if let Some(date) = episode.scene_local_date {
-        triples.extend([
-            RdfTriple::literal(
-                &subject,
-                vocab::SCENE_LOCAL_YEAR,
-                date.format("%Y").to_string(),
-            ),
-            RdfTriple::literal(
-                &subject,
-                vocab::SCENE_MONTH_DAY,
-                date.format("%m-%d").to_string(),
-            ),
-        ]);
-    }
     push_optional_literal(
         &mut triples,
         &subject,
@@ -441,7 +442,7 @@ fn score(value: f32) -> String {
     value.to_string()
 }
 
-fn enum_value(value: impl Serialize) -> String {
+pub(super) fn enum_value(value: impl Serialize) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|value| value.as_str().map(ToOwned::to_owned))

@@ -16,7 +16,7 @@
 // Both flavors share the same hub/fanout limiting primitives
 // (`apply_fanout_limits_by_pair`, `bounded_hub_retention_limit`), filters
 // (`relation_allowed`, `object_type_allowed`), and bounded-failure error
-// construction (`graph_expansion_bounded_error`).
+// construction (`graph_expansion_bounded_failure_trace`).
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
@@ -56,7 +56,7 @@ impl RootFanoutMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<MemoryObjectRef>,
     pub(crate) selection_order: Vec<MemoryObjectRef>,
@@ -75,11 +75,20 @@ pub(crate) type ParticipantOccasions = HashMap<MemoryObjectRef, ParticipantOccas
 pub(crate) struct ParticipantOccasion {
     pub(crate) episode_id: MemoryId,
     pub(crate) time: DateTime<Utc>,
+    pub(crate) observed_at: Option<DateTime<Utc>>,
     pub(crate) retention_state: RetentionState,
     pub(crate) episode_retention_state: RetentionState,
 }
 
 impl ParticipantOccasion {
+    pub(crate) fn memory_time(&self, kind: ObjectType) -> DateTime<Utc> {
+        if kind == ObjectType::Observation {
+            self.observed_at.unwrap_or(self.time)
+        } else {
+            self.time
+        }
+    }
+
     pub(crate) fn filtered_reason(
         &self,
         neighbor: MemoryObjectRef,
@@ -113,16 +122,13 @@ pub(crate) fn bounded_expansion(
         .into_iter()
         .filter(|object| plan.visited.contains(&object.object_ref()))
         .collect();
-    sort_objects(&mut expanded_objects);
+    expanded_objects.sort_by_key(MemoryObject::stable_order_key);
 
     let mut resolved_by = incoming_derived_memory_ids(
         &links.iter().collect::<Vec<_>>(),
         &[RelationType::Resolves, RelationType::FulfillsCommitment],
     );
-    resolved_by.retain(|id, _| {
-        plan.visited
-            .contains(&MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
-    });
+    resolved_by.retain(|object, _| plan.visited.contains(object));
     let traversed_link_ids = plan
         .relations
         .iter()
@@ -286,77 +292,6 @@ fn provenance_linked_derived_memory_id(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn bounded_expansion_node_set(
-    query: &GraphExpansionQuery,
-    root_exists: bool,
-    links: impl IntoIterator<Item = MemoryLink>,
-) -> Result<HashSet<(MemoryId, ObjectType)>, CustomError> {
-    if query.max_fanout_per_node != usize::MAX
-        || query.max_hub_edges != usize::MAX
-        || !query.allowed_relation_types.is_empty()
-        || !query.fanout_overrides.is_empty()
-        || query.lifecycle_policy != GraphExpansionLifecyclePolicy::default()
-        || query.failure_policy != GraphExpansionFailurePolicy::default()
-    {
-        panic!("bounded_expansion_node_set only supports basic depth/node/object-type bounds");
-    }
-
-    if query.root_type == ObjectType::MemoryLink {
-        panic!("bounded_expansion_node_set does not support MemoryLink roots");
-    }
-
-    if !root_exists {
-        return Err(CustomError::GraphExpansionRootNotFound {
-            object_type: query.root_type,
-            object_id: query.root_id,
-        });
-    }
-
-    if query.max_nodes == 0 {
-        return Ok(HashSet::new());
-    }
-
-    let links = links.into_iter().collect::<Vec<_>>();
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::from([(query.root_id, query.root_type, 0_u8)]);
-
-    while let Some((object_id, object_type, depth)) = queue.pop_front() {
-        if visited.len() >= query.max_nodes || !visited.insert((object_id, object_type)) {
-            continue;
-        }
-
-        if depth >= query.max_depth || !query.may_continue_from(object_type) {
-            continue;
-        }
-
-        let mut neighbors: Vec<_> = links
-            .iter()
-            .filter_map(|link| {
-                if link.from_id == object_id && link.from_type == object_type {
-                    Some((link.to_id, link.to_type))
-                } else if link.to_id == object_id && link.to_type == object_type {
-                    Some((link.from_id, link.from_type))
-                } else {
-                    None
-                }
-            })
-            .filter(|(id, kind)| query.allows_object(MemoryObjectRef::new(*kind, *id)))
-            .collect();
-        neighbors
-            .sort_by_key(|node| MemoryObjectRef::from_id_type(node.0, node.1).stable_order_key());
-
-        for neighbor in neighbors {
-            if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
-                continue;
-            }
-            queue.push_back((neighbor.0, neighbor.1, depth + 1));
-        }
-    }
-
-    Ok(visited)
-}
-
 fn bounded_expansion_plan<'a>(
     query: &GraphExpansionQuery,
     objects: impl IntoIterator<Item = &'a MemoryObject>,
@@ -382,44 +317,56 @@ fn bounded_expansion_plan<'a>(
         });
     }
 
-    if let Some(0) = query.failure_policy.timeout_ms {
-        let bounded_failure = GraphExpansionBoundedFailure {
-            reason: GraphExpansionBoundedFailureReason::Timeout,
+    let initial_failure = if query.failure_policy.timeout_ms == Some(0) {
+        Some(GraphExpansionBoundedFailureReason::Timeout)
+    } else if query.max_nodes == 0 {
+        Some(GraphExpansionBoundedFailureReason::NodeLimit)
+    } else {
+        None
+    };
+    if let Some(reason) = initial_failure {
+        let failure = GraphExpansionBoundedFailure {
+            reason,
             at: Some(root),
         };
-        if query.failure_policy.mode == GraphFailureMode::AllowPartialResults {
-            return Ok(BoundedExpansionPlan {
-                visited: HashSet::new(),
-                selection_order: Vec::new(),
-                expanded_nodes: HashSet::new(),
-                relations: Vec::new(),
-                filtered_nodes: Vec::new(),
-                fanout_utilization: Vec::new(),
-                bounded_failure: Some(bounded_failure),
-            });
-        }
-        return Err(graph_expansion_bounded_error(bounded_failure));
-    }
-
-    if query.max_nodes == 0 {
-        let bounded_failure = GraphExpansionBoundedFailure {
-            reason: GraphExpansionBoundedFailureReason::NodeLimit,
-            at: Some(root),
-        };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(bounded_failure));
-        }
+        fail_if_closed(query.failure_policy.mode, failure)?;
         return Ok(BoundedExpansionPlan {
-            visited: HashSet::new(),
-            selection_order: Vec::new(),
-            expanded_nodes: HashSet::new(),
-            relations: Vec::new(),
-            filtered_nodes: Vec::new(),
-            fanout_utilization: Vec::new(),
-            bounded_failure: Some(bounded_failure),
+            bounded_failure: Some(failure),
+            ..Default::default()
         });
     }
 
+    let episode_times = objects
+        .iter()
+        .filter_map(|object| match object {
+            MemoryObject::Episode(episode) => Some((episode.id, episode.scene.time.to_utc())),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let memory_time = |object: &MemoryObject| match object {
+        MemoryObject::Episode(episode) => Some(episode.scene.time.to_utc()),
+        MemoryObject::Observation(observation) => observation
+            .observed_at
+            .or_else(|| episode_times.get(&observation.episode_id).copied())
+            .or_else(|| {
+                occasions
+                    .get(&object.object_ref())
+                    .map(|occasion| occasion.time)
+            }),
+        MemoryObject::DerivedMemory(memory) => Some(memory.created_at),
+        _ => None,
+    };
+    let future_memories = objects
+        .iter()
+        .filter_map(|object| {
+            (matches!(
+                object.object_type(),
+                ObjectType::Episode | ObjectType::Observation
+            ) && memory_time(object).is_some_and(|time| time > query.participant_reference_time)
+                && !(query.allow_future_root && object.object_ref() == root))
+                .then_some(object.object_ref())
+        })
+        .collect::<HashSet<_>>();
     let superseded = incoming_derived_memory_ids(&links, &[RelationType::Supersedes]);
     let resolved = incoming_derived_memory_ids(
         &links,
@@ -441,29 +388,52 @@ fn bounded_expansion_plan<'a>(
             MemoryObject::DerivedMemory(memory)
                 if query.current_subject_state
                     && memory.entity_ids.contains(&query.root_id)
-                    && !resolved.contains_key(&memory.id)
-                    && (query.lifecycle_policy.include_superseded
-                        || !superseded.contains_key(&memory.id))
-                    && (query.lifecycle_policy.include_suppressed
-                        || memory.retention_state != RetentionState::Suppressed) =>
+                    && !resolved.contains_key(&object.object_ref())
+                    && object_lifecycle
+                        .get(&object.object_ref())
+                        .is_some_and(Option::is_none) =>
             {
-                Some(memory)
+                Some((
+                    object.object_ref(),
+                    memory.salience_score,
+                    Some(memory.created_at),
+                    superseded.contains_key(&object.object_ref()),
+                ))
+            }
+            MemoryObject::Observation(observation)
+                if query.current_subject_state
+                    && !future_memories.contains(&object.object_ref())
+                    && object_lifecycle
+                        .get(&object.object_ref())
+                        .is_some_and(Option::is_none) =>
+            {
+                Some((
+                    object.object_ref(),
+                    observation.salience_score,
+                    memory_time(object),
+                    false,
+                ))
             }
             _ => None,
         })
         .collect::<Vec<_>>();
     state_memories.sort_by(|left, right| {
-        superseded
-            .contains_key(&left.id)
-            .cmp(&superseded.contains_key(&right.id))
-            .then_with(|| right.salience_score.total_cmp(&left.salience_score))
-            .then_with(|| right.created_at.cmp(&left.created_at))
-            .then_with(|| left.id.cmp(&right.id))
+        left.3
+            .cmp(&right.3)
+            .then_with(|| right.1.total_cmp(&left.1))
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.0.id.cmp(&right.0.id))
+            .then_with(|| {
+                left.0
+                    .object_type
+                    .stable_rank()
+                    .cmp(&right.0.object_type.stable_rank())
+            })
     });
     let state_ranks = state_memories
         .iter()
         .enumerate()
-        .map(|(rank, memory)| (memory.id, rank))
+        .map(|(rank, row)| (row.0, rank))
         .collect::<HashMap<_, _>>();
     let mut visited = HashSet::new();
     let mut expanded_nodes = HashSet::new();
@@ -478,7 +448,7 @@ fn bounded_expansion_plan<'a>(
 
     while let Some((object_ref, depth)) = queue.pop_front() {
         queued.remove(&object_ref);
-        if visited.contains(&object_ref) {
+        if visited.contains(&object_ref) || future_memories.contains(&object_ref) {
             continue;
         }
         if visited.len() >= query.max_nodes {
@@ -486,9 +456,7 @@ fn bounded_expansion_plan<'a>(
                 reason: GraphExpansionBoundedFailureReason::NodeLimit,
                 at: Some(object_ref),
             };
-            if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                return Err(graph_expansion_bounded_error(failure));
-            }
+            fail_if_closed(query.failure_policy.mode, failure)?;
             bounded_failure.get_or_insert(failure);
             continue;
         }
@@ -516,10 +484,12 @@ fn bounded_expansion_plan<'a>(
                     .is_none_or(|ids| ids.contains(&link.id))
             })
             .filter(|link| relation_allowed(query, link.relation))
-            .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
-                let neighbor = other_endpoint(link, object_ref);
-                if object_refs.contains(&neighbor) && query.allows_object(neighbor) {
+                let neighbor = other_endpoint(link, object_ref)?;
+                if object_refs.contains(&neighbor)
+                    && !future_memories.contains(&neighbor)
+                    && query.allows_incident_link(object_ref, link.relation, neighbor)
+                {
                     Some((*link, neighbor))
                 } else {
                     None
@@ -529,36 +499,63 @@ fn bounded_expansion_plan<'a>(
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
         if depth == 0 && query.current_thread_state {
             incident_links.retain(|(link, neighbor)| {
-                link.relation != RelationType::PartOfThread
-                    || neighbor.object_type != ObjectType::DerivedMemory
-                    || !resolved.contains_key(&neighbor.id)
+                link.relation != RelationType::PartOfThread || !resolved.contains_key(neighbor)
             });
         }
         if depth == 0 && query.current_subject_state {
-            for (link, neighbor) in &incident_links {
-                if link.relation == RelationType::About {
-                    let reason = object_lifecycle
-                        .get(neighbor)
+            let cap = fanout_limit_for_pair(query, RelationType::About, ObjectType::DerivedMemory);
+            let neighbors = incident_links
+                .iter()
+                .filter(|(link, neighbor)| {
+                    SUBJECT_ABOUTNESS_ROUTES.contains(&(link.relation, neighbor.object_type))
+                })
+                .map(|(_, neighbor)| *neighbor)
+                .collect::<HashSet<_>>();
+            let mut excluded = objects
+                .iter()
+                .filter_map(|object| {
+                    let neighbor = object.object_ref();
+                    if !neighbors.contains(&neighbor) || future_memories.contains(&neighbor) {
+                        return None;
+                    }
+                    let created = match object {
+                        MemoryObject::DerivedMemory(memory)
+                            if memory.entity_ids.contains(&query.root_id) =>
+                        {
+                            Some(memory.created_at)
+                        }
+                        MemoryObject::Observation(_) => memory_time(object),
+                        _ => return None,
+                    };
+                    object_lifecycle
+                        .get(&neighbor)
                         .copied()
                         .flatten()
                         .or_else(|| {
-                            (neighbor.object_type == ObjectType::DerivedMemory
-                                && resolved.contains_key(&neighbor.id))
-                            .then_some(GraphExpansionFilteredReason::Resolved)
-                        });
-                    if let Some(reason) = reason {
-                        push_filtered_node(&mut filtered_nodes, *neighbor, reason, &superseded);
-                    }
-                }
+                            resolved
+                                .contains_key(&neighbor)
+                                .then_some(GraphExpansionFilteredReason::Resolved)
+                        })
+                        .map(|reason| (created, neighbor, reason))
+                })
+                .collect::<Vec<_>>();
+            excluded.sort_by_key(|(created, neighbor, _)| {
+                (
+                    std::cmp::Reverse(*created),
+                    neighbor.id,
+                    neighbor.object_type.stable_rank(),
+                )
+            });
+            for (_, neighbor, reason) in excluded.into_iter().take(cap) {
+                push_filtered_node(&mut filtered_nodes, neighbor, reason, &superseded);
             }
-            incident_links =
-                order_current_subject_links(incident_links, &state_ranks, |(link, neighbor)| {
-                    (link.relation == RelationType::About
-                        && neighbor.object_type == ObjectType::DerivedMemory)
-                        .then_some(neighbor.id)
-                });
+            incident_links = order_current_subject_links(
+                incident_links,
+                &state_ranks,
+                cap.saturating_add(usize::from(query.trace_mode.is_enabled())),
+                |(link, neighbor)| (link.relation, *neighbor),
+            );
         }
-
         let root_fanout_mode = RootFanoutMode::for_node(
             depth == 0
                 && object_ref.id == query.root_id
@@ -570,17 +567,12 @@ fn bounded_expansion_plan<'a>(
             })
         });
 
-        let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
-        if exceeds_hub_limit {
-            let failure = GraphExpansionBoundedFailure {
-                reason: GraphExpansionBoundedFailureReason::HubLimit,
-                at: Some(object_ref),
-            };
-            if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                return Err(graph_expansion_bounded_error(failure));
-            }
-            bounded_failure.get_or_insert(failure);
+        if depth == 0 && query.current_subject_state {
+            trim_subject_aboutness_links(query, &mut incident_links, |(link, neighbor)| {
+                (link.relation, neighbor.object_type)
+            });
         }
+
         limit_participant_occasions(
             query,
             &mut incident_links,
@@ -588,21 +580,37 @@ fn bounded_expansion_plan<'a>(
             occasions,
             |(link, neighbor)| (link.relation, *neighbor),
         );
+        let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
+        if exceeds_hub_limit {
+            let failure = GraphExpansionBoundedFailure {
+                reason: GraphExpansionBoundedFailureReason::HubLimit,
+                at: Some(object_ref),
+            };
+            fail_if_closed(query.failure_policy.mode, failure)?;
+            bounded_failure.get_or_insert(failure);
+        }
         if exceeds_hub_limit {
             incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
         }
         if let Some(pre_limit_counts) = pre_limit_counts {
-            let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
-                query,
-                object_ref,
-                incident_links,
-                pre_limit_counts,
-                root_fanout_mode,
-            );
+            let (limited_incident_links, utilization) =
+                apply_fanout_limits_with_utilization_by_pair(
+                    query,
+                    object_ref,
+                    incident_links,
+                    pre_limit_counts,
+                    root_fanout_mode,
+                    |(link, neighbor)| (link.relation, neighbor.object_type),
+                );
             incident_links = limited_incident_links;
             fanout_utilization.extend(utilization);
         } else {
-            incident_links = apply_fanout_limits(query, incident_links, root_fanout_mode);
+            incident_links = apply_fanout_limits_by_pair(
+                query,
+                incident_links,
+                root_fanout_mode,
+                |(link, neighbor)| (link.relation, neighbor.object_type),
+            );
         }
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -628,9 +636,7 @@ fn bounded_expansion_plan<'a>(
                     reason: GraphExpansionBoundedFailureReason::NodeLimit,
                     at: Some(neighbor),
                 };
-                if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                    return Err(graph_expansion_bounded_error(failure));
-                }
+                fail_if_closed(query.failure_policy.mode, failure)?;
                 bounded_failure.get_or_insert(failure);
                 continue;
             }
@@ -661,63 +667,66 @@ fn bounded_expansion_plan<'a>(
     })
 }
 
-// Replace only About-neighbour positions; every other relation retains its order.
-// Missing ranks are ineligible memories and cannot consume the state bucket.
+// One aboutness cap covers both routes. order_current_subject_links orders its
+// admitted prefix; trim_subject_aboutness_links applies it before the hub cap;
+// apply_fanout_limits_by_pair shares the count; fanout_limit_for_pair_with_override_mode
+// supplies the same budget. Utilization retains the extra Mentions/Observation row.
+pub(crate) const SUBJECT_ABOUTNESS_ROUTES: [(RelationType, ObjectType); 2] = [
+    (RelationType::About, ObjectType::DerivedMemory),
+    (RelationType::Mentions, ObjectType::Observation),
+];
+
+fn trim_subject_aboutness_links<T>(
+    query: &GraphExpansionQuery,
+    links: &mut Vec<T>,
+    pair: impl Fn(&T) -> (RelationType, ObjectType),
+) {
+    let cap = fanout_limit_for_pair(query, RelationType::About, ObjectType::DerivedMemory);
+    let mut count = 0;
+    links.retain(|link| {
+        if !SUBJECT_ABOUTNESS_ROUTES.contains(&pair(link)) {
+            return true;
+        }
+        count += 1;
+        count <= cap
+    });
+}
+
+// Shared occasions precede one merged aboutness list, independently of link IDs.
 pub(crate) fn order_current_subject_links<T: Copy>(
     links: Vec<T>,
-    ranks: &HashMap<MemoryId, usize>,
-    state_id: impl Fn(&T) -> Option<MemoryId>,
+    ranks: &HashMap<MemoryObjectRef, usize>,
+    limit: usize,
+    neighbor: impl Fn(&T) -> (RelationType, MemoryObjectRef),
 ) -> Vec<T> {
     let mut state_links = links
         .iter()
         .copied()
-        .filter_map(|link| state_id(&link).and_then(|id| ranks.get(&id).map(|rank| (*rank, link))))
+        .filter_map(|link| {
+            let (relation, object) = neighbor(&link);
+            SUBJECT_ABOUTNESS_ROUTES
+                .contains(&(relation, object.object_type))
+                .then(|| ranks.get(&object).map(|rank| (*rank, link)))
+                .flatten()
+        })
         .collect::<Vec<_>>();
     state_links.sort_by_key(|(rank, _)| *rank);
-    let mut state_links = state_links.into_iter().map(|(_, link)| link);
-    links
-        .into_iter()
-        .filter_map(|link| {
-            if state_id(&link).is_some() {
-                state_links.next()
-            } else {
-                Some(link)
-            }
+    state_links.dedup_by_key(|(rank, _)| *rank);
+    let mut ordered = links
+        .iter()
+        .copied()
+        .filter(|link| {
+            let (relation, object) = neighbor(link);
+            is_participant_pair(relation, object.object_type)
         })
-        .collect()
-}
-
-fn apply_fanout_limits<'a>(
-    query: &GraphExpansionQuery,
-    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    root_fanout_mode: RootFanoutMode,
-) -> Vec<(&'a MemoryLink, MemoryObjectRef)> {
-    apply_fanout_limits_by_pair(
-        query,
-        incident_links,
-        root_fanout_mode,
-        |(link, neighbor)| (link.relation, neighbor.object_type),
-    )
-}
-
-fn apply_fanout_limits_with_utilization<'a>(
-    query: &GraphExpansionQuery,
-    root: MemoryObjectRef,
-    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    pre_limit_counts: FanoutCounts,
-    root_fanout_mode: RootFanoutMode,
-) -> (
-    Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    Vec<GraphExpansionFanoutUtilization>,
-) {
-    apply_fanout_limits_with_utilization_by_pair(
-        query,
-        root,
-        incident_links,
-        pre_limit_counts,
-        root_fanout_mode,
-        |(link, neighbor)| (link.relation, neighbor.object_type),
-    )
+        .collect::<Vec<_>>();
+    ordered.extend(state_links.into_iter().take(limit).map(|(_, link)| link));
+    ordered.extend(links.into_iter().filter(|link| {
+        let (relation, object) = neighbor(link);
+        !is_participant_pair(relation, object.object_type)
+            && !SUBJECT_ABOUTNESS_ROUTES.contains(&(relation, object.object_type))
+    }));
+    ordered
 }
 
 fn apply_fanout_limits_with_utilization_by_pair<T>(
@@ -797,7 +806,14 @@ pub(crate) fn apply_fanout_limits_by_pair<T>(
         }
         let (relation, object_type) = pair_for_item(&item);
         let max_for_pair = fanout_limit_for_pair(query, relation, object_type);
-        let count = per_pair_counts.entry((relation, object_type)).or_default();
+        let pair = if query.current_subject_state
+            && SUBJECT_ABOUTNESS_ROUTES.contains(&(relation, object_type))
+        {
+            (RelationType::About, ObjectType::DerivedMemory)
+        } else {
+            (relation, object_type)
+        };
+        let count = per_pair_counts.entry(pair).or_default();
         if *count >= max_for_pair {
             continue;
         }
@@ -840,6 +856,13 @@ fn fanout_limit_for_pair_with_override_mode(
     if !root_fanout_mode.applies_selectivity() {
         return query.max_fanout_per_node;
     }
+    let (relation, object_type) = if query.current_subject_state
+        && SUBJECT_ABOUTNESS_ROUTES.contains(&(relation, object_type))
+    {
+        (RelationType::About, ObjectType::DerivedMemory)
+    } else {
+        (relation, object_type)
+    };
     query
         .fanout_overrides
         .iter()
@@ -849,8 +872,16 @@ fn fanout_limit_for_pair_with_override_mode(
         .min(query.max_fanout_per_node)
 }
 
-pub(crate) fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
+pub(crate) fn fail_if_closed(
+    mode: GraphFailureMode,
+    failure: GraphExpansionBoundedFailure,
+) -> Result<(), CustomError> {
+    if mode == GraphFailureMode::FailClosed {
+        return Err(CustomError::GraphExpansionBounded(
+            graph_expansion_bounded_failure_trace(failure),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn graph_expansion_bounded_failure_trace(
@@ -870,7 +901,7 @@ fn push_filtered_node(
     filtered_nodes: &mut Vec<GraphExpansionFilteredNode>,
     object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
 ) {
     if !filtered_nodes
         .iter()
@@ -879,18 +910,14 @@ fn push_filtered_node(
         filtered_nodes.push(GraphExpansionFilteredNode {
             object_ref,
             reason,
-            superseded_by: if object_ref.object_type == ObjectType::DerivedMemory {
-                superseded.get(&object_ref.id).cloned().unwrap_or_default()
-            } else {
-                Vec::new()
-            },
+            superseded_by: superseded.get(&object_ref).cloned().unwrap_or_default(),
         });
     }
 }
 
 fn lifecycle_filter_reason(
     object: &MemoryObject,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
     policy: GraphExpansionLifecyclePolicy,
 ) -> Option<GraphExpansionFilteredReason> {
     match object {
@@ -909,11 +936,13 @@ fn lifecycle_filter_reason(
 
 fn derived_memory_lifecycle_filter_reason(
     object: &DerivedMemory,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
     policy: GraphExpansionLifecyclePolicy,
 ) -> Option<GraphExpansionFilteredReason> {
     retention_filter_reason(object.retention_state, policy).or(
-        if superseded.contains_key(&object.id) && !policy.include_superseded {
+        if superseded.contains_key(&MemoryObjectRef::new(ObjectType::DerivedMemory, object.id))
+            && !policy.include_superseded
+        {
             Some(GraphExpansionFilteredReason::Superseded)
         } else {
             None
@@ -937,14 +966,17 @@ fn retention_filter_reason(
 fn incoming_derived_memory_ids(
     links: &[&MemoryLink],
     relations: &[RelationType],
-) -> HashMap<MemoryId, Vec<MemoryId>> {
-    let mut successors = HashMap::<MemoryId, Vec<MemoryId>>::new();
+) -> HashMap<MemoryObjectRef, Vec<MemoryId>> {
+    let mut successors = HashMap::<MemoryObjectRef, Vec<MemoryId>>::new();
     for link in links.iter().filter(|link| {
         relations.contains(&link.relation)
             && link.from_type == ObjectType::DerivedMemory
             && link.to_type == ObjectType::DerivedMemory
     }) {
-        successors.entry(link.to_id).or_default().push(link.from_id);
+        successors
+            .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, link.to_id))
+            .or_default()
+            .push(link.from_id);
     }
     for ids in successors.values_mut() {
         ids.sort_unstable();
@@ -957,21 +989,16 @@ fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool
     query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
 }
 
-fn link_touches_ref(link: &MemoryLink, object_ref: MemoryObjectRef) -> bool {
-    (link.from_id == object_ref.id && link.from_type == object_ref.object_type)
-        || (link.to_id == object_ref.id && link.to_type == object_ref.object_type)
-}
-
-fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> MemoryObjectRef {
-    if link.from_id == object_ref.id && link.from_type == object_ref.object_type {
-        MemoryObjectRef::from_id_type(link.to_id, link.to_type)
+fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> Option<MemoryObjectRef> {
+    let from = MemoryObjectRef::from_id_type(link.from_id, link.from_type);
+    let to = MemoryObjectRef::from_id_type(link.to_id, link.to_type);
+    if from == object_ref {
+        Some(to)
+    } else if to == object_ref {
+        Some(from)
     } else {
-        MemoryObjectRef::from_id_type(link.from_id, link.from_type)
+        None
     }
-}
-
-fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 fn stable_link_key(link: &MemoryLink) -> (MemoryId, MemoryId, MemoryId, u8, u8, u8) {
@@ -1022,7 +1049,13 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         .iter()
         .copied()
         .filter(|link_ref| relation_allowed(query, link_ref.relation()))
-        .filter(|link_ref| query.allows_object(link_ref.other_endpoint(object_ref)))
+        .filter(|link_ref| {
+            query.allows_incident_link(
+                object_ref,
+                link_ref.relation(),
+                link_ref.other_endpoint(object_ref),
+            )
+        })
         .collect::<Vec<_>>();
 
     let root_fanout_mode = RootFanoutMode::for_node(depth == 0 && object_ref == root_ref);
@@ -1040,16 +1073,9 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         occasions,
         |link| (link.relation(), link.other_endpoint(object_ref)),
     );
-    if depth == 0 && query.current_subject_state && query.trace_mode.is_enabled() {
-        // The selector's extra state row is omission evidence, not a traversal edge.
-        let cap = fanout_limit_for_pair(query, RelationType::About, ObjectType::DerivedMemory);
-        let mut selected = HashSet::new();
-        incident_links.retain(|link| {
-            let neighbor = link.other_endpoint(object_ref);
-            link.relation() != RelationType::About
-                || neighbor.object_type != ObjectType::DerivedMemory
-                || selected.contains(&neighbor.id)
-                || (selected.len() < cap && selected.insert(neighbor.id))
+    if depth == 0 && query.current_subject_state {
+        trim_subject_aboutness_links(query, &mut incident_links, |link| {
+            (link.relation(), link.other_endpoint(object_ref).object_type)
         });
     }
     let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
@@ -1058,9 +1084,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             reason: GraphExpansionBoundedFailureReason::HubLimit,
             at: Some(object_ref),
         };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(failure));
-        }
+        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
     }
     if exceeds_hub_limit {
@@ -1080,7 +1104,9 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         )
     } else {
         (
-            apply_link_ref_fanout_limits(query, object_ref, incident_links, root_fanout_mode),
+            apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link: &T| {
+                (link.relation(), link.other_endpoint(object_ref).object_type)
+            }),
             Vec::new(),
         )
     };
@@ -1097,7 +1123,6 @@ pub(crate) fn is_participant_pair(relation: RelationType, object_type: ObjectTyp
     matches!(
         (relation, object_type),
         (RelationType::Involves, ObjectType::Episode)
-            | (RelationType::Mentions, ObjectType::Observation)
     )
 }
 
@@ -1235,18 +1260,6 @@ fn limit_participant_occasions<T: Copy>(
     exclusions
 }
 
-pub(crate) fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
-    query: &GraphExpansionQuery,
-    object_ref: MemoryObjectRef,
-    incident_links: Vec<T>,
-    root_fanout_mode: RootFanoutMode,
-) -> Vec<T> {
-    apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link_ref| {
-        let neighbor = link_ref.other_endpoint(object_ref);
-        (link_ref.relation(), neighbor.object_type)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1257,7 +1270,7 @@ mod tests {
     use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
 
     #[test]
-    fn participant_occasion_budget_clamps_across_route_types() {
+    fn participant_occasion_budget_leaves_aboutness_independent() {
         let episode = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
         let observation = MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(2));
         let query = GraphExpansionQuery::new(MemoryId::from_u128(3), ObjectType::Entity, 1, 10)
@@ -1283,6 +1296,7 @@ mod tests {
                     ParticipantOccasion {
                         episode_id: object.id,
                         time: time + chrono::Duration::minutes(object.id.as_u128() as i64),
+                        observed_at: None,
                         retention_state: RetentionState::Active,
                         episode_retention_state: RetentionState::Active,
                     },
@@ -1300,7 +1314,13 @@ mod tests {
             &occasions,
             |item| *item,
         );
-        assert_eq!(items, vec![(RelationType::Mentions, observation)]);
+        assert_eq!(
+            items,
+            vec![
+                (RelationType::Involves, episode),
+                (RelationType::Mentions, observation)
+            ]
+        );
     }
 
     #[test]
@@ -1346,18 +1366,6 @@ mod tests {
         assert!(matches!(
             error,
             CustomError::UnsupportedExpansionRoot { object } if object == root
-        ));
-    }
-
-    #[test]
-    fn bounded_expansion_validates_missing_root_before_zero_node_limit() {
-        let query = GraphExpansionQuery::new(MemoryId::new_v4(), ObjectType::Entity, 1, 0);
-
-        let error = bounded_expansion_node_set(&query, false, Vec::new()).unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::GraphExpansionRootNotFound { .. }
         ));
     }
 

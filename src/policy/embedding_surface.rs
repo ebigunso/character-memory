@@ -276,7 +276,6 @@ mod tests {
 
     fn episode_fixture() -> Episode {
         Episode {
-            scene_local_date: None,
             id: id(10),
             object_type: ObjectType::Episode,
             modality: Modality::Chat,
