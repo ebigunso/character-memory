@@ -12,7 +12,6 @@ use crate::errors::{ConfigValidationError, ConfigValidationReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
-    #[serde(default = "Scene::now")]
     pub scene: Scene,
     pub topic: Option<String>,
     pub activity: Option<ActivityRef>,
