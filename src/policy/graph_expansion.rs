@@ -667,6 +667,10 @@ fn bounded_expansion_plan<'a>(
     })
 }
 
+// One aboutness cap covers both routes. order_current_subject_links orders its
+// admitted prefix; trim_subject_aboutness_links applies it before the hub cap;
+// apply_fanout_limits_by_pair shares the count; fanout_limit_for_pair_with_override_mode
+// supplies the same budget. Utilization retains the extra Mentions/Observation row.
 pub(crate) const SUBJECT_ABOUTNESS_ROUTES: [(RelationType, ObjectType); 2] = [
     (RelationType::About, ObjectType::DerivedMemory),
     (RelationType::Mentions, ObjectType::Observation),
