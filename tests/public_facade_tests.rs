@@ -108,6 +108,103 @@ mod road_behavior {
     }
 
     #[tokio::test]
+    async fn talking_about_someone_is_independent_of_being_with_them() {
+        let mut results = Vec::new();
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = RememberWritePlan::new();
+            for n in [10, 11] {
+                let mut person = EntityDraft::new();
+                person.id = Some(id(n, reverse));
+                person.created_at = Some(time());
+                person.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+                    person,
+                    provenance(),
+                )));
+            }
+            plan = episode(plan, 100, 1, 0.5, None, reverse);
+            if let MemoryCandidate::Episode(candidate) = plan.candidates.last_mut().unwrap() {
+                candidate
+                    .draft
+                    .scene
+                    .as_mut()
+                    .unwrap()
+                    .participants
+                    .push(SceneParticipant {
+                        key: Some(id(10, reverse)),
+                        ..Default::default()
+                    });
+            }
+            for n in 101..112 {
+                plan = episode(plan, n, if n == 101 { 365 } else { 2 }, 0.5, None, reverse);
+                for offset in 0..if n == 101 { 3 } else { 1 } {
+                    let mut observation =
+                        ObservationDraft::new(id(n, reverse), "A remark about someone");
+                    let oid = id(n * 10 + offset, reverse);
+                    observation.id = Some(oid);
+                    observation.created_at = Some(time());
+                    observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                    plan = plan.with_candidate(MemoryCandidate::Observation(
+                        ObservationCandidate::new(observation, provenance()),
+                    ));
+                    let mut link = MemoryLinkDraft::new(
+                        ObjectType::Observation,
+                        oid,
+                        RelationType::Mentions,
+                        ObjectType::Entity,
+                        id(if n == 101 { 10 } else { 11 }, reverse),
+                    );
+                    link.id = Some(id(5000 + n * 10 + offset, reverse));
+                    link.created_at = Some(time());
+                    link.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                    plan = plan.with_candidate(MemoryCandidate::MemoryLink(
+                        MemoryLinkCandidate::new(link, provenance()),
+                    ));
+                }
+            }
+            commit(&memory, plan).await;
+            let mut context = query(None, 1, 16);
+            context.scene.participants.push(SceneParticipant {
+                key: Some(id(10, reverse)),
+                ..Default::default()
+            });
+            context.cue_floors.participant = 1;
+            context.graph_limits.max_depth = 1;
+            let result = memory.retrieve(context.clone()).await.unwrap();
+            context.candidate_limits.max_graph_roots = 2;
+            context.cue_floors.date_match = 1;
+            context.graph_limits.max_depth = 0;
+            let anniversary = memory.retrieve(context).await.unwrap();
+            test_support::close_and_remove_root(memory, root).await;
+            results.push((reverse, result, anniversary));
+        }
+        for (reverse, result, anniversary) in results {
+            let trace = result.trace.as_ref().unwrap();
+            let presence = trace
+                .selectivity_decisions
+                .iter()
+                .find(|row| row.relation == RelationType::Involves)
+                .unwrap();
+            let mentions = trace
+                .selectivity_decisions
+                .iter()
+                .find(|row| row.relation == RelationType::Mentions)
+                .unwrap();
+            assert_eq!(presence.entity_count, Some(1));
+            assert_eq!(
+                (mentions.entity_count, mentions.global_count),
+                (Some(3), Some(13))
+            );
+            assert_eq!(result.pack.salient_observations.len(), 3);
+            assert!(
+                !roots(&anniversary).contains(&id(101, reverse)),
+                "a mention is not a shared anniversary"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn only_episode_involves_deduplicates_present_participants() {
         let mut outcomes = Vec::new();
         for reverse in [false, true] {
@@ -345,6 +442,8 @@ mod road_behavior {
             let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
             let mut person = EntityDraft::new();
             person.id = Some(id(10, reverse));
+            let mut other_person = EntityDraft::new();
+            other_person.id = Some(id(11, reverse));
             let mut source = EpisodeDraft::new("a shared occasion");
             source.id = Some(id(100, reverse));
             source.scene = Some(Scene::at((time() - Duration::days(1)).fixed_offset()));
@@ -352,6 +451,7 @@ mod road_behavior {
             observation.id = Some(id(200, reverse));
             let mut plan = RememberInput::new("a conversation")
                 .with_entity(person)
+                .with_entity(other_person)
                 .with_episode(source)
                 .with_observation(observation)
                 .with_memory_link(MemoryLinkDraft::new(
@@ -371,7 +471,28 @@ mod road_behavior {
                 provenance(),
             )));
             for n in 300..310 {
-                plan = episode(plan, n, 2, 0.5, None, reverse);
+                // Aboutness selectivity counts other remarks, not unrelated episodes.
+                let mut source = EpisodeDraft::new("another conversation");
+                source.id = Some(id(n, reverse));
+                source.scene = Some(Scene::at((time() - Duration::days(2)).fixed_offset()));
+                let mut remark =
+                    ObservationDraft::new(id(n, reverse), "Someone else was discussed");
+                remark.id = Some(id(n + 1000, reverse));
+                let background = RememberInput::new(format!("background {n}"))
+                    .with_episode(source)
+                    .with_observation(remark)
+                    .with_memory_link(MemoryLinkDraft::new(
+                        ObjectType::Observation,
+                        id(n + 1000, reverse),
+                        RelationType::Mentions,
+                        ObjectType::Entity,
+                        id(11, reverse),
+                    ))
+                    .prepare_write_plan(&RememberPlanDefaults::fixed(
+                        &format!("background {n}"),
+                        time(),
+                    ));
+                plan.candidates.extend(background.candidates);
             }
             commit(&memory, plan).await;
             let mut context = query(None, 1, 8);

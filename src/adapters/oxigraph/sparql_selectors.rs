@@ -632,9 +632,6 @@ impl<'a> SparqlGraphSelectors<'a> {
                 GRAPH ?linkGraph {{ ?link <{relation}> "involves" . }}
                 GRAPH ?neighbor {{ ?neighbor <{object_type}> "episode" ; <{retention}> ?retention . }}
                 BIND(?neighbor AS ?episode)
-              }} UNION {{
-                GRAPH ?linkGraph {{ ?link <{relation}> "mentions" . }}
-                GRAPH ?neighbor {{ ?neighbor <{object_type}> "observation" ; <{episode}> ?episode ; <{retention}> ?retention . }}
               }}
               GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
               BIND(xsd:dateTime(?sceneTime) AS ?time)
@@ -652,7 +649,6 @@ impl<'a> SparqlGraphSelectors<'a> {
             object_type = vocab::OBJECT_TYPE,
             object_id = vocab::OBJECT_ID,
             scene_time = vocab::SCENE_TIME,
-            episode = vocab::EPISODE,
             retention = vocab::RETENTION_STATE,
             reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
             retention_filter = occasion_retention_filter(policy),
@@ -805,11 +801,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             }
         }
         if !participants.is_empty() && !episodes.is_empty() {
-            let episode_refs = episodes
-                .iter()
-                .map(|(row, _)| MemoryObjectRef::new(ObjectType::Episode, row.id))
-                .collect::<Vec<_>>();
-            let mut neighbors = episodes
+            let neighbors = episodes
                 .iter()
                 .map(|(row, _)| {
                     (
@@ -818,35 +810,6 @@ impl<'a> SparqlGraphSelectors<'a> {
                     )
                 })
                 .collect::<HashMap<_, _>>();
-            let query = format!(
-                r#"SELECT DISTINCT ?episode ?neighbor ?retention WHERE {{
-                    {episodes}
-                    GRAPH ?neighbor {{ ?neighbor <{object_type}> "observation" ; <{episode_pred}> ?episode ; <{retention}> ?retention . }}
-                }}"#,
-                episodes = sparql_node_iri_values("episode", &episode_refs),
-                object_type = vocab::OBJECT_TYPE,
-                episode_pred = vocab::EPISODE,
-                retention = vocab::RETENTION_STATE,
-            );
-            for row in self.query_solutions(&query)? {
-                let retention: RetentionState = enum_binding(&row, "retention")?;
-                if policy.include_suppressed || retention == RetentionState::Active {
-                    let (Some(Term::NamedNode(episode)), Some(Term::NamedNode(neighbor))) =
-                        (row.get("episode"), row.get("neighbor"))
-                    else {
-                        return Err(oxigraph_sparql_error(
-                            "expected anniversary episode and observation IRIs",
-                        ));
-                    };
-                    neighbors.insert(
-                        neighbor.as_str().to_owned(),
-                        (
-                            super::shared::memory_id_from_resource(episode.as_str())?,
-                            RelationType::Mentions,
-                        ),
-                    );
-                }
-            }
             let participants = participants
                 .iter()
                 .map(|id| graph_uri(ObjectType::Entity, *id))

@@ -123,52 +123,12 @@ fn retrieval_stats_edges_with_states(
     object_states: &[RetrievalStatsObjectState],
 ) -> Vec<RetrievalStatsEdge> {
     let object_state_lookup = object_state_lookup(object_states);
-    let observation_episodes = objects
-        .iter()
-        .filter_map(|object| match object {
-            MemoryObject::Observation(observation) => {
-                Some((observation.id, observation.episode_id))
-            }
-            _ => None,
-        })
-        .collect::<HashMap<_, _>>();
     let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
         append_intrinsic_edges(&mut edges, object, &object_state_lookup);
     }
     for link in links {
         append_link_edges(&mut edges, link, &object_state_lookup);
-        if link.relation == RelationType::Mentions {
-            let (entity_id, observation_id) = match (link.from_type, link.to_type) {
-                (ObjectType::Entity, ObjectType::Observation) => (link.from_id, link.to_id),
-                (ObjectType::Observation, ObjectType::Entity) => (link.to_id, link.from_id),
-                _ => continue,
-            };
-            if let Some(&episode_id) = observation_episodes.get(&observation_id) {
-                let (retention_state, is_current) =
-                    edge_lifecycle(episode_id, ObjectType::Episode, &object_state_lookup);
-                let mut presence = edge(
-                    entity_id,
-                    RelationType::Involves,
-                    episode_id,
-                    ObjectType::Episode,
-                    retention_state,
-                    is_current,
-                    link.created_at,
-                );
-                presence.source_observation = Some((
-                    observation_id,
-                    edge_lifecycle(
-                        observation_id,
-                        ObjectType::Observation,
-                        &object_state_lookup,
-                    )
-                    .0,
-                ));
-                presence.edge_key.push_str(&format!(":{observation_id}"));
-                insert_edge(&mut edges, presence);
-            }
-        }
     }
     let mut edges = edges.into_values().collect::<Vec<_>>();
     edges.sort_by(|left, right| left.edge_key.cmp(&right.edge_key));

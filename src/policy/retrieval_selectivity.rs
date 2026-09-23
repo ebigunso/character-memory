@@ -74,6 +74,12 @@ impl RetrievalSelectivityPolicy {
     }
 
     fn fanout_budget(&self, relation: RelationType, object_type: ObjectType) -> FanoutSpec {
+        let (relation, object_type) = match (relation, object_type) {
+            (RelationType::Mentions, ObjectType::Observation) => {
+                (RelationType::About, ObjectType::DerivedMemory)
+            }
+            pair => pair,
+        };
         self.fanout_budgets
             .iter()
             .copied()
@@ -459,17 +465,12 @@ struct FanoutSpec {
 
 impl FanoutSpec {
     fn count_bucket(self) -> (RelationType, ObjectType) {
-        match (self.relation, self.object_type) {
-            (RelationType::Mentions, ObjectType::Observation) => {
-                (RelationType::Involves, ObjectType::Episode)
-            }
-            bucket => bucket,
-        }
+        (self.relation, self.object_type)
     }
 }
 
 fn fanout_routes() -> [FanoutSpec; 4] {
-    // Both participant routes count episodes and share the Involves budget.
+    // Mentions counts observations independently, with the aboutness budget.
     let [about, participant, thread] = DEFAULT_FANOUT_SPECS;
     [
         about,
@@ -478,7 +479,7 @@ fn fanout_routes() -> [FanoutSpec; 4] {
         FanoutSpec {
             relation: RelationType::Mentions,
             object_type: ObjectType::Observation,
-            ..participant
+            ..about
         },
     ]
 }

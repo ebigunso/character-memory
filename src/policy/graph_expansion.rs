@@ -1097,7 +1097,6 @@ pub(crate) fn is_participant_pair(relation: RelationType, object_type: ObjectTyp
     matches!(
         (relation, object_type),
         (RelationType::Involves, ObjectType::Episode)
-            | (RelationType::Mentions, ObjectType::Observation)
     )
 }
 
@@ -1257,7 +1256,7 @@ mod tests {
     use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
 
     #[test]
-    fn participant_occasion_budget_clamps_across_route_types() {
+    fn participant_occasion_budget_leaves_aboutness_independent() {
         let episode = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
         let observation = MemoryObjectRef::new(ObjectType::Observation, MemoryId::from_u128(2));
         let query = GraphExpansionQuery::new(MemoryId::from_u128(3), ObjectType::Entity, 1, 10)
@@ -1300,7 +1299,13 @@ mod tests {
             &occasions,
             |item| *item,
         );
-        assert_eq!(items, vec![(RelationType::Mentions, observation)]);
+        assert_eq!(
+            items,
+            vec![
+                (RelationType::Involves, episode),
+                (RelationType::Mentions, observation)
+            ]
+        );
     }
 
     #[test]

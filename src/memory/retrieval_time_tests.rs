@@ -2059,7 +2059,7 @@ async fn anniversary_reservation_needs_a_resolved_notion() {
 }
 
 #[tokio::test]
-async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
+async fn anniversary_sharing_requires_presence_in_either_direction() {
     for (mentions, reverse) in [(false, false), (false, true), (true, false), (true, true)] {
         let (memory, temp) = open().await;
         // No participant literal on either occasion: sharing comes from the links.
@@ -2091,14 +2091,14 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
         let shared = memory.retrieve(context.clone()).await.unwrap();
         assert_eq!(
             roots(&shared),
-            [900],
+            [if mentions { 2000 } else { 900 }],
             "mentions={mentions} reverse={reverse}"
         );
         if mentions {
             memory
                 .forget(ForgetMemoryDraft::suppress(
                     LifecycleTargetRef::Observation(id(400)),
-                    "Sharing requires an eligible observation",
+                    "Forget the remark, which is not presence",
                 ))
                 .await
                 .unwrap();
@@ -2107,7 +2107,8 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
                 [2000]
             );
             context.lifecycle_policy.include_suppressed = true;
-            assert_eq!(roots(&memory.retrieve(context).await.unwrap()), [900]);
+            // Restoring a mention does not turn it into a shared occasion.
+            assert_eq!(roots(&memory.retrieve(context).await.unwrap()), [2000]);
         }
         memory.close().await.unwrap();
         temp.close().unwrap();
