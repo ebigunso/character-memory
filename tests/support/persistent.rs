@@ -9,25 +9,8 @@ use super::base;
 pub async fn try_setup_persistent_character_memory(
     collection_name: String,
     root: &Path,
-    about_derived_memory_fanout: Option<(usize, usize)>,
 ) -> Result<CharacterMemory, CustomError> {
-    let mut builder = persistent_settings(root);
-
-    if let Some((min, max)) = about_derived_memory_fanout {
-        builder = builder
-            .set_override(
-                "retrieval.fanout.about_entity.derived_memory.min",
-                min as i64,
-            )
-            .unwrap()
-            .set_override(
-                "retrieval.fanout.about_entity.derived_memory.max",
-                max as i64,
-            )
-            .unwrap();
-    }
-
-    base::open(builder, collection_name).await
+    base::open(persistent_settings(root), collection_name).await
 }
 
 /// Persistent vector, graph and stats stores at a caller-owned test root.

@@ -42,7 +42,6 @@ mod scene_offset_behavior {
             let memory = test_support::try_setup_persistent_character_memory(
                 collection.clone(),
                 root.path(),
-                None,
             )
             .await
             .unwrap();
@@ -53,7 +52,7 @@ mod scene_offset_behavior {
             let before = memory.retrieve(query(now().fixed_offset())).await.unwrap();
             memory.close().await.unwrap();
             let memory =
-                test_support::try_setup_persistent_character_memory(collection, root.path(), None)
+                test_support::try_setup_persistent_character_memory(collection, root.path())
                     .await
                     .unwrap();
             let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
