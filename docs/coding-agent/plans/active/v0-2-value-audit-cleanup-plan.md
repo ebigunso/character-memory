@@ -696,6 +696,42 @@ This change is not work of this plan. The evals cleanup plan carries it on its b
     owner: orchestrator
     detail: "Measurement, run by an evals worker: the recorded failing query from the obligations evidence (evals b4a8ab5 fixture, library before and after this task) records zero bounded failures after and returns the same pack as before apart from the degraded flag. The final-tip behavior-free proof then allows exactly this change: bounded-failure counts may only fall."
 
+### Task_14: Graph expansion reads only the links and occasions it selected
+- type: impl
+- effort: 3 worker-hours
+- worker: cm-worker2
+- owns:
+  - src/adapters/oxigraph/shared.rs (link hydration and the occasion-metadata call path)
+  - src/adapters/oxigraph/embedded.rs (only if a wrapper becomes unused)
+  - src/adapters/oxigraph/tests.rs (the read-counter tests)
+- depends_on: [Task_13]
+- description: |
+  Found by the consolidation slice-end timing: retrieval is about 1.59 times slower after consolidation Task_3 (interleaved, same load, and about 1.6 times where results are unchanged); the other steps are about 1.0. The investigation (`.agent-work/reviewer/observedin-read-cost-investigation.md`) found two costs on the expansion path:
+  - `hydrate_links_by_id_sets_from_store` hydrates every link in the store and then filters to the selected IDs, once per expanded root. This predates Task_3, which multiplied it by adding a traversal level. It contradicts ruling 67 (read compact columns, decide in Rust, hydrate only what is kept).
+  - Task_3's occasion-metadata call re-queries memories whose occasions the same expansion already fetched: three SELECTs per expanded root, where one is new information.
+
+  The fix:
+  - Hydrate by ID with the existing `hydrate_links_by_ids_from_store`, keeping the endpoint and lifecycle filters, and delete the full-store wrappers that become unused.
+  - Filter the metadata request through the per-expansion occasion map, extend the map with fetched rows, and derive future memories from the whole map.
+  - No cache across requests, no port change, ObservedIn and the as-of cut unchanged.
+- acceptance:
+  - A real-adapter read-counter test: one episode, its observation and their ObservedIn link. RDF quads read equal the expected named graphs and stay identical after 200 unrelated episodes are written; the unfixed code reads 66, then 3,066.
+  - The SELECT count for the one-root keyless fixture is 8, down from 9. With both objects as vector roots it is 14, down from 16.
+  - Every complete retrieval outcome in the existing suites is unchanged.
+- validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test with counts; pre-commit; the read-counter tests shown failing at the Task_13 tip"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review by cm-reviewer2, who found the costs: reads bounded by the selected IDs, the future filter derived from the whole map, outcomes unchanged"
+  - kind: command
+    required: true
+    owner: orchestrator
+    detail: "Timing, notebook grade: the interleaved harness on the fixed 50-query keyless and time subset, consolidation parent 67d6735 against this task's tip. Direction confirmed if the ratio returns to about 1.0 or below; if a residual stays above 1.1, attribute it before closing. The final-tip behavior-free proof covers the outputs."
+
 ## Integration
 - Branch: `feature/2026-09-24/value-audit-cleanup`, cut from `origin/feature/2026-09-23/consolidation-records` at c0ed9e21. It holds this plan. Each task is one PR, stacked in task-number order on the one below (`gh stack link`).
 - Lanes:
@@ -780,6 +816,12 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
   - Plan delta (what changed): Task_13 follows Task_4, which edits the same file. It is a behavior change on reported health (the false degraded flag goes, recall content is unchanged), so it carries its own small measurement, and the final-tip proof allows bounded-failure counts only to fall. Wave 2 went out before Task_1's measurement by the orchestrator's ruling, because the final-tip proof covers it and no Wave 2 task depends on the fanout default.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none; the design doc already states the contract.
+
+- 2026-09-24 Task_14 added, and Task_13's allowance made precise.
+  Trigger / new insight: consolidation Task_3 made retrieval about 1.59 times slower, which interleaved timing confirmed and attributed to that step alone. The investigation found a pre-existing whole-store link hydration per expanded root (contrary to ruling 67), which Task_3 multiplied, plus redundant occasion-metadata queries. Task_13's review showed that selecting before the hub check also returns an occasion that a person root's aboutness links used to starve out.
+  - Plan delta (what changed): Task_14 fixes both read costs without changing outcomes, and is timed against the consolidation parent. The final-tip proof allows bounded-failure counts only to fall, and memories only to be recovered where a false bound starved them; each recovery is reported, never masked. Unchanged-output claims for Task_13 are scoped to the recorded non-root and obligations fixtures.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
 
 ## Notes
 - Risks:
