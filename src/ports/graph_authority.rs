@@ -333,7 +333,7 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
-    pub(crate) resolved_by: std::collections::HashMap<MemoryId, Vec<MemoryId>>,
+    pub(crate) resolved_by: std::collections::HashMap<MemoryObjectRef, Vec<MemoryId>>,
     pub(crate) expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,

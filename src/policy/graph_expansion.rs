@@ -128,10 +128,7 @@ pub(crate) fn bounded_expansion(
         &links.iter().collect::<Vec<_>>(),
         &[RelationType::Resolves, RelationType::FulfillsCommitment],
     );
-    resolved_by.retain(|id, _| {
-        plan.visited
-            .contains(&MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
-    });
+    resolved_by.retain(|object, _| plan.visited.contains(object));
     let traversed_link_ids = plan
         .relations
         .iter()
@@ -391,7 +388,7 @@ fn bounded_expansion_plan<'a>(
             MemoryObject::DerivedMemory(memory)
                 if query.current_subject_state
                     && memory.entity_ids.contains(&query.root_id)
-                    && !resolved.contains_key(&memory.id)
+                    && !resolved.contains_key(&object.object_ref())
                     && object_lifecycle
                         .get(&object.object_ref())
                         .is_some_and(Option::is_none) =>
@@ -400,7 +397,7 @@ fn bounded_expansion_plan<'a>(
                     object.object_ref(),
                     memory.salience_score,
                     Some(memory.created_at),
-                    superseded.contains_key(&memory.id),
+                    superseded.contains_key(&object.object_ref()),
                 ))
             }
             MemoryObject::Observation(observation)
@@ -503,9 +500,7 @@ fn bounded_expansion_plan<'a>(
         incident_links.sort_by_key(|(link, _)| stable_link_key(link));
         if depth == 0 && query.current_thread_state {
             incident_links.retain(|(link, neighbor)| {
-                link.relation != RelationType::PartOfThread
-                    || neighbor.object_type != ObjectType::DerivedMemory
-                    || !resolved.contains_key(&neighbor.id)
+                link.relation != RelationType::PartOfThread || !resolved.contains_key(neighbor)
             });
         }
         if depth == 0 && query.current_subject_state {
@@ -538,9 +533,9 @@ fn bounded_expansion_plan<'a>(
                         .copied()
                         .flatten()
                         .or_else(|| {
-                            (neighbor.object_type == ObjectType::DerivedMemory
-                                && resolved.contains_key(&neighbor.id))
-                            .then_some(GraphExpansionFilteredReason::Resolved)
+                            resolved
+                                .contains_key(&neighbor)
+                                .then_some(GraphExpansionFilteredReason::Resolved)
                         })
                         .map(|reason| (created, neighbor, reason))
                 })
@@ -931,7 +926,7 @@ fn push_filtered_node(
     filtered_nodes: &mut Vec<GraphExpansionFilteredNode>,
     object_ref: MemoryObjectRef,
     reason: GraphExpansionFilteredReason,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
 ) {
     if !filtered_nodes
         .iter()
@@ -940,18 +935,14 @@ fn push_filtered_node(
         filtered_nodes.push(GraphExpansionFilteredNode {
             object_ref,
             reason,
-            superseded_by: if object_ref.object_type == ObjectType::DerivedMemory {
-                superseded.get(&object_ref.id).cloned().unwrap_or_default()
-            } else {
-                Vec::new()
-            },
+            superseded_by: superseded.get(&object_ref).cloned().unwrap_or_default(),
         });
     }
 }
 
 fn lifecycle_filter_reason(
     object: &MemoryObject,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
     policy: GraphExpansionLifecyclePolicy,
 ) -> Option<GraphExpansionFilteredReason> {
     match object {
@@ -970,11 +961,13 @@ fn lifecycle_filter_reason(
 
 fn derived_memory_lifecycle_filter_reason(
     object: &DerivedMemory,
-    superseded: &HashMap<MemoryId, Vec<MemoryId>>,
+    superseded: &HashMap<MemoryObjectRef, Vec<MemoryId>>,
     policy: GraphExpansionLifecyclePolicy,
 ) -> Option<GraphExpansionFilteredReason> {
     retention_filter_reason(object.retention_state, policy).or(
-        if superseded.contains_key(&object.id) && !policy.include_superseded {
+        if superseded.contains_key(&MemoryObjectRef::new(ObjectType::DerivedMemory, object.id))
+            && !policy.include_superseded
+        {
             Some(GraphExpansionFilteredReason::Superseded)
         } else {
             None
@@ -998,14 +991,17 @@ fn retention_filter_reason(
 fn incoming_derived_memory_ids(
     links: &[&MemoryLink],
     relations: &[RelationType],
-) -> HashMap<MemoryId, Vec<MemoryId>> {
-    let mut successors = HashMap::<MemoryId, Vec<MemoryId>>::new();
+) -> HashMap<MemoryObjectRef, Vec<MemoryId>> {
+    let mut successors = HashMap::<MemoryObjectRef, Vec<MemoryId>>::new();
     for link in links.iter().filter(|link| {
         relations.contains(&link.relation)
             && link.from_type == ObjectType::DerivedMemory
             && link.to_type == ObjectType::DerivedMemory
     }) {
-        successors.entry(link.to_id).or_default().push(link.from_id);
+        successors
+            .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, link.to_id))
+            .or_default()
+            .push(link.from_id);
     }
     for ids in successors.values_mut() {
         ids.sort_unstable();

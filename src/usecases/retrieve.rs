@@ -27,9 +27,9 @@ use crate::policy::{
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailureReason,
+    GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 #[cfg(test)]
@@ -649,12 +649,10 @@ impl RetrieveAssembly {
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
-            if object_ref.object_type == ObjectType::DerivedMemory {
-                if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
-                    ranked.resolved_by.extend(resolvers);
-                    ranked.resolved_by.sort_unstable();
-                    ranked.resolved_by.dedup();
-                }
+            if let Some(resolvers) = expansion.resolved_by.get(&object_ref) {
+                ranked.resolved_by.extend(resolvers);
+                ranked.resolved_by.sort_unstable();
+                ranked.resolved_by.dedup();
             }
         }
 
@@ -1964,7 +1962,10 @@ mod tests {
             ],
             Vec::new(),
         );
-        expansion.resolved_by.insert(entity.id, vec![resolver]);
+        expansion.resolved_by.insert(
+            MemoryObjectRef::new(ObjectType::DerivedMemory, entity.id),
+            vec![resolver],
+        );
         let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
         assembly
             .absorb_expansion(&candidate, &query, expansion)
