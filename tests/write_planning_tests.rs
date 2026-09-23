@@ -321,7 +321,7 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
         assert!(matches!(
             failure.causes.as_slice(),
             [
-                StatsUpdateCause::EndpointHydration { .. }
+                StatsUpdateCause::GraphRead { .. }
                     | StatsUpdateCause::EdgeWrite { .. }
                     | StatsUpdateCause::ObjectStateWrite { .. }
                     | StatsUpdateCause::HealthCheck { .. }

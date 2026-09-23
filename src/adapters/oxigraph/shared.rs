@@ -142,7 +142,20 @@ pub(super) fn hydrate_objects_by_refs_from_store(
     store: &Store,
     refs: &[MemoryObjectRef],
 ) -> Result<Vec<MemoryObject>, CustomError> {
-    let subjects = rdf_subject_values(store)?;
+    let graphs = refs
+        .iter()
+        .filter(|object| object.object_type != ObjectType::MemoryLink)
+        .map(|object| NamedNode::new(graph_uri(object.object_type, object.id)))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Include assertion subjects owned by each graph, not just its root subject.
+    let subjects = rdf_subject_values_from_quads(graphs.iter().flat_map(|graph| {
+        store.quads_for_pattern(
+            None,
+            None,
+            None,
+            Some(GraphNameRef::NamedNode(graph.as_ref())),
+        )
+    }))?;
     let mut objects = Vec::new();
     for object_ref in refs {
         if object_ref.object_type == ObjectType::MemoryLink {
@@ -221,8 +234,16 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
 pub(super) fn rdf_subject_values(
     store: &Store,
 ) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
+    rdf_subject_values_from_quads(store.iter())
+}
+
+fn rdf_subject_values_from_quads(
+    quads: impl IntoIterator<Item = Result<Quad, oxigraph::store::StorageError>>,
+) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
     let mut subjects = HashMap::<String, RdfSubjectValues>::new();
-    for quad in store.iter() {
+    for quad in quads {
+        #[cfg(test)]
+        RDF_QUADS_READ.with(|count| count.set(count.get() + 1));
         let quad = quad.map_err(oxigraph_error)?;
         if !matches!(quad.graph_name, GraphName::NamedNode(_)) {
             continue;
@@ -245,6 +266,11 @@ pub(super) fn rdf_subject_values(
     Ok(subjects)
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static RDF_QUADS_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn rdf_subject_values_for_named_graph(
     store: &Store,
     graph_uri: &str,
@@ -258,6 +284,8 @@ fn rdf_subject_values_for_named_graph(
         None,
         Some(GraphNameRef::NamedNode(graph_name.as_ref())),
     ) {
+        #[cfg(test)]
+        RDF_QUADS_READ.with(|count| count.set(count.get() + 1));
         let quad = quad.map_err(oxigraph_error)?;
         let NamedOrBlankNode::NamedNode(subject) = quad.subject else {
             continue;
@@ -601,7 +629,16 @@ pub(super) fn bounded_graph_visible_refs(
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
     let (state_ids, state_filtered) = if query.current_subject_state {
-        selectors.select_subject_state(query.root_id, query.lifecycle_policy)?
+        selectors.select_subject_state(
+            query.root_id,
+            query.lifecycle_policy,
+            crate::policy::graph_expansion::fanout_limit_for_pair(
+                query,
+                RelationType::About,
+                ObjectType::DerivedMemory,
+            ),
+            query.trace_mode.is_enabled(),
+        )?
     } else {
         (Vec::new(), Vec::new())
     };
@@ -617,23 +654,39 @@ pub(super) fn bounded_graph_visible_refs(
         if frontier.is_empty() {
             break;
         }
-        let link_refs = selectors.select_links_touching(&frontier)?;
+        let mut link_refs =
+            selectors.select_links_touching(&frontier, depth == 0 && query.current_thread_state)?;
         if depth == 0
             && query
                 .fanout_overrides
                 .iter()
                 .any(|entry| is_participant_pair(entry.relation, entry.object_type))
         {
+            let mut seen = HashSet::new();
             let neighbors = link_refs
                 .iter()
                 .filter_map(|link| {
                     let neighbor = link.other_endpoint(root_ref);
-                    is_participant_pair(link.relation, neighbor.object_type).then_some(neighbor)
+                    (is_participant_pair(link.relation, neighbor.object_type)
+                        && query.allows_object(neighbor)
+                        && (query.allowed_relation_types.is_empty()
+                            || query.allowed_relation_types.contains(&link.relation))
+                        && crate::policy::graph_expansion::fanout_limit_for_pair(
+                            query,
+                            link.relation,
+                            neighbor.object_type,
+                        ) > 0
+                        && seen.insert(neighbor))
+                    .then_some(neighbor)
                 })
-                .collect::<HashSet<_>>()
-                .into_iter()
                 .collect::<Vec<_>>();
-            participant_occasions = selectors.select_participant_occasions(&neighbors)?;
+            participant_occasions =
+                selectors.select_bounded_participant_occasions(&neighbors, query)?;
+            link_refs.retain(|link| {
+                let neighbor = link.other_endpoint(root_ref);
+                !is_participant_pair(link.relation, neighbor.object_type)
+                    || participant_occasions.contains_key(&neighbor)
+            });
         }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
@@ -674,18 +727,6 @@ pub(super) fn bounded_graph_visible_refs(
                     },
                 );
                 &ordered
-            } else if depth == 0 && !query.resolved_thread_members.is_empty() {
-                ordered = incident_link_refs
-                    .iter()
-                    .filter(|link| {
-                        link.relation != RelationType::PartOfThread
-                            || !query
-                                .resolved_thread_members
-                                .contains(&link.other_endpoint(*object_ref))
-                    })
-                    .copied()
-                    .collect();
-                &ordered
             } else {
                 incident_link_refs
             };
@@ -723,7 +764,7 @@ pub(super) fn bounded_graph_visible_refs(
 
     let candidate_refs = graph_refs.iter().copied().collect::<Vec<_>>();
     let lifecycle_link_ids = selectors
-        .select_links_touching(&candidate_refs)?
+        .select_links_touching(&candidate_refs, false)?
         .into_iter()
         .filter(|link_ref| {
             matches!(

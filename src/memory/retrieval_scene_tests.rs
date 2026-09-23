@@ -637,10 +637,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
             })
             .unwrap();
         assert_eq!(utilization.retained_count, 1);
-        assert_eq!(
-            utilization.omitted_by_fanout_count,
-            8 + usize::from(active_sibling)
-        );
+        // One extra eligible occasion is fetched to retain the omission indication.
+        assert_eq!(utilization.omitted_by_fanout_count, 1);
     };
     assert_lifecycle_evidence(&first);
     // Suppression after the occasion budget fills must not inflate lifecycle evidence.
@@ -785,14 +783,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 continue;
             }
             assert_eq!(row.selected_cap, 1);
-            assert_eq!(
-                row.omitted_by_fanout_count,
-                if row.relation == RelationType::Involves {
-                    8 + usize::from(forget_last)
-                } else {
-                    9
-                }
-            );
+            // The fetched prefix contains lifecycle exclusions and no omitted eligible route.
+            assert_eq!(row.omitted_by_fanout_count, 0);
         }
     }
     memory.close().await.unwrap();

@@ -314,6 +314,82 @@ async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_sa
 }
 
 #[tokio::test]
+async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forget() {
+    let (memory, _) = memory().await;
+    let id = MemoryId::from_u128(8802);
+    let mut thread = MemoryThreadDraft::new("A thread", "An ongoing topic");
+    thread.id = Some(id);
+    let mut observation = ObservationDraft::new(id, "An observed detail");
+    observation.id = Some(id);
+    memory
+        .remember(
+            RememberInput::new("An experience")
+                .with_episode(episode_draft(id.as_u128(), Some(words_scene())))
+                .with_observation(observation)
+                .with_memory_thread(thread),
+            RememberOptions::default(),
+        )
+        .await
+        .unwrap();
+
+    let mut observed = Vec::new();
+    for stage in 0..3 {
+        if stage > 0 {
+            let target = if stage == 1 {
+                LifecycleTargetRef::observation(id)
+            } else {
+                LifecycleTargetRef::episode(id)
+            };
+            memory
+                .forget(ForgetMemoryDraft::suppress(
+                    target,
+                    "Only this typed object",
+                ))
+                .await
+                .unwrap();
+        }
+        for (object_type, surface) in [
+            (ObjectType::Episode, VectorSurface::Summary),
+            (ObjectType::Episode, VectorSurface::SceneSetting),
+            (ObjectType::Episode, VectorSurface::SceneParticipants),
+            (ObjectType::MemoryThread, VectorSurface::Summary),
+        ] {
+            let mut query = RetrievalContext::default().with_trace();
+            query.object_type_defaults = vec![object_type];
+            query.graph_limits.max_depth = 0;
+            match surface {
+                VectorSurface::SceneSetting => {
+                    query.scene.setting.words = words_scene().setting.words
+                }
+                VectorSurface::SceneParticipants => {
+                    query.scene.participants = words_scene().participants
+                }
+                _ => query.topic = Some("An experience".to_owned()),
+            }
+            let result = memory.retrieve(query).await.unwrap();
+            let found = result
+                .trace
+                .unwrap()
+                .vector_candidates
+                .iter()
+                .any(|candidate| {
+                    candidate.object == MemoryObjectRef::new(object_type, id)
+                        && candidate.surface == surface
+                });
+            observed.push((stage, object_type, surface, found));
+        }
+    }
+    memory.close().await.unwrap();
+    for (stage, object_type, surface, found) in &observed {
+        assert_eq!(
+            *found,
+            *stage < 2 || *object_type == ObjectType::MemoryThread,
+            "{stage} {object_type:?} {surface:?}: {observed:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_place() {
     // A lexical provider makes the recall test depend on words, not hash collisions.
     struct PlaceEmbedder;
