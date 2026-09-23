@@ -639,6 +639,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selectivity_plan_uses_lifecycle_scoped_counts() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let entity_id = crate::domain::MemoryId::from_u128(1);
+        let edges = [
+            (crate::domain::RetentionState::Active, true),
+            (crate::domain::RetentionState::Active, false),
+            (crate::domain::RetentionState::Suppressed, false),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(
+            |(index, (retention_state, is_current))| RetrievalStatsEdge {
+                edge_key: format!("thread:{index}"),
+                entity_id,
+                relation_kind: RelationType::PartOfThread,
+                object_id: crate::domain::MemoryId::from_u128(index as u128 + 2),
+                object_type: ObjectType::DerivedMemory,
+                retention_state,
+                is_current,
+                first_seen_at: chrono::DateTime::UNIX_EPOCH,
+                last_seen_at: chrono::DateTime::UNIX_EPOCH,
+            },
+        )
+        .collect::<Vec<_>>();
+        stats.record_edges(&edges).await.unwrap();
+        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
+
+        for (include_suppressed, include_superseded, scope, count) in [
+            (false, false, SelectivityCountScope::Current, 1),
+            (false, true, SelectivityCountScope::Active, 2),
+            (true, false, SelectivityCountScope::Total, 3),
+            (true, true, SelectivityCountScope::Total, 3),
+        ] {
+            let plan = selectivity_plan_for_entity(
+                entity_id,
+                0.75,
+                20,
+                &stats,
+                RetrievalSelectivityPolicy::default(),
+                &stats_context,
+                RetrievalLifecyclePolicy {
+                    include_suppressed,
+                    include_superseded,
+                },
+                TraceMode::Enabled,
+            )
+            .await
+            .unwrap();
+            let trace = plan
+                .traces
+                .iter()
+                .find(|trace| trace.relation == RelationType::PartOfThread)
+                .unwrap();
+            assert_eq!(trace.count_scope, scope);
+            assert_eq!(trace.entity_count, Some(count));
+            assert_eq!(trace.global_count, Some(count));
+            assert!(!trace.fallback);
+        }
+    }
+
+    #[tokio::test]
     async fn subject_aboutness_has_one_configured_budget_even_for_mentions_only_scope() {
         let stats = InMemoryRetrievalStatsStore::new();
         let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
