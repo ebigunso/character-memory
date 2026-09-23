@@ -59,7 +59,8 @@ Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
 | `createdAt`, `updatedAt` | Timestamps on the types that declare them |
 | `modality`, `endedAt` | Episode modality and optional interval end |
 | `sceneTime` | Required experience instant, stored in UTC without precision loss |
-| `sceneLocalYear`, `sceneMonthDay` | Local date derived from the supplied scene offset; exact anniversary match and replay equality |
+| `sceneOffsetSeconds` | Required supplied offset in seconds east of UTC, restricted to whole minutes within ±23:59; hydration restores it and replay equality compares it |
+| `sceneLocalYear`, `sceneMonthDay` | Anniversary index derived from `scene.time`'s local date |
 | `sceneParticipants` | Lossless JSON array of participants, each with optional key, name and description; a key or nonblank words required |
 | `settingKey`, `settingWords` | Independently optional context key and words; the key is directly queryable |
 | `sceneCustomValues` | Lossless JSON object of string custom values |
@@ -98,9 +99,9 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `assertionName` | Supplied name spelling |
 | `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
 
-Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
+Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`belief_assertions_from_rdf`)](../../../src/adapters/oxigraph/shared.rs). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
 
-Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104).
+Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`select_notions_known_as`)](../../../src/adapters/oxigraph/sparql_selectors.rs).
 
 ### Links And Currency
 
@@ -112,12 +113,14 @@ Name lookup reads active beliefs with no incoming `Supersedes` link. It can reso
 | `createdAt` | Link creation time |
 | `urn:cmem:relation:<relation_name>` | Direct traversal predicate emitted with the reified link |
 
-| Memory list | Derived link | Direction |
+| Authoritative reference | Derived link | Direction |
 |---|---|---|
 | `entity_ids` | `About` / `about` | Interpreted memory → notion |
 | `supersedes` | `Supersedes` / `supersedes` | Successor → predecessor |
+| Observation `episode_id` | `ObservedIn` / `observed_in` | Observation → episode |
+| Episode `scene.participants[].key` | `Involves` / `involves` | Episode → notion |
 
-Remember and correction persist deterministic derived links with their memory objects. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and supersession predecessors that do not already exist in the graph.
+Commit persists deterministic derived links with their memory objects. `ObservedIn` and `Involves` reuse an authored link between the required endpoints in either orientation; presence creates no `Mentions` links. An observation's parent episode must exist in the same plan or store. Admission rejects authored `Supersedes`, authored `About` between interpreted memories and notions in either direction, duplicate generated/authored link IDs, and supersession predecessors that do not already exist in the graph.
 
 Currency is determined by incoming interpreted-memory `Supersedes` links. Predecessor content and retention are preserved; a suppressed successor still supplies supersession evidence. Default retrieval excludes suppressed and superseded memories. `include_suppressed` and `include_superseded` independently opt into those histories. Notions and threads remain graph anchors.
 
@@ -125,7 +128,7 @@ Currency is determined by incoming interpreted-memory `Supersedes` links. Predec
 
 The internal SQLite projection uses `entity_edge_index`, `entity_relation_counts`, `global_relation_counts`, `episode_state_index`, `episode_counts`, `episode_presence_index` and `stats_meta`. The in-memory implementation follows the same counter contract.
 
-The edge index deduplicates `(entity, relation, object type, object)` tuples. `episode_presence_index` keeps scene participant keys and episode involvement links separately from observation mentions mapped through the observation's episode. Each mention retains its producing observation and retention state; each notion counts once per episode when the episode and any presence source are active, without creating graph links. Forgetting one observation leaves presence from another observation, a scene participant or a direct involvement link intact. `episode_state_index` stores one row per episode, including episodes with no keyed participants, with its retention state. The two participant paths use this episode total as their denominator and share the existing participant fanout budget; `About` and `PartOfThread` retain their relation/object edge-count denominators.
+The edge index deduplicates counted `(entity, relation, object type, object)` tuples. `episode_presence_index` counts each notion once per episode from scene participant keys and `Involves` episode links in either orientation, following episode retention. `Mentions` observations are aboutness, not presence; forgetting an observation does not remove the episode's presence. `episode_state_index` stores every episode, including those without keyed participants, with its retention state. The presence route uses the episode total as its frequency denominator. `About` and `Mentions` share a bounded aboutness list and maintain no relation counters; counted relations such as `PartOfThread` retain their relation/object edge-count denominators.
 
 `episode_counts` caches total and active episode counts in one row, updated in the same transaction as episode state changes. Retrieval reads that row without scanning episodes. The in-memory adapter refreshes episode counts with its existing dirty-counter cache.
 
@@ -137,7 +140,7 @@ The edge index deduplicates `(entity, relation, object type, object)` tuples. `e
 
 The edge cache's `is_current` value is derived from graph state. Episodes have no supersession, so their active and current counts are equal. Including suppressed but excluding superseded memories uses total relation/object counts as an approximation, with possible fanout distortion in either direction; graph filtering still enforces eligibility.
 
-An existing statistics database without `episode_presence_index` reports missing episode statistics, including after subsequent writes. Fresh schema creation is one transaction, including the episode tables. A fresh statistics store is required to use episode-frequency counting; no migration or graph-to-statistics rebuild is provided.
+SQLite schema initialization is transactional, including the episode tables. The library provides no statistics schema migration or graph-to-statistics rebuild; stores using a superseded schema must be recreated and populated through writes.
 
 Statistics cannot establish object existence, provenance, links or retrieval eligibility. An unhealthy stats store causes conservative selectivity fallback and requires caller-managed recovery.
 

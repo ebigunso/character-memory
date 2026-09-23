@@ -2,14 +2,12 @@ mod activity;
 mod scene;
 mod state;
 
-// Continuity retrieval pipeline used by the public facade and internal tests.
-// Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage, CueKind,
-    FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace,
-    GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision,
+    AdmissionRoad, ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage,
+    CueKind, FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry,
+    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterDecision,
     LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
     SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
@@ -17,21 +15,21 @@ use crate::api::types::{
     VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
-    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
+    MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
-use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
+use crate::policy::graph_expansion::{fail_if_closed, graph_expansion_bounded_failure_trace};
 use crate::policy::{
     selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailure,
-    GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
-    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailureReason,
+    GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
+    GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 #[cfg(test)]
@@ -98,16 +96,14 @@ where
         let mut explicit_roots = cues
             .participants
             .iter()
-            .map(|id| CandidateRoot {
-                date_match_floor_eligible: false,
-                object_id: *id,
-                object_type: ObjectType::Entity,
-                score: 1.0,
-                source: GraphRootSource::Participant,
-                vector_score: None,
-                cue_kinds: BTreeSet::from([CueKind::Participant]),
-                full_standing_score: Some(1.0),
-                full_standing_kinds: BTreeSet::from([CueKind::Participant]),
+            .enumerate()
+            .map(|(position, id)| {
+                CandidateRoot::new(
+                    MemoryObjectRef::new(ObjectType::Entity, *id),
+                    RecallRoad::Participant,
+                    1.0,
+                    position,
+                )
             })
             .collect::<Vec<_>>();
         let mut assembly = RetrieveAssembly::new(trace_mode);
@@ -115,7 +111,6 @@ where
         let mut root_order = HashMap::new();
         let keys = context.scene.scope_keys();
         let scope_kinds = std::iter::repeat_n(CueKind::Participant, cues.participants.len())
-            .chain(std::iter::repeat_n(CueKind::Place, keys.len()))
             .chain([CueKind::Activity])
             .collect::<Vec<_>>();
         if context.graph_limits.allowed_object_types.is_empty()
@@ -124,16 +119,15 @@ where
                 .allowed_object_types
                 .contains(&ObjectType::DerivedMemory)
         {
-            for (offset, key) in keys.iter().enumerate() {
+            let contribution = RecallRoad::Place.contribution(&context);
+            let mut place_rows = HashMap::new();
+            for key in &keys {
                 let (ids, filtered) = self
                     .graph_store
                     .query_scope_state(
                         key,
-                        GraphExpansionLifecyclePolicy {
-                            include_suppressed: context.lifecycle_policy.include_suppressed,
-                            include_superseded: context.lifecycle_policy.include_superseded,
-                        },
-                        context.candidate_limits.max_graph_roots,
+                        GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
+                        contribution,
                     )
                     .await?;
                 assembly
@@ -145,30 +139,19 @@ where
                             &entry.superseded_by,
                         )
                     }));
-                for (rank, id) in ids.into_iter().enumerate() {
-                    root_order.insert(
-                        (
-                            cues.participants.len() + offset,
-                            MemoryObjectRef::new(ObjectType::DerivedMemory, id),
-                        ),
-                        rank,
-                    );
-                    state_scopes
-                        .entry(MemoryObjectRef::new(ObjectType::DerivedMemory, id))
-                        .or_default()
-                        .push(cues.participants.len() + offset);
-                    explicit_roots.push(CandidateRoot {
-                        date_match_floor_eligible: false,
-                        object_id: id,
-                        object_type: ObjectType::DerivedMemory,
-                        score: 1.0,
-                        source: GraphRootSource::Place,
-                        vector_score: None,
-                        cue_kinds: BTreeSet::from([CueKind::Place]),
-                        full_standing_score: Some(1.0),
-                        full_standing_kinds: BTreeSet::from([CueKind::Place]),
-                    });
-                }
+                place_rows.extend(ids.into_iter().map(|row| (row.id, row)));
+            }
+            let mut place_rows = place_rows.into_values().collect::<Vec<_>>();
+            place_rows.sort_unstable_by_key(|row| (std::cmp::Reverse(row.time), row.id));
+            place_rows.truncate(contribution);
+            for (rank, row) in place_rows.into_iter().enumerate() {
+                explicit_roots.push(CandidateRoot::from_rank(
+                    row,
+                    ObjectType::DerivedMemory,
+                    RecallRoad::Place,
+                    0.0,
+                    rank,
+                ));
             }
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
@@ -178,57 +161,40 @@ where
                 filtered_lifecycle_decision(entry.object_ref, entry.reason, &entry.superseded_by)
             }));
         for (rank, root) in activity_roots.iter().enumerate() {
-            if root.object_type == ObjectType::DerivedMemory {
-                root_order.insert(
-                    (
-                        cues.participants.len() + keys.len(),
-                        MemoryObjectRef::new(root.object_type, root.object_id),
-                    ),
-                    rank,
-                );
+            if root.object.object_type == ObjectType::DerivedMemory {
+                root_order.insert((cues.participants.len(), root.object), rank);
                 state_scopes
-                    .entry(MemoryObjectRef::new(root.object_type, root.object_id))
+                    .entry(root.object)
                     .or_default()
-                    .push(cues.participants.len() + keys.len());
+                    .push(cues.participants.len());
             }
         }
         explicit_roots.extend(activity_roots);
-        let time_limit = prompt_ready_sections()
-            .into_iter()
-            .map(|section| section_limit(section, context.section_limits))
-            .max()
-            .unwrap_or(0);
-        let time_range_has_more = if let Some(range) = context.time_range {
-            let matches = self
-                .graph_store
-                .query_episodes_by_time(
-                    Some(range.start),
-                    range.end,
-                    time_limit.saturating_add(1),
-                    GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    },
-                )
-                .await?;
-            let has_more = matches.len() > time_limit;
-            explicit_roots.extend(matches.into_iter().take(time_limit).map(|object_id| {
-                CandidateRoot {
-                    date_match_floor_eligible: true,
-                    object_id,
-                    object_type: ObjectType::Episode,
-                    score: 0.0,
-                    source: GraphRootSource::DateMatch,
-                    vector_score: None,
-                    cue_kinds: BTreeSet::from([CueKind::DateMatch]),
-                    full_standing_score: None,
-                    full_standing_kinds: BTreeSet::new(),
-                }
-            }));
-            Some(has_more)
+        let time_road = if context.time_range.is_some() {
+            RecallRoad::Range
         } else {
-            None
+            RecallRoad::Recency
         };
+        let contribution = time_road.contribution(&context);
+        // Only a caller range needs an extra row to report that more exists.
+        let read_limit = contribution.saturating_add(usize::from(context.time_range.is_some()));
+        let window = self
+            .graph_store
+            .query_episodes_by_time(
+                context.time_range.map(|range| range.start),
+                context
+                    .time_range
+                    .map_or(context.scene.time.to_utc(), |range| range.end),
+                read_limit,
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
+            )
+            .await?;
+        let time_range_has_more = context.time_range.map(|_| window.len() > contribution);
+        explicit_roots.extend(window.into_iter().take(contribution).enumerate().map(
+            |(position, row)| {
+                CandidateRoot::from_rank(row, ObjectType::Episode, time_road, 0.0, position)
+            },
+        ));
         let resolved = cues
             .references
             .iter()
@@ -241,56 +207,36 @@ where
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        let anniversary_limit = context.cue_floors.date_match.max(1);
+        let anniversary_roads = [
+            RecallRoad::SharedAnniversary,
+            RecallRoad::UnsharedAnniversary,
+        ];
         let anniversaries = self
             .graph_store
             .query_anniversaries(
                 context.scene.time.date_naive(),
                 &resolved,
-                anniversary_limit.saturating_add(1),
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
+                anniversary_roads
+                    .iter()
+                    .map(|road| road.contribution(&context))
+                    .max()
+                    .unwrap_or(0),
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
             )
             .await?;
-        let anniversary_has_more = anniversaries.len() > anniversary_limit;
-        explicit_roots.extend(anniversaries.into_iter().take(anniversary_limit).map(
-            |(object_id, shared)| CandidateRoot {
-                object_id,
-                object_type: ObjectType::Episode,
-                score: 0.0,
-                source: GraphRootSource::DateMatch,
-                vector_score: None,
-                cue_kinds: BTreeSet::from([CueKind::DateMatch]),
-                full_standing_score: None,
-                full_standing_kinds: BTreeSet::new(),
-                date_match_floor_eligible: shared,
-            },
-        ));
-        let recent = self
-            .graph_store
-            .query_episodes_by_time(
-                None,
-                context.scene.time.to_utc(),
-                time_limit,
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
-            )
-            .await?;
-        explicit_roots.extend(recent.into_iter().map(|object_id| CandidateRoot {
-            date_match_floor_eligible: false,
-            object_id,
-            object_type: ObjectType::Episode,
-            score: 0.0,
-            source: GraphRootSource::Recency,
-            vector_score: None,
-            cue_kinds: BTreeSet::from([CueKind::Recency]),
-            full_standing_score: None,
-            full_standing_kinds: BTreeSet::new(),
-        }));
+        for road in anniversary_roads {
+            explicit_roots.extend(
+                anniversaries
+                    .iter()
+                    .copied()
+                    .filter(|(_, shared)| *shared == (road == RecallRoad::SharedAnniversary))
+                    .take(road.contribution(&context))
+                    .enumerate()
+                    .map(|(position, (row, _))| {
+                        CandidateRoot::from_rank(row, ObjectType::Episode, road, 0.0, position)
+                    }),
+            );
+        }
         let root_selection = select_candidate_roots(
             cues.roots,
             &explicit_roots,
@@ -301,13 +247,10 @@ where
         );
         let candidate_roots = root_selection.roots;
         // Explicit roots and what they bring precede word matches at sections.
-        let mut section_orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
+        let mut section_orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>> = BTreeMap::new();
         for root in &explicit_roots {
-            for kind in &root.cue_kinds {
-                section_orders
-                    .entry(*kind)
-                    .or_default()
-                    .push(MemoryObjectRef::new(root.object_type, root.object_id));
+            for kind in root.roads.keys() {
+                section_orders.entry(*kind).or_default().push(root.object);
             }
         }
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
@@ -317,7 +260,7 @@ where
         let mut selectivity_traces = trace_mode.is_enabled().then(Vec::new);
         let selectivity_stats_context = if candidate_roots
             .iter()
-            .any(|candidate| candidate.object_type == ObjectType::Entity)
+            .any(|candidate| candidate.object.object_type == ObjectType::Entity)
         {
             Some(
                 SelectivityStatsContext::load_with_scope(
@@ -334,18 +277,17 @@ where
         for candidate in &candidate_roots {
             let selectivity_plan = if let Some(stats_context) = selectivity_stats_context
                 .as_ref()
-                .filter(|_| candidate.object_type == ObjectType::Entity)
+                .filter(|_| candidate.object.object_type == ObjectType::Entity)
             {
                 selectivity_plan_for_entity(
-                    candidate.object_id,
-                    candidate.score,
+                    candidate.object.id,
+                    candidate.score(),
                     context.graph_limits.max_fanout_per_node,
                     self.stats_store,
                     self.selectivity_policy,
                     stats_context,
                     context.lifecycle_policy,
                     trace_mode,
-                    candidate.source == GraphRootSource::Participant,
                 )
                 .await?
             } else {
@@ -358,8 +300,8 @@ where
             let mut query =
                 graph_query_for_candidate(candidate, &context, selectivity_plan.fanout_overrides)
                     .with_fanout_utilization_recording(trace_mode);
-            if context.activity == Some(crate::api::types::ActivityRef::Thread(candidate.object_id))
-                && candidate.object_type == ObjectType::MemoryThread
+            if context.activity == Some(crate::api::types::ActivityRef::Thread(candidate.object.id))
+                && candidate.object.object_type == ObjectType::MemoryThread
             {
                 // Filter traversal itself: the bounded audit cannot list every resolved member.
                 query.current_thread_state = true;
@@ -376,30 +318,28 @@ where
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
-                        if context.graph_limits.failure_mode == GraphFailureMode::FailClosed {
-                            return Err(bounded_failure_error(failure));
-                        }
+                        fail_if_closed(context.graph_limits.failure_mode, failure)?;
                     }
-                    if candidate.source == GraphRootSource::Participant {
+                    if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
                             .participants
                             .iter()
-                            .position(|id| *id == candidate.object_id)
+                            .position(|id| *id == candidate.object.id)
                             .expect("participant roots follow resolved scene notions");
                         state::record_subject_state(
                             &mut state_scopes,
                             scope,
-                            candidate.object_id,
+                            candidate.object.id,
                             &expansion,
                         );
                     }
                     for kind in explicit_roots
                         .iter()
                         .filter(|root| {
-                            root.object_type == candidate.object_type
-                                && root.object_id == candidate.object_id
+                            root.object.object_type == candidate.object.object_type
+                                && root.object.id == candidate.object.id
                         })
-                        .flat_map(|root| &root.cue_kinds)
+                        .flat_map(|root| root.roads.keys())
                     {
                         section_orders
                             .entry(*kind)
@@ -413,7 +353,10 @@ where
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
-                    assembly.omit_missing_candidate(candidate)
+                    assembly.omit_unverified_candidate(
+                        candidate,
+                        StaleCandidateReason::GraphObjectMissing,
+                    )
                 }
                 Err(error) => return Err(error),
             }
@@ -433,6 +376,27 @@ where
             );
         }
 
+        let missing_times = assembly
+            .objects
+            .values()
+            .filter_map(|ranked| match &ranked.object {
+                MemoryObject::Observation(observation) if observation.observed_at.is_none() => {
+                    Some(ranked.object.object_ref())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if !missing_times.is_empty() {
+            for (object, occasion) in self
+                .graph_store
+                .query_episode_occasions(&missing_times)
+                .await?
+            {
+                if let Some(ranked) = assembly.objects.get_mut(&object) {
+                    ranked.memory_time = Some(occasion.time);
+                }
+            }
+        }
         let ranked_objects = assembly.ranked_objects();
         for (kind, order) in root_selection.orders {
             section_orders.entry(kind).or_default().extend(order);
@@ -441,6 +405,7 @@ where
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
             section_assignments: Vec::new(),
+            admitted_by: HashMap::new(),
             floor_admissions: cues.floor_admissions,
         };
         details
@@ -498,10 +463,17 @@ where
             selectivity: selectivity_telemetry,
             section_pressure,
         };
+        let memory_scenes = self
+            .memory_scenes(
+                &pack,
+                details.admitted_by,
+                context.lifecycle_policy.include_suppressed,
+                context.scene.time.to_utc(),
+            )
+            .await?;
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_searches: cues.scene_cue_searches,
             time_range_has_more,
-            anniversary_has_more,
             vector_candidates: vector_candidates
                 .iter()
                 .enumerate()
@@ -522,13 +494,6 @@ where
             section_assignments: details.section_assignments,
         });
 
-        let memory_scenes = self
-            .memory_scenes(
-                &pack,
-                context.lifecycle_policy.include_suppressed,
-                context.scene.time.to_utc(),
-            )
-            .await?;
         Ok(RetrieveOutcome {
             scene: context.scene,
             activity,
@@ -547,13 +512,13 @@ struct RetrievalDetails {
     lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     stale_candidate_omissions: Vec<StaleCandidateOmission>,
     section_assignments: Vec<SectionAssignment>,
+    admitted_by: HashMap<MemoryObjectRef, BTreeSet<AdmissionRoad>>,
     floor_admissions: Vec<CueFloorAdmission>,
 }
 
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
     objects: HashMap<MemoryObjectRef, RankedObject>,
-    superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
     graph_relations: Option<Vec<crate::api::types::GraphRelationTrace>>,
@@ -574,13 +539,12 @@ impl RetrieveAssembly {
         expansion: GraphExpansion,
     ) -> Result<(), CustomError> {
         let bounded_failure = expansion.bounded_failure;
-        let candidate_ref =
-            MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
+        let candidate_ref = candidate.object;
 
         // Reuse the traversal rule on the admitted graph. This reads no store and
         // cannot widen the root's bounds; it identifies where the reminder road ends.
-        let reminder_reached = if candidate.full_standing_score.is_some()
-            && candidate.cue_kinds != candidate.full_standing_kinds
+        let reminder_reached = if candidate.expanding_score().is_some()
+            && candidate.roads.len() != candidate.expanding_roads().len()
             && expansion
                 .objects
                 .iter()
@@ -601,18 +565,6 @@ impl RetrieveAssembly {
         } else {
             HashSet::new()
         };
-
-        for relation in &expansion.relations {
-            if relation.relation == RelationType::Supersedes
-                && relation.from.object_type == ObjectType::DerivedMemory
-                && relation.to.object_type == ObjectType::DerivedMemory
-            {
-                self.superseded_by
-                    .entry(relation.to.id)
-                    .or_default()
-                    .push(relation.from.id);
-            }
-        }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
@@ -650,13 +602,13 @@ impl RetrieveAssembly {
                 .copied()
                 .map(graph_component)
                 .unwrap_or(0.0);
-            let (score, kinds) = match candidate.full_standing_score {
+            let (score, kinds) = match candidate.expanding_score() {
                 Some(score)
                     if object_ref != candidate_ref && !reminder_reached.contains(&object_ref) =>
                 {
-                    (score, &candidate.full_standing_kinds)
+                    (score, candidate.expanding_roads())
                 }
-                _ => (candidate.score, &candidate.cue_kinds),
+                _ => (candidate.score(), candidate.road_set()),
             };
             let inherited_cue = if object_ref == candidate_ref {
                 score
@@ -673,9 +625,7 @@ impl RetrieveAssembly {
                 .entry(object_ref)
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
-                    ranked.cue_kinds.extend(&kinds);
-                    ranked.date_match_floor_eligible |=
-                        candidate.date_match_floor_eligible && kinds.contains(&CueKind::DateMatch);
+                    ranked.roads.extend(&kinds);
                     ranked.is_root |= object_ref == candidate_ref;
                     if ranked.is_root || ranked.reminder_only == reminder_only {
                         ranked.graph_component = ranked.graph_component.max(graph_component);
@@ -701,17 +651,13 @@ impl RetrieveAssembly {
                         candidate_score,
                     );
                     ranked.reminder_only = reminder_only;
-                    ranked.date_match_floor_eligible =
-                        candidate.date_match_floor_eligible && kinds.contains(&CueKind::DateMatch);
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
-            if object_ref.object_type == ObjectType::DerivedMemory {
-                if let Some(resolvers) = expansion.resolved_by.get(&object_ref.id) {
-                    ranked.resolved_by.extend(resolvers);
-                    ranked.resolved_by.sort_unstable();
-                    ranked.resolved_by.dedup();
-                }
+            if let Some(resolvers) = expansion.resolved_by.get(&object_ref) {
+                ranked.resolved_by.extend(resolvers);
+                ranked.resolved_by.sort_unstable();
+                ranked.resolved_by.dedup();
             }
         }
 
@@ -726,7 +672,7 @@ impl RetrieveAssembly {
                 root_filtered = true;
                 let stale_reason = stale_reason_from_filtered(filtered.reason);
                 self.stale_omissions.push(StaleCandidateOmission {
-                    candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                    candidate: candidate.object,
                     vector_score: candidate.vector_score,
                     reason: stale_reason,
                 });
@@ -735,93 +681,48 @@ impl RetrieveAssembly {
         }
 
         if !root_filtered && !root_verified && !self.objects.contains_key(&candidate_ref) {
-            if bounded_failure.is_some() {
-                self.omit_bounded_candidate(candidate);
+            let reason = if bounded_failure.is_some() {
+                StaleCandidateReason::GraphExpansionBounded
             } else {
-                self.omit_missing_candidate(candidate);
-            }
+                StaleCandidateReason::GraphObjectMissing
+            };
+            self.omit_unverified_candidate(candidate, reason);
         }
         Ok(())
     }
 
-    fn omit_bounded_candidate(&mut self, candidate: &CandidateRoot) {
+    fn omit_unverified_candidate(
+        &mut self,
+        candidate: &CandidateRoot,
+        reason: StaleCandidateReason,
+    ) {
         self.stale_omissions.push(StaleCandidateOmission {
-            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+            candidate: candidate.object,
             vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphExpansionBounded,
+            reason,
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            retention_state: None,
+            object: candidate.object,
             superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
-            reason: LifecycleFilterReason::GraphExpansionBounded,
-        });
-    }
-
-    fn omit_missing_candidate(&mut self, candidate: &CandidateRoot) {
-        self.stale_omissions.push(StaleCandidateOmission {
-            candidate: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphObjectMissing,
-        });
-        self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
-            retention_state: None,
-            superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
-            reason: LifecycleFilterReason::GraphObjectMissing,
+            reason: match reason {
+                StaleCandidateReason::GraphExpansionBounded => {
+                    LifecycleFilterReason::GraphExpansionBounded
+                }
+                StaleCandidateReason::GraphObjectMissing => {
+                    LifecycleFilterReason::GraphObjectMissing
+                }
+                _ => unreachable!("unverified candidates are missing or bounded"),
+            },
         });
     }
 
     fn ranked_objects(&mut self) -> Vec<RankedObject> {
-        for superseded in self.superseded_by.values_mut() {
-            superseded.sort();
-            superseded.dedup();
-        }
-
         let mut ranked_objects = Vec::new();
         for (_, ranked) in std::mem::take(&mut self.objects) {
             ranked_objects.push(ranked);
         }
 
         ranked_objects.sort_by_key(|ranked| ranked.rank_key());
-        // Reorder only contributed-occasion slots within an equal-score/type
-        // tie: floor-eligible date matches precede recency and unshared anniversaries.
-        // Other objects retain the general ID order and their positions.
-        for tied in ranked_objects.chunk_by_mut(|left, right| {
-            left.rank_key().score == right.rank_key().score
-                && left.object.object_type() == right.object.object_type()
-        }) {
-            let positions = tied
-                .iter()
-                .enumerate()
-                .filter_map(|(index, ranked)| {
-                    (matches!(ranked.object, MemoryObject::Episode(_))
-                        && (ranked.cue_kinds.contains(&CueKind::DateMatch)
-                            || ranked.cue_kinds.contains(&CueKind::Recency)))
-                    .then_some(index)
-                })
-                .collect::<Vec<_>>();
-            if positions.len() < 2 {
-                continue;
-            }
-            let mut recent = positions
-                .iter()
-                .map(|&index| tied[index].clone())
-                .collect::<Vec<_>>();
-            recent.sort_by_key(|ranked| match &ranked.object {
-                MemoryObject::Episode(episode) => (
-                    !ranked.date_match_floor_eligible,
-                    std::cmp::Reverse(episode.scene.time),
-                    episode.id,
-                ),
-                _ => unreachable!("only contributed episodes occupy these slots"),
-            });
-            for (position, ranked) in positions.into_iter().zip(recent) {
-                tied[position] = ranked;
-            }
-        }
         self.stale_omissions.sort_by_key(|omission| {
             (
                 omission.candidate.id,
@@ -845,9 +746,9 @@ impl RetrieveAssembly {
 struct RankedObject {
     object: MemoryObject,
     cue_component: f32,
-    cue_kinds: BTreeSet<CueKind>,
+    roads: BTreeSet<RecallRoad>,
     reminder_only: bool,
-    date_match_floor_eligible: bool,
+    memory_time: Option<chrono::DateTime<chrono::Utc>>,
     is_root: bool,
     vector_candidate_score: Option<f32>,
     graph_component: f32,
@@ -859,23 +760,35 @@ impl RankedObject {
     fn new(
         object: MemoryObject,
         cue_component: f32,
-        cue_kinds: BTreeSet<CueKind>,
+        roads: BTreeSet<RecallRoad>,
         graph_component: f32,
         vector_candidate_score: Option<f32>,
     ) -> Self {
         let salience_component = salience_component(&object);
+        let memory_time = match &object {
+            MemoryObject::Episode(object) => Some(object.scene.time.to_utc()),
+            MemoryObject::Observation(object) => object.observed_at,
+            MemoryObject::DerivedMemory(object) => Some(object.created_at),
+            MemoryObject::MemoryThread(object) => Some(object.created_at),
+            MemoryObject::Entity(object) => Some(object.created_at),
+            MemoryObject::MemoryLink(object) => Some(object.created_at),
+        };
         Self {
             object,
             cue_component,
-            cue_kinds,
+            roads,
             reminder_only: false,
-            date_match_floor_eligible: false,
+            memory_time,
             is_root: false,
             vector_candidate_score,
             graph_component,
             salience_component,
             resolved_by: Vec::new(),
         }
+    }
+
+    fn kinds(&self) -> BTreeSet<CueKind> {
+        road_kinds(&self.roads)
     }
 
     fn final_score(&self) -> f32 {
@@ -889,6 +802,7 @@ impl RankedObject {
         let object_type = self.object.object_type();
         RankKey {
             score: SortableScore(self.final_score()),
+            time: std::cmp::Reverse(self.memory_time),
             object_type_rank: object_type.stable_rank(),
             object_id,
         }
@@ -930,85 +844,73 @@ impl Ord for SortableScore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct RankKey {
     score: SortableScore,
+    time: std::cmp::Reverse<Option<chrono::DateTime<chrono::Utc>>>,
     object_type_rank: u8,
     object_id: MemoryId,
 }
 
-// Only a kind's own queue head credits its turn, even if already selected.
-// Direct selector/search order precedes inherited-only members in stage order.
-// Given-kind floors take full-standing members first. An explicit time floor
-// reserves its latest occasions regardless of which other roads reached them.
-// Only roots share spare turns; other stages fill from their ranked prefix.
-// An index outside the old prefix records the floor that changed its admission.
-fn floor_kinds(
-    kinds: &BTreeSet<CueKind>,
-    date_match_eligible: bool,
-) -> std::borrow::Cow<'_, BTreeSet<CueKind>> {
-    if !date_match_eligible && kinds.contains(&CueKind::DateMatch) {
-        let mut reserved = kinds.clone();
-        reserved.remove(&CueKind::DateMatch);
-        std::borrow::Cow::Owned(reserved)
-    } else {
-        std::borrow::Cow::Borrowed(kinds)
-    }
-}
-
-fn select_with_cue_floors<'a>(
-    candidates: impl IntoIterator<Item = (MemoryObjectRef, &'a BTreeSet<CueKind>, bool)>,
-    orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+// A reservation credits its road's own head, even if already selected. Only
+// expanding roads can take a spare turn at roots; other stages fill ranked room.
+fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
+    candidates: impl IntoIterator<Item = (MemoryObjectRef, BTreeSet<RecallRoad>)>,
+    orders: impl Fn(RecallRoad) -> I,
     limit: usize,
     floors: RetrievalCueFloors,
     stage: CueFloorStage,
 ) -> Vec<(usize, Option<CueKind>)> {
     let candidates = candidates.into_iter().collect::<Vec<_>>();
-    let kinds = candidates
-        .iter()
-        .flat_map(|(_, kinds, _)| kinds.iter().copied())
-        .collect::<BTreeSet<_>>();
-    if candidates.len() <= limit || kinds.is_empty() {
-        return (0..candidates.len().min(limit))
-            .map(|index| (index, None))
-            .collect();
+    if candidates.len() <= limit {
+        return (0..candidates.len()).map(|index| (index, None)).collect();
     }
+    let mut roads = candidates
+        .iter()
+        .flat_map(|(_, roads)| roads.iter().copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    roads.sort_by_key(|road| (!road.rule().expands, *road));
+    let expanding_kinds = roads
+        .iter()
+        .filter(|road| road.rule().expands)
+        .map(|road| road.rule().kind)
+        .collect::<BTreeSet<_>>();
     let mut queues = [
-        (CueKind::Participant, floors.participant),
-        (CueKind::Place, floors.place),
-        (CueKind::Activity, floors.activity),
-        (CueKind::DateMatch, floors.date_match),
-        (CueKind::Topic, floors.topic),
-        (CueKind::Recency, floors.recency),
+        CueKind::Participant,
+        CueKind::Place,
+        CueKind::Activity,
+        CueKind::DateMatch,
+        CueKind::Topic,
+        CueKind::Recency,
     ]
-    .map(|(kind, floor)| {
-        let mut ranks = HashMap::new();
-        for (rank, object) in orders.get(&kind).into_iter().flatten().enumerate() {
-            ranks.entry(*object).or_insert(rank);
-        }
-        let mut queue = candidates
+    .map(|kind| {
+        let mut queue = Vec::new();
+        let mut seen = HashSet::new();
+        for road in roads
             .iter()
-            .enumerate()
-            .filter_map(|(index, (_, kinds, _))| kinds.contains(&kind).then_some(index))
-            .collect::<Vec<_>>();
-        queue.sort_by_key(|&index| {
-            (
-                !matches!(kind, CueKind::Recency | CueKind::DateMatch) && candidates[index].2,
+            .filter(|road| road.rule().kind == kind && road.rule().reserves)
+        {
+            let mut ranks = HashMap::new();
+            for (rank, object) in orders(*road).into_iter().enumerate() {
+                ranks.entry(object).or_insert(rank);
+            }
+            let mut members = candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(index, (_, roads))| roads.contains(road).then_some(index))
+                .collect::<Vec<_>>();
+            members.sort_by_key(|&index| {
                 ranks
                     .get(&candidates[index].0)
                     .copied()
-                    .unwrap_or(usize::MAX),
-            )
-        });
-        (kind, floor, queue.into_iter())
+                    .unwrap_or(usize::MAX)
+            });
+            queue.extend(members.into_iter().filter(|index| seen.insert(*index)));
+        }
+        (kind, cue_floor(floors, kind), queue.into_iter())
     });
     let mut selected = BTreeMap::new();
-    'selection: for reserve_floors in [true, false] {
-        if !reserve_floors
-            && (!matches!(stage, CueFloorStage::GraphRoots)
-                || kinds
-                    .iter()
-                    .filter(|&&kind| !matches!(kind, CueKind::Recency | CueKind::DateMatch))
-                    .count()
-                    <= 1)
-        {
+    'selection: for reserve in [true, false] {
+        if !reserve && (stage != CueFloorStage::GraphRoots || expanding_kinds.len() < 2) {
             break;
         }
         for round in 0..limit {
@@ -1016,15 +918,24 @@ fn select_with_cue_floors<'a>(
                 if selected.len() == limit {
                     break 'selection;
                 }
-                if (reserve_floors && round >= *floor)
-                    || (!reserve_floors && matches!(kind, CueKind::Recency | CueKind::DateMatch))
-                {
+                if reserve && round >= *floor {
                     continue;
                 }
-                let Some(index) = queue.next() else { continue };
-                selected
-                    .entry(index)
-                    .or_insert((index >= limit).then_some(*kind));
+                let next = if reserve {
+                    queue.next()
+                } else {
+                    queue.find(|&index| {
+                        candidates[index]
+                            .1
+                            .iter()
+                            .any(|road| road.rule().kind == *kind && road.rule().expands)
+                    })
+                };
+                if let Some(index) = next {
+                    selected
+                        .entry(index)
+                        .or_insert((index >= limit).then_some(*kind));
+                }
             }
         }
     }
@@ -1040,52 +951,59 @@ fn select_with_cue_floors<'a>(
 fn build_pack(
     mut ranked_objects: Vec<RankedObject>,
     (state_scopes, scope_kinds): (&state::StateScopes, &[CueKind]),
-    orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+    orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
     section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
-    let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
-        state::order_section_state(&mut ranked_objects, section, state_scopes);
+        state::order_state_per_kind(
+            &mut ranked_objects,
+            state_scopes,
+            scope_kinds,
+            |object| {
+                (section_for_object(object) == Some(section)).then(|| object.object.object_ref())
+            },
+            |_, _| 0,
+        );
         let candidates = ranked_objects
             .iter()
             .filter(|ranked| section_for_object(ranked) == Some(section))
             .collect::<Vec<_>>();
         // Section state already has its scope/score order; root recency must not
         // become the section floor order. Reuse this prefix without re-sorting it.
-        let mut orders = orders.clone();
-        for kind in [CueKind::Participant, CueKind::Place, CueKind::Activity] {
-            let state_order = candidates.iter().filter_map(|ranked| {
-                let object = ranked.object.object_ref();
-                state_scopes.get(&object).and_then(|scopes| {
-                    scopes
-                        .iter()
-                        .any(|&scope| scope_kinds[scope] == kind)
-                        .then_some(object)
+        let mut state_orders = BTreeMap::new();
+        for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
+            let state_order = candidates
+                .iter()
+                .filter_map(|ranked| {
+                    let object = ranked.object.object_ref();
+                    state_scopes.get(&object).and_then(|scopes| {
+                        scopes
+                            .iter()
+                            .any(|&scope| scope_kinds[scope] == kind)
+                            .then_some(object)
+                    })
                 })
-            });
-            orders.entry(kind).or_default().splice(..0, state_order);
+                .collect::<Vec<_>>();
+            state_orders.insert(kind, state_order);
         }
-        let reserved_kinds = candidates
-            .iter()
-            .map(|ranked| floor_kinds(&ranked.cue_kinds, ranked.date_match_floor_eligible))
-            .collect::<Vec<_>>();
         for (index, cause) in select_with_cue_floors(
             candidates
                 .iter()
-                .zip(&reserved_kinds)
-                .map(|(ranked, kinds)| {
-                    (
-                        ranked.object.object_ref(),
-                        kinds.as_ref(),
-                        ranked.reminder_only,
-                    )
-                }),
-            &orders,
+                .map(|ranked| (ranked.object.object_ref(), ranked.roads.clone())),
+            |road| {
+                state_orders
+                    .get(&road.rule().kind)
+                    .filter(|_| road.rule().expands && orders.contains_key(&road))
+                    .into_iter()
+                    .flatten()
+                    .chain(orders.get(&road).into_iter().flatten())
+                    .copied()
+            },
             section_limit(section, limits),
             floors,
             CueFloorStage::Section { section },
@@ -1114,14 +1032,14 @@ fn build_pack(
                 section: ContextPackSection::Omitted,
                 rank: None,
                 reason: section_omission_reason(&ranked.object),
-                cue_kinds: ranked.cue_kinds.clone(),
+                cue_kinds: ranked.kinds(),
             });
             continue;
         };
 
-        let count = section_counts.count_mut(section);
+        let pressure = section_pressure_for(section_pressure, section);
         if !selected.contains(&ranked.object.object_ref()) {
-            increment_section_omitted_by_limit(section_pressure, section);
+            pressure.omitted_by_limit_count += 1;
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
@@ -1137,14 +1055,21 @@ fn build_pack(
                     intended_section: section,
                     scores: ranked.section_score_components(),
                 },
-                cue_kinds: ranked.cue_kinds.clone(),
+                cue_kinds: ranked.kinds(),
             });
             continue;
         }
 
-        *count += 1;
-        increment_section_included(section_pressure, section);
-        let rank = *count;
+        pressure.included_count += 1;
+        let rank = pressure.included_count;
+        details.admitted_by.insert(
+            ranked.object.object_ref(),
+            ranked
+                .roads
+                .iter()
+                .map(|road| road.rule().admitted_by)
+                .collect(),
+        );
         details.section_assignments.push(SectionAssignment {
             object: ranked.object.object_ref(),
             section,
@@ -1152,7 +1077,7 @@ fn build_pack(
             reason: SectionAssignmentReason::Selected {
                 scores: ranked.section_score_components(),
             },
-            cue_kinds: ranked.cue_kinds.clone(),
+            cue_kinds: ranked.kinds(),
         });
 
         match ranked.object {
@@ -1204,73 +1129,52 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
     ]
 }
 
-fn increment_section_included(
+fn section_pressure_for(
     section_pressure: &mut [SectionPressureSummary],
     section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
+) -> &mut SectionPressureSummary {
+    section_pressure
         .iter_mut()
         .find(|summary| summary.section == section)
-    {
-        summary.included_count += 1;
-    }
+        .expect("every pack section has a pressure summary")
 }
 
-fn increment_section_omitted_by_limit(
-    section_pressure: &mut [SectionPressureSummary],
-    section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
-        .iter_mut()
-        .find(|summary| summary.section == section)
-    {
-        summary.omitted_by_limit_count += 1;
+fn count_reasons<R: Copy + Eq>(
+    reasons: impl Iterator<Item = R>,
+    rank: impl Fn(R) -> u8,
+) -> impl Iterator<Item = (R, usize)> {
+    let mut counts = Vec::<(R, usize)>::new();
+    for reason in reasons {
+        if let Some((_, count)) = counts.iter_mut().find(|(value, _)| *value == reason) {
+            *count += 1;
+        } else {
+            counts.push((reason, 1));
+        }
     }
+    counts.sort_by_key(|(reason, _)| rank(*reason));
+    counts.into_iter()
 }
 
 fn summarize_stale_candidate_omissions(
     omissions: &[StaleCandidateOmission],
 ) -> Vec<StaleCandidateOmissionSummary> {
-    let mut summaries = Vec::<StaleCandidateOmissionSummary>::new();
-    for omission in omissions {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == omission.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(StaleCandidateOmissionSummary {
-                reason: omission.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| stale_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        omissions.iter().map(|entry| entry.reason),
+        stale_reason_rank,
+    )
+    .map(|(reason, count)| StaleCandidateOmissionSummary { reason, count })
+    .collect()
 }
 
 fn summarize_lifecycle_omissions(
     decisions: &[LifecycleFilterDecision],
 ) -> Vec<LifecycleOmissionSummary> {
-    let mut summaries = Vec::<LifecycleOmissionSummary>::new();
-    for decision in decisions
-        .iter()
-        .filter(|decision| decision.action == LifecycleFilterAction::Omitted)
-    {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == decision.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(LifecycleOmissionSummary {
-                reason: decision.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| lifecycle_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        decisions.iter().map(|entry| entry.reason),
+        lifecycle_reason_rank,
+    )
+    .map(|(reason, count)| LifecycleOmissionSummary { reason, count })
+    .collect()
 }
 
 fn push_derived(
@@ -1292,74 +1196,310 @@ fn push_derived(
     }
 }
 
-#[derive(Debug, Default)]
-struct SectionCounts {
-    active_threads: usize,
-    relevant_episodes: usize,
-    salient_observations: usize,
-    derived_memories: usize,
-    preferences: usize,
-    relationship_notes: usize,
-    open_loops: usize,
-    commitments: usize,
-    character_signals: usize,
+// Declaration order is the road order in the root key and in the README.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RecallRoad {
+    Participant,
+    Place,
+    Activity,
+    Topic,
+    ParticipantDescription,
+    SettingWords,
+    Range,
+    SharedAnniversary,
+    UnsharedAnniversary,
+    Recency,
 }
 
-impl SectionCounts {
-    fn count_mut(&mut self, section: ContextPackSection) -> &mut usize {
-        match section {
-            ContextPackSection::ActiveThreads => &mut self.active_threads,
-            ContextPackSection::RelevantEpisodes => &mut self.relevant_episodes,
-            ContextPackSection::SalientObservations => &mut self.salient_observations,
-            ContextPackSection::DerivedMemories => &mut self.derived_memories,
-            ContextPackSection::Preferences => &mut self.preferences,
-            ContextPackSection::RelationshipNotes => &mut self.relationship_notes,
-            ContextPackSection::OpenLoops => &mut self.open_loops,
-            ContextPackSection::Commitments => &mut self.commitments,
-            ContextPackSection::CharacterSignals => &mut self.character_signals,
-            ContextPackSection::Omitted => unreachable!("omitted is not a pack section counter"),
+#[derive(Clone, Copy)]
+enum Contribution {
+    RootCap,
+    CandidateCap,
+    Description,
+    Room,
+}
+
+struct RoadRule {
+    kind: CueKind,
+    admitted_by: AdmissionRoad,
+    source: GraphRootSource,
+    expands: bool,
+    reserves: bool,
+    contribution: Contribution,
+    time_rank: bool,
+}
+
+impl RecallRoad {
+    fn rule(self) -> RoadRule {
+        use Contribution::*;
+        let (kind, admitted_by, source, expands, reserves, contribution, time_rank) = match self {
+            Self::Participant => (
+                CueKind::Participant,
+                AdmissionRoad::Participant,
+                GraphRootSource::Participant,
+                true,
+                true,
+                RootCap,
+                false,
+            ),
+            Self::Place => (
+                CueKind::Place,
+                AdmissionRoad::Place,
+                GraphRootSource::Place,
+                false,
+                true,
+                RootCap,
+                true,
+            ),
+            Self::Activity => (
+                CueKind::Activity,
+                AdmissionRoad::Activity,
+                GraphRootSource::Activity,
+                true,
+                true,
+                RootCap,
+                false,
+            ),
+            Self::Topic => (
+                CueKind::Topic,
+                AdmissionRoad::Topic,
+                GraphRootSource::Vector,
+                true,
+                true,
+                CandidateCap,
+                false,
+            ),
+            Self::ParticipantDescription => (
+                CueKind::Participant,
+                AdmissionRoad::PersonDescription,
+                GraphRootSource::Vector,
+                false,
+                true,
+                Description,
+                false,
+            ),
+            Self::SettingWords => (
+                CueKind::Place,
+                AdmissionRoad::SettingWords,
+                GraphRootSource::Vector,
+                false,
+                true,
+                Description,
+                false,
+            ),
+            Self::Range => (
+                CueKind::DateMatch,
+                AdmissionRoad::Range,
+                GraphRootSource::DateMatch,
+                false,
+                true,
+                Room,
+                true,
+            ),
+            Self::SharedAnniversary => (
+                CueKind::DateMatch,
+                AdmissionRoad::Anniversary,
+                GraphRootSource::DateMatch,
+                false,
+                true,
+                Room,
+                true,
+            ),
+            Self::UnsharedAnniversary => (
+                CueKind::DateMatch,
+                AdmissionRoad::Anniversary,
+                GraphRootSource::DateMatch,
+                false,
+                false,
+                Room,
+                true,
+            ),
+            Self::Recency => (
+                CueKind::Recency,
+                AdmissionRoad::Recency,
+                GraphRootSource::Recency,
+                false,
+                true,
+                Room,
+                true,
+            ),
+        };
+        RoadRule {
+            kind,
+            admitted_by,
+            source,
+            expands,
+            reserves,
+            contribution,
+            time_rank,
         }
     }
+
+    fn contribution(self, context: &RetrievalContext) -> usize {
+        let room = || {
+            prompt_ready_sections()
+                .into_iter()
+                .map(|section| section_limit(section, context.section_limits))
+                .max()
+                .unwrap_or(0)
+        };
+        match self.rule().contribution {
+            Contribution::RootCap => context.candidate_limits.max_graph_roots,
+            Contribution::CandidateCap => context.candidate_limits.max_vector_candidates,
+            Contribution::Description => cue_floor(context.cue_floors, self.rule().kind).max(1),
+            Contribution::Room => room(),
+        }
+    }
+}
+
+fn cue_floor(floors: RetrievalCueFloors, kind: CueKind) -> usize {
+    match kind {
+        CueKind::Participant => floors.participant,
+        CueKind::Place => floors.place,
+        CueKind::Activity => floors.activity,
+        CueKind::Topic => floors.topic,
+        CueKind::DateMatch => floors.date_match,
+        CueKind::Recency => floors.recency,
+    }
+}
+
+fn road_kinds(roads: &BTreeSet<RecallRoad>) -> BTreeSet<CueKind> {
+    roads.iter().map(|road| road.rule().kind).collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RoadReach {
+    score: f32,
+    position: usize,
 }
 
 #[derive(Debug, Clone)]
 struct CandidateRoot {
-    object_id: MemoryId,
-    object_type: ObjectType,
-    score: f32,
-    source: GraphRootSource,
+    object: MemoryObjectRef,
+    roads: BTreeMap<RecallRoad, RoadReach>,
     vector_score: Option<f32>,
-    cue_kinds: BTreeSet<CueKind>,
-    full_standing_score: Option<f32>,
-    full_standing_kinds: BTreeSet<CueKind>,
-    date_match_floor_eligible: bool,
+    memory_rank: Option<crate::ports::graph_authority::GraphMemoryRank>,
 }
 
 impl CandidateRoot {
-    fn from_vector(
-        candidate: &VectorCandidateMatch,
-        cue_kinds: BTreeSet<CueKind>,
-        topic_score: Option<f32>,
-    ) -> Self {
+    fn new(object: MemoryObjectRef, road: RecallRoad, score: f32, position: usize) -> Self {
         Self {
-            date_match_floor_eligible: false,
-            object_id: candidate.object_id,
-            object_type: candidate.object_type,
-            score: candidate.score,
-            source: GraphRootSource::Vector,
-            vector_score: Some(candidate.score),
-            full_standing_score: topic_score,
-            full_standing_kinds: cue_kinds
-                .iter()
-                .filter(|&&kind| kind == CueKind::Topic)
-                .copied()
-                .collect(),
-            cue_kinds,
+            object,
+            roads: BTreeMap::from([(
+                road,
+                RoadReach {
+                    score: if score > 0.0 { score } else { 0.0 },
+                    position,
+                },
+            )]),
+            vector_score: None,
+            memory_rank: None,
         }
     }
 
+    fn from_rank(
+        row: crate::ports::graph_authority::GraphMemoryRank,
+        object_type: ObjectType,
+        road: RecallRoad,
+        score: f32,
+        position: usize,
+    ) -> Self {
+        let mut root = Self::new(
+            MemoryObjectRef::new(object_type, row.id),
+            road,
+            score,
+            position,
+        );
+        if root.score() == 0.0 && road.rule().time_rank {
+            root.memory_rank = Some(row);
+        }
+        root
+    }
+
+    fn score(&self) -> f32 {
+        self.roads
+            .values()
+            .map(|reach| reach.score)
+            .max_by(f32::total_cmp)
+            .unwrap_or(0.0)
+    }
+
+    fn road_set(&self) -> BTreeSet<RecallRoad> {
+        self.roads.keys().copied().collect()
+    }
+
+    fn expanding_roads(&self) -> BTreeSet<RecallRoad> {
+        self.roads
+            .keys()
+            .filter(|road| road.rule().expands)
+            .copied()
+            .collect()
+    }
+
+    fn expanding_score(&self) -> Option<f32> {
+        self.roads
+            .iter()
+            .filter(|(road, _)| road.rule().expands)
+            .map(|(_, reach)| reach.score)
+            .max_by(f32::total_cmp)
+    }
+
     fn reminder_only(&self) -> bool {
-        self.full_standing_score.is_none()
+        !self.roads.keys().any(|road| road.rule().expands)
+    }
+
+    fn source(&self) -> GraphRootSource {
+        self.roads
+            .first_key_value()
+            .expect("a root has a road")
+            .0
+            .rule()
+            .source
+    }
+
+    fn merge(&mut self, other: Self) {
+        for (road, reach) in other.roads {
+            self.roads
+                .entry(road)
+                .and_modify(|prior| {
+                    prior.score = prior.score.max(reach.score);
+                    prior.position = prior.position.min(reach.position);
+                })
+                .or_insert(reach);
+        }
+        if let Some(score) = other.vector_score {
+            self.vector_score = Some(self.vector_score.map_or(score, |prior| prior.max(score)));
+        }
+        if other.memory_rank.is_some() {
+            self.memory_rank = other.memory_rank;
+        }
+        if self.score() > 0.0 {
+            self.memory_rank = None;
+        }
+    }
+
+    fn rank_key(
+        &self,
+    ) -> (
+        SortableScore,
+        SortableScore,
+        std::cmp::Reverse<Option<chrono::DateTime<chrono::Utc>>>,
+        RecallRoad,
+        usize,
+        MemoryId,
+    ) {
+        let rank = self
+            .memory_rank
+            .filter(|_| self.score() == 0.0 && self.roads.keys().any(|road| road.rule().time_rank));
+        let (road, reach) = self.roads.first_key_value().expect("a root has a road");
+        (
+            SortableScore(self.score()),
+            SortableScore(rank.map_or(0.0, |rank| rank.salience)),
+            std::cmp::Reverse(rank.map(|rank| rank.time)),
+            *road,
+            reach.position,
+            self.object.id,
+        )
     }
 }
 
@@ -1369,13 +1509,13 @@ struct CandidateRootSelection {
     unique_count: usize,
     omitted: Vec<CandidateRoot>,
     floor_admissions: Vec<CueFloorAdmission>,
-    orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+    orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
 }
 
 fn select_candidate_roots(
     candidates: Vec<CandidateRoot>,
     explicit_roots: &[CandidateRoot],
-    content_orders: &BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+    content_orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
     (scopes, root_order, scope_kinds): (
@@ -1384,156 +1524,53 @@ fn select_candidate_roots(
         &[CueKind],
     ),
 ) -> CandidateRootSelection {
-    let mut orders: BTreeMap<CueKind, Vec<MemoryObjectRef>> = BTreeMap::new();
-    for root in explicit_roots {
-        for kind in &root.cue_kinds {
-            orders
-                .entry(*kind)
-                .or_default()
-                .push(MemoryObjectRef::new(root.object_type, root.object_id));
-        }
-    }
+    let mut orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>> = BTreeMap::new();
     let mut by_ref: HashMap<MemoryObjectRef, CandidateRoot> = HashMap::new();
-    for candidate in candidates {
-        let object_ref = MemoryObjectRef::from_id_type(candidate.object_id, candidate.object_type);
-        match by_ref.entry(object_ref) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                if candidate.score.total_cmp(&entry.get().score).is_gt() {
-                    entry.insert(candidate);
-                }
-            }
+    for root in explicit_roots.iter().cloned().chain(candidates) {
+        for road in root.roads.keys() {
+            orders.entry(*road).or_default().push(root.object);
+        }
+        match by_ref.entry(root.object) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => entry.get_mut().merge(root),
             std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(candidate);
+                entry.insert(root);
             }
         }
     }
-    let mut content = by_ref.into_values().collect::<Vec<_>>();
-    content.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| {
-                left.object_type
-                    .stable_rank()
-                    .cmp(&right.object_type.stable_rank())
-            })
-            .then_with(|| left.object_id.cmp(&right.object_id))
-    });
-    let mut time_roots = explicit_roots
-        .iter()
-        .filter(|root| {
-            matches!(
-                root.source,
-                GraphRootSource::Recency | GraphRootSource::DateMatch
-            )
-        })
-        .collect::<Vec<_>>();
-    // Only eligible date matches lead. Recency is the newest bounded prefix;
-    // additional unshared anniversaries are older, and overlaps merge below.
-    time_roots.sort_by_key(|root| {
-        (
-            !root.date_match_floor_eligible,
-            root.source == GraphRootSource::DateMatch,
-        )
-    });
-    let roots = explicit_roots
-        .iter()
-        .filter(|root| {
-            !matches!(
-                root.source,
-                GraphRootSource::Recency | GraphRootSource::DateMatch
-            )
-        })
-        .cloned()
-        .chain(content)
-        // Time sources use only their reservations and remaining root room.
-        .chain(time_roots.into_iter().cloned())
-        .collect::<Vec<_>>();
-    let mut indices = HashMap::new();
-    let mut merged: Vec<CandidateRoot> = Vec::new();
-    for root in roots {
-        let object = MemoryObjectRef::new(root.object_type, root.object_id);
-        if let Some(index) = indices.get(&object).copied() {
-            let existing: &mut CandidateRoot = &mut merged[index];
-            existing.date_match_floor_eligible |= root.date_match_floor_eligible;
-            existing.cue_kinds.extend(root.cue_kinds);
-            existing.score = existing.score.max(root.score);
-            existing
-                .full_standing_kinds
-                .extend(root.full_standing_kinds);
-            if let Some(score) = root.full_standing_score {
-                existing.full_standing_score = Some(
-                    existing
-                        .full_standing_score
-                        .map_or(score, |previous| previous.max(score)),
-                );
-            }
-            if let Some(score) = root.vector_score {
-                existing.vector_score = Some(
-                    existing
-                        .vector_score
-                        .map_or(score, |previous| previous.max(score)),
-                );
-            }
-        } else {
-            indices.insert(object, merged.len());
-            merged.push(root);
-        }
+    for (road, order) in content_orders {
+        orders.insert(*road, order.clone());
     }
-    // A shared root may first appear in another scope. Keep each selector's own
-    // order here; pack queues deliberately use only their final ranked indices.
-    state::order_state(
-        &mut merged,
-        scopes,
-        |root| Some(MemoryObjectRef::new(root.object_type, root.object_id)),
-        |scope, root| {
-            root_order[&(
-                scope,
-                MemoryObjectRef::new(root.object_type, root.object_id),
-            )]
-        },
-    );
-    let root_positions = merged
-        .iter()
-        .enumerate()
-        .map(|(index, root)| {
-            (
-                MemoryObjectRef::new(root.object_type, root.object_id),
-                index,
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    for (kind, order) in &mut orders {
-        if !matches!(kind, CueKind::Recency | CueKind::DateMatch) {
-            order.sort_by_key(|object| root_positions[object]);
-        }
+    for (road, order) in &mut orders {
         let mut seen = HashSet::new();
         order.retain(|object| seen.insert(*object));
-        let own_scopes = state::scopes_for_kind(scopes, scope_kinds, *kind);
+        let own_scopes = state::scopes_for_kind(scopes, scope_kinds, road.rule().kind);
         state::order_state(
             order,
             &own_scopes,
             |object| Some(*object),
             |scope, object| root_order[&(scope, *object)],
         );
+        for (position, object) in order.iter().enumerate() {
+            if let Some(root) = by_ref.get_mut(object) {
+                if let Some(reach) = root.roads.get_mut(road) {
+                    reach.position = position;
+                }
+            }
+        }
     }
-    for (kind, order) in content_orders {
-        orders.entry(*kind).or_default().extend(order);
-    }
+    let mut merged = by_ref.into_values().collect::<Vec<_>>();
+    merged.sort_by_key(CandidateRoot::rank_key);
+    state::order_state_per_kind(
+        &mut merged,
+        scopes,
+        scope_kinds,
+        |root| Some(root.object),
+        |scope, root| root_order[&(scope, root.object)],
+    );
     let unique_count = merged.len();
-    let reserved_kinds = merged
-        .iter()
-        .map(|root| floor_kinds(&root.cue_kinds, root.date_match_floor_eligible))
-        .collect::<Vec<_>>();
     let selection = select_with_cue_floors(
-        merged.iter().zip(&reserved_kinds).map(|(root, kinds)| {
-            (
-                MemoryObjectRef::new(root.object_type, root.object_id),
-                kinds.as_ref(),
-                root.reminder_only(),
-            )
-        }),
-        &orders,
+        merged.iter().map(|root| (root.object, root.road_set())),
+        |road| orders.get(&road).into_iter().flatten().copied(),
         max_graph_roots,
         floors,
         CueFloorStage::GraphRoots,
@@ -1543,10 +1580,10 @@ fn select_candidate_roots(
     let mut omitted = Vec::new();
     let mut floor_admissions = Vec::new();
     for (index, root) in merged.into_iter().enumerate() {
-        if selection.peek().is_some_and(|&(chosen, _)| chosen == index) {
-            if let Some((_, Some(cue_kind))) = selection.next() {
+        if let Some((_, cause)) = selection.next_if(|(chosen, _)| *chosen == index) {
+            if let Some(cue_kind) = cause {
                 floor_admissions.push(CueFloorAdmission {
-                    object: MemoryObjectRef::new(root.object_type, root.object_id),
+                    object: root.object,
                     stage: CueFloorStage::GraphRoots,
                     cue_kind,
                 });
@@ -1571,8 +1608,8 @@ fn graph_query_for_candidate(
     fanout_overrides: Vec<crate::ports::graph_authority::GraphExpansionFanoutOverride>,
 ) -> GraphExpansionQuery {
     let mut query = GraphExpansionQuery::new(
-        candidate.object_id,
-        candidate.object_type,
+        candidate.object.id,
+        candidate.object.object_type,
         context.graph_limits.max_depth,
         context.graph_limits.max_nodes,
     )
@@ -1581,18 +1618,19 @@ fn graph_query_for_candidate(
     .with_fanout_overrides(fanout_overrides)
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
-    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-        include_suppressed: context.lifecycle_policy.include_suppressed,
-        include_superseded: context.lifecycle_policy.include_superseded,
-    })
+    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
+        context.lifecycle_policy,
+    ))
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,
     });
-    query.current_subject_state = candidate.object_type == ObjectType::Entity
-        && candidate.source == GraphRootSource::Participant;
+    query.current_subject_state = candidate.object.object_type == ObjectType::Entity
+        && candidate.source() == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
     query.participant_reference_time = context.scene.time.to_utc();
+    query.allow_future_root = candidate.object.object_type == ObjectType::Episode
+        && candidate.roads.contains_key(&RecallRoad::Range);
     query
 }
 
@@ -1602,10 +1640,6 @@ fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &Selecti
     total.low_selectivity_supported_count += next.low_selectivity_supported_count;
     total.low_selectivity_rejected_count += next.low_selectivity_rejected_count;
     total.fallback_count += next.fallback_count;
-}
-
-fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
 }
 
 fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
@@ -1638,8 +1672,8 @@ fn graph_expansion_trace(
     expansion: &GraphExpansion,
 ) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        source: candidate.source,
-        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+        source: candidate.source(),
+        root: candidate.object,
         object_count: expansion.objects.len(),
         relation_count: expansion.relations.len(),
         filtered_node_count: expansion.filtered_nodes.len(),
@@ -1674,8 +1708,8 @@ fn fanout_utilization_traces_for_expansion(
 
 fn missing_root_expansion_trace(candidate: &CandidateRoot) -> GraphExpansionTrace {
     GraphExpansionTrace {
-        source: candidate.source,
-        root: MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+        source: candidate.source(),
+        root: candidate.object,
         object_count: 0,
         relation_count: 0,
         filtered_node_count: 0,
@@ -1701,9 +1735,7 @@ fn filtered_lifecycle_decision(
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
         object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
-        retention_state: None,
         superseded_by: superseded_by.to_vec(),
-        action: LifecycleFilterAction::Omitted,
         reason: match reason {
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
@@ -1802,9 +1834,6 @@ fn salience_component(object: &MemoryObject) -> f32 {
 
 fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
-        LifecycleFilterReason::Active => 0,
-        LifecycleFilterReason::SuppressedIncludedByPolicy => 2,
-        LifecycleFilterReason::SupersededIncludedByPolicy => 5,
         LifecycleFilterReason::SuppressedOmitted => 7,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
@@ -1837,6 +1866,7 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::GraphFailureMode;
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
@@ -1845,19 +1875,94 @@ mod tests {
     use async_trait::async_trait;
     use uuid::Uuid;
 
-    use chrono::{DateTime, Utc};
-
-    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::ContinuitySectionLimits;
     use crate::domain::RetentionState;
     use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
-    use crate::policy::RetrievalSelectivityPolicy;
-    use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
-        high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
-        TemporaryVectorCandidateStore,
+        in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
+
+    #[tokio::test]
+    async fn search_and_explicit_roots_canonicalize_nonpositive_scores() {
+        let graph = graph_with(&[], &[]).await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        for score in [-0.0_f32, 0.0, -0.5, 0.75] {
+            let expected = if score > 0.0 { score } else { 0.0 };
+            let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
+            let vector = VectorRecallOverride {
+                inner: TemporaryVectorCandidateStore::open(2).await,
+                completeness: None,
+                candidate: Some(vector_candidate(object.id, object.object_type, score)),
+            };
+            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
+                .recall_cues(&RetrievalContext::new("score boundary"))
+                .await
+                .unwrap();
+            assert_eq!(
+                cues.candidates.iter().next().unwrap().score.to_bits(),
+                expected.to_bits()
+            );
+            let root = CandidateRoot::new(object, RecallRoad::Topic, score, 0);
+            assert_eq!(root.score().to_bits(), expected.to_bits());
+            vector.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn clamped_topic_roots_keep_the_raw_search_head() {
+        let graph = graph_with(&[], &[]).await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        for (near, far) in [(2, 1), (1, 2)] {
+            let vector = TemporaryVectorCandidateStore::open(2).await;
+            for (id, score) in [(near, -0.25_f32), (far, -0.75)] {
+                let mut memory = representative_fixtures().user_preference;
+                memory.id = MemoryId::from_u128(id);
+                let object = MemoryObject::DerivedMemory(memory);
+                let record = crate::policy::memory_object_vector_record(&object).unwrap();
+                vector
+                    .upsert_vector_records(&[VectorRecordEmbedding::new(
+                        &record,
+                        &[score, (1.0 - score * score).sqrt()],
+                    )])
+                    .await
+                    .unwrap();
+            }
+            let raw = vector
+                .search_candidates(&VectorCandidateSearch::new(
+                    vec![1.0, 0.0],
+                    2,
+                    vec![ObjectType::DerivedMemory],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                raw.candidates.iter().next().unwrap().object_id,
+                MemoryId::from_u128(near)
+            );
+            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
+                .recall_cues(&RetrievalContext::new("unmatched topic"))
+                .await
+                .unwrap();
+            assert!(cues
+                .candidates
+                .iter()
+                .all(|candidate| candidate.score.to_bits() == 0));
+            let selected = select_candidate_roots(
+                cues.roots,
+                &[],
+                &cues.orders,
+                1,
+                RetrievalCueFloors {
+                    topic: 1,
+                    ..Default::default()
+                },
+                (&HashMap::new(), &HashMap::new(), &[]),
+            );
+            assert_eq!(selected.roots[0].object.id, MemoryId::from_u128(near));
+            vector.close().await.unwrap();
+        }
+    }
 
     #[test]
     fn resolution_metadata_stays_on_derived_memory_when_ids_collide() {
@@ -1866,17 +1971,12 @@ mod tests {
         let mut memory = fixtures.open_loop;
         memory.id = entity.id;
         let resolver = fixtures.correction.id;
-        let candidate = CandidateRoot {
-            object_id: entity.id,
-            object_type: ObjectType::Entity,
-            score: 1.0,
-            source: GraphRootSource::Participant,
-            vector_score: None,
-            cue_kinds: BTreeSet::from([CueKind::Participant]),
-            full_standing_score: Some(1.0),
-            full_standing_kinds: BTreeSet::from([CueKind::Participant]),
-            date_match_floor_eligible: false,
-        };
+        let candidate = CandidateRoot::new(
+            MemoryObjectRef::new(ObjectType::Entity, entity.id),
+            RecallRoad::Participant,
+            1.0,
+            0,
+        );
         let query = GraphExpansionQuery::new(entity.id, ObjectType::Entity, 1, 2);
         let mut expansion = GraphExpansion::new(
             vec![
@@ -1885,7 +1985,10 @@ mod tests {
             ],
             Vec::new(),
         );
-        expansion.resolved_by.insert(entity.id, vec![resolver]);
+        expansion.resolved_by.insert(
+            MemoryObjectRef::new(ObjectType::DerivedMemory, entity.id),
+            vec![resolver],
+        );
         let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
         assembly
             .absorb_expansion(&candidate, &query, expansion)
@@ -1906,14 +2009,14 @@ mod tests {
     fn single_kind_reserves_own_head_then_fills_final_ranked_room() {
         let objects =
             [1, 2, 3].map(|id| MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(id)));
-        let kinds = BTreeSet::from([CueKind::Participant]);
+        let kinds = BTreeSet::from([RecallRoad::Participant]);
         let orders = BTreeMap::from([(
-            CueKind::Participant,
+            RecallRoad::Participant,
             vec![objects[2], objects[1], objects[0]],
         )]);
         let selected = select_with_cue_floors(
-            objects.into_iter().map(|object| (object, &kinds, false)),
-            &orders,
+            objects.into_iter().map(|object| (object, kinds.clone())),
+            |road| orders.get(&road).into_iter().flatten().copied(),
             2,
             RetrievalCueFloors {
                 participant: 1,
@@ -1925,7 +2028,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_ties_keep_uncontributed_positions_and_general_id_order() {
+    fn equal_section_scores_use_memory_time_for_every_road() {
         let fixtures = representative_fixtures();
         let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
         for n in 1..=3 {
@@ -1934,9 +2037,9 @@ mod tests {
             episode.salience_score = 0.0;
             episode.scene.time += chrono::Duration::days(n as i64);
             let kinds = BTreeSet::from([if n == 2 {
-                CueKind::Topic
+                RecallRoad::Topic
             } else {
-                CueKind::Recency
+                RecallRoad::Recency
             }]);
             assembly.objects.insert(
                 MemoryObjectRef::new(ObjectType::Episode, episode.id),
@@ -1954,7 +2057,7 @@ mod tests {
     }
 
     #[test]
-    fn date_ties_keep_other_positions_and_distinct_scores() {
+    fn section_time_breaks_ties_without_overriding_distinct_scores() {
         let fixtures = representative_fixtures();
         let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
         for n in 1..=6 {
@@ -1963,18 +2066,17 @@ mod tests {
             episode.salience_score = 0.0;
             episode.scene.time += chrono::Duration::days(n as i64);
             let kind = match n {
-                1 | 6 => CueKind::Recency,
-                3 | 5 => CueKind::DateMatch,
-                _ => CueKind::Topic,
+                1 | 6 => RecallRoad::Recency,
+                3 | 5 => RecallRoad::Range,
+                _ => RecallRoad::Topic,
             };
-            let mut ranked = RankedObject::new(
+            let ranked = RankedObject::new(
                 MemoryObject::Episode(episode),
                 if n == 6 { 1.0 } else { 0.0 },
                 BTreeSet::from([kind]),
                 1.0,
                 None,
             );
-            ranked.date_match_floor_eligible = kind == CueKind::DateMatch;
             assembly.objects.insert(ranked.object.object_ref(), ranked);
         }
         assert_eq!(
@@ -1983,7 +2085,7 @@ mod tests {
                 .iter()
                 .map(|ranked| ranked.object.id().as_u128())
                 .collect::<Vec<_>>(),
-            [6, 5, 2, 3, 4, 1]
+            [6, 5, 4, 3, 2, 1]
         );
     }
 
@@ -2002,28 +2104,18 @@ mod tests {
         )
         .into_domain()
         .unwrap();
-        let full = CandidateRoot {
-            date_match_floor_eligible: false,
-            object_id: person.id,
-            object_type: ObjectType::Entity,
-            score: 1.0,
-            source: GraphRootSource::Participant,
-            vector_score: None,
-            cue_kinds: BTreeSet::from([CueKind::Participant]),
-            full_standing_score: Some(1.0),
-            full_standing_kinds: BTreeSet::from([CueKind::Participant]),
-        };
-        let recent = CandidateRoot {
-            date_match_floor_eligible: false,
-            object_id: episode.id,
-            object_type: ObjectType::Episode,
-            score: 0.0,
-            source: GraphRootSource::Recency,
-            vector_score: None,
-            cue_kinds: BTreeSet::from([CueKind::Recency]),
-            full_standing_score: None,
-            full_standing_kinds: BTreeSet::new(),
-        };
+        let full = CandidateRoot::new(
+            MemoryObjectRef::new(ObjectType::Entity, person.id),
+            RecallRoad::Participant,
+            1.0,
+            0,
+        );
+        let recent = CandidateRoot::new(
+            MemoryObjectRef::new(ObjectType::Episode, episode.id),
+            RecallRoad::Recency,
+            0.0,
+            0,
+        );
         for roots in [[&full, &recent], [&recent, &full]] {
             let mut assembly = RetrieveAssembly::new(TraceMode::Disabled);
             for root in roots {
@@ -2049,7 +2141,7 @@ mod tests {
             assert_eq!(ranked.final_score(), 0.737_499_95);
             assert!(!ranked.reminder_only);
             assert_eq!(
-                ranked.cue_kinds,
+                ranked.kinds(),
                 BTreeSet::from([CueKind::Participant, CueKind::Recency])
             );
         }
@@ -2122,7 +2214,14 @@ mod tests {
         let selected = select_candidate_roots(
             [middle.clone(), low, high.clone()]
                 .iter()
-                .map(|candidate| CandidateRoot::from_vector(candidate, BTreeSet::new(), None))
+                .map(|candidate| {
+                    CandidateRoot::new(
+                        MemoryObjectRef::new(candidate.object_type, candidate.object_id),
+                        RecallRoad::Topic,
+                        candidate.score,
+                        0,
+                    )
+                })
                 .collect(),
             &[],
             &BTreeMap::new(),
@@ -2135,7 +2234,7 @@ mod tests {
             selected
                 .roots
                 .iter()
-                .map(|root| (root.object_id, root.score))
+                .map(|root| (root.object.id, root.score()))
                 .collect::<Vec<_>>(),
             vec![
                 (high.object_id, high.score),
@@ -2377,67 +2476,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn entity_neutral_selectivity_rejects_low_selectivity_concept_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &fixture
-                .derived_memories
-                .iter()
-                .map(|memory| memory.id)
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan
-            .traces
-            .iter()
-            .any(|decision| decision.relation == RelationType::About
-                && decision.object_type == ObjectType::DerivedMemory
-                && decision.chosen_fanout == 0
-                && decision.decision
-                    == crate::api::types::SelectivityDecision::LowSelectivityRejected));
-        assert!(!expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap == 0
-                && entry.retained_count == 0
-                && entry.omitted_by_fanout_count > 0));
-    }
-
-    #[tokio::test]
     async fn retrieval_telemetry_preserves_vector_recall_completeness() {
         let cases = [
             VectorRecallCompleteness::NotRequested,
@@ -2469,55 +2507,6 @@ mod tests {
                 0
             );
         }
-    }
-
-    #[tokio::test]
-    async fn selectivity_allows_high_selectivity_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &[fixture.derived_memories[0].id],
-        )
-        .await;
-        record_other_about_edges(&stats, 80).await;
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan.telemetry.high_selectivity_count > 0);
-        assert!(expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap <= entry.configured_cap
-                && entry.retained_count > 0));
     }
 
     #[tokio::test]
@@ -2572,8 +2561,7 @@ mod tests {
         assert!(trace
             .lifecycle_filter_decisions
             .iter()
-            .any(|decision| decision.object.id == fixtures.suppressed_seed.id
-                && decision.action == LifecycleFilterAction::Omitted));
+            .any(|decision| decision.object.id == fixtures.suppressed_seed.id));
     }
 
     #[tokio::test]
@@ -3368,10 +3356,10 @@ mod tests {
                 candidate.object.id == missing_vector_only_id
                     && candidate.object.object_type == ObjectType::DerivedMemory
             }));
-            assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
-                decision.object.id == fixtures.suppressed_seed.id
-                    && decision.action == LifecycleFilterAction::Omitted
-            }));
+            assert!(trace
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|decision| { decision.object.id == fixtures.suppressed_seed.id }));
         }
     }
 
@@ -3393,52 +3381,6 @@ mod tests {
         graph.upsert_objects(objects).await.unwrap();
         graph.upsert_links(links).await.unwrap();
         graph
-    }
-
-    async fn record_about_edges(
-        stats: &InMemoryRetrievalStatsStore,
-        entity_id: MemoryId,
-        derived_memory_ids: &[MemoryId],
-    ) {
-        let edges = derived_memory_ids
-            .iter()
-            .map(|object_id| stats_edge(entity_id, *object_id))
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    async fn record_other_about_edges(stats: &InMemoryRetrievalStatsStore, count: u128) {
-        let edges = (0..count)
-            .map(|offset| {
-                stats_edge(
-                    Uuid::from_u128(0x650e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                    Uuid::from_u128(0x750e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                )
-            })
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    fn stats_edge(entity_id: MemoryId, object_id: MemoryId) -> RetrievalStatsEdge {
-        let observed_at = timestamp();
-        RetrievalStatsEdge {
-            edge_key: format!("{}:about:derived_memory:{}", entity_id, object_id),
-            entity_id,
-            relation_kind: RelationType::About,
-            object_id,
-            object_type: ObjectType::DerivedMemory,
-            retention_state: RetentionState::Active,
-            is_current: true,
-            first_seen_at: observed_at,
-            last_seen_at: observed_at,
-            source_observation: None,
-        }
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 
     fn vector_candidate(
@@ -3534,7 +3476,8 @@ mod tests {
             participants: &[crate::domain::MemoryId],
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
+        {
             let _ = (date, participants, limit, policy);
             Ok(Vec::new())
         }
@@ -3545,7 +3488,7 @@ mod tests {
             end: chrono::DateTime<chrono::Utc>,
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
             let _ = (start, end, limit, policy);
             Ok(Vec::new())
         }
@@ -3635,12 +3578,32 @@ mod tests {
             Ok((Vec::new(), Vec::new()))
         }
 
+        async fn query_thread_state(
+            &self,
+            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+            _limit: usize,
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            Ok((Vec::new(), Vec::new()))
+        }
+
         async fn query_scope_state(
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
             limit: usize,
-        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
             let _ = (key, policy, limit);
             unreachable!("scope selector is not used by this failure fixture")
         }

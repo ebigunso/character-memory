@@ -11,6 +11,14 @@ use crate::domain::{
 };
 use crate::errors::{CustomError, GraphQueryError};
 
+/// Compact selector metadata; content is hydrated only after admission.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GraphMemoryRank {
+    pub(crate) id: MemoryId,
+    pub(crate) time: DateTime<Utc>,
+    pub(crate) salience: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::enum_variant_names,
@@ -36,8 +44,6 @@ pub(crate) struct GraphDerivedMemoryProvenanceQuery {
 pub(crate) struct GraphDerivedMemoryThreadQuery {
     pub(crate) thread_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    // Activity state excludes resolved members; lifecycle operations still see them.
-    pub(crate) current_state_limit: Option<usize>,
 }
 
 impl GraphDerivedMemoryProvenanceQuery {
@@ -63,7 +69,6 @@ impl GraphDerivedMemoryThreadQuery {
         Self {
             thread_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            current_state_limit: None,
         }
     }
 
@@ -157,6 +162,8 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) current_subject_state: bool,
     pub(crate) reminder_only: bool,
     pub(crate) participant_reference_time: DateTime<Utc>,
+    // Only an occasion directly contributed by the caller's range can be future.
+    pub(crate) allow_future_root: bool,
     pub(crate) current_thread_state: bool,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
@@ -192,6 +199,7 @@ impl GraphExpansionQuery {
             current_subject_state: false,
             reminder_only: false,
             participant_reference_time: DateTime::<Utc>::MAX_UTC,
+            allow_future_root: false,
             current_thread_state: false,
             traversal_link_ids: None,
             trace_mode: TraceMode::Disabled,
@@ -216,6 +224,19 @@ impl GraphExpansionQuery {
             && (!self.reminder_only
                 || object.object_type != ObjectType::Episode
                 || object.id == self.root_id)
+    }
+
+    pub(crate) fn allows_incident_link(
+        &self,
+        from: MemoryObjectRef,
+        relation: RelationType,
+        to: MemoryObjectRef,
+    ) -> bool {
+        self.allows_object(to)
+            && (!self.reminder_only
+                || to.object_type != ObjectType::Observation
+                || (relation == RelationType::ObservedIn
+                    && from == MemoryObjectRef::new(ObjectType::Episode, self.root_id)))
     }
 
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
@@ -312,7 +333,7 @@ pub(crate) struct GraphExpansion {
     pub(crate) links: Vec<MemoryLink>,
     pub(crate) relations: Vec<GraphExpansionRelation>,
     pub(crate) filtered_nodes: Vec<GraphExpansionFilteredNode>,
-    pub(crate) resolved_by: std::collections::HashMap<MemoryId, Vec<MemoryId>>,
+    pub(crate) resolved_by: std::collections::HashMap<MemoryObjectRef, Vec<MemoryId>>,
     pub(crate) expanded_nodes: std::collections::HashSet<MemoryObjectRef>,
     pub(crate) fanout_utilization: Vec<GraphExpansionFanoutUtilization>,
     pub(crate) bounded_failure: Option<GraphExpansionBoundedFailure>,
@@ -348,7 +369,7 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
-    /// Return bounded eligible episode IDs, newest recorded time then ID.
+    /// Return bounded eligible episode rank rows, newest recorded time then ID.
     /// Both time bounds are inclusive; an absent start leaves that end open.
     async fn query_episodes_by_time(
         &self,
@@ -356,16 +377,16 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         end: DateTime<Utc>,
         limit: usize,
         policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<MemoryId>, CustomError>;
+    ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError>;
 
-    /// Matching local calendar dates, shared occasions first, newest instant then ID.
+    /// Matching local calendar dates: each shared/unshared list has its own limit, newest instant then ID.
     async fn query_anniversaries(
         &self,
         date: chrono::NaiveDate,
         participants: &[MemoryId],
         limit: usize,
         policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(MemoryId, bool)>, CustomError>;
+    ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>;
 
     /// Read recorded occasion time and retention for episode or observation references.
     async fn query_episode_occasions(
@@ -417,12 +438,25 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError>;
 
+    /// Retrieval state has its own bounded read; lifecycle queries still see all members.
+    async fn query_thread_state(
+        &self,
+        query: &GraphDerivedMemoryThreadQuery,
+        limit: usize,
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError>;
+
     async fn query_scope_state(
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
         limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError>;
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    >;
 
     async fn query_last_interaction(
         &self,
@@ -435,122 +469,4 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         query: &GraphExpansionQuery,
     ) -> Result<GraphExpansion, CustomError>;
-}
-
-#[async_trait]
-impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
-    async fn query_anniversaries(
-        &self,
-        date: chrono::NaiveDate,
-        participants: &[MemoryId],
-        limit: usize,
-        policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(MemoryId, bool)>, CustomError> {
-        (**self)
-            .query_anniversaries(date, participants, limit, policy)
-            .await
-    }
-
-    async fn query_episodes_by_time(
-        &self,
-        start: Option<DateTime<Utc>>,
-        end: DateTime<Utc>,
-        limit: usize,
-        policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<MemoryId>, CustomError> {
-        (**self)
-            .query_episodes_by_time(start, end, limit, policy)
-            .await
-    }
-
-    async fn query_episode_occasions(
-        &self,
-        episodes: &[MemoryObjectRef],
-    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-        (**self).query_episode_occasions(episodes).await
-    }
-
-    async fn query_last_interaction(
-        &self,
-        participant: MemoryId,
-        reference_time: DateTime<Utc>,
-        policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Option<(MemoryId, DateTime<Utc>)>, CustomError> {
-        (**self)
-            .query_last_interaction(participant, reference_time, policy)
-            .await
-    }
-
-    async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
-        (**self).query_notions_known_as(name).await
-    }
-
-    async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
-        (**self).upsert_objects(objects).await
-    }
-
-    async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-        (**self).upsert_links(links).await
-    }
-
-    async fn upsert_objects_and_links(
-        &self,
-        objects: &[MemoryObject],
-        links: &[MemoryLink],
-    ) -> Result<(), CustomError> {
-        (**self).upsert_objects_and_links(objects, links).await
-    }
-
-    async fn query_objects(
-        &self,
-        query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
-        (**self).query_objects(query).await
-    }
-
-    async fn query_superseded_derived_memory_ids(
-        &self,
-        memory_ids: &[MemoryId],
-    ) -> Result<Vec<MemoryId>, GraphQueryError> {
-        (**self)
-            .query_superseded_derived_memory_ids(memory_ids)
-            .await
-    }
-
-    async fn query_links_by_ids(
-        &self,
-        link_ids: &[MemoryId],
-    ) -> Result<Vec<MemoryLink>, CustomError> {
-        (**self).query_links_by_ids(link_ids).await
-    }
-
-    async fn query_derived_memories_by_provenance(
-        &self,
-        query: &GraphDerivedMemoryProvenanceQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
-        (**self).query_derived_memories_by_provenance(query).await
-    }
-
-    async fn query_derived_memories_by_thread(
-        &self,
-        query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        (**self).query_derived_memories_by_thread(query).await
-    }
-
-    async fn query_scope_state(
-        &self,
-        key: &ScopeKey,
-        policy: GraphExpansionLifecyclePolicy,
-        limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        (**self).query_scope_state(key, policy, limit).await
-    }
-
-    async fn expand_bounded(
-        &self,
-        query: &GraphExpansionQuery,
-    ) -> Result<GraphExpansion, CustomError> {
-        (**self).expand_bounded(query).await
-    }
 }

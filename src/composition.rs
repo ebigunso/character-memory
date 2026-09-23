@@ -291,13 +291,14 @@ pub(crate) fn retrieval_stats_store(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::embedding::MockEmbeddingProvider;
     use crate::ports::retrieval_stats::RetrievalStatsHealthState;
 
     #[test]
     fn preflight_rejects_zero_provider_vector_size_before_storage_init() {
         let settings = Settings::new(::config::Config::default()).unwrap();
 
-        let error = preflight_error(&settings, FixedEmbeddingProvider(0));
+        let error = preflight_error(&settings, 0);
 
         assert!(matches!(
             error,
@@ -322,7 +323,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = preflight_error(&settings, FixedEmbeddingProvider(3));
+        let error = preflight_error(&settings, 3);
 
         let CustomError::ConfigValidation(ConfigValidationError { keys, reason }) = error else {
             panic!("expected configuration validation error");
@@ -362,31 +363,12 @@ mod tests {
         ));
     }
 
-    fn preflight_error(settings: &Settings, provider: FixedEmbeddingProvider) -> CustomError {
+    fn preflight_error(settings: &Settings, vector_size: usize) -> CustomError {
+        let mut provider = MockEmbeddingProvider::new();
+        provider.expect_vector_size().return_const(vector_size);
         match preflight(settings, Some(Box::new(provider))) {
             Ok(_) => panic!("preflight should reject the settings"),
             Err(error) => error,
-        }
-    }
-
-    #[derive(Debug)]
-    struct FixedEmbeddingProvider(usize);
-
-    #[async_trait]
-    impl EmbeddingProvider for FixedEmbeddingProvider {
-        fn vector_size(&self) -> usize {
-            self.0
-        }
-
-        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-            Ok(vec![0.0; self.0])
-        }
-
-        async fn bulk_generate_embeddings<'a>(
-            &self,
-            texts: &'a [&'a str],
-        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-            Ok(vec![vec![0.0; self.0]; texts.len()])
         }
     }
 }

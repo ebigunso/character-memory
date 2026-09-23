@@ -1,14 +1,12 @@
 use character_memory::{
-    CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EpisodeDraft, MemoryId,
-    MemoryLinkDraft, ObjectType, RelationType, RememberInput, RememberPlanDefaults,
-    RetrievalContext, Scene,
+    CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EpisodeDraft, MemoryLinkDraft,
+    ObjectType, RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene,
 };
 use chrono::{DateTime, Utc};
+use test_support::id;
 #[path = "support/mod.rs"]
 pub mod test_support;
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
+
 fn at() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
         .unwrap()

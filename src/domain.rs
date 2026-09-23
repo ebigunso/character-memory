@@ -240,6 +240,9 @@ pub enum DomainValidationError {
     #[error("a caller-built episode must state its scene")]
     MissingScene,
 
+    #[error("scene time offset {offset_seconds} seconds must be a whole-minute RFC 3339 offset")]
+    InvalidSceneTimeOffset { offset_seconds: i32 },
+
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
 
@@ -298,9 +301,6 @@ pub struct Episode {
     pub object_type: ObjectType,
     pub modality: Modality,
     pub scene: Scene,
-    /// Calendar date at the supplied scene offset, derived when the episode is built.
-    /// Episodes stored without this derivation have no anniversary date.
-    pub scene_local_date: Option<chrono::NaiveDate>,
     pub ended_at: Option<DateTime<Utc>>,
     pub summary: String,
     pub raw_ref: Option<String>,
@@ -313,6 +313,7 @@ pub struct Episode {
 impl Episode {
     pub fn validate(&self) -> Result<(), DomainValidationError> {
         validate_object_type("Episode.object_type", self.object_type, ObjectType::Episode)?;
+        self.scene.validate_time()?;
         if self.summary.trim().is_empty() {
             return Err(DomainValidationError::EmptyEpisodeSummary);
         }

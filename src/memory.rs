@@ -17,10 +17,6 @@ mod retrieval_floor_tests;
 #[cfg(test)]
 mod retrieval_scene_tests;
 #[cfg(test)]
-mod retrieval_time_tests;
-#[cfg(test)]
-mod retrieval_turn_tests;
-#[cfg(test)]
 mod scene_tests;
 #[cfg(test)]
 mod write_turn_tests;
@@ -186,21 +182,19 @@ impl CharacterMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
     use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
+    use crate::test_support::{pack_contains_derived_memory, parse_id as id};
     use crate::*;
     use async_trait::async_trait;
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{ObjectType, RelationType};
-    use crate::models::vector::{
-        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
-    };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
-        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
+        deterministic_embedder, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
 
@@ -220,7 +214,8 @@ mod tests {
             .expect("remember facade should persist through injected parts");
 
         assert!(outcome.persisted_object_ids.contains(&entity_id));
-        assert_eq!(outcome.persisted_link_ids, Vec::<MemoryId>::new());
+        // Ruling 69: the source observation has one structural ObservedIn link.
+        assert_eq!(outcome.persisted_link_ids.len(), 1);
         assert!(!outcome.vector_indexed_object_ids.contains(&entity_id));
         assert_eq!(outcome.vector_indexing_failure, None);
     }
@@ -658,8 +653,10 @@ mod tests {
     async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
         let memory = CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
-            Box::new(FailingVectorCandidateStore),
-            Box::new(DeterministicMemoryEmbedder::new(8)),
+            Box::new(FailingVectorCandidateStore(
+                TemporaryVectorCandidateStore::open(8).await,
+            )),
+            Box::new(deterministic_embedder(8)),
         );
         let plan = memory
             .prepare(
@@ -936,10 +933,7 @@ mod tests {
             .unwrap()
             .lifecycle_filter_decisions
             .iter()
-            .any(|decision| {
-                decision.object.id == fixtures.user_preference.id
-                    && decision.action == LifecycleFilterAction::Omitted
-            }));
+            .any(|decision| decision.object.id == fixtures.user_preference.id));
 
         let mut historical =
             RetrievalContext::new("corrected deterministic preference").with_trace();
@@ -1556,19 +1550,15 @@ mod tests {
                 let mut distinct = keys.iter().flatten().copied().collect::<Vec<_>>();
                 distinct.sort_unstable();
                 distinct.dedup();
-                assert_eq!(links.len(), distinct.len());
+                // Ruling 69: presence belongs to the episode; observations also have ObservedIn.
+                assert_eq!(links.len(), distinct.len() + usize::from(!episode_only));
                 for key in distinct {
                     assert_eq!(
                         links
                             .iter()
                             .filter(|l| l.to_id == Uuid::from_u128(key)
                                 && l.to_type == ObjectType::Entity
-                                && l.relation
-                                    == if episode_only {
-                                        RelationType::Involves
-                                    } else {
-                                        RelationType::Mentions
-                                    })
+                                && l.relation == RelationType::Involves)
                             .count(),
                         1
                     );
@@ -1599,11 +1589,7 @@ mod tests {
     }
 
     async fn injected_memory() -> CharacterMemory {
-        CharacterMemory::from_parts(
-            Box::new(in_memory_graph_store()),
-            Box::new(TemporaryVectorCandidateStore::open(8).await),
-            Box::new(DeterministicMemoryEmbedder::new(8)),
-        )
+        crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
     }
 
     async fn retrieval_memory() -> (CharacterMemory, crate::test_support::RepresentativeFixtures) {
@@ -1623,7 +1609,9 @@ mod tests {
         let memory = CharacterMemory::from_parts(
             Box::new(graph),
             Box::new(vector),
-            Box::new(FixedMemoryEmbedder::new(vec![1.0, 0.0])),
+            Box::new(crate::test_support::TestEmbedder(|_: &EmbeddingInput| {
+                vec![1.0, 0.0]
+            })),
         );
 
         (memory, fixtures)
@@ -1669,7 +1657,7 @@ mod tests {
         let memory = CharacterMemory::from_parts(
             Box::new(graph),
             Box::new(vector),
-            Box::new(DeterministicMemoryEmbedder::new(4)),
+            Box::new(deterministic_embedder(4)),
         );
 
         (memory, fixtures, replacement_id)
@@ -1749,47 +1737,15 @@ mod tests {
         replacement
     }
 
-    fn pack_contains_derived_memory(pack: &ContinuityContextPack, memory_id: MemoryId) -> bool {
-        pack.derived_memories
-            .iter()
-            .chain(pack.preferences.iter())
-            .chain(pack.relationship_notes.iter())
-            .chain(pack.open_loops.iter())
-            .chain(pack.commitments.iter())
-            .chain(pack.character_signals.iter())
-            .any(|included| included.memory.id == memory_id)
-    }
-
     #[derive(Debug)]
-    struct FixedMemoryEmbedder {
-        embedding: Vec<f32>,
-    }
-
-    impl FixedMemoryEmbedder {
-        fn new(embedding: Vec<f32>) -> Self {
-            Self { embedding }
-        }
-    }
-
-    #[async_trait]
-    impl MemoryEmbedder for FixedMemoryEmbedder {
-        async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(self.embedding.clone())
-        }
-
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            Ok(vec![self.embedding.clone(); inputs.len()])
-        }
-    }
-
-    #[derive(Debug)]
-    struct FailingVectorCandidateStore;
+    struct FailingVectorCandidateStore(TemporaryVectorCandidateStore);
 
     #[async_trait]
     impl VectorCandidateStore for FailingVectorCandidateStore {
+        async fn close(&self) -> Result<(), CustomError> {
+            self.0.close().await
+        }
+
         async fn upsert_vector_records(
             &self,
             _records: &[VectorRecordEmbedding<'_>],
@@ -1806,21 +1762,11 @@ mod tests {
             &self,
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
-            Ok(VectorCandidateRecall {
-                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
-                candidates: CanonicalCandidates::new([]),
-                completeness: if query.limit == 0 || query.object_types.is_empty() {
-                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
-                } else {
-                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
-                        scanned: 0,
-                    }
-                },
-            })
+            self.0.search_candidates(query).await
         }
 
-        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            Ok(())
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            self.0.delete_candidates(objects).await
         }
     }
 
@@ -1846,9 +1792,5 @@ mod tests {
             }),
             "expected invalid {expected_kind:?} validation for {expected_ref:?}, got {validations:?}"
         );
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
     }
 }

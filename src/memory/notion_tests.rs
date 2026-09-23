@@ -2,9 +2,7 @@ use crate::api::types::*;
 use crate::domain::*;
 use crate::ports::graph_authority::{GraphExpansionQuery, GraphObjectQuery, TraceMode};
 use crate::ports::retrieval_stats::RetrievalStatsCounterKey;
-use crate::test_support::{
-    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
-};
+use crate::test_support::deterministic_embedder;
 use crate::{CharacterMemory, CustomError};
 
 fn assertion(subject: MemoryId, name: &str) -> BeliefAssertion {
@@ -52,11 +50,7 @@ fn plan_with_belief(draft: DerivedMemoryDraft, create_notion: bool) -> RememberW
 }
 
 async fn memory() -> CharacterMemory {
-    CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(8).await),
-        Box::new(DeterministicMemoryEmbedder::new(8)),
-    )
+    crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
 }
 
 #[tokio::test]
@@ -327,7 +321,7 @@ async fn notion_belief_admission_is_enforced_at_validate_and_commit() {
 }
 
 #[tokio::test]
-async fn every_belief_subject_is_linked_and_counted_once() {
+async fn every_belief_subject_is_linked_once() {
     for sqlite in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut memory = memory().await;
@@ -397,10 +391,8 @@ async fn every_belief_subject_is_linked_and_counted_once() {
                 object_type: ObjectType::DerivedMemory,
             })
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(counter.total_count, 1);
-        assert_eq!(counter.current_count, 1);
+        assert!(counter.is_none());
         let mut given_text = given_belief(MemoryId::from_u128(6303), subject, "unasserted");
         given_text.assertions.clear();
         assert_eq!(
@@ -432,13 +424,17 @@ async fn every_belief_subject_is_linked_and_counted_once() {
             )
             .await
             .unwrap();
-        assert_eq!(ordinary_outcome.persisted_link_ids.len(), 1);
+        // Ruling 69: ObservedIn accompanies the subject's About link.
+        assert_eq!(ordinary_outcome.persisted_link_ids.len(), 2);
         let plain_link = graph
             .query_links_by_ids(&ordinary_outcome.persisted_link_ids)
             .await
             .unwrap();
-        assert_eq!(plain_link[0].to_id, subject);
-        assert_eq!(plain_link[0].relation, RelationType::About);
+        let about = plain_link
+            .iter()
+            .find(|link| link.relation == RelationType::About)
+            .unwrap();
+        assert_eq!(about.to_id, subject);
         let counter = memory
             .memory_composition
             .stats_store
@@ -448,10 +444,8 @@ async fn every_belief_subject_is_linked_and_counted_once() {
                 object_type: ObjectType::DerivedMemory,
             })
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(counter.total_count, 3);
-        assert_eq!(counter.current_count, 3);
+        assert!(counter.is_none());
         memory.close().await.unwrap();
     }
 }
@@ -776,7 +770,12 @@ async fn authored_belief_about_links_are_rejected_in_both_directions() {
         .query_links_by_ids(&first.persisted_link_ids)
         .await
         .unwrap();
-    assert!(matches!(derived.as_slice(), [link]
+    // Ruling 69: the structural source link is independent of the derived About link.
+    let about = derived
+        .iter()
+        .filter(|link| link.relation == RelationType::About)
+        .collect::<Vec<_>>();
+    assert!(matches!(about.as_slice(), [link]
         if link.from_id == belief_id && link.from_type == ObjectType::DerivedMemory
         && link.to_id == subject && link.to_type == ObjectType::Entity && link.relation == RelationType::About));
     for draft in &rejected {

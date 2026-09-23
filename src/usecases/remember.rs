@@ -328,10 +328,10 @@ mod tests {
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
     use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
+    use crate::test_support::parse_id as id;
+    use crate::test_support::write_time as timestamp;
     use async_trait::async_trait;
-    use chrono::{DateTime, Utc};
     use std::sync::{Arc, Mutex, MutexGuard};
-    use uuid::Uuid;
 
     use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
@@ -347,16 +347,16 @@ mod tests {
         RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
         VectorDatabaseErrorKind, VectorIndexingCause,
     };
-    use crate::models::vector::{
-        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
-    };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
     use crate::ports::retrieval_stats::{
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
         RetrievalStatsObjectState, RetrievalStatsStore,
     };
     use crate::ports::vector_candidate::VectorCandidateRecall;
-    use crate::test_support::{in_memory_graph_store, representative_fixtures};
+    use crate::test_support::{
+        in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
+    };
     use crate::usecases::write_planning::RememberPlanDefaults;
 
     #[tokio::test]
@@ -376,7 +376,7 @@ mod tests {
             .await
             .unwrap()
             .is_valid());
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
@@ -416,7 +416,7 @@ mod tests {
             fail_currency_query: true,
             ..RecordingGraphStore::default()
         };
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let outcome = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
@@ -497,7 +497,7 @@ mod tests {
         let graph = RecordingGraphStore::default();
         let vector = RecordingVectorStore {
             calls: graph.calls.clone(),
-            ..RecordingVectorStore::default()
+            ..RecordingVectorStore::new().await
         };
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
@@ -512,9 +512,11 @@ mod tests {
             .expect("remember draft should persist");
 
         assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
+        // Ruling 69: the structural ObservedIn follows the authored links.
+        assert_eq!(outcome.persisted_link_ids.len(), 3);
         assert_eq!(
-            outcome.persisted_link_ids,
-            vec![ids.inline_link, ids.extra_link]
+            outcome.persisted_link_ids[..2],
+            [ids.inline_link, ids.extra_link]
         );
         assert_eq!(outcome.vector_indexed_object_ids, expected_vector_ids(&ids));
         assert_eq!(outcome.vector_indexing_failure, None);
@@ -555,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn bounded_link_collision_query_rejects_divergent_existing_content() {
         let graph = in_memory_graph_store();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let existing = representative_fixtures().links()[0].clone();
         graph
@@ -580,7 +582,7 @@ mod tests {
     async fn graph_object_failure_prevents_link_and_vector_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default().fail_objects();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -602,7 +604,7 @@ mod tests {
     async fn graph_link_failure_prevents_vector_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default().fail_links();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -629,7 +631,7 @@ mod tests {
     async fn validation_failure_prevents_all_store_writes() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let mut invalid_episode = EpisodeDraft::new(" ");
         invalid_episode.id = Some(ids.episode);
@@ -662,7 +664,7 @@ mod tests {
     async fn vector_upsert_failure_returns_partial_success_with_graph_ids() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default().fail_upsert();
+        let vector = RecordingVectorStore::new().await.fail_upsert();
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -676,9 +678,11 @@ mod tests {
             .expect("graph success with vector failure should return partial outcome");
 
         assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
+        // Ruling 69: the structural ObservedIn follows the authored links.
+        assert_eq!(outcome.persisted_link_ids.len(), 3);
         assert_eq!(
-            outcome.persisted_link_ids,
-            vec![ids.inline_link, ids.extra_link]
+            outcome.persisted_link_ids[..2],
+            [ids.inline_link, ids.extra_link]
         );
         assert!(outcome.vector_indexed_object_ids.is_empty());
         let failure = outcome
@@ -699,7 +703,7 @@ mod tests {
     async fn wrong_embedding_count_returns_clear_partial_failure_without_vector_write() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default().with_embedding_count(3);
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -731,7 +735,7 @@ mod tests {
     async fn remember_pipeline_records_stats_after_vector_attempt() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -746,7 +750,7 @@ mod tests {
                             ids.extra_link,
                             ObjectType::Entity,
                             ids.entity,
-                            RelationType::Mentions,
+                            RelationType::Involves,
                             ObjectType::Episode,
                             ids.episode,
                         )),
@@ -760,7 +764,7 @@ mod tests {
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
                 entity_id: ids.entity,
-                relation_kind: RelationType::Mentions,
+                relation_kind: RelationType::Involves,
                 object_type: ObjectType::Episode,
             })
             .await
@@ -775,7 +779,7 @@ mod tests {
     async fn remember_accepts_caller_supplied_associated_with_links() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -801,7 +805,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
+        // Ruling 69: ObservedIn accompanies the caller's association.
+        assert_eq!(outcome.persisted_link_ids.len(), 2);
+        assert_eq!(outcome.persisted_link_ids[0], ids.extra_link);
         let stored = graph.query_links_by_ids(&[ids.extra_link]).await.unwrap();
         assert!(matches!(stored.as_slice(), [link]
             if link.id == ids.extra_link && link.relation == RelationType::AssociatedWith));
@@ -820,7 +826,7 @@ mod tests {
             ])
             .await
             .unwrap();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -882,7 +888,7 @@ mod tests {
             ])
             .await
             .fail_id_queries();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = EdgeFailingStatsStore::default();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -1059,16 +1065,6 @@ mod tests {
         draft
     }
 
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
-    }
-
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum StoreCall {
         GraphObjects(Vec<MemoryId>),
@@ -1192,7 +1188,8 @@ mod tests {
             participants: &[crate::domain::MemoryId],
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
+        {
             let _ = (date, participants, limit, policy);
             Ok(Vec::new())
         }
@@ -1203,7 +1200,7 @@ mod tests {
             end: chrono::DateTime<chrono::Utc>,
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
             self.store
                 .query_episodes_by_time(start, end, limit, policy)
                 .await
@@ -1328,12 +1325,33 @@ mod tests {
             self.store.query_derived_memories_by_thread(query).await
         }
 
+        async fn query_thread_state(
+            &self,
+            query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+            limit: usize,
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            let _ = (query, limit);
+            self.store.query_thread_state(query, limit).await
+        }
+
         async fn query_scope_state(
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
             limit: usize,
-        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
             self.store.query_scope_state(key, policy, limit).await
         }
 
@@ -1345,13 +1363,22 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct RecordingVectorStore {
+        inner: TemporaryVectorCandidateStore,
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_upsert: bool,
     }
 
     impl RecordingVectorStore {
+        async fn new() -> Self {
+            Self {
+                inner: TemporaryVectorCandidateStore::open(1).await,
+                calls: Arc::default(),
+                fail_upsert: false,
+            }
+        }
+
         fn fail_upsert(mut self) -> Self {
             self.fail_upsert = true;
             self
@@ -1364,6 +1391,10 @@ mod tests {
 
     #[async_trait]
     impl VectorCandidateStore for RecordingVectorStore {
+        async fn close(&self) -> Result<(), CustomError> {
+            self.inner.close().await
+        }
+
         async fn upsert_vector_records(
             &self,
             records: &[VectorRecordEmbedding<'_>],
@@ -1382,28 +1413,18 @@ mod tests {
                     "vector write failed",
                 )));
             }
-            Ok(())
+            self.inner.upsert_vector_records(records).await
         }
 
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
-            Ok(VectorCandidateRecall {
-                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
-                candidates: CanonicalCandidates::new([]),
-                completeness: if query.limit == 0 || query.object_types.is_empty() {
-                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
-                } else {
-                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
-                        scanned: 0,
-                    }
-                },
-            })
+            self.inner.search_candidates(query).await
         }
 
-        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            Ok(())
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            self.inner.delete_candidates(objects).await
         }
     }
 

@@ -54,19 +54,11 @@ where
             activity,
             resolution: ActivityResolution::Found,
         });
-        let root = |reference: MemoryObjectRef| CandidateRoot {
-            date_match_floor_eligible: false,
-            object_id: reference.id,
-            object_type: reference.object_type,
-            score: 1.0,
-            source: GraphRootSource::Activity,
-            full_standing_score: Some(1.0),
-            full_standing_kinds: BTreeSet::from([CueKind::Activity]),
-            vector_score: None,
-            cue_kinds: BTreeSet::from([CueKind::Activity]),
+        let root = |(position, reference)| {
+            CandidateRoot::new(reference, RecallRoad::Activity, 1.0, position)
         };
         let mut filtered = Vec::new();
-        let mut roots = vec![root(reference)];
+        let mut roots = vec![root((0, reference))];
         // Resolution reports existence even when the activity cannot cue its members.
         if !context.graph_limits.allowed_object_types.is_empty()
             && !context
@@ -79,23 +71,15 @@ where
         let mut members = Vec::new();
         match object {
             MemoryObject::MemoryThread(thread) => {
-                let mut query = GraphDerivedMemoryThreadQuery::by_threads(vec![thread.id])
-                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    });
-                query.current_state_limit = Some(context.candidate_limits.max_graph_roots);
-                let (mut memories, omitted) = self
+                let query = GraphDerivedMemoryThreadQuery::by_threads(vec![thread.id])
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
+                        context.lifecycle_policy,
+                    ));
+                let (memories, omitted) = self
                     .graph_store
-                    .query_derived_memories_by_thread(&query)
+                    .query_thread_state(&query, RecallRoad::Activity.contribution(context))
                     .await?;
                 filtered.extend(omitted);
-                memories.sort_by(|left, right| {
-                    right
-                        .created_at
-                        .cmp(&left.created_at)
-                        .then_with(|| left.id.cmp(&right.id))
-                });
                 members.extend(
                     memories
                         .into_iter()
@@ -143,10 +127,7 @@ where
                     })
                     .collect::<Vec<_>>();
                 let occasions = self.graph_store.query_episode_occasions(&sources).await?;
-                let policy = GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                };
+                let policy = GraphExpansionLifecyclePolicy::from(context.lifecycle_policy);
                 members.retain(|reference| {
                     if let Some((object_ref, reason)) = occasions
                         .get(reference)
@@ -178,7 +159,12 @@ where
             _ => return Ok((result, roots, filtered)),
         }
         members.dedup();
-        roots.extend(members.into_iter().map(root));
+        roots.extend(
+            members
+                .into_iter()
+                .enumerate()
+                .map(|(position, reference)| root((position + 1, reference))),
+        );
         Ok((result, roots, filtered))
     }
 }

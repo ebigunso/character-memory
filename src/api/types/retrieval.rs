@@ -8,11 +8,10 @@ use crate::domain::{
     GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
     RelationType, RetentionState, Scene, ThreadStatus, VectorSurface,
 };
-use crate::errors::{ConfigValidationError, ConfigValidationReason};
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalContext {
-    #[serde(default = "Scene::now")]
     pub scene: Scene,
     pub topic: Option<String>,
     pub activity: Option<ActivityRef>,
@@ -59,7 +58,8 @@ impl RetrievalContext {
         self
     }
 
-    pub(crate) fn validate(&self) -> Result<(), ConfigValidationError> {
+    pub(crate) fn validate(&self) -> Result<(), CustomError> {
+        self.scene.validate_time()?;
         if self.object_type_defaults.is_empty() {
             return Err(ConfigValidationError {
                 keys: vec!["object_type_defaults"],
@@ -67,7 +67,8 @@ impl RetrievalContext {
                     expected: "at least one retrieval object type",
                     actual: "[]".to_owned(),
                 },
-            });
+            }
+            .into());
         }
 
         Ok(())
@@ -121,7 +122,7 @@ impl Default for RetrievalCandidateLimits {
 /// person or place: five people share the participant floor.
 ///
 /// After reservations, spare room follows score order except at root selection,
-/// where given non-time kinds share turns. Time kinds then take remaining room.
+/// where kinds with expanding roads share turns. Other roads fill remaining room.
 /// A zero floor removes the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
@@ -229,6 +230,17 @@ impl RetrievalLifecyclePolicy {
     }
 }
 
+impl From<RetrievalLifecyclePolicy>
+    for crate::ports::graph_authority::GraphExpansionLifecyclePolicy
+{
+    fn from(policy: RetrievalLifecyclePolicy) -> Self {
+        Self {
+            include_suppressed: policy.include_suppressed,
+            include_superseded: policy.include_superseded,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrieveOutcome {
     /// An unset or empty part means not given. A scene is never complete: people
@@ -247,6 +259,8 @@ pub struct RetrieveOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryScenes {
     pub memory: MemoryObjectRef,
+    /// Roads that brought this admitted memory to mind, with or without a trace.
+    pub admitted_by: BTreeSet<AdmissionRoad>,
     /// Empty means no recorded experience; unavailable sources are explicit entries.
     pub sources: Vec<SourceScene>,
     /// Whole seconds since this interpreted memory's latest eligible support
@@ -255,6 +269,21 @@ pub struct MemoryScenes {
     /// other than an interpreted memory. Suppressed sources count only when
     /// include_suppressed is enabled. This fact never changes recall or scores.
     pub seconds_since_support: Option<i64>,
+}
+
+/// What reached an admitted memory, separate from the kinds used to reserve room.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AdmissionRoad {
+    Participant,
+    Place,
+    Activity,
+    Topic,
+    PersonDescription,
+    SettingWords,
+    Range,
+    Anniversary,
+    Recency,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -315,7 +344,7 @@ pub enum SceneReferenceResolution {
     /// For a name, no notion is currently known by exactly this name, nothing more.
     /// For a key, no notion currently exists at that key.
     Unknown,
-    ContentCue,
+    Reminder,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -556,8 +585,6 @@ pub struct RetrievalTrace {
     /// `None` means no range was supplied. Determined by one extra bounded ID read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_range_has_more: Option<bool>,
-    /// More eligible occasions share this local calendar date in earlier years.
-    pub anniversary_has_more: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     pub floor_admissions: Vec<CueFloorAdmission>,
@@ -575,7 +602,6 @@ impl RetrievalTrace {
         Self {
             vector_candidates: Vec::new(),
             time_range_has_more: None,
-            anniversary_has_more: false,
             scene_cue_searches: Vec::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),
@@ -675,10 +701,10 @@ pub struct SelectivityTrace {
     pub object_type: ObjectType,
     pub count_scope: SelectivityCountScope,
     pub score: Option<f64>,
-    /// Distinct episodes involving the notion for Involves/Episode and Mentions/Observation;
+    /// Distinct episodes involving the notion for the Involves/Episode participant path;
     /// otherwise the notion's relation/object edge count.
     pub entity_count: Option<u64>,
-    /// All episodes in the count scope for the two participant paths;
+    /// All episodes in the count scope for the Involves/Episode participant path;
     /// otherwise the global relation/object edge count.
     pub global_count: Option<u64>,
     pub support_factor: f64,
@@ -718,25 +744,13 @@ pub enum GraphExpansionOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleFilterDecision {
     pub object: MemoryObjectRef,
-    pub retention_state: Option<RetentionState>,
     pub superseded_by: Vec<MemoryId>,
-    pub action: LifecycleFilterAction,
     pub reason: LifecycleFilterReason,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LifecycleFilterAction {
-    Included,
-    Omitted,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum LifecycleFilterReason {
-    Active,
-    SuppressedIncludedByPolicy,
-    SupersededIncludedByPolicy,
     SuppressedOmitted,
     SupersededOmitted,
     GraphObjectMissing,
@@ -843,7 +857,6 @@ mod tests {
 
     fn episode(id: MemoryId) -> Episode {
         Episode {
-            scene_local_date: None,
             id,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,

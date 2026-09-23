@@ -1,4 +1,5 @@
 use std::{fs, path::Path};
+use test_support::id;
 
 use async_trait::async_trait;
 use character_memory::{
@@ -10,7 +11,6 @@ use character_memory::{
 };
 use config::{builder::DefaultState, Config, ConfigBuilder};
 use tempfile::TempDir;
-use uuid::Uuid;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
@@ -33,7 +33,7 @@ async fn injected_provider_opens_without_unused_settings_and_ignores_them_when_p
         let memory = CharacterMemory::new_with_embedding_provider(
             settings,
             "injected_without_placeholders".to_owned(),
-            Box::new(ConstantEmbeddingProvider(2)),
+            Box::new(constant_provider(2)),
         )
         .await
         .unwrap();
@@ -50,7 +50,7 @@ async fn injected_provider_dimension_must_match_existing_vector_storage() {
     let memory = CharacterMemory::new_with_embedding_provider(
         Settings::new(config.clone()).unwrap(),
         "injected_dimensions".to_owned(),
-        Box::new(ConstantEmbeddingProvider(2)),
+        Box::new(constant_provider(2)),
     )
     .await
     .unwrap();
@@ -59,7 +59,7 @@ async fn injected_provider_dimension_must_match_existing_vector_storage() {
     let result = CharacterMemory::new_with_embedding_provider(
         Settings::new(config).unwrap(),
         "injected_dimensions".to_owned(),
-        Box::new(ConstantEmbeddingProvider(3)),
+        Box::new(constant_provider(3)),
     )
     .await;
     assert!(matches!(
@@ -91,7 +91,7 @@ async fn persistent_graph_requires_a_path_at_facade_construction() {
         let result = CharacterMemory::new_with_embedding_provider(
             settings,
             "missing_graph_path".to_owned(),
-            Box::new(ConstantEmbeddingProvider(2)),
+            Box::new(constant_provider(2)),
         )
         .await;
         assert!(matches!(
@@ -192,7 +192,7 @@ async fn empty_sqlite_path_fails_before_either_constructor_creates_stores() {
             CharacterMemory::new_with_embedding_provider(
                 settings,
                 "preflight".to_owned(),
-                Box::new(ConstantEmbeddingProvider(2)),
+                Box::new(constant_provider(2)),
             )
             .await
         } else {
@@ -258,30 +258,14 @@ async fn embedded_default_contract_is_service_free_restart_safe_and_canonical() 
 async fn close_releases_local_stores_for_immediate_removal_and_fresh_reopen() {
     let temp = TempDir::new().unwrap();
     let collection = "close_release";
-    let config = common_settings()
-        .set_override(
-            "vector_store_path",
-            temp.path().join("vectors").to_str().unwrap(),
-        )
-        .unwrap()
-        .set_override("graph_store_mode", "persistent")
-        .unwrap()
-        .set_override("oxigraph_path", temp.path().join("graph").to_str().unwrap())
-        .unwrap()
-        .set_override("retrieval_stats_store_mode", "sqlite")
-        .unwrap()
-        .set_override(
-            "retrieval_stats_path",
-            temp.path().join("stats.sqlite").to_str().unwrap(),
-        )
-        .unwrap()
+    let config = test_support::persistent_settings(temp.path())
         .build()
         .unwrap();
     let memory = open(Config::builder().add_source(config.clone()), collection)
         .await
         .unwrap();
     remember_fixture(&memory).await;
-    assert!(temp.path().join("stats.sqlite").is_file());
+    assert!(temp.path().join("stats.sqlite3").is_file());
     assert!(temp.path().join("graph").is_dir());
     memory.close().await.unwrap();
     fs::remove_dir_all(temp.path()).unwrap();
@@ -304,7 +288,10 @@ async fn default_construction_rejects_a_missing_vector_store_path() {
     let error = match CharacterMemory::new_with_embedding_provider(
         settings,
         "missing_vector_path".to_owned(),
-        Box::new(ConstantEmbeddingProvider(vector_size)),
+        Box::new(test_support::TestEmbeddingProvider::new(
+            vector_size,
+            move |_: &str| constant_embedding(vector_size),
+        )),
     )
     .await
     {
@@ -454,7 +441,10 @@ async fn open(
     CharacterMemory::new_with_embedding_provider(
         settings,
         collection.to_owned(),
-        Box::new(ConstantEmbeddingProvider(vector_size)),
+        Box::new(test_support::TestEmbeddingProvider::new(
+            vector_size,
+            move |_: &str| constant_embedding(vector_size),
+        )),
     )
     .await
 }
@@ -605,30 +595,6 @@ fn ids(trace: &[VectorCandidateTrace]) -> Vec<MemoryId> {
     trace.iter().map(|candidate| candidate.object.id).collect()
 }
 
-fn id(value: u128) -> MemoryId {
-    Uuid::from_u128(value)
-}
-
-struct ConstantEmbeddingProvider(usize);
-
-#[async_trait]
-impl EmbeddingProvider for ConstantEmbeddingProvider {
-    fn vector_size(&self) -> usize {
-        self.0
-    }
-
-    async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-        Ok(constant_embedding(self.0))
-    }
-
-    async fn bulk_generate_embeddings<'a>(
-        &self,
-        texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        Ok(texts.iter().map(|_| constant_embedding(self.0)).collect())
-    }
-}
-
 struct ZeroNormFixtureEmbeddingProvider {
     vector_size: usize,
     zero_texts: [String; 2],
@@ -667,4 +633,8 @@ fn constant_embedding(size: usize) -> Vec<f32> {
     let mut embedding = vec![0.0; size];
     embedding[0] = 1.0;
     embedding
+}
+
+fn constant_provider(size: usize) -> impl EmbeddingProvider {
+    test_support::TestEmbeddingProvider::new(size, move |_: &str| constant_embedding(size))
 }

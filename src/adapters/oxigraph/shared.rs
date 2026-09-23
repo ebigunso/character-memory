@@ -1,19 +1,19 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use oxigraph::model::{GraphName, GraphNameRef, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, GraphFailureMode, MemoryId, MemoryLink,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, is_participant_pair,
-    order_current_subject_links, BoundedExpansionLinkRef, ParticipantOccasions,
+    bounded_incident_link_refs, fail_if_closed, is_participant_pair, order_current_subject_links,
+    BoundedExpansionLinkRef, ParticipantOccasions, SUBJECT_ABOUTNESS_ROUTES,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -74,9 +74,7 @@ pub(super) fn insert_visible_ref(
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(failure));
-        }
+        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
         return Ok(());
     }
@@ -171,7 +169,7 @@ pub(super) fn hydrate_objects_by_refs_from_store(
             )?);
         }
     }
-    sort_objects(&mut objects);
+    objects.sort_by_key(MemoryObject::stable_order_key);
     Ok(objects)
 }
 
@@ -321,7 +319,7 @@ pub(super) fn memory_object_from_rdf(
             modality: enum_literal(subject, values, super::vocabulary::MODALITY)?,
             scene: crate::domain::Scene {
                 time: timestamp_literal(subject, values, super::vocabulary::SCENE_TIME)?
-                    .fixed_offset(),
+                    .with_timezone(&scene_offset_literal(subject, values)?),
                 participants: serde_json::from_str(
                     &values.literal(subject, super::vocabulary::SCENE_PARTICIPANTS)?,
                 )
@@ -339,15 +337,6 @@ pub(super) fn memory_object_from_rdf(
                     rdf_parse_error(subject, super::vocabulary::SCENE_CUSTOM_VALUES, error)
                 })?,
             },
-            scene_local_date: values
-                .optional_literal(super::vocabulary::SCENE_LOCAL_YEAR)
-                .map(|year| {
-                    let month_day = values.literal(subject, super::vocabulary::SCENE_MONTH_DAY)?;
-                    format!("{year}-{month_day}").parse().map_err(|error| {
-                        rdf_parse_error(subject, super::vocabulary::SCENE_LOCAL_YEAR, error)
-                    })
-                })
-                .transpose()?,
             ended_at: optional_timestamp_literal(values, super::vocabulary::ENDED_AT)?,
             summary: values.literal(subject, super::vocabulary::SUMMARY)?,
             raw_ref: values.optional_literal(super::vocabulary::RAW_REF),
@@ -552,6 +541,19 @@ pub(super) fn f32_literal(
         .map_err(|error| rdf_parse_error(subject, predicate, error))
 }
 
+fn scene_offset_literal(
+    subject: &str,
+    values: &RdfSubjectValues,
+) -> Result<FixedOffset, CustomError> {
+    let predicate = super::vocabulary::SCENE_OFFSET_SECONDS;
+    let seconds = values
+        .literal(subject, predicate)?
+        .parse()
+        .map_err(|error| rdf_parse_error(subject, predicate, error))?;
+    FixedOffset::east_opt(seconds)
+        .ok_or_else(|| rdf_parse_error(subject, predicate, "offset must be less than 24 hours"))
+}
+
 pub(super) fn timestamp_literal(
     subject: &str,
     values: &RdfSubjectValues,
@@ -628,26 +630,24 @@ pub(super) fn bounded_graph_visible_refs(
     let mut filtered_nodes = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
-    let (state_ids, state_filtered) = if query.current_subject_state {
-        selectors.select_subject_state(
-            query.root_id,
-            query.lifecycle_policy,
-            crate::policy::graph_expansion::fanout_limit_for_pair(
-                query,
-                RelationType::About,
-                ObjectType::DerivedMemory,
-            ),
-            query.trace_mode.is_enabled(),
-        )?
+    let (state_refs, state_filtered) = if query.current_subject_state {
+        selectors.select_subject_state(query)?
     } else {
         (Vec::new(), Vec::new())
     };
-    let state_ranks = state_ids
+    let state_ranks = state_refs
         .into_iter()
         .enumerate()
-        .map(|(rank, id)| (id, rank))
+        .map(|(rank, object)| (object, rank))
         .collect();
-    let mut participant_occasions = ParticipantOccasions::new();
+    let mut participant_occasions = if matches!(
+        root_ref.object_type,
+        ObjectType::Episode | ObjectType::Observation
+    ) {
+        selectors.select_participant_occasions(&[root_ref])?
+    } else {
+        ParticipantOccasions::new()
+    };
 
     for depth in 0..query.max_depth {
         frontier.retain(|object| query.may_continue_from(object.object_type));
@@ -688,6 +688,36 @@ pub(super) fn bounded_graph_visible_refs(
                     || participant_occasions.contains_key(&neighbor)
             });
         }
+        // Every road is as-of the scene, including an observation's parent hop.
+        if query.participant_reference_time != DateTime::<Utc>::MAX_UTC
+            || query.current_subject_state
+        {
+            let memories = link_refs
+                .iter()
+                .flat_map(|link| [link.from, link.to])
+                .chain(frontier.iter().copied())
+                .filter(|object| {
+                    matches!(
+                        object.object_type,
+                        ObjectType::Episode | ObjectType::Observation
+                    )
+                })
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let occasions = selectors.select_participant_occasions(&memories)?;
+            let future = occasions
+                .iter()
+                .filter(|(object, occasion)| {
+                    occasion.memory_time(object.object_type) > query.participant_reference_time
+                        && !(query.allow_future_root && **object == root_ref)
+                })
+                .map(|(object, _)| *object)
+                .collect::<HashSet<_>>();
+            participant_occasions.extend(occasions);
+            frontier.retain(|object| !future.contains(object));
+            link_refs.retain(|link| !future.contains(&link.from) && !future.contains(&link.to));
+        }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
         for object_ref in &frontier {
@@ -697,33 +727,35 @@ pub(super) fn bounded_graph_visible_refs(
                 .unwrap_or_default();
             let ordered;
             let incident_link_refs = if depth == 0 && query.current_subject_state {
-                if (query.allowed_relation_types.is_empty()
-                    || query.allowed_relation_types.contains(&RelationType::About))
-                    && (query.allowed_object_types.is_empty()
-                        || query
-                            .allowed_object_types
-                            .contains(&ObjectType::DerivedMemory))
-                {
-                    let about_refs = incident_link_refs
+                let about_refs = incident_link_refs
+                    .iter()
+                    .filter_map(|link| {
+                        let neighbor = link.other_endpoint(*object_ref);
+                        (SUBJECT_ABOUTNESS_ROUTES.contains(&(link.relation, neighbor.object_type))
+                            && query.allows_object(neighbor)
+                            && (query.allowed_relation_types.is_empty()
+                                || query.allowed_relation_types.contains(&link.relation)))
+                        .then_some(neighbor)
+                    })
+                    .collect::<HashSet<_>>();
+                filtered_nodes.extend(
+                    state_filtered
                         .iter()
-                        .filter(|link| link.relation == RelationType::About)
-                        .map(|link| link.other_endpoint(*object_ref))
-                        .collect::<HashSet<_>>();
-                    filtered_nodes.extend(
-                        state_filtered
-                            .iter()
-                            .filter(|entry| about_refs.contains(&entry.object_ref))
-                            .cloned(),
-                    );
-                }
+                        .filter(|entry| about_refs.contains(&entry.object_ref))
+                        .cloned(),
+                );
+                let cap = crate::policy::graph_expansion::fanout_limit_for_pair(
+                    query,
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                );
                 ordered = order_current_subject_links(
                     incident_link_refs.to_vec(),
                     &state_ranks,
+                    cap.saturating_add(usize::from(query.trace_mode.is_enabled())),
                     |link| {
                         let neighbor = link.other_endpoint(*object_ref);
-                        (link.relation == RelationType::About
-                            && neighbor.object_type == ObjectType::DerivedMemory)
-                            .then_some(neighbor.id)
+                        (link.relation, neighbor)
                     },
                 );
                 &ordered
@@ -817,10 +849,6 @@ pub(super) fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError
 
 pub(super) fn oxigraph_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph graph store error: {error}"))
-}
-
-pub(super) fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 impl From<oxigraph::model::IriParseError> for CustomError {

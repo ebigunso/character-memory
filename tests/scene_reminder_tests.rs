@@ -1,12 +1,11 @@
-use async_trait::async_trait;
 use character_memory::*;
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use serde_json::{json, Value};
+use test_support::scene_time as time;
+use test_support::{id, keyed};
 
 #[path = "support/mod.rs"]
 pub mod test_support;
-
-struct Provider;
 
 fn embedding(text: &str) -> Vec<f32> {
     let (topic, scene): (f32, f32) = match text {
@@ -27,34 +26,6 @@ fn embedding(text: &str) -> Vec<f32> {
     ]
 }
 
-#[async_trait]
-impl EmbeddingProvider for Provider {
-    fn vector_size(&self) -> usize {
-        3
-    }
-    async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-        Ok(embedding(text))
-    }
-    async fn bulk_generate_embeddings<'a>(
-        &self,
-        texts: &'a [&'a str],
-    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        Ok(texts.iter().map(|text| embedding(text)).collect())
-    }
-}
-
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
-fn time() -> DateTime<Utc> {
-    "2026-09-21T12:00:00Z".parse().unwrap()
-}
-fn keyed(n: u128) -> SceneParticipant {
-    SceneParticipant {
-        key: Some(id(n)),
-        ..Default::default()
-    }
-}
 fn described(words: &str) -> SceneParticipant {
     SceneParticipant {
         description: Some(words.to_owned()),
@@ -64,35 +35,10 @@ fn described(words: &str) -> SceneParticipant {
 
 async fn open() -> (CharacterMemory, tempfile::TempDir) {
     let root = tempfile::tempdir().unwrap();
-    let settings = config::Config::builder()
-        .set_override(
-            "vector_store_path",
-            root.path().join("vectors").to_string_lossy().into_owned(),
-        )
-        .unwrap()
-        .set_override("graph_store_mode", "persistent")
-        .unwrap()
-        .set_override(
-            "oxigraph_path",
-            root.path().join("graph").to_string_lossy().into_owned(),
-        )
-        .unwrap()
-        .set_override("retrieval_stats_store_mode", "sqlite")
-        .unwrap()
-        .set_override(
-            "retrieval_stats_path",
-            root.path()
-                .join("stats.sqlite3")
-                .to_string_lossy()
-                .into_owned(),
-        )
-        .unwrap()
-        .build()
-        .unwrap();
-    let memory = CharacterMemory::new_with_embedding_provider(
-        Settings::new(settings).unwrap(),
+    let memory = test_support::open_with_provider(
+        test_support::persistent_settings(root.path()),
         test_support::unique_collection_name(),
-        Box::new(Provider),
+        test_support::TestEmbeddingProvider::new(3, embedding),
     )
     .await
     .unwrap();
@@ -455,12 +401,12 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
         .await
         .unwrap();
     assert!(
-        topic
+        !topic
             .pack
             .relevant_episodes
             .iter()
             .any(|episode| episode.id == id(10)),
-        "scene cutoff is not a retrieval-wide as-of filter"
+        "a topic match cannot recall a future occasion"
     );
     memory.close().await.unwrap();
     root.close().unwrap();

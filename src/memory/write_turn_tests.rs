@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::ports::graph_authority::*;
 use crate::ports::retrieval_stats::*;
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 use crate::test_support::{
-    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
+    deterministic_embedder, in_memory_graph_store, TemporaryVectorCandidateStore,
 };
 use crate::{CharacterMemory, CustomError};
 
@@ -82,6 +82,7 @@ struct Fixture {
     graph: Arc<Gate>,
     vector: Arc<Gate>,
     stats: Arc<Gate>,
+    projected: Arc<Mutex<Vec<RetrievalStatsObjectState>>>,
     embed: Arc<Gate>,
 }
 
@@ -90,6 +91,7 @@ impl Fixture {
         let graph = Arc::new(Gate::default());
         let vector = Arc::new(Gate::default());
         let stats = Arc::new(Gate::default());
+        let projected = Arc::new(Mutex::new(Vec::new()));
         let embed = Arc::new(Gate::default());
         let mut memory = CharacterMemory::from_parts(
             Box::new(GatedGraph {
@@ -101,13 +103,14 @@ impl Fixture {
                 gate: vector.clone(),
             }),
             Box::new(GatedEmbedder {
-                inner: DeterministicMemoryEmbedder::new(8),
+                inner: Box::new(deterministic_embedder(8)),
                 gate: embed.clone(),
             }),
         );
         memory.memory_composition.stats_store = Box::new(GatedStats {
             store: InMemoryRetrievalStatsStore::new(),
             gate: stats.clone(),
+            projected: projected.clone(),
         });
         let mut entity = EntityDraft::new();
         entity.id = Some(SUBJECT);
@@ -135,6 +138,7 @@ impl Fixture {
             graph,
             vector,
             stats,
+            projected,
             embed,
         }
     }
@@ -171,6 +175,22 @@ impl Fixture {
             .collect::<Vec<_>>();
         ids.sort();
         ids
+    }
+
+    fn assert_projected(&self, expected: &[(MemoryId, RetentionState, bool)]) {
+        let actual = self
+            .projected
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|state| state.object_type == ObjectType::DerivedMemory)
+            .map(|state| (state.object_id, (state.retention_state, state.is_current)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let expected = expected
+            .iter()
+            .map(|(id, retention, current)| (*id, (*retention, *current)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(actual, expected);
     }
 
     async fn counter(&self, relation: RelationType) -> RetrievalStatsCounter {
@@ -263,14 +283,10 @@ async fn competing_commits_revalidate_the_same_id_before_writing() {
     );
     assert_eq!(fixture.belief(NEW).await.text, "First writer");
     assert_eq!(fixture.vector_ids().await, vec![OLD, NEW]);
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 2,
-            active_count: 2,
-            current_count: 2
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, true),
+        (NEW, RetentionState::Active, true),
+    ]);
 }
 
 #[tokio::test]
@@ -299,14 +315,10 @@ async fn remember_and_forget_finish_as_commit_then_forget_without_late_vector_or
         RetentionState::Suppressed
     );
     assert_eq!(fixture.vector_ids().await, vec![OLD]);
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 2,
-            active_count: 1,
-            current_count: 1
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, true),
+        (NEW, RetentionState::Suppressed, false),
+    ]);
 }
 
 #[tokio::test]
@@ -331,14 +343,10 @@ async fn correction_holds_the_turn_through_stats_before_link_hydrates_endpoints(
             current_count: 0
         }
     );
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 2,
-            active_count: 2,
-            current_count: 1
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, false),
+        (REPLACEMENT, RetentionState::Active, true),
+    ]);
 }
 
 #[tokio::test]
@@ -361,14 +369,10 @@ async fn correction_graph_noop_retry_serializes_vector_and_stats_repair_with_for
         RetentionState::Suppressed
     );
     assert!(fixture.vector_ids().await.is_empty());
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 2,
-            active_count: 1,
-            current_count: 0
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, false),
+        (REPLACEMENT, RetentionState::Suppressed, false),
+    ]);
 }
 
 #[tokio::test]
@@ -458,14 +462,11 @@ async fn correction_rebuilds_the_cascade_after_embedding() {
     completes(correction).await.unwrap();
     assert_eq!(fixture.vector_ids().await, vec![REPLACEMENT]);
     assert_eq!(fixture.belief(REPLACEMENT).await.supersedes, vec![OLD, NEW]);
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 3,
-            active_count: 3,
-            current_count: 1
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, false),
+        (NEW, RetentionState::Active, false),
+        (REPLACEMENT, RetentionState::Active, true),
+    ]);
 }
 
 #[tokio::test]
@@ -487,7 +488,10 @@ async fn precomputed_embedding_errors_still_commit_graph_and_stats_then_allow_re
         "Persist despite the embedding error"
     );
     assert_eq!(fixture.vector_ids().await, vec![OLD]);
-    assert_eq!(fixture.counter(RelationType::About).await.current_count, 2);
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, true),
+        (NEW, RetentionState::Active, true),
+    ]);
 
     let corrected = fixture.memory.correct(correction()).await.unwrap();
     assert!(matches!(
@@ -506,16 +510,13 @@ async fn precomputed_embedding_errors_still_commit_graph_and_stats_then_allow_re
     ));
     assert_eq!(fixture.belief(REPLACEMENT).await.supersedes, vec![OLD]);
     assert!(fixture.vector_ids().await.is_empty());
-    assert_eq!(
-        fixture.counter(RelationType::About).await,
-        RetrievalStatsCounter {
-            total_count: 3,
-            active_count: 3,
-            current_count: 2
-        }
-    );
+    fixture.assert_projected(&[
+        (OLD, RetentionState::Active, false),
+        (NEW, RetentionState::Active, true),
+        (REPLACEMENT, RetentionState::Active, true),
+    ]);
 
-    fixture.memory.memory_composition.embedder = Box::new(DeterministicMemoryEmbedder::new(8));
+    fixture.memory.memory_composition.embedder = Box::new(deterministic_embedder(8));
     let repaired = fixture
         .memory
         .commit(plan, CommitOptions::default())
@@ -553,7 +554,7 @@ impl GraphAuthorityStore for GatedGraph {
         participants: &[crate::domain::MemoryId],
         limit: usize,
         policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+    ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError> {
         let _ = (date, participants, limit, policy);
         Ok(Vec::new())
     }
@@ -564,7 +565,7 @@ impl GraphAuthorityStore for GatedGraph {
         end: chrono::DateTime<chrono::Utc>,
         limit: usize,
         policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+    ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
         self.store
             .query_episodes_by_time(start, end, limit, policy)
             .await
@@ -632,12 +633,33 @@ impl GraphAuthorityStore for GatedGraph {
     ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         self.store.query_derived_memories_by_thread(query).await
     }
+    async fn query_thread_state(
+        &self,
+        query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        let _ = (query, limit);
+        self.store.query_thread_state(query, limit).await
+    }
+
     async fn query_scope_state(
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
         limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
         self.store.query_scope_state(key, policy, limit).await
     }
 
@@ -678,7 +700,7 @@ impl VectorCandidateStore for GatedVector {
 }
 
 struct GatedEmbedder {
-    inner: DeterministicMemoryEmbedder,
+    inner: Box<dyn MemoryEmbedder>,
     gate: Arc<Gate>,
 }
 
@@ -696,6 +718,7 @@ impl MemoryEmbedder for GatedEmbedder {
 struct GatedStats {
     store: InMemoryRetrievalStatsStore,
     gate: Arc<Gate>,
+    projected: Arc<Mutex<Vec<RetrievalStatsObjectState>>>,
 }
 
 #[async_trait]
@@ -711,7 +734,9 @@ impl RetrievalStatsStore for GatedStats {
         states: &[RetrievalStatsObjectState],
     ) -> Result<(), RetrievalStatsStoreError> {
         self.gate.stop_once().await;
-        self.store.record_object_states(states).await
+        self.store.record_object_states(states).await?;
+        self.projected.lock().unwrap().extend_from_slice(states);
+        Ok(())
     }
     async fn counter(
         &self,

@@ -2,6 +2,8 @@
 
 This directory contains decision records (ADRs), split into two tracks so high-level design decisions do not mix with implementation choices. New records follow the harness template `durable-docs-authoring/references/adr-template.md`, copied here as `template.md` when the repository keeps its own; the admission test, form, lifecycle, and acceptance rules are in the harness reference `durable-docs-authoring/references/adr.md`.
 
+- [ADR-D-0039: A setting key or custom value recalls what was formed there as a reminder](design/ADR-D-0039-a-setting-key-or-custom-value-recalls-what-was-formed-there-as-a-reminder.md) — proposed; depends on ADR-D-0022 and ADR-D-0024; replaces neither.
+
 ## Directory layout
 ```text
 docs/decisions/
