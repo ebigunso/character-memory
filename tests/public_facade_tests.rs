@@ -163,31 +163,41 @@ mod road_behavior {
             commit(&memory, plan).await;
 
             for (case, kind, n, expected) in [
-                ("range", ObjectType::Episode, 100, vec![CueKind::DateMatch]),
+                (
+                    "range",
+                    ObjectType::Episode,
+                    100,
+                    vec![AdmissionRoad::Range],
+                ),
                 (
                     "faint topic",
                     ObjectType::Episode,
                     101,
-                    vec![CueKind::Topic],
+                    vec![AdmissionRoad::Topic],
                 ),
-                ("quiet", ObjectType::Episode, 102, vec![CueKind::Recency]),
+                (
+                    "quiet",
+                    ObjectType::Episode,
+                    102,
+                    vec![AdmissionRoad::Recency],
+                ),
                 (
                     "keyed place",
                     ObjectType::DerivedMemory,
                     202,
-                    vec![CueKind::Place],
+                    vec![AdmissionRoad::Place],
                 ),
                 (
                     "overlap",
                     ObjectType::DerivedMemory,
                     200,
-                    vec![CueKind::Participant, CueKind::Topic],
+                    vec![AdmissionRoad::Participant, AdmissionRoad::Topic],
                 ),
                 (
                     "activity",
                     ObjectType::MemoryThread,
                     300,
-                    vec![CueKind::Activity],
+                    vec![AdmissionRoad::Activity],
                 ),
             ] {
                 let mut context = query(None, 8, 8);
@@ -224,11 +234,9 @@ mod road_behavior {
                     assignments.iter().filter(|row| row.rank.is_some()).count()
                 );
                 for entry in &untraced.memory_scenes {
-                    let assignment = assignments
+                    assert!(assignments
                         .iter()
-                        .find(|row| row.object == entry.memory && row.rank.is_some())
-                        .unwrap();
-                    assert_eq!(entry.admitted_by, assignment.cue_kinds);
+                        .any(|row| row.object == entry.memory && row.rank.is_some()));
                     assert!(!entry.admitted_by.is_empty());
                 }
                 let json = serde_json::to_value(&untraced).unwrap();
@@ -1582,7 +1590,7 @@ mod road_behavior {
                 .iter_mut()
                 .find(|entry| entry.memory.id == id(101, reverse))
             {
-                assert!(entry.admitted_by.remove(&CueKind::Recency));
+                assert!(entry.admitted_by.remove(&AdmissionRoad::Recency));
             }
             assert_eq!(scenes, after.memory_scenes);
             let scores = |result: &RetrieveOutcome| {

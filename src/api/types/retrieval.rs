@@ -247,8 +247,8 @@ pub struct RetrieveOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryScenes {
     pub memory: MemoryObjectRef,
-    /// Cue kinds that brought this admitted memory to mind, with or without a trace.
-    pub admitted_by: BTreeSet<CueKind>,
+    /// Roads that brought this admitted memory to mind, with or without a trace.
+    pub admitted_by: BTreeSet<AdmissionRoad>,
     /// Empty means no recorded experience; unavailable sources are explicit entries.
     pub sources: Vec<SourceScene>,
     /// Whole seconds since this interpreted memory's latest eligible support
@@ -257,6 +257,21 @@ pub struct MemoryScenes {
     /// other than an interpreted memory. Suppressed sources count only when
     /// include_suppressed is enabled. This fact never changes recall or scores.
     pub seconds_since_support: Option<i64>,
+}
+
+/// What reached an admitted memory, separate from the kinds used to reserve room.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AdmissionRoad {
+    Participant,
+    Place,
+    Activity,
+    Topic,
+    PersonDescription,
+    SettingWords,
+    Range,
+    Anniversary,
+    Recency,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

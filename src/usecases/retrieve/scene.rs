@@ -355,15 +355,10 @@ where
     pub(super) async fn memory_scenes(
         &self,
         pack: &ContinuityContextPack,
-        section_assignments: &[SectionAssignment],
+        mut admitted_by: HashMap<MemoryObjectRef, BTreeSet<AdmissionRoad>>,
         include_suppressed: bool,
         reference_time: DateTime<Utc>,
     ) -> Result<Vec<MemoryScenes>, CustomError> {
-        let mut admitted_by = section_assignments
-            .iter()
-            .filter(|assignment| assignment.rank.is_some())
-            .map(|assignment| (assignment.object, assignment.cue_kinds.clone()))
-            .collect::<HashMap<_, _>>();
         let mut memories = Vec::new();
         let mut objects = HashMap::new();
         for episode in &pack.relevant_episodes {
@@ -472,7 +467,7 @@ where
                     memory,
                     admitted_by: admitted_by
                         .remove(&memory)
-                        .expect("every packed memory has an admitted section assignment"),
+                        .expect("every packed memory has its admission roads"),
                     sources,
                     seconds_since_support,
                 }
