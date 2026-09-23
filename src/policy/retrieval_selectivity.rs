@@ -13,7 +13,7 @@ use crate::errors::{
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 use crate::ports::graph_authority::TraceMode;
 use crate::ports::retrieval_stats::{
-    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsHealth,
+    is_counted_relation, RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsHealth,
     RetrievalStatsHealthState, RetrievalStatsStore,
 };
 
@@ -133,7 +133,10 @@ impl SelectivityStatsContext {
         };
         let mut global_counters = HashMap::new();
         if health.state == RetrievalStatsHealthState::Healthy {
-            for spec in &specs {
+            for spec in specs
+                .iter()
+                .filter(|spec| is_counted_relation(spec.relation))
+            {
                 let bucket = spec.count_bucket();
                 if global_counters.contains_key(&bucket) {
                     continue;
@@ -734,8 +737,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unused_aboutness_counter_failures_do_not_poison_counted_routes() {
+        let stats = FailingRetrievalStatsStore {
+            aboutness_only: true,
+        };
+        let context = SelectivityStatsContext::load(&stats).await.unwrap();
+        assert_eq!(context.health.state, RetrievalStatsHealthState::Healthy);
+        let plan = selectivity_plan_for_entity(
+            crate::domain::MemoryId::from_u128(1),
+            1.0,
+            20,
+            &stats,
+            RetrievalSelectivityPolicy::default(),
+            &context,
+            RetrievalLifecyclePolicy::default(),
+            TraceMode::Enabled,
+        )
+        .await
+        .unwrap();
+        assert_eq!(plan.traces.len(), 2);
+        assert!(plan.traces.iter().all(|trace| !trace.fallback));
+    }
+
+    #[tokio::test]
     async fn selectivity_plan_uses_conservative_fanout_when_stats_reads_fail() {
-        let stats = FailingRetrievalStatsStore;
+        let stats = FailingRetrievalStatsStore {
+            aboutness_only: false,
+        };
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
         let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462021").unwrap(),
@@ -870,7 +898,9 @@ mod tests {
         assert_eq!(decision, SelectivityDecision::LowSelectivityRejected);
     }
 
-    struct FailingRetrievalStatsStore;
+    struct FailingRetrievalStatsStore {
+        aboutness_only: bool,
+    }
 
     #[async_trait]
     impl RetrievalStatsStore for FailingRetrievalStatsStore {
@@ -897,8 +927,13 @@ mod tests {
 
         async fn counter(
             &self,
-            _key: &RetrievalStatsCounterKey,
+            key: &RetrievalStatsCounterKey,
         ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            if self.aboutness_only {
+                return self
+                    .global_counter(key.relation_kind, key.object_type)
+                    .await;
+            }
             Err(RetrievalStatsStoreError::Sqlite {
                 detail: "stats counter read failed".to_owned(),
             })
@@ -906,9 +941,18 @@ mod tests {
 
         async fn global_counter(
             &self,
-            _relation_kind: RelationType,
+            relation_kind: RelationType,
             _object_type: ObjectType,
         ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+            if self.aboutness_only
+                && !matches!(relation_kind, RelationType::About | RelationType::Mentions)
+            {
+                return Ok(Some(RetrievalStatsCounter {
+                    total_count: 10,
+                    active_count: 10,
+                    current_count: 10,
+                }));
+            }
             Err(RetrievalStatsStoreError::Sqlite {
                 detail: "stats global counter read failed".to_owned(),
             })

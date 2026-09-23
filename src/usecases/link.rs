@@ -301,7 +301,8 @@ mod tests {
         let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let draft = valid_link_draft();
+        let mut draft = valid_link_draft();
+        draft.relation = RelationType::Involves;
         let entity_id = draft.to_id;
 
         let persisted = pipeline.link(draft).await.unwrap().link;
@@ -438,7 +439,8 @@ mod tests {
         let graph = QueryObjectsFailingGraph::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let draft = valid_link_draft();
+        let mut draft = valid_link_draft();
+        draft.relation = RelationType::Involves;
         let entity_id = draft.to_id;
 
         let persisted = pipeline.link(draft).await.unwrap().link;

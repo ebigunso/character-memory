@@ -6,9 +6,9 @@ use tokio::sync::Mutex;
 use crate::domain::{MemoryId, ObjectType, RelationType, RetentionState};
 use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
-    insert_edge, recomputed_counters, recomputed_global_counters, RetrievalStatsCounter,
-    RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
-    RetrievalStatsObjectState, RetrievalStatsStore,
+    insert_edge, is_counted_relation, recomputed_counters, recomputed_global_counters,
+    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+    RetrievalStatsHealthState, RetrievalStatsObjectState, RetrievalStatsStore,
 };
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryRetrievalStatsStore {
@@ -51,7 +51,10 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
         edges: &[RetrievalStatsEdge],
     ) -> Result<(), RetrievalStatsStoreError> {
         let mut state = self.state.lock().await;
-        for edge in edges {
+        for edge in edges
+            .iter()
+            .filter(|edge| is_counted_relation(edge.relation_kind))
+        {
             insert_edge(&mut state.edges, edge.clone());
         }
         state.counters_dirty = true;

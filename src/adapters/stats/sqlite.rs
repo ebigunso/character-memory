@@ -8,9 +8,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::domain::{ObjectType, RelationType, RetentionState};
 use crate::errors::{IoErrorKind, RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
-    object_type_key, relation_type_key, retention_state_key, RetrievalStatsCounter,
-    RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth, RetrievalStatsHealthState,
-    RetrievalStatsObjectState, RetrievalStatsStore,
+    is_counted_relation, object_type_key, relation_type_key, retention_state_key,
+    RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
+    RetrievalStatsHealthState, RetrievalStatsObjectState, RetrievalStatsStore,
 };
 
 #[derive(Debug)]
@@ -52,7 +52,10 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for edge in edges {
+        for edge in edges
+            .iter()
+            .filter(|edge| is_counted_relation(edge.relation_kind))
+        {
             if is_episode_presence(edge.relation_kind, edge.object_type) {
                 upsert_episode_presence(&transaction, edge)?;
             } else {
@@ -774,14 +777,14 @@ mod tests {
                 .execute(
                     "INSERT INTO global_relation_counts
                      (relation_kind, object_type, total_count, active_count, current_count)
-                     VALUES ('about', 'derived_memory', -1, 0, 0)",
+                     VALUES ('part_of_thread', 'derived_memory', -1, 0, 0)",
                     [],
                 )
                 .unwrap();
         }
 
         let error = store
-            .global_counter(RelationType::About, ObjectType::DerivedMemory)
+            .global_counter(RelationType::PartOfThread, ObjectType::DerivedMemory)
             .await
             .unwrap_err();
 

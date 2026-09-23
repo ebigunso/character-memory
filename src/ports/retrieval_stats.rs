@@ -121,9 +121,12 @@ fn retrieval_stats_edges_with_states(
     let object_state_lookup = object_state_lookup(object_states);
     let mut edges: HashMap<String, RetrievalStatsEdge> = HashMap::new();
     for object in objects {
-        append_intrinsic_edges(&mut edges, object, &object_state_lookup);
+        append_intrinsic_edges(&mut edges, object);
     }
-    for link in links {
+    for link in links
+        .iter()
+        .filter(|link| is_counted_relation(link.relation))
+    {
         append_link_edges(&mut edges, link, &object_state_lookup);
     }
     let mut edges = edges.into_values().collect::<Vec<_>>();
@@ -188,46 +191,26 @@ pub(crate) fn retention_state_key(retention_state: RetentionState) -> &'static s
     }
 }
 
-fn append_intrinsic_edges(
-    edges: &mut HashMap<String, RetrievalStatsEdge>,
-    object: &MemoryObject,
-    object_states: &HashMap<(MemoryId, ObjectType), RetrievalStatsObjectState>,
-) {
-    match object {
-        MemoryObject::Episode(episode) => {
-            for entity_id in episode.scene.participant_keys() {
-                insert_edge(
-                    edges,
-                    edge(
-                        entity_id,
-                        RelationType::Involves,
-                        episode.id,
-                        ObjectType::Episode,
-                        episode.retention_state,
-                        true,
-                        episode.created_at,
-                    ),
-                );
-            }
+pub(crate) fn is_counted_relation(relation: RelationType) -> bool {
+    !matches!(relation, RelationType::About | RelationType::Mentions)
+}
+
+fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, object: &MemoryObject) {
+    if let MemoryObject::Episode(episode) = object {
+        for entity_id in episode.scene.participant_keys() {
+            insert_edge(
+                edges,
+                edge(
+                    entity_id,
+                    RelationType::Involves,
+                    episode.id,
+                    ObjectType::Episode,
+                    episode.retention_state,
+                    true,
+                    episode.created_at,
+                ),
+            );
         }
-        MemoryObject::Observation(_) => {}
-        MemoryObject::DerivedMemory(memory) => {
-            for entity_id in &memory.entity_ids {
-                insert_edge(
-                    edges,
-                    edge(
-                        *entity_id,
-                        RelationType::About,
-                        memory.id,
-                        ObjectType::DerivedMemory,
-                        memory.retention_state,
-                        edge_lifecycle(memory.id, ObjectType::DerivedMemory, object_states).1,
-                        memory.created_at,
-                    ),
-                );
-            }
-        }
-        MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {}
     }
 }
 
@@ -481,6 +464,7 @@ mod tests {
         keeps_restrictive_lifecycle_on_repeated_edge,
         updates_lifecycle_counts_from_object_states,
         health_marker_survives_successful_writes,
+        does_not_maintain_aboutness_counts,
     );
 
     port_contract_suite!(
@@ -491,7 +475,54 @@ mod tests {
         keeps_restrictive_lifecycle_on_repeated_edge,
         updates_lifecycle_counts_from_object_states,
         health_marker_survives_successful_writes,
+        does_not_maintain_aboutness_counts,
     );
+
+    async fn does_not_maintain_aboutness_counts(store: &dyn RetrievalStatsStore) {
+        let entity_id = MemoryId::from_u128(1);
+        for (relation, object_type) in [
+            (RelationType::About, ObjectType::DerivedMemory),
+            (RelationType::Mentions, ObjectType::Observation),
+        ] {
+            let object_id = MemoryId::from_u128(2);
+            store
+                .record_edges(&[edge(
+                    entity_id,
+                    relation,
+                    object_id,
+                    object_type,
+                    RetentionState::Active,
+                    true,
+                    timestamp(),
+                )])
+                .await
+                .unwrap();
+            store
+                .record_object_states(&[RetrievalStatsObjectState {
+                    object_id,
+                    object_type,
+                    retention_state: RetentionState::Suppressed,
+                    is_current: false,
+                    observed_at: timestamp(),
+                }])
+                .await
+                .unwrap();
+            assert!(store
+                .counter(&RetrievalStatsCounterKey {
+                    entity_id,
+                    relation_kind: relation,
+                    object_type
+                })
+                .await
+                .unwrap()
+                .is_none());
+            assert!(store
+                .global_counter(relation, object_type)
+                .await
+                .unwrap()
+                .is_none());
+        }
+    }
 
     async fn counts_all_episodes_once_in_their_lifecycle_scope(store: &dyn RetrievalStatsStore) {
         let mut states = [RetentionState::Active, RetentionState::Suppressed]
@@ -574,7 +605,7 @@ mod tests {
             .record_edges(&[
                 edge(
                     first_entity_id,
-                    RelationType::About,
+                    RelationType::PartOfThread,
                     first_memory_id,
                     ObjectType::DerivedMemory,
                     RetentionState::Active,
@@ -583,7 +614,7 @@ mod tests {
                 ),
                 edge(
                     second_entity_id,
-                    RelationType::About,
+                    RelationType::PartOfThread,
                     second_memory_id,
                     ObjectType::DerivedMemory,
                     RetentionState::Suppressed,
@@ -595,7 +626,7 @@ mod tests {
             .unwrap();
 
         let counter = store
-            .global_counter(RelationType::About, ObjectType::DerivedMemory)
+            .global_counter(RelationType::PartOfThread, ObjectType::DerivedMemory)
             .await
             .unwrap()
             .unwrap();
@@ -649,7 +680,7 @@ mod tests {
         store
             .record_edges(&[edge(
                 entity_id,
-                RelationType::About,
+                RelationType::PartOfThread,
                 memory_id,
                 ObjectType::DerivedMemory,
                 RetentionState::Active,
@@ -672,7 +703,7 @@ mod tests {
         let counter = store
             .counter(&RetrievalStatsCounterKey {
                 entity_id,
-                relation_kind: RelationType::About,
+                relation_kind: RelationType::PartOfThread,
                 object_type: ObjectType::DerivedMemory,
             })
             .await
@@ -757,13 +788,13 @@ mod tests {
 
         let edges = retrieval_stats_edges(&objects, &[], &HashSet::new());
 
-        assert_eq!(edges.len(), 2);
+        assert_eq!(edges.len(), 1);
         assert!(edges.iter().any(|edge| {
             edge.entity_id == entity_id
                 && edge.relation_kind == RelationType::Involves
                 && edge.object_id == episode_id
         }));
-        assert!(edges.iter().any(|edge| {
+        assert!(!edges.iter().any(|edge| {
             edge.entity_id == entity_id
                 && edge.relation_kind == RelationType::About
                 && edge.object_id == memory_id
@@ -801,7 +832,7 @@ mod tests {
             from_type: ObjectType::Entity,
             to_id: memory_id,
             to_type: ObjectType::DerivedMemory,
-            relation: RelationType::About,
+            relation: RelationType::PartOfThread,
             rationale: None,
             created_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
@@ -872,13 +903,15 @@ mod tests {
             from_type: ObjectType::Entity,
             to_id: memory_id,
             to_type: ObjectType::DerivedMemory,
-            relation: RelationType::About,
+            relation: RelationType::PartOfThread,
             rationale: None,
             created_at: timestamp(),
             schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
         };
 
-        let edges = retrieval_stats_edges(&[memory], &[link], &HashSet::new());
+        let mut duplicate = link.clone();
+        duplicate.id = MemoryId::from_u128(1);
+        let edges = retrieval_stats_edges(&[memory], &[link, duplicate], &HashSet::new());
 
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].retention_state, RetentionState::Suppressed);

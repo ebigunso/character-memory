@@ -327,7 +327,7 @@ async fn notion_belief_admission_is_enforced_at_validate_and_commit() {
 }
 
 #[tokio::test]
-async fn every_belief_subject_is_linked_and_counted_once() {
+async fn every_belief_subject_is_linked_once() {
     for sqlite in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let mut memory = memory().await;
@@ -397,10 +397,8 @@ async fn every_belief_subject_is_linked_and_counted_once() {
                 object_type: ObjectType::DerivedMemory,
             })
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(counter.total_count, 1);
-        assert_eq!(counter.current_count, 1);
+        assert!(counter.is_none());
         let mut given_text = given_belief(MemoryId::from_u128(6303), subject, "unasserted");
         given_text.assertions.clear();
         assert_eq!(
@@ -452,10 +450,8 @@ async fn every_belief_subject_is_linked_and_counted_once() {
                 object_type: ObjectType::DerivedMemory,
             })
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(counter.total_count, 3);
-        assert_eq!(counter.current_count, 3);
+        assert!(counter.is_none());
         memory.close().await.unwrap();
     }
 }

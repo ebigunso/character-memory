@@ -750,7 +750,7 @@ mod tests {
                             ids.extra_link,
                             ObjectType::Entity,
                             ids.entity,
-                            RelationType::Mentions,
+                            RelationType::Involves,
                             ObjectType::Episode,
                             ids.episode,
                         )),
@@ -764,7 +764,7 @@ mod tests {
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
                 entity_id: ids.entity,
-                relation_kind: RelationType::Mentions,
+                relation_kind: RelationType::Involves,
                 object_type: ObjectType::Episode,
             })
             .await
