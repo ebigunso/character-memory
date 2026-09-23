@@ -78,7 +78,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                 {
                     edge.retention_state = object_state.retention_state;
                     edge.is_current = object_state.is_current;
-                    edge.last_seen_at = edge.last_seen_at.max(object_state.observed_at);
                 }
             }
         }

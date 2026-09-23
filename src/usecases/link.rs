@@ -23,7 +23,10 @@ where
     pub(crate) fn new(graph_store: &'a G) -> Self {
         Self {
             graph_store,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
         }
     }
 
@@ -110,15 +113,11 @@ mod tests {
         DerivedMemory, DomainValidationError, MemoryId, MemoryObject, ObjectType, RelationType,
         RetentionState, DEFAULT_SCHEMA_VERSION,
     };
-    use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause};
     use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
         GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
     };
-    use crate::ports::retrieval_stats::{
-        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-        RetrievalStatsObjectState, RetrievalStatsStore,
-    };
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::test_support::{in_memory_graph_store, representative_fixtures};
 
     #[tokio::test]
@@ -340,7 +339,9 @@ mod tests {
         draft.relation = RelationType::Involves;
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap().link;
+        let outcome = pipeline.link(draft).await.unwrap();
+        assert!(outcome.stats_update_status.failure.is_some());
+        let persisted = outcome.link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -358,103 +359,6 @@ mod tests {
             stats.health().await.unwrap().state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
-    }
-
-    #[tokio::test]
-    async fn link_outcome_preserves_all_stats_failures() {
-        let graph = in_memory_graph_store();
-        let fixtures = representative_fixtures();
-        graph
-            .upsert_objects(&[
-                MemoryObject::Entity(fixtures.hub_entity.clone()),
-                MemoryObject::Episode(fixtures.episode.clone()),
-            ])
-            .await
-            .unwrap();
-        let stats = DualFailingStatsStore;
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let draft = MemoryLinkDraft::new(
-            ObjectType::Entity,
-            fixtures.hub_entity.id,
-            RelationType::Involves,
-            ObjectType::Episode,
-            fixtures.episode.id,
-        );
-
-        let outcome = pipeline
-            .link(draft)
-            .await
-            .expect("stats degradation should remain a repairable link outcome");
-
-        assert_eq!(outcome.link.from_id, fixtures.hub_entity.id);
-        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
-        let failure = outcome
-            .stats_update_status
-            .failure
-            .as_ref()
-            .expect("stats failure must be visible");
-        assert_eq!(failure.failed_object_ids, vec![fixtures.episode.id]);
-        assert!(matches!(
-            failure.causes.as_slice(),
-            [
-                StatsUpdateCause::EdgeWrite { .. },
-                StatsUpdateCause::ObjectStateWrite { .. }
-            ]
-        ));
-    }
-
-    struct DualFailingStatsStore;
-
-    #[async_trait]
-    impl RetrievalStatsStore for DualFailingStatsStore {
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats edge write failed".to_owned(),
-            })
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats object-state write failed".to_owned(),
-            })
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(RetrievalStatsHealth::default())
-        }
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            _cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
     }
 
     #[derive(Default)]

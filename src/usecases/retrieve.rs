@@ -60,7 +60,10 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
             selectivity_policy: RetrievalSelectivityPolicy::with_fanout_budgets(
                 settings.get_selectivity_smoothing_alpha(),
                 settings.get_selectivity_gamma(),
