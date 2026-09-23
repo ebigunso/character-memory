@@ -588,7 +588,7 @@ The tasks run in sequence, one worker at a time, because they share one crate an
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-23 Base: PR 150 at `67d6735` (the phase correctness fixes merged with the time stack). New families (keyed setting, activity pressure) and the anniversary capability sentinel passed instrument review at companion `52abadb`; the capture runs on `12af98b`, which only moves the calibration entry to an 8 MiB thread after the full capture overflowed the Windows debug main stack at both `d36d96d` and `67d6735` (a harness limit, reviewed). BEFORE captured twice, byte-identical (SHA-256 `a8579019...`), zero bounded failures, 599 rows. What the base shows, as the falsifiers expect: last Tuesday with no topic brings all 5 Tuesdays plus 3 of today's occasions counted as recency; a salient unshared anniversary in the year-deep daily store is cut at the root cap; with the home key the same top home belief is in 6 of 6 packs; the office key shrinks two people's state; the activity takes more than its floor from the topic. Readings stay in the companion's scratch until the slice-end AFTER exists; then the evidence rule decides where they live.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
