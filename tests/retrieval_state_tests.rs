@@ -4,10 +4,11 @@ use character_memory::{
     RelationType, RememberInput, RememberPlanDefaults, RetrievalContext, Scene, SceneParticipant,
     DEFAULT_SCHEMA_VERSION,
 };
-use chrono::{DateTime, Utc};
+use test_support::time_at_minute as time;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
+use test_support::derived_ids as ids;
 
 async fn commit_input(memory: &CharacterMemory, input: RememberInput) {
     let defaults = RememberPlanDefaults::fixed(&input.content, time(0));
@@ -18,13 +19,6 @@ async fn commit_input(memory: &CharacterMemory, input: RememberInput) {
         )
         .await
         .unwrap();
-}
-
-fn time(offset: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + chrono::Duration::minutes(offset)
 }
 
 fn entity(id: u128) -> EntityDraft {
@@ -108,15 +102,6 @@ async fn write_many(
         input = input.with_derived_memory(draft);
     }
     commit_input(memory, input).await;
-}
-
-fn ids(result: &character_memory::RetrieveOutcome) -> Vec<MemoryId> {
-    result
-        .pack
-        .derived_memories
-        .iter()
-        .map(|x| x.memory.id)
-        .collect()
 }
 
 #[tokio::test]

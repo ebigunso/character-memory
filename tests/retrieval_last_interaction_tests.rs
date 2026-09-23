@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use test_support::{id, keyed};
 
 use character_memory::{
     BeliefAssertion, BeliefPredicate, CandidateProvenance, CharacterMemory, CommitOptions,
@@ -14,20 +15,12 @@ use chrono::{DateTime, Duration, Utc};
 #[path = "support/mod.rs"]
 pub mod test_support;
 
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
 fn reference_time() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-21T12:00:00.750Z")
         .unwrap()
         .with_timezone(&Utc)
 }
-fn keyed(n: u128) -> SceneParticipant {
-    SceneParticipant {
-        key: Some(id(n)),
-        ..Default::default()
-    }
-}
+
 fn request(participants: Vec<SceneParticipant>) -> RetrievalContext {
     let mut scene = Scene::at((reference_time()).fixed_offset());
     scene.participants = participants;
@@ -141,13 +134,13 @@ async fn identity_reports_last_interaction_without_trace_or_pack_room() {
         for days in [365, 30, 1] {
             experience(
                 &memory,
-                (10000 + days) as u128,
+                (20000 - days) as u128,
                 reference_time() - Duration::days(days),
                 caller,
             )
             .await;
         }
-        let expected = fact(10001, reference_time() - Duration::days(1));
+        let expected = fact(19999, reference_time() - Duration::days(1));
         for participant in [
             keyed(100),
             SceneParticipant {
@@ -158,12 +151,12 @@ async fn identity_reports_last_interaction_without_trace_or_pack_room() {
             let result = memory.retrieve(request(vec![participant])).await.unwrap();
             assert!(result.trace.is_none());
             assert_eq!(last(&result), Some(&expected));
-            assert!(occasions(&result).contains(&id(10001)));
+            assert!(occasions(&result).contains(&id(19999)));
         }
         experience(&memory, 9999, reference_time() + Duration::days(1), caller).await;
         let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
         assert_eq!(last(&result), Some(&expected));
-        assert!(occasions(&result).contains(&id(10001)));
+        assert!(occasions(&result).contains(&id(19999)));
         assert!(!occasions(&result).contains(&id(9999)));
 
         let mut no_room = request(vec![keyed(100), keyed(200)]);

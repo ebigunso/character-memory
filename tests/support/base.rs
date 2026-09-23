@@ -26,7 +26,7 @@ pub async fn open(
     collection_name: String,
 ) -> Result<CharacterMemory, CustomError> {
     let settings = Settings::new(builder.build().unwrap())?;
-    let embed_provider = Box::new(DeterministicEmbeddingProvider::new(
+    let embed_provider = Box::new(deterministic_provider(
         settings.get_embedding_vector_size()?,
     ));
     CharacterMemory::new_with_embedding_provider(settings, collection_name, embed_provider).await
@@ -48,54 +48,79 @@ pub fn unique_collection_name() -> String {
     format!("test_collection_{}", Uuid::new_v4())
 }
 
-pub struct DeterministicEmbeddingProvider {
+pub struct TestEmbeddingProvider<F> {
     vector_size: usize,
+    vector: F,
 }
 
-impl DeterministicEmbeddingProvider {
-    pub fn new(vector_size: usize) -> Self {
-        Self { vector_size }
-    }
-
-    fn vector_for_text(&self, text: &str) -> Vec<f32> {
-        let mut embedding = vec![0.0; self.vector_size];
-
-        for token in text.split(|character: char| !character.is_alphanumeric()) {
-            if token.is_empty() {
-                continue;
-            }
-
-            let index = stable_hash(token) % self.vector_size;
-            embedding[index] += 1.0;
+impl<F> TestEmbeddingProvider<F> {
+    pub fn new(vector_size: usize, vector: F) -> Self {
+        Self {
+            vector_size,
+            vector,
         }
-
-        if embedding.iter().all(|value| *value == 0.0) {
-            embedding[0] = 1.0;
-        }
-
-        embedding
     }
 }
 
 #[async_trait]
-impl EmbeddingProvider for DeterministicEmbeddingProvider {
+impl<F> EmbeddingProvider for TestEmbeddingProvider<F>
+where
+    F: Fn(&str) -> Vec<f32> + Send + Sync,
+{
     fn vector_size(&self) -> usize {
         self.vector_size
     }
-
     async fn generate_embedding<'a>(&self, text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
-        Ok(self.vector_for_text(text))
+        Ok((self.vector)(text))
     }
-
     async fn bulk_generate_embeddings<'a>(
         &self,
         texts: &'a [&'a str],
     ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        Ok(texts
-            .iter()
-            .map(|text| self.vector_for_text(text))
-            .collect())
+        Ok(texts.iter().map(|text| (self.vector)(text)).collect())
     }
+}
+
+pub fn deterministic_provider(vector_size: usize) -> impl EmbeddingProvider {
+    TestEmbeddingProvider::new(vector_size, move |text: &str| {
+        deterministic_embedding(text, vector_size)
+    })
+}
+
+fn deterministic_embedding(text: &str, vector_size: usize) -> Vec<f32> {
+    let mut embedding = vec![0.0; vector_size];
+
+    for token in text.split(|character: char| !character.is_alphanumeric()) {
+        if token.is_empty() {
+            continue;
+        }
+
+        let index = stable_hash(token) % vector_size;
+        embedding[index] += 1.0;
+    }
+
+    if embedding.iter().all(|value| *value == 0.0) {
+        embedding[0] = 1.0;
+    }
+
+    embedding
+}
+
+pub async fn open_with_provider(
+    builder: ConfigBuilder<DefaultState>,
+    collection: String,
+    provider: impl EmbeddingProvider + 'static,
+) -> Result<CharacterMemory, CustomError> {
+    CharacterMemory::new_with_embedding_provider(
+        Settings::new(builder.build().unwrap())?,
+        collection,
+        Box::new(provider),
+    )
+    .await
+}
+
+pub fn id(n: u128) -> character_memory::MemoryId {
+    character_memory::MemoryId::from_u128(n)
 }
 
 fn stable_hash(text: &str) -> usize {
@@ -126,5 +151,40 @@ pub async fn cleanup_collection(collection_name: &str) {
                 );
             }
         }
+    }
+}
+
+pub fn parse_id(value: &str) -> character_memory::MemoryId {
+    value.parse().unwrap()
+}
+pub fn scene_time() -> chrono::DateTime<chrono::Utc> {
+    "2026-09-21T12:00:00Z".parse().unwrap()
+}
+pub fn time_at_minute(offset: i64) -> chrono::DateTime<chrono::Utc> {
+    "2026-09-21T00:00:00Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap()
+        + chrono::Duration::minutes(offset)
+}
+
+pub fn ensure(condition: bool, message: &'static str) -> Result<(), String> {
+    if condition {
+        Ok(())
+    } else {
+        Err(message.to_owned())
+    }
+}
+pub fn derived_ids(result: &character_memory::RetrieveOutcome) -> Vec<character_memory::MemoryId> {
+    result
+        .pack
+        .derived_memories
+        .iter()
+        .map(|entry| entry.memory.id)
+        .collect()
+}
+pub fn keyed(n: u128) -> character_memory::SceneParticipant {
+    character_memory::SceneParticipant {
+        key: Some(id(n)),
+        ..Default::default()
     }
 }

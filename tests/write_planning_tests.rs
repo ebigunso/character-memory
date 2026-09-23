@@ -9,6 +9,7 @@ use character_memory::{
     RetrievalContext, StatsUpdateCause, StatsUpdateStatus,
 };
 use tempfile::TempDir;
+use test_support::parse_id as id;
 use uuid::Uuid;
 
 #[path = "support/mod.rs"]
@@ -592,10 +593,6 @@ fn stable_id(label: &str, index: u8) -> MemoryId {
         &Uuid::NAMESPACE_OID,
         format!("character-memory:write-planning-test:{label}:{index}").as_bytes(),
     )
-}
-
-fn id(value: &str) -> MemoryId {
-    Uuid::parse_str(value).expect("fixture UUID should parse")
 }
 
 fn fixed_timestamp() -> chrono::DateTime<chrono::Utc> {

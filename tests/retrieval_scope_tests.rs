@@ -1,25 +1,18 @@
 use character_memory::{
     ActivityRef, CharacterMemory, CommitOptions, CorrectMemoryDraft, CorrectionTarget,
     DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft,
-    GraphExpansionOutcome, GraphRootSource, LifecycleFilterReason, LifecycleTargetRef, MemoryId,
+    GraphExpansionOutcome, GraphRootSource, LifecycleFilterReason, LifecycleTargetRef,
     MemoryThreadDraft, ObjectType, ObservationDraft, RememberInput, RememberPlanDefaults,
     ReplacementDerivedMemoryDraft, RetrievalContext, Scene, SceneParticipant,
     SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
 };
-use chrono::{DateTime, Utc};
+use test_support::id;
+use test_support::time_at_minute as at;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
+use test_support::derived_ids as ids;
 
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
-fn at(n: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + chrono::Duration::minutes(n)
-}
 fn scene(setting: Option<&str>, custom: &[(&str, &str)]) -> Scene {
     let mut scene = Scene::at((at(10)).fixed_offset());
     scene.setting.key = setting.map(str::to_owned);
@@ -62,14 +55,6 @@ fn context(scene: Scene) -> RetrievalContext {
     let mut result = RetrievalContext::default().with_scene(scene).with_trace();
     result.graph_limits.max_depth = 0;
     result
-}
-fn ids(result: &character_memory::RetrieveOutcome) -> Vec<MemoryId> {
-    result
-        .pack
-        .derived_memories
-        .iter()
-        .map(|entry| entry.memory.id)
-        .collect()
 }
 
 #[tokio::test]

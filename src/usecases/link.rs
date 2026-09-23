@@ -145,9 +145,9 @@ mod tests {
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
     use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
+    use crate::test_support::parse_id as id;
+    use crate::test_support::write_time as timestamp;
     use async_trait::async_trait;
-    use chrono::{DateTime, Utc};
-    use uuid::Uuid;
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::domain::{
@@ -730,15 +730,5 @@ mod tests {
         );
         draft.id = Some(id("550e8400-e29b-41d4-a716-446655444042"));
         draft
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 }

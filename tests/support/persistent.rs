@@ -11,18 +11,7 @@ pub async fn try_setup_persistent_character_memory(
     root: &Path,
     about_derived_memory_fanout: Option<(usize, usize)>,
 ) -> Result<CharacterMemory, CustomError> {
-    let mut builder = base::embedded_settings(root)
-        .set_override("graph_store_mode", "persistent")
-        .unwrap()
-        .set_override("oxigraph_path", base::path_string(&root.join("graph")))
-        .unwrap()
-        .set_override("retrieval_stats_store_mode", "sqlite")
-        .unwrap()
-        .set_override(
-            "retrieval_stats_path",
-            base::path_string(&root.join("stats.sqlite3")),
-        )
-        .unwrap();
+    let mut builder = persistent_settings(root);
 
     if let Some((min, max)) = about_derived_memory_fanout {
         builder = builder
@@ -39,4 +28,20 @@ pub async fn try_setup_persistent_character_memory(
     }
 
     base::open(builder, collection_name).await
+}
+
+/// Persistent vector, graph and stats stores at a caller-owned test root.
+pub fn persistent_settings(root: &Path) -> config::ConfigBuilder<config::builder::DefaultState> {
+    base::embedded_settings(root)
+        .set_override("graph_store_mode", "persistent")
+        .unwrap()
+        .set_override("oxigraph_path", base::path_string(&root.join("graph")))
+        .unwrap()
+        .set_override("retrieval_stats_store_mode", "sqlite")
+        .unwrap()
+        .set_override(
+            "retrieval_stats_path",
+            base::path_string(&root.join("stats.sqlite3")),
+        )
+        .unwrap()
 }

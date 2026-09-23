@@ -123,10 +123,7 @@ fn retrieval_stats_edges_with_states(
     for object in objects {
         append_intrinsic_edges(&mut edges, object);
     }
-    for link in links
-        .iter()
-        .filter(|link| is_counted_relation(link.relation))
-    {
+    for link in links {
         append_link_edges(&mut edges, link, &object_state_lookup);
     }
     let mut edges = edges.into_values().collect::<Vec<_>>();

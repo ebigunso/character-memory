@@ -196,27 +196,11 @@ fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::embedder::MemoryEmbedder;
     use async_trait::async_trait;
 
     use crate::models::vector::{zero_norm_record_fixture, VectorCandidateSearch};
-    use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::vector_candidate::VectorCandidateRecall;
-
-    struct FixedEmbedder(Vec<f32>);
-
-    #[async_trait]
-    impl MemoryEmbedder for FixedEmbedder {
-        async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(self.0.clone())
-        }
-
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            Ok(vec![self.0.clone(); inputs.len()])
-        }
-    }
 
     struct AdapterMustNotRun;
 
@@ -253,7 +237,8 @@ mod tests {
             embedding_text,
         );
         let store = AdapterMustNotRun;
-        let embedder = FixedEmbedder(embedding);
+        let embedder =
+            crate::test_support::TestEmbedder(move |_: &EmbeddingInput| embedding.clone());
         let service = VectorIndexingService::new(&store);
         let inputs = [record.embedding_input()];
         let embeddings = embedder.embed_batch(&inputs).await;
