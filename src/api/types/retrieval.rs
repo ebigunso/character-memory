@@ -731,25 +731,13 @@ pub enum GraphExpansionOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleFilterDecision {
     pub object: MemoryObjectRef,
-    pub retention_state: Option<RetentionState>,
     pub superseded_by: Vec<MemoryId>,
-    pub action: LifecycleFilterAction,
     pub reason: LifecycleFilterReason,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LifecycleFilterAction {
-    Included,
-    Omitted,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum LifecycleFilterReason {
-    Active,
-    SuppressedIncludedByPolicy,
-    SupersededIncludedByPolicy,
     SuppressedOmitted,
     SupersededOmitted,
     GraphObjectMissing,

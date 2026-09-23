@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::api::types::{
     AdmissionRoad, ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage,
     CueKind, FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry,
-    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction,
-    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext,
-    RetrievalCueFloors, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
-    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
-    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
-    StaleCandidateReason, VectorCandidateTrace,
+    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterDecision,
+    LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
+    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
+    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
+    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
+    VectorCandidateTrace,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
@@ -709,9 +709,7 @@ impl RetrieveAssembly {
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: candidate.object,
-            retention_state: None,
             superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
             reason: LifecycleFilterReason::GraphExpansionBounded,
         });
     }
@@ -724,9 +722,7 @@ impl RetrieveAssembly {
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: candidate.object,
-            retention_state: None,
             superseded_by: Vec::new(),
-            action: LifecycleFilterAction::Omitted,
             reason: LifecycleFilterReason::GraphObjectMissing,
         });
     }
@@ -1191,10 +1187,7 @@ fn summarize_lifecycle_omissions(
     decisions: &[LifecycleFilterDecision],
 ) -> Vec<LifecycleOmissionSummary> {
     let mut summaries = Vec::<LifecycleOmissionSummary>::new();
-    for decision in decisions
-        .iter()
-        .filter(|decision| decision.action == LifecycleFilterAction::Omitted)
-    {
+    for decision in decisions {
         if let Some(summary) = summaries
             .iter_mut()
             .find(|summary| summary.reason == decision.reason)
@@ -1804,9 +1797,7 @@ fn filtered_lifecycle_decision(
 ) -> LifecycleFilterDecision {
     LifecycleFilterDecision {
         object: MemoryObjectRef::new(object_ref.object_type, object_ref.id),
-        retention_state: None,
         superseded_by: superseded_by.to_vec(),
-        action: LifecycleFilterAction::Omitted,
         reason: match reason {
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
@@ -1905,9 +1896,6 @@ fn salience_component(object: &MemoryObject) -> f32 {
 
 fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
     match reason {
-        LifecycleFilterReason::Active => 0,
-        LifecycleFilterReason::SuppressedIncludedByPolicy => 2,
-        LifecycleFilterReason::SupersededIncludedByPolicy => 5,
         LifecycleFilterReason::SuppressedOmitted => 7,
         LifecycleFilterReason::SupersededOmitted => 10,
         LifecycleFilterReason::GraphObjectMissing => 11,
@@ -2747,8 +2735,7 @@ mod tests {
         assert!(trace
             .lifecycle_filter_decisions
             .iter()
-            .any(|decision| decision.object.id == fixtures.suppressed_seed.id
-                && decision.action == LifecycleFilterAction::Omitted));
+            .any(|decision| decision.object.id == fixtures.suppressed_seed.id));
     }
 
     #[tokio::test]
@@ -3543,10 +3530,10 @@ mod tests {
                 candidate.object.id == missing_vector_only_id
                     && candidate.object.object_type == ObjectType::DerivedMemory
             }));
-            assert!(trace.lifecycle_filter_decisions.iter().any(|decision| {
-                decision.object.id == fixtures.suppressed_seed.id
-                    && decision.action == LifecycleFilterAction::Omitted
-            }));
+            assert!(trace
+                .lifecycle_filter_decisions
+                .iter()
+                .any(|decision| { decision.object.id == fixtures.suppressed_seed.id }));
         }
     }
 
