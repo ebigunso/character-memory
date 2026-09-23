@@ -294,6 +294,7 @@ pub(crate) enum GraphExpansionFilteredReason {
     Suppressed,
     Superseded,
     Resolved,
+    LaterThanReferenceTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

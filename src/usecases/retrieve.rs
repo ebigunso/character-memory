@@ -1740,6 +1740,9 @@ fn filtered_lifecycle_decision(
             GraphExpansionFilteredReason::Suppressed => LifecycleFilterReason::SuppressedOmitted,
             GraphExpansionFilteredReason::Superseded => LifecycleFilterReason::SupersededOmitted,
             GraphExpansionFilteredReason::Resolved => LifecycleFilterReason::ResolvedOmitted,
+            GraphExpansionFilteredReason::LaterThanReferenceTime => {
+                LifecycleFilterReason::LaterThanReferenceTime
+            }
         },
     }
 }
@@ -1751,6 +1754,9 @@ fn stale_reason_from_filtered(reason: GraphExpansionFilteredReason) -> StaleCand
             unreachable!("resolution filters state neighbors, never recall roots")
         }
         GraphExpansionFilteredReason::Superseded => StaleCandidateReason::Superseded,
+        GraphExpansionFilteredReason::LaterThanReferenceTime => {
+            StaleCandidateReason::LaterThanReferenceTime
+        }
     }
 }
 
@@ -1839,6 +1845,7 @@ fn lifecycle_reason_rank(reason: LifecycleFilterReason) -> u8 {
         LifecycleFilterReason::GraphObjectMissing => 11,
         LifecycleFilterReason::GraphExpansionBounded => 12,
         LifecycleFilterReason::ResolvedOmitted => 13,
+        LifecycleFilterReason::LaterThanReferenceTime => 14,
     }
 }
 
@@ -1849,6 +1856,7 @@ fn stale_reason_rank(reason: StaleCandidateReason) -> u8 {
         StaleCandidateReason::Superseded => 3,
         StaleCandidateReason::SectionLimit => 4,
         StaleCandidateReason::GraphExpansionBounded => 5,
+        StaleCandidateReason::LaterThanReferenceTime => 6,
     }
 }
 

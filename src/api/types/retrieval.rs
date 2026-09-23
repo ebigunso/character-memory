@@ -592,6 +592,7 @@ pub struct RetrievalTrace {
     pub graph_expansions: Vec<GraphExpansionTrace>,
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
     pub selectivity_decisions: Vec<SelectivityTrace>,
+    /// Omission evidence is bounded, so future occasions cut by the participant prefilter may have no entry.
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
     pub section_assignments: Vec<SectionAssignment>,
@@ -756,6 +757,7 @@ pub enum LifecycleFilterReason {
     GraphObjectMissing,
     GraphExpansionBounded,
     ResolvedOmitted,
+    LaterThanReferenceTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -773,6 +775,7 @@ pub enum StaleCandidateReason {
     Superseded,
     SectionLimit,
     GraphExpansionBounded,
+    LaterThanReferenceTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
