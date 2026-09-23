@@ -16,7 +16,7 @@ use crate::errors::CustomError;
 use crate::policy::graph_expansion::{ParticipantOccasion, ParticipantOccasions};
 use crate::ports::graph_authority::{
     GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery, GraphExpansionFilteredNode,
-    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphObjectQuery,
+    GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphMemoryRank, GraphObjectQuery,
 };
 
 use super::vocabulary as vocab;
@@ -268,6 +268,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             true,
             Some(&traversable),
         )
+        .map(|(rows, filtered)| (rows.into_iter().map(|row| row.id).collect(), filtered))
     }
 
     pub(crate) fn select_scope_state(
@@ -275,7 +276,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         key: &crate::domain::ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
         limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let value = serde_json::to_string(key).expect("scope keys contain strings only");
         let predicate = format!(
             "?memory <{}> {} .",
@@ -289,7 +290,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         &self,
         query: &GraphDerivedMemoryThreadQuery,
         limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError> {
         if query.thread_ids.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
@@ -321,7 +322,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         read_more: bool,
         salience_first: bool,
         traversable: Option<&HashSet<MemoryId>>,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let eligible_limit = limit.saturating_add(usize::from(read_more));
         if eligible_limit == 0 {
             return Ok((Vec::new(), Vec::new()));
@@ -329,13 +330,15 @@ impl<'a> SparqlGraphSelectors<'a> {
         // ponytail: scan keyed rank rows; reshape selectors if this compact scan
         // grows costly. Full RDF hydration stays behind the eligible/evidence caps.
         let query = format!(
-            r#"SELECT ?id ?retention ?salience ?created ?relation ?source WHERE {{
+            r#"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+            SELECT ?id ?retention ?salience ?time ?relation ?source WHERE {{
                 GRAPH ?g {{
                     ?memory a <{derived_class}> ; <{object_id}> ?id ;
                         <{salience}> ?salience ; <{created}> ?created ;
                         <{retention}> ?retention .
                     {scope_predicate}
                 }}
+                BIND({memory_time} AS ?time)
                 OPTIONAL {{ GRAPH ?linkGraph {{
                     ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
                         <{to_type}> "derived_memory" ; <{relation}> ?relation ;
@@ -343,6 +346,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                     VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
                 }} }}
             }}"#,
+            memory_time = memory_time_expression(ObjectType::DerivedMemory),
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
             salience = vocab::SALIENCE_SCORE,
@@ -377,7 +381,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                     salience: literal_binding(&row, "salience")?
                         .parse()
                         .map_err(oxigraph_sparql_error)?,
-                    created: literal_binding(&row, "created")?
+                    created: literal_binding(&row, "time")?
                         .parse()
                         .map_err(oxigraph_sparql_error)?,
                     superseded_by: Vec::new(),
@@ -447,7 +451,11 @@ impl<'a> SparqlGraphSelectors<'a> {
             eligible
                 .into_iter()
                 .take(eligible_limit)
-                .map(|state| state.id)
+                .map(|state| GraphMemoryRank {
+                    id: state.id,
+                    time: state.created,
+                    salience: state.salience,
+                })
                 .collect(),
             excluded
                 .into_iter()
@@ -761,7 +769,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         participants: &[MemoryId],
         limit: usize,
         policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(MemoryId, bool)>, CustomError> {
+    ) -> Result<Vec<(GraphMemoryRank, bool)>, CustomError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -803,23 +811,18 @@ impl<'a> SparqlGraphSelectors<'a> {
                     occasion_retention_filter(policy).replace("?retention", "?neighborRetention")
             )
         };
-        let query = format!(
+        let pattern = format!(
             r#"
-            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT DISTINCT ?episodeId ?time ?shared WHERE {{
                 GRAPH ?episode {{
                     ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ;
                         <{month_day}> {month_day_value} ; <{local_year}> ?localYear ;
-                        <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention .
+                        <{scene_time}> ?sceneTime ; <{salience}> ?salience ; <{retention}> ?episodeRetention .
                 }}
                 FILTER(xsd:integer(?localYear) < {year})
                 BIND(?episodeRetention AS ?retention)
                 {retention_filter}
-                BIND(xsd:dateTime(?sceneTime) AS ?time)
+                BIND({memory_time} AS ?time)
                 BIND({shared} AS ?shared)
-            }}
-            ORDER BY DESC(?shared) DESC(?time) ?episodeId
-            LIMIT {limit}
         "#,
             object_type = vocab::OBJECT_TYPE,
             object_id = vocab::OBJECT_ID,
@@ -828,14 +831,27 @@ impl<'a> SparqlGraphSelectors<'a> {
             month_day_value = sparql_string_literal(&date.format("%m-%d").to_string()),
             year = chrono::Datelike::year(&date),
             scene_time = vocab::SCENE_TIME,
+            salience = vocab::SALIENCE_SCORE,
+            memory_time = memory_time_expression(ObjectType::Episode),
             retention = vocab::RETENTION_STATE,
             retention_filter = occasion_retention_filter(policy)
         );
+        let columns = "?episodeId ?time ?salience ?shared";
+        let selection = |shared: bool| {
+            format!(
+            "{{ SELECT DISTINCT {columns} WHERE {{ {pattern} FILTER(?shared = {shared}) }} ORDER BY DESC(?time) ?episodeId LIMIT {limit} }}"
+        )
+        };
+        let query = if participants.is_empty() {
+            format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT DISTINCT {columns} WHERE {{ {pattern} }} ORDER BY DESC(?time) ?episodeId LIMIT {limit}")
+        } else {
+            format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT {columns} WHERE {{ {} UNION {} }} ORDER BY DESC(?shared) DESC(?time) ?episodeId", selection(true), selection(false))
+        };
         self.query_solutions(&query)?
             .iter()
             .map(|row| {
                 Ok((
-                    memory_id_binding(row, "episodeId")?,
+                    memory_rank_binding(row, "episodeId")?,
                     literal_binding(row, "shared")? == "true",
                 ))
             })
@@ -848,15 +864,15 @@ impl<'a> SparqlGraphSelectors<'a> {
         end: DateTime<Utc>,
         limit: usize,
         policy: GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<MemoryId>, CustomError> {
+    ) -> Result<Vec<GraphMemoryRank>, CustomError> {
         if start.is_some_and(|start| start > end) || limit == 0 {
             return Ok(Vec::new());
         }
         let pattern = format!(
             r#"
-            GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+            GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{salience}> ?salience ; <{retention}> ?episodeRetention . }}
             BIND(?episodeRetention AS ?retention)
-            BIND(xsd:dateTime(?sceneTime) AS ?time)
+            BIND({memory_time} AS ?time)
             FILTER(?time <= {end}^^xsd:dateTime)
             {start_filter}
             {retention_filter}
@@ -864,6 +880,8 @@ impl<'a> SparqlGraphSelectors<'a> {
             object_type = vocab::OBJECT_TYPE,
             object_id = vocab::OBJECT_ID,
             scene_time = vocab::SCENE_TIME,
+            salience = vocab::SALIENCE_SCORE,
+            memory_time = memory_time_expression(ObjectType::Episode),
             retention = vocab::RETENTION_STATE,
             end = sparql_string_literal(&end.to_rfc3339()),
             start_filter = start.map_or_else(String::new, |start| format!(
@@ -878,13 +896,13 @@ impl<'a> SparqlGraphSelectors<'a> {
             .query_solutions(&format!(
                 r#"
             PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT DISTINCT ?episodeId ?time WHERE {{ {pattern} }}
+            SELECT DISTINCT ?episodeId ?time ?salience WHERE {{ {pattern} }}
             ORDER BY DESC(?time) ?episodeId
             LIMIT {limit}
         "#,
             ))?
             .iter()
-            .map(|solution| memory_id_binding(solution, "episodeId"))
+            .map(|solution| memory_rank_binding(solution, "episodeId"))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(episodes)
     }
@@ -1112,4 +1130,28 @@ fn enum_value(value: impl serde::Serialize) -> String {
 
 fn oxigraph_sparql_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph SPARQL selector error: {error}"))
+}
+
+// Selectors share the same clock as section ranking. Observation support is its
+// observed time, otherwise its parent scene; write time never substitutes for it.
+fn memory_time_expression(object_type: ObjectType) -> &'static str {
+    match object_type {
+        ObjectType::Episode => "xsd:dateTime(?sceneTime)",
+        ObjectType::Observation => {
+            "COALESCE(xsd:dateTime(?observedAt), xsd:dateTime(?parentSceneTime))"
+        }
+        _ => "xsd:dateTime(?created)",
+    }
+}
+
+fn memory_rank_binding(row: &QuerySolution, id: &str) -> Result<GraphMemoryRank, CustomError> {
+    Ok(GraphMemoryRank {
+        id: memory_id_binding(row, id)?,
+        time: literal_binding(row, "time")?
+            .parse()
+            .map_err(oxigraph_sparql_error)?,
+        salience: literal_binding(row, "salience")?
+            .parse()
+            .map_err(oxigraph_sparql_error)?,
+    })
 }
