@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::{
-    DerivedMemory, GraphFailureMode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
-    ObjectType, RelationType, ScopeKey,
+    DerivedMemory, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+    ScopeKey,
 };
 use crate::errors::{CustomError, GraphQueryError};
 
@@ -106,21 +106,6 @@ impl GraphObjectQuery {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct GraphExpansionFailurePolicy {
-    pub(crate) timeout_ms: Option<u64>,
-    pub(crate) mode: GraphFailureMode,
-}
-
-impl Default for GraphExpansionFailurePolicy {
-    fn default() -> Self {
-        Self {
-            timeout_ms: Some(250),
-            mode: GraphFailureMode::AllowPartialResults,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum TraceMode {
     #[default]
@@ -169,7 +154,6 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
     pub(crate) trace_mode: TraceMode,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
-    pub(crate) failure_policy: GraphExpansionFailurePolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,7 +188,6 @@ impl GraphExpansionQuery {
             traversal_link_ids: None,
             trace_mode: TraceMode::Disabled,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            failure_policy: GraphExpansionFailurePolicy::default(),
         }
     }
 
@@ -279,14 +262,6 @@ impl GraphExpansionQuery {
         self.lifecycle_policy = lifecycle_policy;
         self
     }
-
-    pub(crate) fn with_failure_policy(
-        mut self,
-        failure_policy: GraphExpansionFailurePolicy,
-    ) -> Self {
-        self.failure_policy = failure_policy;
-        self
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,7 +282,6 @@ pub(crate) struct GraphExpansionFilteredNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GraphExpansionBoundedFailureReason {
     NodeLimit,
-    Timeout,
     HubLimit,
 }
 

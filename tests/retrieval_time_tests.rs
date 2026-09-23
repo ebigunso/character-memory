@@ -200,7 +200,6 @@ fn query(topic: bool, person: bool) -> RetrievalContext {
     }
     let mut context = RetrievalContext::default().with_scene(scene).with_trace();
     context.topic = topic.then(|| "topic".to_owned());
-    context.graph_limits.timeout_ms = None;
     context
 }
 

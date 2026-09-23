@@ -24,11 +24,9 @@ mod scene_offset_behavior {
     }
 
     fn query(time: DateTime<FixedOffset>) -> RetrievalContext {
-        let mut query = RetrievalContext::default()
+        RetrievalContext::default()
             .with_scene(Scene::at(time))
-            .with_trace();
-        query.graph_limits.timeout_ms = None;
-        query
+            .with_trace()
     }
 
     #[tokio::test]
@@ -351,7 +349,6 @@ mod road_behavior {
             .with_trace();
         context.topic = topic.map(str::to_owned);
         context.graph_limits.max_depth = 0;
-        context.graph_limits.timeout_ms = None;
         context.candidate_limits.max_graph_roots = roots;
         context.candidate_limits.max_vector_candidates = 32;
         context.section_limits = ContinuitySectionLimits {
@@ -725,7 +722,6 @@ mod road_behavior {
             context.graph_limits.max_depth = 1;
             context.graph_limits.max_hub_edges = 64;
             context.graph_limits.max_fanout_per_node = 16;
-            context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
             let mut suppressed = 0;
             for prefix in [0, 64, 75] {
                 for offset in suppressed..prefix {
@@ -751,6 +747,22 @@ mod road_behavior {
             let traced = traced
                 .unwrap_or_else(|error| panic!("reverse={reverse}, prefix={prefix}: {error:?}"));
             let untraced = untraced.unwrap();
+            assert_eq!(
+                traced
+                    .rationale
+                    .telemetry
+                    .graph_expansion
+                    .bounded_failure_count,
+                0
+            );
+            assert_eq!(
+                untraced
+                    .rationale
+                    .telemetry
+                    .graph_expansion
+                    .bounded_failure_count,
+                0
+            );
             assert_eq!(traced.pack, untraced.pack);
             assert_eq!(
                 traced.rationale.lifecycle_omission_count,

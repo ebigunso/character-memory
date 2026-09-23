@@ -7,9 +7,9 @@ mod tests {
     };
     use crate::ports::graph_authority::{
         GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansionBoundedFailureReason, GraphExpansionFailurePolicy,
-        GraphExpansionFanoutOverride, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-        GraphExpansionQuery, GraphObjectQuery,
+        GraphExpansionBoundedFailureReason, GraphExpansionFanoutOverride,
+        GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphExpansionQuery,
+        GraphObjectQuery,
     };
     use crate::test_support::{high_fanout_graph_fixture, representative_fixtures};
     use crate::CustomError;
@@ -801,35 +801,42 @@ mod tests {
         store.upsert_objects(&fixture.objects()).await.unwrap();
         store.upsert_links(&fixture.links).await.unwrap();
 
-        let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
-            .with_allowed_object_types(vec![ObjectType::DerivedMemory])
-            .with_max_hub_edges(8)
-            .with_max_fanout_per_node(2);
-        let without_utilization = store.expand_bounded(&query).await.unwrap();
-        let expansion = store
-            .expand_bounded(&query.with_fanout_utilization_recording(
-                crate::ports::graph_authority::TraceMode::Enabled,
-            ))
-            .await
-            .unwrap();
+        for cap in [2, 4] {
+            let root = MemoryObjectRef::new(ObjectType::Entity, fixture.hub_entity.id);
+            let query = GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
+                .with_allowed_object_types(vec![ObjectType::DerivedMemory])
+                .with_max_hub_edges(8)
+                .with_max_fanout_per_node(cap);
+            let without_utilization = store.expand_bounded(&query).await.unwrap();
+            let mut expansion = store
+                .expand_bounded(&query.with_fanout_utilization_recording(
+                    crate::ports::graph_authority::TraceMode::Enabled,
+                ))
+                .await
+                .unwrap();
+            let utilization = std::mem::take(&mut expansion.fanout_utilization);
 
-        assert_eq!(expansion.links.len(), 2);
-        assert_eq!(without_utilization.objects, expansion.objects);
-        assert_eq!(without_utilization.links, expansion.links);
-        assert_eq!(without_utilization.relations, expansion.relations);
-        assert_eq!(without_utilization.filtered_nodes, expansion.filtered_nodes);
-        assert_eq!(
-            without_utilization.bounded_failure,
-            expansion.bounded_failure
-        );
-        assert!(expansion.fanout_utilization.iter().any(|entry| {
-            entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap == 2
-                && entry.retained_count == 2
-                && entry.omitted_by_fanout_count == 10
-        }));
+            assert_eq!(expansion, without_utilization);
+            assert_eq!(expansion.links.len(), cap);
+            assert_eq!(
+                expansion.bounded_failure,
+                Some(
+                    crate::ports::graph_authority::GraphExpansionBoundedFailure {
+                        reason: GraphExpansionBoundedFailureReason::HubLimit,
+                        at: Some(root),
+                    }
+                )
+            );
+            assert!(utilization.iter().any(|entry| {
+                entry.root == root
+                    && entry.relation == RelationType::About
+                    && entry.object_type == ObjectType::DerivedMemory
+                    && entry.configured_cap == cap
+                    && entry.selected_cap == cap
+                    && entry.retained_count == cap
+                    && entry.omitted_by_fanout_count == 12 - cap
+            }));
+        }
     }
 
     #[tokio::test]
@@ -988,10 +995,18 @@ mod tests {
             .fanout_utilization
             .iter()
             .any(|entry| entry.root.id == fixtures.user_preference.id));
-        assert!(embedded_expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixtures.salient_observation.id));
+        assert_eq!(
+            embedded_expansion
+                .fanout_utilization
+                .iter()
+                .map(|entry| entry.root)
+                .collect::<std::collections::HashSet<_>>(),
+            std::collections::HashSet::from([
+                MemoryObjectRef::new(ObjectType::Entity, fixtures.hub_entity.id),
+                MemoryObjectRef::new(ObjectType::Episode, fixtures.episode.id),
+                MemoryObjectRef::new(ObjectType::Observation, fixtures.salient_observation.id),
+            ])
+        );
     }
 
     #[tokio::test]
@@ -1233,7 +1248,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oxigraph_expansion_reports_or_fails_closed_on_hub_limit() {
+    async fn oxigraph_expansion_reports_partial_results_on_hub_limit() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixture = high_fanout_graph_fixture();
 
@@ -1253,24 +1268,6 @@ mod tests {
             GraphExpansionBoundedFailureReason::HubLimit
         );
         assert_eq!(partial.links.len(), 2);
-
-        let error = store
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
-                    .with_max_hub_edges(1)
-                    .with_failure_policy(GraphExpansionFailurePolicy {
-                        timeout_ms: Some(250),
-                        mode: crate::domain::GraphFailureMode::FailClosed,
-                    }),
-            )
-            .await
-            .unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::GraphExpansionBounded(trace)
-                if trace.reason == crate::domain::GraphExpansionBoundedReason::HubLimit
-        ));
     }
 
     #[tokio::test]
@@ -1617,10 +1614,6 @@ mod tests {
             let query = GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
                 .with_max_hub_edges(1)
                 .with_max_fanout_per_node(1)
-                .with_failure_policy(GraphExpansionFailurePolicy {
-                    timeout_ms: None,
-                    mode: crate::domain::GraphFailureMode::FailClosed,
-                })
                 .with_fanout_overrides(vec![GraphExpansionFanoutOverride {
                     relation: RelationType::Involves,
                     object_type: ObjectType::Episode,
@@ -1882,11 +1875,7 @@ mod tests {
                             },
                         ])
                         .with_max_hub_edges(2)
-                        .with_fanout_utilization_recording(trace)
-                        .with_failure_policy(GraphExpansionFailurePolicy {
-                            timeout_ms: None,
-                            mode: crate::domain::GraphFailureMode::FailClosed,
-                        });
+                        .with_fanout_utilization_recording(trace);
                         query.current_subject_state = true;
                         query.participant_reference_time =
                             fixtures.salient_observation.created_at + chrono::Duration::minutes(74);
@@ -1898,10 +1887,47 @@ mod tests {
                             &ParticipantOccasions::new(),
                         )
                         .unwrap();
+                        assert!(actual.bounded_failure.is_none());
+                        assert!(hydrated.bounded_failure.is_none());
                         assert_eq!(actual.objects, hydrated.objects);
                         assert_eq!(actual.selection_order, hydrated.selection_order);
                         assert_eq!(actual.filtered_nodes, hydrated.filtered_nodes);
-                        assert_eq!(actual.fanout_utilization, hydrated.fanout_utilization);
+                        let mut expected_utilization = Vec::new();
+                        if trace.is_enabled() {
+                            if suppressed != 75 {
+                                expected_utilization.push((
+                                    RelationType::Mentions,
+                                    ObjectType::Observation,
+                                    1,
+                                    1,
+                                ));
+                            }
+                            expected_utilization.push((
+                                RelationType::About,
+                                ObjectType::DerivedMemory,
+                                1,
+                                0,
+                            ));
+                        }
+                        assert_eq!(
+                            actual
+                                .fanout_utilization
+                                .iter()
+                                .map(|entry| (
+                                    entry.relation,
+                                    entry.object_type,
+                                    entry.retained_count,
+                                    entry.omitted_by_fanout_count,
+                                ))
+                                .collect::<Vec<_>>(),
+                            expected_utilization
+                        );
+                        assert!(actual.fanout_utilization.iter().all(|entry| {
+                            entry.root
+                                == MemoryObjectRef::new(ObjectType::Entity, fixtures.hub_entity.id)
+                                && entry.configured_cap == 2
+                                && entry.selected_cap == 2
+                        }));
                         let observations = actual
                             .objects
                             .iter()
@@ -2567,31 +2593,5 @@ mod tests {
             .await
             .unwrap();
         assert!(expansion.links.contains(&link));
-    }
-
-    #[tokio::test]
-    async fn oxigraph_uses_deterministic_timeout_substitute() {
-        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let fixtures = representative_fixtures();
-
-        store.upsert_objects(&fixtures.objects()).await.unwrap();
-        store.upsert_links(&fixtures.links()).await.unwrap();
-
-        let expansion = store
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 5)
-                    .with_failure_policy(GraphExpansionFailurePolicy {
-                        timeout_ms: Some(0),
-                        mode: crate::domain::GraphFailureMode::AllowPartialResults,
-                    }),
-            )
-            .await
-            .unwrap();
-
-        assert!(expansion.objects.is_empty());
-        assert_eq!(
-            expansion.bounded_failure.unwrap().reason,
-            GraphExpansionBoundedFailureReason::Timeout
-        );
     }
 }

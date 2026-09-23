@@ -4,9 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphFailureMode, MemoryId,
-    MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType, RetentionState, Scene,
-    ThreadStatus, VectorSurface,
+    DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, MemoryId, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType, RetentionState, Scene, ThreadStatus,
+    VectorSurface,
 };
 use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 
@@ -155,8 +155,6 @@ pub struct RetrievalGraphLimits {
     pub max_nodes: usize,
     pub max_fanout_per_node: usize,
     pub max_hub_edges: usize,
-    pub timeout_ms: Option<u64>,
-    pub failure_mode: GraphFailureMode,
     pub allowed_relation_types: Vec<RelationType>,
     /// Types allowed during graph traversal; independent of vector candidate scope.
     /// An empty list imposes no object-type restriction.
@@ -170,8 +168,6 @@ impl Default for RetrievalGraphLimits {
             max_nodes: 96,
             max_fanout_per_node: 16,
             max_hub_edges: 64,
-            timeout_ms: Some(250),
-            failure_mode: GraphFailureMode::AllowPartialResults,
             allowed_relation_types: Vec::new(),
             allowed_object_types: vec![
                 ObjectType::Episode,

@@ -9,9 +9,7 @@ mod write_validation;
 pub use belief::{BeliefAssertion, BeliefPredicate, BeliefValidationError};
 pub use lifecycle::{LifecycleDtoValidationError, SourceReferenceKind};
 pub use object_ref::MemoryObjectRef;
-pub use retrieval::{
-    GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason, GraphFailureMode,
-};
+pub use retrieval::{GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason};
 pub(crate) use scene::ScopeKey;
 pub use scene::{Scene, SceneParticipant, SceneSetting};
 pub use write_validation::{
