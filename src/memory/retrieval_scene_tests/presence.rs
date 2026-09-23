@@ -685,7 +685,7 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         entry.source,
         GraphRootSource::Participant | GraphRootSource::Recency
     )));
-    assert!(key_result.rationale.telemetry.selectivity.decision_count > 0);
+    assert!(!trace.selectivity_decisions.is_empty());
     assert!(trace.section_assignments.iter().any(|row| {
         matches!(row.reason, SectionAssignmentReason::Selected { .. })
             && row.cue_kinds == std::collections::BTreeSet::from([CueKind::Participant])

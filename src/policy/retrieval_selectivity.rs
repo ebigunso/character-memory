@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::api::types::{
-    RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision, SelectivityTelemetry,
-    SelectivityTrace,
+    RetrievalLifecyclePolicy, SelectivityCountScope, SelectivityDecision, SelectivityTrace,
 };
 use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
 #[cfg(test)]
@@ -60,7 +59,6 @@ impl RetrievalSelectivityPolicy {
 pub(crate) struct SelectivityPlan {
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
     pub(crate) traces: Vec<SelectivityTrace>,
-    pub(crate) telemetry: SelectivityTelemetry,
 }
 
 #[derive(Debug, Clone)]
@@ -249,7 +247,6 @@ pub(crate) async fn selectivity_plan_for_entity(
             None => conservative_fallback_fanout(min_fanout, max_fanout),
         };
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
-        increment_telemetry(&mut plan.telemetry, decision);
         plan.fanout_overrides.push(GraphExpansionFanoutOverride {
             relation,
             object_type,
@@ -365,20 +362,6 @@ impl SelectivityCountScope {
     }
 }
 
-fn increment_telemetry(telemetry: &mut SelectivityTelemetry, decision: SelectivityDecision) {
-    telemetry.decision_count += 1;
-    match decision {
-        SelectivityDecision::HighSelectivity => telemetry.high_selectivity_count += 1,
-        SelectivityDecision::LowSelectivitySupported => {
-            telemetry.low_selectivity_supported_count += 1
-        }
-        SelectivityDecision::LowSelectivityRejected => {
-            telemetry.low_selectivity_rejected_count += 1
-        }
-        SelectivityDecision::ConservativeFallback => telemetry.fallback_count += 1,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FanoutSpec {
     relation: RelationType,
@@ -485,7 +468,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(without_trace.telemetry.decision_count, 2);
+        assert_eq!(without_trace.fanout_overrides, with_trace.fanout_overrides);
         assert!(without_trace.traces.is_empty());
         assert_eq!(with_trace.traces.len(), 2);
     }
@@ -512,7 +495,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, 2);
+        assert_eq!(plan.traces.len(), 2);
         assert_eq!(
             plan.traces
                 .iter()
@@ -683,7 +666,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, 2);
+        assert_eq!(plan.traces.len(), 2);
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
@@ -713,7 +696,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, 2);
+        assert_eq!(plan.traces.len(), 2);
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
@@ -749,7 +732,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.decision_count, 1);
         assert_eq!(plan.fanout_overrides.len(), 1);
         assert_eq!(plan.fanout_overrides[0].relation, RelationType::Involves);
         assert_eq!(plan.fanout_overrides[0].object_type, ObjectType::Episode);
@@ -786,7 +768,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.decision_count, 0);
         assert!(plan.fanout_overrides.is_empty());
         assert!(plan.traces.is_empty());
     }
