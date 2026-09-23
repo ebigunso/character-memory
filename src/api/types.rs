@@ -18,7 +18,7 @@ pub use lifecycle::{
     VectorMaintenanceOperation,
 };
 pub use retrieval::{
-    default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult,
+    default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult, AdmissionRoad,
     ContextPackSection, ContinuityContextPack, ContinuitySectionLimits, CueFloorAdmission,
     CueFloorStage, CueKind, FanoutUtilizationTrace, GraphExpansionBoundedFailureSummary,
     GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace, GraphRelationTrace,

@@ -355,6 +355,7 @@ where
     pub(super) async fn memory_scenes(
         &self,
         pack: &ContinuityContextPack,
+        mut admitted_by: HashMap<MemoryObjectRef, BTreeSet<AdmissionRoad>>,
         include_suppressed: bool,
         reference_time: DateTime<Utc>,
     ) -> Result<Vec<MemoryScenes>, CustomError> {
@@ -464,6 +465,9 @@ where
                 });
                 MemoryScenes {
                     memory,
+                    admitted_by: admitted_by
+                        .remove(&memory)
+                        .expect("every packed memory has its admission roads"),
                     sources,
                     seconds_since_support,
                 }

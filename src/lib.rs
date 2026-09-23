@@ -19,7 +19,7 @@ pub use crate::models::vector::zero_norm_record_fixture;
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
-    default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult,
+    default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult, AdmissionRoad,
     CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     ContextPackSection, ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft,
     CorrectionCascadePolicy, CorrectionTarget, CueKind, DerivedMemoryCandidate, DerivedMemoryDraft,

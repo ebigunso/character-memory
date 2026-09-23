@@ -7,14 +7,14 @@ mod state;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::api::types::{
-    ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage, CueKind,
-    FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry, GraphExpansionTrace,
-    GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction, LifecycleFilterDecision,
-    LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
-    RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace,
+    AdmissionRoad, ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage,
+    CueKind, FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry,
+    GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterAction,
+    LifecycleFilterDecision, LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext,
+    RetrievalCueFloors, RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome,
+    SectionAssignment, SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents,
+    SelectivityTelemetry, StaleCandidateOmission, StaleCandidateOmissionSummary,
+    StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
     DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
@@ -416,6 +416,7 @@ where
             lifecycle_filter_decisions: assembly.lifecycle_decisions,
             stale_candidate_omissions: assembly.stale_omissions,
             section_assignments: Vec::new(),
+            admitted_by: HashMap::new(),
             floor_admissions: cues.floor_admissions,
         };
         details
@@ -473,6 +474,14 @@ where
             selectivity: selectivity_telemetry,
             section_pressure,
         };
+        let memory_scenes = self
+            .memory_scenes(
+                &pack,
+                details.admitted_by,
+                context.lifecycle_policy.include_suppressed,
+                context.scene.time.to_utc(),
+            )
+            .await?;
         let trace = trace_mode.is_enabled().then(|| RetrievalTrace {
             scene_cue_searches: cues.scene_cue_searches,
             time_range_has_more,
@@ -496,13 +505,6 @@ where
             section_assignments: details.section_assignments,
         });
 
-        let memory_scenes = self
-            .memory_scenes(
-                &pack,
-                context.lifecycle_policy.include_suppressed,
-                context.scene.time.to_utc(),
-            )
-            .await?;
         Ok(RetrieveOutcome {
             scene: context.scene,
             activity,
@@ -521,6 +523,7 @@ struct RetrievalDetails {
     lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     stale_candidate_omissions: Vec<StaleCandidateOmission>,
     section_assignments: Vec<SectionAssignment>,
+    admitted_by: HashMap<MemoryObjectRef, BTreeSet<AdmissionRoad>>,
     floor_admissions: Vec<CueFloorAdmission>,
 }
 
@@ -1092,6 +1095,14 @@ fn build_pack(
         *count += 1;
         increment_section_included(section_pressure, section);
         let rank = *count;
+        details.admitted_by.insert(
+            ranked.object.object_ref(),
+            ranked
+                .roads
+                .iter()
+                .map(|road| road.rule().admitted_by)
+                .collect(),
+        );
         details.section_assignments.push(SectionAssignment {
             object: ranked.object.object_ref(),
             section,
@@ -1294,6 +1305,7 @@ enum Contribution {
 
 struct RoadRule {
     kind: CueKind,
+    admitted_by: AdmissionRoad,
     source: GraphRootSource,
     expands: bool,
     reserves: bool,
@@ -1304,9 +1316,10 @@ struct RoadRule {
 impl RecallRoad {
     fn rule(self) -> RoadRule {
         use Contribution::*;
-        let (kind, source, expands, reserves, contribution, time_rank) = match self {
+        let (kind, admitted_by, source, expands, reserves, contribution, time_rank) = match self {
             Self::Participant => (
                 CueKind::Participant,
+                AdmissionRoad::Participant,
                 GraphRootSource::Participant,
                 true,
                 true,
@@ -1315,6 +1328,7 @@ impl RecallRoad {
             ),
             Self::Place => (
                 CueKind::Place,
+                AdmissionRoad::Place,
                 GraphRootSource::Place,
                 false,
                 true,
@@ -1323,6 +1337,7 @@ impl RecallRoad {
             ),
             Self::Activity => (
                 CueKind::Activity,
+                AdmissionRoad::Activity,
                 GraphRootSource::Activity,
                 true,
                 true,
@@ -1331,6 +1346,7 @@ impl RecallRoad {
             ),
             Self::Topic => (
                 CueKind::Topic,
+                AdmissionRoad::Topic,
                 GraphRootSource::Vector,
                 true,
                 true,
@@ -1339,6 +1355,7 @@ impl RecallRoad {
             ),
             Self::ParticipantDescription => (
                 CueKind::Participant,
+                AdmissionRoad::PersonDescription,
                 GraphRootSource::Vector,
                 false,
                 true,
@@ -1347,6 +1364,7 @@ impl RecallRoad {
             ),
             Self::SettingWords => (
                 CueKind::Place,
+                AdmissionRoad::SettingWords,
                 GraphRootSource::Vector,
                 false,
                 true,
@@ -1355,6 +1373,7 @@ impl RecallRoad {
             ),
             Self::Range => (
                 CueKind::DateMatch,
+                AdmissionRoad::Range,
                 GraphRootSource::DateMatch,
                 false,
                 true,
@@ -1363,6 +1382,7 @@ impl RecallRoad {
             ),
             Self::SharedAnniversary => (
                 CueKind::DateMatch,
+                AdmissionRoad::Anniversary,
                 GraphRootSource::DateMatch,
                 false,
                 true,
@@ -1371,6 +1391,7 @@ impl RecallRoad {
             ),
             Self::UnsharedAnniversary => (
                 CueKind::DateMatch,
+                AdmissionRoad::Anniversary,
                 GraphRootSource::DateMatch,
                 false,
                 false,
@@ -1379,6 +1400,7 @@ impl RecallRoad {
             ),
             Self::Recency => (
                 CueKind::Recency,
+                AdmissionRoad::Recency,
                 GraphRootSource::Recency,
                 false,
                 true,
@@ -1388,6 +1410,7 @@ impl RecallRoad {
         };
         RoadRule {
             kind,
+            admitted_by,
             source,
             expands,
             reserves,
