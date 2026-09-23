@@ -91,7 +91,7 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
         link.created_at = Some(at());
         memory.link(link).await.unwrap();
     }
-    let mut counts = Vec::new();
+    let mut outcomes = Vec::new();
     for trace in [false, true] {
         let mut request = RetrievalContext::new("quasar hatch calibration")
             .with_scene(Scene::at((at()).fixed_offset()));
@@ -105,22 +105,21 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
         request.graph_limits.timeout_ms = None;
         request.include_trace = trace;
         request.lifecycle_policy.include_superseded = relation == RelationType::Supersedes;
-        let result = memory.retrieve(request).await.unwrap();
-        counts.push(
-            result
-                .rationale
-                .telemetry
-                .graph_expansion
-                .expanded_relation_count,
-        );
+        outcomes.push(memory.retrieve(request).await.unwrap());
     }
+    let trace = outcomes[1].trace.take().unwrap();
     memory.close().await.unwrap();
     root.close().unwrap();
     assert_eq!(
-        counts,
-        vec![2, 2],
+        trace
+            .graph_expansions
+            .iter()
+            .map(|entry| entry.relation_count)
+            .sum::<usize>(),
+        2,
         "{relation:?} evidence must not become traversal"
     );
+    assert_eq!(outcomes[0], outcomes[1]);
 }
 
 #[tokio::test]

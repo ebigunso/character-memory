@@ -265,7 +265,6 @@ async fn belief_content_reaches_notion_and_static_caps_bound_expansion() {
         .iter()
         .all(|candidate| candidate.object.object_type != ObjectType::Entity));
     assert!(trace.selectivity_decisions.is_empty());
-    assert_eq!(broad.rationale.telemetry.selectivity.decision_count, 0);
     assert!(trace
         .fanout_utilization
         .iter()
