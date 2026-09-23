@@ -122,7 +122,7 @@ pub(crate) fn bounded_expansion(
         .into_iter()
         .filter(|object| plan.visited.contains(&object.object_ref()))
         .collect();
-    sort_objects(&mut expanded_objects);
+    expanded_objects.sort_by_key(MemoryObject::stable_order_key);
 
     let mut resolved_by = incoming_derived_memory_ids(
         &links.iter().collect::<Vec<_>>(),
@@ -1044,10 +1044,6 @@ fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> MemoryObjec
     } else {
         MemoryObjectRef::from_id_type(link.from_id, link.from_type)
     }
-}
-
-fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 fn stable_link_key(link: &MemoryLink) -> (MemoryId, MemoryId, MemoryId, u8, u8, u8) {

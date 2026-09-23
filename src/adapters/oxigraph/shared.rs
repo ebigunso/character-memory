@@ -172,7 +172,7 @@ pub(super) fn hydrate_objects_by_refs_from_store(
             )?);
         }
     }
-    sort_objects(&mut objects);
+    objects.sort_by_key(MemoryObject::stable_order_key);
     Ok(objects)
 }
 
@@ -848,10 +848,6 @@ pub(super) fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, CustomError
 
 pub(super) fn oxigraph_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph graph store error: {error}"))
-}
-
-pub(super) fn sort_objects(objects: &mut [MemoryObject]) {
-    objects.sort_by_key(MemoryObject::stable_order_key);
 }
 
 impl From<oxigraph::model::IriParseError> for CustomError {
