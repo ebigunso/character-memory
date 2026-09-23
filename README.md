@@ -382,7 +382,7 @@ Raw source storage is outside Character Memory core. The library may preserve op
 
 ## Running tests
 
-By default, `cargo test` runs against embedded stores with deterministic embedding providers and needs neither a Qdrant service nor a `.env` file. The only integration tests that connect to a Qdrant service are the two service parity tests in `tests/vector_port_contract_tests.rs`; opt in with `REQUIRE_QDRANT_TESTS=1` and set `QDRANT_CONNECTION_STRING` to the service's gRPC endpoint.
+By default, `cargo test` runs against embedded stores with deterministic embedding providers and needs neither a Qdrant service nor a `.env` file. Three tests connect to a Qdrant service: the two service parity tests in `tests/vector_port_contract_tests.rs` and `service_delete_removes_every_surface_of_only_the_requested_object` in `src/adapters/qdrant/store.rs`; opt in with `REQUIRE_QDRANT_TESTS=1` and set `QDRANT_CONNECTION_STRING` to the service's gRPC endpoint.
 
 ```sh
 cargo test
