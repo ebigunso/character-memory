@@ -730,6 +730,31 @@ The tasks run in sequence, one worker at a time, because they share one crate an
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
+- 2026-09-24 Slice-end measurement read: behavior direction confirmed, with one falsifier explained and one residual; timing is open.
+  Trigger / new insight: the slice-end AFTER at library c0ed9e21 (harness 1b8f02a) ran twice, byte-identical, against the accepted BEFORE at 67d6735. Its shared fields equal an independent capture at f6926ef, so the later commits changed nothing measured. All eight authored input blocks are identical, there were no bounded failures, and the six protected fixtures are unchanged. Readings, in both identifier orders:
+  - What the plan set out to change moved the right way:
+    - Office key: with the key present, each of the six people brings one of their own state memories, keyed or not (was 3, 2, 2, 2, 0, 0 with the key).
+    - Home belief: the same highest-salience home belief no longer appears across six unrelated topics (6 of 6 to 0 of 6).
+    - "Last Tuesday": it no longer brings out-of-range recent episodes (3 without a topic and 6 with one, to 0 and 0).
+    - A salience-1.0 unshared anniversary in a 367-day store comes to mind (ruling 65).
+    - The familiar person keeps 8 state memories and 8 episodes, and now also brings 11 observations made on those occasions (principle 5, ruling 69).
+  - Held: on-topic survival under same-place pressure (0 of 410 below the scene-words numbers); latest-N without keys (90 of 90); the familiar person's state; the ordinary unshared anniversary; no reminder leak in shared interpretation; activity pressure (topic 8 to 6, 6, 5 at floors 0, 1, 2, unchanged).
+  - Falsifier fired: the share of the pack taken by an unlived topic at home rose from 16 of 20 to 30 of 31. Attribution at the intermediate tips separates two movements:
+    - At Task_2 (places), the home key's exclusive contribution fell from 4 to 1 and the pack stayed at 20. That is principle 1 replacing the old per-key root cap with one reserved place slot: the intended change.
+    - At Task_3 (ObservedIn), the pack grew from 20 to 31 (32 without the key). The empty observation section filled with 11 or 12 observations that rest on the admitted episodes' occasions. That is principle 5 working as designed.
+    - What it amplifies is not new: every topic hit for an unlived topic was already a near-zero-similarity neighbour (semantic on-topic 0 at both pins, similarities at most 2.4e-6 under deterministic embeddings). A least-bad neighbour now brings its observations too.
+    - The falsifier measured a share of overlapping cue kinds. That share is blind to pack growth and counts the key's shrinking reminder as a rise, so the literal trigger is explained, not a regression of the design.
+  - Residuals, recorded and not fixed here:
+    - An unlived topic still fills spare room with near-zero neighbours, now through observations as well. The fix is a relevance floor on topic hits, which needs calibration against real embeddings (ADR-I-0036 already says the synthetic results establish no similarity bound).
+    - With an activity and two people present, the second person brings one state memory instead of two at every activity floor.
+    - The oldest salience-1.0 belief about a place no longer comes under the place key alone, and deliberately asking still brings it: presence is not aboutness (ruling 70).
+    - The busy-occasion selection still depends on identifier order in one order, as before.
+  - Timing is open: the AFTER medians are about 1.5 times the BEFORE across nearly every family, including families whose packs did not grow. But the two captures were taken hours apart, with full test suites running on the machine during the AFTER. A controlled interleaved timing at both pins is running, and the timing reading is appended when it lands.
+  - What it means for the character: being keyed into a setting no longer skews what a present person brings or what the character believes; a range asked for is a range kept; what was observed at an occasion comes with it. Asked about something it never lived, the character still reaches for irrelevant memories, and now more of them.
+  - Plan delta (what changed): none to the design. Lesson for falsifiers: name the quantity that matters to the character (the count of irrelevant memories, the pack size), not a share of overlapping cue kinds.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
 ## Notes
 - Risks:
   - Treating a keyed place as a reminder removes the only route by which a setting key brings where things stand at full strength. A deployment that keys only the place and names no one now gets place memories at floor and unclaimed room. The keyed-setting family measures this.
