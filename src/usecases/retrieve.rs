@@ -1035,8 +1035,9 @@ fn build_pack(
             continue;
         };
 
+        let pressure = section_pressure_for(section_pressure, section);
         if !selected.contains(&ranked.object.object_ref()) {
-            increment_section_omitted_by_limit(section_pressure, section);
+            pressure.omitted_by_limit_count += 1;
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
@@ -1057,7 +1058,8 @@ fn build_pack(
             continue;
         }
 
-        let rank = increment_section_included(section_pressure, section);
+        pressure.included_count += 1;
+        let rank = pressure.included_count;
         details.admitted_by.insert(
             ranked.object.object_ref(),
             ranked
@@ -1125,28 +1127,14 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
     ]
 }
 
-fn increment_section_included(
+fn section_pressure_for(
     section_pressure: &mut [SectionPressureSummary],
     section: ContextPackSection,
-) -> usize {
-    let summary = section_pressure
+) -> &mut SectionPressureSummary {
+    section_pressure
         .iter_mut()
         .find(|summary| summary.section == section)
-        .expect("every pack section has a pressure summary");
-    summary.included_count += 1;
-    summary.included_count
-}
-
-fn increment_section_omitted_by_limit(
-    section_pressure: &mut [SectionPressureSummary],
-    section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
-        .iter_mut()
-        .find(|summary| summary.section == section)
-    {
-        summary.omitted_by_limit_count += 1;
-    }
+        .expect("every pack section has a pressure summary")
 }
 
 fn summarize_stale_candidate_omissions(
