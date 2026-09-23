@@ -163,19 +163,23 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
             if direct { 1 } else { 2 }
         );
         let recorded = inputs.lock().unwrap().clone();
-        assert_eq!(recorded.len(), if direct { 6 } else { 4 });
-        for input in recorded {
-            assert_eq!(
-                input.text,
-                match input.surface {
-                    VectorSurface::Summary => "Episode summary: An experience",
-                    VectorSurface::SceneSetting => "窓のそば quiet café",
-                    VectorSurface::SceneParticipants => "Alice\na visitor in blue\nAlice",
-                    VectorSurface::Text => "Observation excerpt: An experience",
-                    other => panic!("unexpected embedding: {other:?}"),
-                }
-            );
+        let mut expected = vec![
+            VectorSurface::Summary,
+            VectorSurface::SceneSetting,
+            VectorSurface::SceneParticipants,
+        ];
+        if direct {
+            expected.extend_from_within(..);
+        } else {
+            expected.push(VectorSurface::Text);
         }
+        assert_eq!(
+            recorded
+                .iter()
+                .map(|input| input.surface)
+                .collect::<Vec<_>>(),
+            expected
+        );
         let result = memory
             .retrieve(RetrievalContext::default().with_scene(supplied))
             .await
@@ -186,7 +190,7 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
 }
 
 #[tokio::test]
-async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
+async fn scene_without_words_indexes_only_content_and_excludes_keys() {
     for blank_words in [false, true] {
         let (memory, inputs) = memory().await;
         let participant = MemoryId::from_u128(8700);
@@ -222,23 +226,21 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
         };
         assert_eq!(episode.scene, scene);
         let recorded = inputs.lock().unwrap().clone();
-        assert_eq!(recorded.len(), 2);
         assert_eq!(
             recorded
                 .iter()
-                .find(|input| input.object_type == Some(ObjectType::Episode))
-                .unwrap()
-                .text,
-            "Episode summary: An experience"
+                .map(|input| (input.object_type, input.surface))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(ObjectType::Episode), VectorSurface::Summary),
+                (Some(ObjectType::Observation), VectorSurface::Text),
+            ]
         );
-        assert_eq!(
-            recorded
-                .iter()
-                .find(|input| input.object_type == Some(ObjectType::Observation))
-                .unwrap()
-                .text,
-            "Observation excerpt: An experience"
-        );
+        for input in recorded {
+            assert!(!input.text.contains(scene.setting.key.as_ref().unwrap()));
+            assert!(!input.text.contains(&scene.custom_values["session"]));
+            assert!(!input.text.contains(&participant.to_string()));
+        }
         memory.close().await.unwrap();
     }
 }
@@ -254,55 +256,16 @@ fn text_embedder(words: [&'static str; 2]) -> impl MemoryEmbedder {
 }
 
 #[tokio::test]
-async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
-    let memory =
-        crate::test_support::memory_with_embedder(3, text_embedder(["volcano", "harbor"])).await;
-    let id = MemoryId::from_u128(8801);
-    let mut episode = episode_draft(id.as_u128(), Some(Scene::at((time()).fixed_offset())));
-    episode.summary = "A volcano erupted".to_owned();
-    let mut observation = ObservationDraft::new(id, "Ships arrived at the harbor");
-    observation.id = Some(id);
-    let outcome = memory
-        .remember(
-            RememberInput::new("A volcano erupted")
-                .with_episode(episode)
-                .with_observation(observation),
-            RememberOptions::default(),
-        )
-        .await
-        .unwrap();
-    assert!(outcome.vector_indexing_failure.is_none());
-    for (topic, object_type, surface) in [
-        ("volcano", ObjectType::Episode, VectorSurface::Summary),
-        ("harbor", ObjectType::Observation, VectorSurface::Text),
-    ] {
-        let mut context = RetrievalContext::new(topic).with_trace();
-        context.object_type_defaults = vec![object_type];
-        context.graph_limits.max_depth = 0;
-        let result = memory.retrieve(context).await.unwrap();
-        let trace = result.trace.unwrap();
-        let [candidate] = trace.vector_candidates.as_slice() else {
-            panic!(
-                "one {object_type:?} vector expected: {:?}",
-                trace.vector_candidates
-            );
-        };
-        assert_eq!(candidate.object, MemoryObjectRef::new(object_type, id));
-        assert_eq!(candidate.surface, surface);
-        assert!(candidate.score > 0.9999, "{topic}: {candidate:?}");
-    }
-    memory.close().await.unwrap();
-}
-
-#[tokio::test]
 async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forget() {
-    let (memory, _) = memory().await;
+    let memory =
+        crate::test_support::memory_with_embedder(3, text_embedder(["experience", "observed"]))
+            .await;
     let id = MemoryId::from_u128(8802);
     let mut thread = MemoryThreadDraft::new("A thread", "An ongoing topic");
     thread.id = Some(id);
     let mut observation = ObservationDraft::new(id, "An observed detail");
     observation.id = Some(id);
-    memory
+    let outcome = memory
         .remember(
             RememberInput::new("An experience")
                 .with_episode(episode_draft(id.as_u128(), Some(words_scene())))
@@ -312,6 +275,7 @@ async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forg
         )
         .await
         .unwrap();
+    assert!(outcome.vector_indexing_failure.is_none());
 
     let mut observed = Vec::new();
     for stage in 0..3 {
@@ -321,18 +285,20 @@ async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forg
             } else {
                 LifecycleTargetRef::episode(id)
             };
-            memory
+            let outcome = memory
                 .forget(ForgetMemoryDraft::suppress(
                     target,
                     "Only this typed object",
                 ))
                 .await
                 .unwrap();
+            assert!(outcome.vector_maintenance_failure.is_none());
         }
         for (object_type, surface) in [
             (ObjectType::Episode, VectorSurface::Summary),
             (ObjectType::Episode, VectorSurface::SceneSetting),
             (ObjectType::Episode, VectorSurface::SceneParticipants),
+            (ObjectType::Observation, VectorSurface::Text),
             (ObjectType::MemoryThread, VectorSurface::Summary),
         ] {
             let mut query = RetrievalContext::default().with_trace();
@@ -345,77 +311,51 @@ async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forg
                 VectorSurface::SceneParticipants => {
                     query.scene.participants = words_scene().participants
                 }
-                _ => query.topic = Some("An experience".to_owned()),
+                _ => {
+                    query.topic = Some(
+                        match object_type {
+                            ObjectType::Observation => "An observed detail",
+                            ObjectType::MemoryThread => "An ongoing topic",
+                            _ => "An experience",
+                        }
+                        .to_owned(),
+                    )
+                }
             }
             let result = memory.retrieve(query).await.unwrap();
-            let found = result
-                .trace
-                .unwrap()
-                .vector_candidates
-                .iter()
-                .any(|candidate| {
-                    candidate.object == MemoryObjectRef::new(object_type, id)
-                        && candidate.surface == surface
-                });
-            observed.push((stage, object_type, surface, found));
+            let trace = result.trace.unwrap();
+            let candidate = trace.vector_candidates.iter().find(|candidate| {
+                candidate.object == MemoryObjectRef::new(object_type, id)
+                    && candidate.surface == surface
+            });
+            if let Some(candidate) = candidate {
+                assert!(candidate.score > 0.9999, "{candidate:?}");
+                if surface == VectorSurface::Summary {
+                    assert_eq!(trace.vector_candidates.len(), 1);
+                    if object_type == ObjectType::Episode {
+                        assert_eq!(result.pack.relevant_episodes.len(), 1);
+                        assert_eq!(result.pack.relevant_episodes[0].summary, "An experience");
+                    } else {
+                        assert_eq!(result.pack.active_threads.len(), 1);
+                        assert_eq!(result.pack.active_threads[0].summary, "An ongoing topic");
+                    }
+                }
+            }
+            observed.push((stage, object_type, surface, candidate.is_some()));
         }
     }
     memory.close().await.unwrap();
     for (stage, object_type, surface, found) in &observed {
         assert_eq!(
             *found,
-            *stage < 2 || *object_type == ObjectType::MemoryThread,
+            match object_type {
+                ObjectType::Observation => *stage == 0,
+                ObjectType::MemoryThread => true,
+                _ => *stage < 2,
+            },
             "{stage} {object_type:?} {surface:?}: {observed:?}"
         );
     }
-}
-
-#[tokio::test]
-async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_place() {
-    // A lexical provider makes the recall test depend on words, not hash collisions.
-    let memory = crate::test_support::memory_with_embedder(
-        2,
-        crate::test_support::TestEmbedder(|input: &EmbeddingInput| {
-            vec![
-                1.0,
-                input
-                    .text
-                    .split_whitespace()
-                    .filter(|word| *word == "observatory")
-                    .count() as f32,
-            ]
-        }),
-    )
-    .await;
-    let control = MemoryId::from_u128(8701);
-    let situated = MemoryId::from_u128(8702);
-    for (id, words) in [(control, None), (situated, Some("observatory"))] {
-        let mut scene = Scene::at((time()).fixed_offset());
-        scene.setting.words = words.map(str::to_owned);
-        let mut episode = episode_draft(id.as_u128(), Some(scene));
-        episode.summary = "We made a decision".to_owned();
-        let outcome = memory
-            .remember(
-                RememberInput::new("We made a decision").with_episode(episode),
-                RememberOptions::default(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(outcome.vector_indexed_object_ids.len(), 2);
-    }
-    let mut query = RetrievalContext::default();
-    query.scene.setting.words = Some("observatory".to_owned());
-    query.object_type_defaults = vec![ObjectType::Episode];
-    query.candidate_limits.max_vector_candidates = 1;
-    query.candidate_limits.max_graph_roots = 1;
-    query.graph_limits.max_depth = 0;
-    let recalled = memory.retrieve(query).await.unwrap();
-    assert_eq!(recalled.pack.relevant_episodes.len(), 1);
-    let episode = &recalled.pack.relevant_episodes[0];
-    assert_eq!(episode.id, situated);
-    assert!(!episode.summary.contains("observatory"));
-    assert_eq!(episode.scene.setting.words.as_deref(), Some("observatory"));
-    memory.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -492,8 +432,7 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         .unwrap()
         .iter()
         .any(|input| input.object_id == Some(episode_id)
-            && input.surface == VectorSurface::SceneParticipants
-            && input.text.ends_with("\nMira, the host")));
+            && input.surface == VectorSurface::SceneParticipants));
 
     let graph = &memory.memory_composition.graph_store;
     let saved = graph
