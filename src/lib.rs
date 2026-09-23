@@ -12,10 +12,6 @@ pub(crate) mod ports;
 pub(crate) mod test_support;
 pub(crate) mod usecases;
 
-#[cfg(feature = "test-fixtures")]
-#[doc(hidden)]
-pub use crate::models::vector::zero_norm_record_fixture;
-
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
@@ -46,9 +42,7 @@ pub use crate::api::types::{
     VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure,
     VectorMaintenanceFailureItem, VectorMaintenanceOperation, VectorRecallCompleteness,
 };
-pub use crate::config::{
-    GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
-};
+pub use crate::config::{GraphStoreMode, RetrievalStatsStoreMode, Settings};
 pub use crate::domain::{
     graph_uri, BeliefAssertion, BeliefPredicate, BeliefValidationError, CandidateProvenanceIssue,
     CandidateReferenceRole, CandidateScoreField, CandidateSourceSpanIssue, CandidateTimestampField,

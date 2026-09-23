@@ -63,8 +63,6 @@ pub struct VectorDatabaseError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EmbeddingError {
-    #[error("embedding API key is missing")]
-    MissingApiKey,
     #[error("embedding provider vector size must be positive, got {actual}")]
     InvalidVectorSize { actual: usize },
     #[error("embedding input is blank at index {index:?}")]
