@@ -960,7 +960,6 @@ fn build_pack(
     section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
-    let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
         state::order_state_per_kind(
@@ -1036,7 +1035,6 @@ fn build_pack(
             continue;
         };
 
-        let count = section_counts.count_mut(section);
         if !selected.contains(&ranked.object.object_ref()) {
             increment_section_omitted_by_limit(section_pressure, section);
             details
@@ -1059,9 +1057,7 @@ fn build_pack(
             continue;
         }
 
-        *count += 1;
-        increment_section_included(section_pressure, section);
-        let rank = *count;
+        let rank = increment_section_included(section_pressure, section);
         details.admitted_by.insert(
             ranked.object.object_ref(),
             ranked
@@ -1132,13 +1128,13 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
 fn increment_section_included(
     section_pressure: &mut [SectionPressureSummary],
     section: ContextPackSection,
-) {
-    if let Some(summary) = section_pressure
+) -> usize {
+    let summary = section_pressure
         .iter_mut()
         .find(|summary| summary.section == section)
-    {
-        summary.included_count += 1;
-    }
+        .expect("every pack section has a pressure summary");
+    summary.included_count += 1;
+    summary.included_count
 }
 
 fn increment_section_omitted_by_limit(
@@ -1211,36 +1207,6 @@ fn push_derived(
         ContextPackSection::CharacterSignals => pack.character_signals.push(included),
         ContextPackSection::DerivedMemories => pack.derived_memories.push(included),
         _ => unreachable!("derived memories require a derived-memory pack section"),
-    }
-}
-
-#[derive(Debug, Default)]
-struct SectionCounts {
-    active_threads: usize,
-    relevant_episodes: usize,
-    salient_observations: usize,
-    derived_memories: usize,
-    preferences: usize,
-    relationship_notes: usize,
-    open_loops: usize,
-    commitments: usize,
-    character_signals: usize,
-}
-
-impl SectionCounts {
-    fn count_mut(&mut self, section: ContextPackSection) -> &mut usize {
-        match section {
-            ContextPackSection::ActiveThreads => &mut self.active_threads,
-            ContextPackSection::RelevantEpisodes => &mut self.relevant_episodes,
-            ContextPackSection::SalientObservations => &mut self.salient_observations,
-            ContextPackSection::DerivedMemories => &mut self.derived_memories,
-            ContextPackSection::Preferences => &mut self.preferences,
-            ContextPackSection::RelationshipNotes => &mut self.relationship_notes,
-            ContextPackSection::OpenLoops => &mut self.open_loops,
-            ContextPackSection::Commitments => &mut self.commitments,
-            ContextPackSection::CharacterSignals => &mut self.character_signals,
-            ContextPackSection::Omitted => unreachable!("omitted is not a pack section counter"),
-        }
     }
 }
 
