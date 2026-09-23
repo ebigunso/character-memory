@@ -143,8 +143,7 @@ impl<'a> SparqlGraphSelectors<'a> {
               GRAPH ?notionGraph {{ ?notion a <{entity_class}> ; <{object_id}> ?id . }}
               FILTER NOT EXISTS {{
                 GRAPH ?linkGraph {{
-                  ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                    <{to_type}> "derived_memory" ; <{relation}> "supersedes" ; <{to}> ?belief .
+                  {supersedes}
                 }}
               }}
             }}
@@ -157,11 +156,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             subject = vocab::ASSERTION_SUBJECT,
             entity_class = vocab::CLASS_ENTITY,
             object_id = vocab::OBJECT_ID,
-            link_class = vocab::CLASS_MEMORY_LINK,
-            from_type = vocab::FROM_TYPE,
-            to_type = vocab::TO_TYPE,
-            relation = vocab::RELATION,
-            to = vocab::TO,
+            supersedes = derived_successor_pattern("?belief", "\"supersedes\""),
         );
         self.select_memory_ids(&query, None)
     }
@@ -400,9 +395,8 @@ impl<'a> SparqlGraphSelectors<'a> {
                 BIND(IF(?objectType = "observation", COALESCE(xsd:dateTime(?observedAt), xsd:dateTime(?sceneTime)), {memory_time}) AS ?time)
                 {as_of_filter}
                 OPTIONAL {{ GRAPH ?linkGraph {{
-                    ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                        <{to_type}> "derived_memory" ; <{relation}> ?relation ;
-                        <{from}> ?source ; <{to}> ?memory .
+                    {successor}
+                    ?link <{from}> ?source .
                     VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
                 }} }}
             }}"#,
@@ -416,12 +410,8 @@ impl<'a> SparqlGraphSelectors<'a> {
             salience = vocab::SALIENCE_SCORE,
             created = vocab::CREATED_AT,
             retention = vocab::RETENTION_STATE,
-            link_class = vocab::CLASS_MEMORY_LINK,
-            from_type = vocab::FROM_TYPE,
-            to_type = vocab::TO_TYPE,
-            relation = vocab::RELATION,
+            successor = derived_successor_pattern("?memory", "?relation"),
             from = vocab::FROM,
-            to = vocab::TO,
         );
         // Collect every lifecycle row before applying policy or the budget.
         let mut states = HashMap::<MemoryObjectRef, State>::new();
@@ -631,17 +621,12 @@ impl<'a> SparqlGraphSelectors<'a> {
                     r#"SELECT DISTINCT ?member WHERE {{
                         {members}
                         GRAPH ?g {{
-                            ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                                <{to_type}> "derived_memory" ; <{relation}> ?kind ; <{to}> ?member .
+                            {resolution}
                             VALUES ?kind {{ "resolves" "fulfills_commitment" }}
                         }}
                     }}"#,
                     members = sparql_node_iri_values("member", &members),
-                    link_class = vocab::CLASS_MEMORY_LINK,
-                    from_type = vocab::FROM_TYPE,
-                    to_type = vocab::TO_TYPE,
-                    relation = vocab::RELATION,
-                    to = vocab::TO,
+                    resolution = derived_successor_pattern("?member", "?kind"),
                 );
                 let resolved = self
                     .query_solutions(&query)?
@@ -695,7 +680,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                 GRAPH ?neighbor {{ ?neighbor <{object_type}> "episode" ; <{retention}> ?retention . }}
                 BIND(?neighbor AS ?episode)
               }}
-              GRAPH ?episode {{ ?episode <{object_type}> "episode" ; <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+              GRAPH ?episode {{ ?episode <{object_type}> "episode" ; {episode_scene} . }}
               BIND(xsd:dateTime(?sceneTime) AS ?time)
               FILTER(?time <= {reference_time}^^xsd:dateTime)
               {retention_filter}
@@ -709,8 +694,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             to = vocab::TO,
             relation = vocab::RELATION,
             object_type = vocab::OBJECT_TYPE,
-            object_id = vocab::OBJECT_ID,
-            scene_time = vocab::SCENE_TIME,
+            episode_scene = episode_scene_properties(),
             retention = vocab::RETENTION_STATE,
             reference_time = sparql_string_literal(&reference_time.to_rfc3339()),
             retention_filter = occasion_retention_filter(policy),
@@ -740,11 +724,11 @@ impl<'a> SparqlGraphSelectors<'a> {
                 {{
                     {values}
                     GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention ;
-                        <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                        {episode_scene} . }}
                 }} UNION {{
                     {values}
                     GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention ; <{episode}> ?episode . }}
-                    GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                    GRAPH ?episode {{ ?episode {episode_scene} . }}
                 }}
                 OPTIONAL {{
                     {values}
@@ -754,7 +738,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
             retention = vocab::RETENTION_STATE,
-            scene_time = vocab::SCENE_TIME,
+            episode_scene = episode_scene_properties(),
             episode = vocab::EPISODE,
             observed_at = vocab::OBSERVED_AT,
         );
@@ -1072,6 +1056,26 @@ fn link_touching_node_pattern() -> String {
         "{{ ?link <{}> ?node . }} UNION {{ ?link <{}> ?node . }}",
         vocab::FROM,
         vocab::TO
+    )
+}
+
+fn derived_successor_pattern(target: &str, relation: &str) -> String {
+    format!(
+        "?link a <{}> ; <{}> \"derived_memory\" ; <{}> \"derived_memory\" ; <{}> {relation} ; <{}> {target} .",
+        vocab::CLASS_MEMORY_LINK,
+        vocab::FROM_TYPE,
+        vocab::TO_TYPE,
+        vocab::RELATION,
+        vocab::TO,
+    )
+}
+
+fn episode_scene_properties() -> String {
+    format!(
+        "<{}> ?episodeId ; <{}> ?sceneTime ; <{}> ?episodeRetention",
+        vocab::OBJECT_ID,
+        vocab::SCENE_TIME,
+        vocab::RETENTION_STATE,
     )
 }
 
