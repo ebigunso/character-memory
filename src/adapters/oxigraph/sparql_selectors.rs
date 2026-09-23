@@ -283,7 +283,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             vocab::SCOPE_KEY,
             oxigraph::model::Literal::new_simple_literal(value)
         );
-        self.select_state(&predicate, policy, limit, false, true, None)
+        self.select_state(&predicate, policy, limit, false, false, None)
     }
 
     pub(crate) fn select_thread_state(

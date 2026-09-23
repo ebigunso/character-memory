@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 mod road_behavior {
     use super::test_support;
-    use character_memory::api::types::{RetrievalCueFloors, TimeRange};
+    use character_memory::api::types::{CueFloorStage, RetrievalCueFloors, TimeRange};
     use character_memory::*;
     use chrono::{DateTime, Duration, Utc};
 
@@ -105,6 +105,453 @@ mod road_behavior {
             })
             .map(|row| row.root.id)
             .collect()
+    }
+
+    mod place_behavior {
+        use super::*;
+
+        fn source(n: u128, days: i64, setting: Option<&str>, reverse: bool) -> EpisodeDraft {
+            let mut draft = EpisodeDraft::new("ordinary source");
+            draft.id = Some(id(n, reverse));
+            let mut scene = Scene::at((time() - Duration::days(days)).fixed_offset());
+            scene.setting.key = setting.map(str::to_owned);
+            draft.scene = Some(scene);
+            draft.created_at = Some(time());
+            draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            draft
+        }
+
+        fn belief(
+            n: u128,
+            source: u128,
+            days: i64,
+            text: &str,
+            reverse: bool,
+        ) -> DerivedMemoryDraft {
+            let mut draft = DerivedMemoryDraft::new(DerivedType::Claim, text)
+                .with_source_episode(id(source, reverse));
+            draft.id = Some(id(n, reverse));
+            draft.created_at = Some(time() - Duration::days(days));
+            draft.updated_at = draft.created_at;
+            draft.salience_score = 0.0;
+            draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            draft
+        }
+
+        async fn write(memory: &CharacterMemory, input: RememberInput) {
+            let defaults = RememberPlanDefaults::fixed(&input.content, time());
+            commit(memory, input.prepare_write_plan(&defaults)).await;
+        }
+
+        fn claims(result: &RetrieveOutcome) -> Vec<MemoryId> {
+            result
+                .pack
+                .derived_memories
+                .iter()
+                .map(|entry| entry.memory.id)
+                .collect()
+        }
+
+        fn cue_score(result: &RetrieveOutcome, id: MemoryId) -> f32 {
+            result
+                .trace
+                .as_ref()
+                .unwrap()
+                .section_assignments
+                .iter()
+                .find_map(|row| {
+                    if row.object.id != id {
+                        return None;
+                    }
+                    match row.reason {
+                        SectionAssignmentReason::Selected { scores } => scores.cue_score,
+                        _ => None,
+                    }
+                })
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn an_office_key_leaves_room_for_every_person_present() {
+            for reverse in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                write(
+                    &memory,
+                    RememberInput::new("office formation").with_episode(source(
+                        101,
+                        20,
+                        Some("office"),
+                        reverse,
+                    )),
+                )
+                .await;
+                let mut input = RememberInput::new("six people and office memories")
+                    .with_episode(source(100, 20, None, reverse));
+                for person in 0..6 {
+                    let mut entity = EntityDraft::new();
+                    entity.id = Some(id(10 + person, reverse));
+                    input = input.with_entity(entity);
+                    for offset in 0..2 {
+                        let mut state = belief(
+                            200 + person * 10 + offset,
+                            100,
+                            10 - offset as i64,
+                            "personal state",
+                            reverse,
+                        );
+                        state.entity_ids.push(id(10 + person, reverse));
+                        input = input.with_derived_memory(state);
+                    }
+                }
+                for n in 300..312 {
+                    input = input.with_derived_memory(belief(
+                        n,
+                        101,
+                        1 + (311 - n) as i64,
+                        "office memory",
+                        reverse,
+                    ));
+                }
+                for n in 400..408 {
+                    input = input.with_derived_memory(belief(
+                        n,
+                        100,
+                        2 + (407 - n) as i64,
+                        "quasar telescope astronomy spectroscopy",
+                        reverse,
+                    ));
+                }
+                write(&memory, input).await;
+                let mut context = query(Some("quasar telescope astronomy spectroscopy"), 12, 12);
+                context.candidate_limits.max_vector_candidates = 8;
+                context.graph_limits.max_depth = 1;
+                context.cue_floors.participant = 1;
+                context.cue_floors.topic = 1;
+                context.cue_floors.place = 1;
+                context.scene.participants = (0..6)
+                    .map(|person| SceneParticipant {
+                        key: Some(id(10 + person, reverse)),
+                        ..Default::default()
+                    })
+                    .collect();
+                let without = memory.retrieve(context.clone()).await.unwrap();
+                context.scene.setting.key = Some("office".into());
+                let with = memory.retrieve(context).await.unwrap();
+                test_support::close_and_remove_root(memory, root).await;
+                for person in 0..6 {
+                    let count = |result: &RetrieveOutcome| {
+                        claims(result)
+                            .iter()
+                            .filter(|&&member| {
+                                [
+                                    id(200 + person * 10, reverse),
+                                    id(201 + person * 10, reverse),
+                                ]
+                                .contains(&member)
+                            })
+                            .count()
+                    };
+                    assert!(count(&with) > 0, "person {person}");
+                    assert_eq!(count(&with), count(&without));
+                }
+                assert_eq!(
+                    claims(&with)
+                        .iter()
+                        .filter(|&&member| (300..312).any(|n| member == id(n, reverse)))
+                        .count(),
+                    1
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn activity_does_not_join_the_round_among_people() {
+            for reverse in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut thread = MemoryThreadDraft::new("work", "work");
+                thread.id = Some(id(500, reverse));
+                let mut input = RememberInput::new("people and activity")
+                    .with_memory_thread(thread)
+                    .with_episode(source(100, 20, None, reverse));
+                for person in 0..6 {
+                    let mut entity = EntityDraft::new();
+                    entity.id = Some(id(10 + person, reverse));
+                    input = input.with_entity(entity);
+                    for offset in 0..2 {
+                        let mut state = belief(
+                            200 + person * 10 + offset,
+                            100,
+                            10 - offset as i64,
+                            "personal state",
+                            reverse,
+                        );
+                        state.entity_ids.push(id(10 + person, reverse));
+                        input = input.with_derived_memory(state);
+                    }
+                }
+                for n in 600..608 {
+                    let mut member =
+                        belief(n, 100, 1 + (607 - n) as i64, "activity member", reverse);
+                    member.thread_ids.push(id(500, reverse));
+                    input = input.with_derived_memory(member);
+                }
+                write(&memory, input).await;
+                let mut context = query(None, 24, 24);
+                context.graph_limits.max_depth = 1;
+                context.activity = Some(ActivityRef::Thread(id(500, reverse)));
+                context.scene.participants = (0..6)
+                    .map(|person| SceneParticipant {
+                        key: Some(id(10 + person, reverse)),
+                        ..Default::default()
+                    })
+                    .collect();
+                let result = memory.retrieve(context).await.unwrap();
+                test_support::close_and_remove_root(memory, root).await;
+                let ordered = claims(&result);
+                assert_eq!(
+                    &ordered[..8],
+                    &(600..608).rev().map(|n| id(n, reverse)).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    &ordered[8..14],
+                    &(0..6)
+                        .map(|person| id(201 + person * 10, reverse))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn home_reserves_its_newest_memory_across_distinct_topics() {
+            for reverse in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut salient = belief(500, 100, 100, "old important home belief", reverse);
+                salient.salience_score = 1.0;
+                let mut input = RememberInput::new("a constant home key")
+                    .with_episode(source(100, 100, Some("home"), reverse))
+                    .with_derived_memory(salient)
+                    .with_derived_memory(belief(501, 100, 0, "newest home memory", reverse));
+                let topics = [
+                    "quasar telescope astronomy spectroscopy",
+                    "orchid botany greenhouse fertilizer",
+                    "violin sonata orchestra rehearsal",
+                ];
+                for (offset, topic) in topics.iter().enumerate() {
+                    input = input.with_derived_memory(belief(
+                        600 + offset as u128,
+                        100,
+                        5,
+                        topic,
+                        reverse,
+                    ));
+                }
+                write(&memory, input).await;
+                for topic in topics {
+                    let mut context = query(Some(topic), 8, 2);
+                    context.candidate_limits.max_vector_candidates = 1;
+                    context.scene.setting.key = Some("home".into());
+                    context.cue_floors.place = 1;
+                    context.cue_floors.topic = 1;
+                    let result = memory.retrieve(context).await.unwrap();
+                    assert!(claims(&result).contains(&id(501, reverse)));
+                    assert!(!claims(&result).contains(&id(500, reverse)));
+                    assert!(result
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .floor_admissions
+                        .iter()
+                        .any(|row| row.cue_kind == CueKind::Place
+                            && row.object.id == id(501, reverse)));
+                }
+                test_support::close_and_remove_root(memory, root).await;
+            }
+        }
+
+        #[tokio::test]
+        async fn place_keys_share_one_newest_first_road_and_budget() {
+            let mut outcomes = Vec::new();
+            for reverse in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut home = RememberInput::new("home memories").with_episode(source(
+                    100,
+                    20,
+                    Some("home"),
+                    reverse,
+                ));
+                for n in 500..503 {
+                    home = home.with_derived_memory(belief(
+                        n,
+                        100,
+                        (503 - n) as i64,
+                        "home memory",
+                        reverse,
+                    ));
+                }
+                write(&memory, home).await;
+                let values = [
+                    ("weather".into(), "rain".into()),
+                    ("mood".into(), "calm".into()),
+                ]
+                .into_iter()
+                .collect();
+                let mut latest = source(200, 20, None, reverse);
+                latest.scene.as_mut().unwrap().custom_values = values;
+                let values = latest.scene.as_ref().unwrap().custom_values.clone();
+                write(
+                    &memory,
+                    RememberInput::new("newest context memory")
+                        .with_episode(latest)
+                        .with_derived_memory(belief(600, 200, 0, "newest memory", reverse)),
+                )
+                .await;
+                for cap in [1, 3] {
+                    let mut context = query(None, cap, 3);
+                    context.scene.setting.key = Some("home".into());
+                    context.scene.custom_values = values.clone();
+                    context.cue_floors.place = 1;
+                    let result = memory.retrieve(context).await.unwrap();
+                    let trace = result.trace.unwrap();
+                    let number = |id: MemoryId| {
+                        if reverse {
+                            100_000 - id.as_u128()
+                        } else {
+                            id.as_u128()
+                        }
+                    };
+                    let floor = trace
+                        .floor_admissions
+                        .iter()
+                        .filter(|row| {
+                            row.cue_kind == CueKind::Place && row.stage == CueFloorStage::GraphRoots
+                        })
+                        .map(|row| number(row.object.id))
+                        .collect::<Vec<_>>();
+                    let mut contributed = trace
+                        .graph_expansions
+                        .iter()
+                        .filter(|row| row.source == GraphRootSource::Place)
+                        .map(|row| number(row.root.id))
+                        .collect::<Vec<_>>();
+                    contributed.sort_unstable();
+                    outcomes.push((reverse, cap, floor, contributed));
+                }
+                test_support::close_and_remove_root(memory, root).await;
+            }
+            // At cap one the floor must promote the newest Place memory past recency.
+            assert!(
+                outcomes
+                    .iter()
+                    .filter(|(_, cap, _, _)| *cap == 1)
+                    .all(|(_, _, floor, _)| floor == &[600]),
+                "{outcomes:?}"
+            );
+            for (_, cap, _, contributed) in outcomes {
+                assert_eq!(
+                    contributed,
+                    if cap == 1 {
+                        vec![600]
+                    } else {
+                        vec![501, 502, 600]
+                    }
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn a_place_reminder_only_opens_history_when_the_topic_also_matches() {
+            for reverse in [false, true] {
+                for custom in [false, true] {
+                    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                    let mut entity = EntityDraft::new();
+                    entity.id = Some(id(7, reverse));
+                    let mut formation = source(100, 2, (!custom).then_some("library"), reverse);
+                    if custom {
+                        formation
+                            .scene
+                            .as_mut()
+                            .unwrap()
+                            .custom_values
+                            .insert("weather".into(), "rain".into());
+                    }
+                    let mut older = source(200, 20, None, reverse);
+                    older
+                        .scene
+                        .as_mut()
+                        .unwrap()
+                        .participants
+                        .push(SceneParticipant {
+                            key: Some(id(7, reverse)),
+                            ..Default::default()
+                        });
+                    let mut learned = belief(
+                        400,
+                        100,
+                        1,
+                        "quasar telescope astronomy spectroscopy",
+                        reverse,
+                    );
+                    learned.entity_ids.push(id(7, reverse));
+                    write(
+                        &memory,
+                        RememberInput::new("older encounter")
+                            .with_entity(entity)
+                            .with_entity_id(id(7, reverse))
+                            .with_episode(older),
+                    )
+                    .await;
+                    write(
+                        &memory,
+                        RememberInput::new("a belief formed here about someone")
+                            .with_episode(formation)
+                            .with_derived_memory(learned),
+                    )
+                    .await;
+                    let mut context = query(None, 8, 8);
+                    context.graph_limits.max_depth = 3;
+                    context.candidate_limits.max_vector_candidates = 1;
+                    context.cue_floors.place = 1;
+                    context.time_range = Some(TimeRange {
+                        start: time() - Duration::days(400),
+                        end: time() - Duration::days(399),
+                    });
+                    if custom {
+                        context
+                            .scene
+                            .custom_values
+                            .insert("weather".into(), "rain".into());
+                    } else {
+                        context.scene.setting.key = Some("library".into());
+                    }
+                    let reminder = memory.retrieve(context.clone()).await.unwrap();
+                    context.topic = Some("quasar telescope astronomy spectroscopy".into());
+                    let matched = memory.retrieve(context).await.unwrap();
+                    test_support::close_and_remove_root(memory, root).await;
+                    assert_eq!(cue_score(&reminder, id(400, reverse)), 0.0);
+                    assert!(!reminder
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .any(|episode| episode.id == id(200, reverse)));
+                    let topic_score = matched
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .vector_candidates
+                        .iter()
+                        .find(|row| row.object.id == id(400, reverse))
+                        .unwrap()
+                        .score;
+                    assert!(topic_score > 0.0);
+                    assert_eq!(cue_score(&matched, id(400, reverse)), topic_score);
+                    assert!(matched
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .any(|episode| episode.id == id(200, reverse)));
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -608,7 +1055,8 @@ mod road_behavior {
                 }
             }
             commit(&memory, plan).await;
-            let mut context = query(None, 3, 8);
+            // Two reserved seats keep this about the thread head; Place takes no spare turn.
+            let mut context = query(None, 2, 8);
             context.scene.setting.key = Some("office".into());
             context
                 .scene

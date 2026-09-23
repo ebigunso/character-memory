@@ -7,7 +7,6 @@ use character_memory::{
     SourceProvenanceReference, DEFAULT_SCHEMA_VERSION,
 };
 use chrono::{DateTime, Utc};
-use serde_json::json;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
@@ -245,7 +244,7 @@ async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
 }
 
 #[tokio::test]
-async fn key_scopes_share_root_and_pack_caps_with_shared_members_and_activity() {
+async fn place_reminders_share_caps_with_participant_state_and_activity() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     let mut thread = MemoryThreadDraft::new("work", "work");
     thread.id = Some(id(600));
@@ -287,20 +286,21 @@ async fn key_scopes_share_root_and_pack_caps_with_shared_members_and_activity() 
     // Principle 1 serves activity's own head (the thread) before its members.
     scoped.candidate_limits.max_graph_roots = 3;
     let result = memory.retrieve(scoped.clone()).await.unwrap();
-    assert_eq!(ids(&result), vec![id(301), id(311)]);
+    // Principles 4 and 5: activity keeps its strength; place reserves only its own head.
+    assert_eq!(ids(&result), vec![id(321), id(301)]);
     assert_eq!(result.pack.active_threads[0].id, id(600));
     scoped.candidate_limits.max_graph_roots = 12;
     scoped.section_limits.derived_memories = 3;
     let result = memory.retrieve(scoped.clone()).await.unwrap();
-    assert_eq!(ids(&result), vec![id(301), id(311), id(321)]);
-    // Shared participant/custom memory occupies one slot and credits both scopes.
+    assert_eq!(ids(&result), vec![id(321), id(301), id(302)]);
+    // A participant/place overlap keeps its participant strength in one slot.
     scoped.scene.participants.push(SceneParticipant {
         key: Some(id(500)),
         ..Default::default()
     });
     scoped.graph_limits.max_depth = 1;
     let result = memory.retrieve(scoped.clone()).await.unwrap();
-    assert_eq!(ids(&result), vec![id(311), id(301), id(321)]);
+    assert_eq!(ids(&result), vec![id(321), id(311), id(301)]);
     assert_eq!(
         ids(&result).iter().filter(|&&key| key == id(311)).count(),
         1
@@ -309,8 +309,8 @@ async fn key_scopes_share_root_and_pack_caps_with_shared_members_and_activity() 
     scoped.scene.custom_values.clear();
     assert_eq!(
         ids(&memory.retrieve(scoped).await.unwrap()),
-        vec![id(311), id(321)],
-        "participant precedes activity even without context keys"
+        vec![id(321), id(311)],
+        "principle 4 keeps activity outside the round among people"
     );
     memory.close().await.unwrap();
     root.close().unwrap();
@@ -357,14 +357,15 @@ async fn scope_priority_survives_both_caps_and_map_order() {
         let mut limited = context(scene(None, &[("z", "42"), ("a", "42")]));
         limited.candidate_limits.max_graph_roots = root_cap;
         limited.section_limits.derived_memories = 1;
-        assert_eq!(ids(&memory.retrieve(limited).await.unwrap()), vec![id(320)]);
+        // One Place road breaks equal-time ties by id, not custom-key spelling.
+        assert_eq!(ids(&memory.retrieve(limited).await.unwrap()), vec![id(310)]);
     }
     memory.close().await.unwrap();
     root.close().unwrap();
 }
 
 #[tokio::test]
-async fn overlapping_root_scopes_preserve_each_selectors_priority() {
+async fn overlapping_place_keys_share_candidates_without_outscoring_the_topic() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     for (source, scope, memory_id, salience) in [
         (101, scene(Some("place"), &[]), 301, 1.0),
@@ -383,9 +384,10 @@ async fn overlapping_root_scopes_preserve_each_selectors_priority() {
     }
     let mut limited = context(scene(Some("place"), &[("project", "42")]));
     limited.candidate_limits.max_graph_roots = 2;
+    // One Place cap contributes 301 and 302; recency outranks 302 in spare room.
     assert_eq!(
         ids(&memory.retrieve(limited.clone()).await.unwrap()),
-        vec![id(301), id(303)]
+        vec![id(301)]
     );
     let topic = "quasar telescope astronomy spectroscopy";
     let mut topical = belief(901, 104);
@@ -400,7 +402,8 @@ async fn overlapping_root_scopes_preserve_each_selectors_priority() {
     limited.topic = Some(topic.into());
     limited.candidate_limits.max_graph_roots = 3;
     let result = memory.retrieve(limited).await.unwrap();
-    assert_eq!(ids(&result), vec![id(301), id(303), id(901)]);
+    // Principle 5: a place reminder cannot outscore a positive topic match.
+    assert_eq!(ids(&result), vec![id(901), id(301), id(303)]);
     memory.close().await.unwrap();
     root.close().unwrap();
 }
@@ -498,17 +501,6 @@ async fn dense_place_records_topic_admission_at_root_cap() {
         .iter()
         .find(|row| row.root.id == id(901))
         .unwrap();
-    println!(
-        "DENSE_PLACE_TOPIC={}",
-        json!({
-            "topic_score": recalled.score,
-            "topic_rank": recalled.rank,
-            "topic_root_outcome": root_trace.outcome,
-            "topic_in_pack": ids(&result).contains(&id(901)),
-            "place_beliefs_in_pack": ids(&result).iter().filter(|key| (301..314).contains(&key.as_u128())).count(),
-            "attempted_roots": result.rationale.telemetry.graph_expansion.attempted_root_count,
-        })
-    );
     assert_eq!(root_trace.outcome, GraphExpansionOutcome::Expanded);
     assert!(ids(&result).contains(&id(901)));
     let mut additional = RememberInput::new("more topical notes");
@@ -525,15 +517,15 @@ async fn dense_place_records_topic_admission_at_root_cap() {
             .iter()
             .filter(|key| (901..908).contains(&key.as_u128()))
             .count(),
-        6,
-        "topic receives spare root turns beyond its floor"
+        7,
+        "principle 4 gives place reminders no spare root turn"
     );
     assert_eq!(
         selected
             .iter()
             .filter(|key| (301..314).contains(&key.as_u128()))
             .count(),
-        6
+        5
     );
     memory.close().await.unwrap();
     root.close().unwrap();
