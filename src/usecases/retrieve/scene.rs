@@ -273,7 +273,7 @@ where
                 .into_iter()
                 .map(|reference| SceneReferenceResult {
                     reference,
-                    resolution: SceneReferenceResolution::ContentCue,
+                    resolution: SceneReferenceResolution::Reminder,
                     last_interactions: BTreeMap::new(),
                 }),
         );

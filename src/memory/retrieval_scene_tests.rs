@@ -1531,7 +1531,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
     assert!(description_only
         .scene_references
         .iter()
-        .all(|reference| reference.resolution == SceneReferenceResolution::ContentCue));
+        .all(|reference| reference.resolution == SceneReferenceResolution::Reminder));
 
     let named_belief = MemoryObjectRef::new(ObjectType::DerivedMemory, MemoryId::from_u128(1100));
     let topic_only = memory
@@ -1585,7 +1585,7 @@ async fn descriptions_and_setting_words_recall_content_once_and_merge_with_topic
         &place_result.scene_references[0],
         SceneReferenceResult {
             reference: SceneReference::SettingWords,
-            resolution: SceneReferenceResolution::ContentCue,
+            resolution: SceneReferenceResolution::Reminder,
             ..
         }
     ));
