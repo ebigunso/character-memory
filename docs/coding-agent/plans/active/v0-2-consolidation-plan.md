@@ -77,18 +77,18 @@
 ## Design
 - Chosen, one road table. Every root holds the set of roads that reached it. What it reports, whether it expands, the kinds it may reserve under and its contribution budget come from this table. The table is one match in `retrieve.rs`, and the README copies it. This is the final table; Task_1 keeps the place row as it is today (a key opens history at a score of one), and Task_2 changes it:
 
-  | road | reported kind | expands | reserves | contributes |
-  | --- | --- | --- | --- | --- |
-  | participant key or name | participant | opens history | yes | the notion, expanded |
-  | setting key, custom value | place | leaf | yes | up to the root cap, newest first by memory time |
-  | activity | activity | opens history | yes | the thread's members |
-  | topic | topic | opens history | yes | up to the candidate cap |
-  | participant description | participant | leaf | yes | the larger of one and the participant floor |
-  | setting words | place | leaf | yes | the larger of one and the place floor |
-  | range | date match | leaf | yes | up to the room, plus one to mark that more exists |
-  | anniversary shared with someone present | date match | leaf | yes | up to the room |
-  | anniversary shared with nobody | date match | leaf | no | up to the room |
-  | recency (no range given) | recency | leaf | only what the caller's recency floor sets (default zero) | up to the room |
+  | road | floor kind | admitted by (reported) | expands | reserves | contributes |
+  | --- | --- | --- | --- | --- | --- |
+  | participant key or name | participant | participant | opens history | yes | the notion, expanded |
+  | setting key, custom value | place | place | leaf | yes | up to the root cap, newest first by memory time |
+  | activity | activity | activity | opens history | yes | the thread's members |
+  | topic | topic | topic | opens history | yes | up to the candidate cap |
+  | participant description | participant | person description | leaf | yes | the larger of one and the participant floor |
+  | setting words | place | setting words | leaf | yes | the larger of one and the place floor |
+  | range | date match | range | leaf | yes | up to the room, plus one to mark that more exists |
+  | anniversary shared with someone present | date match | anniversary | leaf | yes | up to the room |
+  | anniversary shared with nobody | date match | anniversary | leaf | no | up to the room |
+  | recency (no range given) | recency | recency | leaf | only what the caller's recency floor sets (default zero) | up to the room |
 
   The row order is part of the root key: given roads (participant, place key, activity), then search roads (topic, descriptions), then time roads. "The room" is today's time budget, the largest section cap in force. The prospective slice adds its due and trigger rows.
 - Principle 1, reserved room. It replaces:
@@ -343,10 +343,10 @@
   - README.md
 - depends_on: [Task_3]
 - description: |
-  `MemoryScenes` gains `admitted_by`: the cue kinds of the admitted ranked object, passed from pack building to `memory_scenes` with no read, filled with the trace on or off. Nothing else in the result changes. The README says what each kind means for a consumer ("asked about" for date match from a range, "about someone present" for participant, "matched the topic", "reminded by the place", "from lately" for recency) and that the words belong to the consumer.
+  `MemoryScenes` gains `admitted_by`: the roads that admitted the ranked object, as a reported enum separate from the floor kinds (the table's "admitted by" column: participant, place, activity, topic, person description, setting words, range, anniversary, recency), so a description is never reported as knowing someone and an anniversary never as a date the caller asked about, passed from pack building to `memory_scenes` with no read, filled with the trace on or off. Nothing else in the result changes. The README defines each reported road by what reached the memory (for example: participant, someone present given by key or name, meaning occasions they were at and what is held about them; person description, a resemblance to how someone present was described, which can be a stranger), and says the words the character uses belong to the consumer; it gives no phrasing.
 - acceptance:
   - Every `MemoryScenes` entry carries `admitted_by`, with the trace off.
-  - A range occasion reports date match; a faint topic hit reports topic; recent occasions with nothing said report recency; a keyed-place memory reports place; a memory reached by a participant key and the topic reports both.
+  - Exact sets, both identifier orders: a range occasion reports range; an anniversary with a range also given reports anniversary, not range; a faint topic hit reports topic; recent occasions with nothing said report recency; a keyed-place memory reports place; a description-only match reports person description (or setting words), never participant or place; a memory reached by a participant key and the topic reports both.
   - The field is identical with the trace on and off, and the pack (members, order and scores) equals the parent's.
 - validation:
   - kind: command
@@ -717,6 +717,12 @@ The tasks run in sequence, one worker at a time, because they share one crate an
     - Every file was already in the owning task's owns.
   - Tradeoffs considered: none; each item lands in the task that already owns its file.
   - User approval: ruled by the coordinator.
+  - Record proposed: none.
+
+- 2026-09-23 Decision: what the result reports is the roads, not the floor kinds (Task_4 Tier A, rulings log 72).
+  - Trigger / new insight: reporting the floor kind made a stranger's description read as "someone present" and an anniversary read as a date the caller asked about, the false continuity rulings 60 and 62 exist to prevent.
+  - Plan delta (what changed): the road table gains an "admitted by" column; `admitted_by` is a separate reported enum; Task_4's acceptance uses exact sets including a description-only match and an anniversary with a range; the README defines meanings, not phrasing.
+  - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
 ## Notes
