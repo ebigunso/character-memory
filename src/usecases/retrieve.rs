@@ -19,14 +19,14 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
-use crate::policy::graph_expansion::{fail_if_closed, graph_expansion_bounded_failure_trace};
+use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
     selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionFilteredReason,
     GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
@@ -318,9 +318,8 @@ where
                     if let Some(traces) = &mut fanout_utilization_traces {
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
-                    if let Some(failure) = expansion.bounded_failure {
+                    if expansion.bounded_failure.is_some() {
                         graph_expansion_telemetry.bounded_failure_count += 1;
-                        fail_if_closed(context.graph_limits.failure_mode, failure)?;
                     }
                     if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
@@ -1591,11 +1590,7 @@ fn graph_query_for_candidate(
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
     .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
         context.lifecycle_policy,
-    ))
-    .with_failure_policy(GraphExpansionFailurePolicy {
-        timeout_ms: context.graph_limits.timeout_ms,
-        mode: context.graph_limits.failure_mode,
-    });
+    ));
     query.current_subject_state = candidate.object.object_type == ObjectType::Entity
         && candidate.source() == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
@@ -1802,8 +1797,8 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::GraphExpansionBoundedReason;
     use crate::domain::ScopeKey;
-    use crate::domain::{GraphExpansionBoundedReason, GraphFailureMode};
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -2557,36 +2552,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bounded_expansion_failure_errors_when_degraded_results_are_disabled() {
-        let fixtures = representative_fixtures();
-        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
-        let mut context = RetrievalContext::new("fail closed");
-        context.graph_limits.timeout_ms = Some(0);
-        context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
-
-        let error = pipeline.retrieve(context).await.unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::GraphExpansionBounded(trace)
-                if trace.reason == GraphExpansionBoundedReason::Timeout
-                    && trace.at == Some(MemoryObjectRef::new(
-                        ObjectType::DerivedMemory,
-                        fixtures.user_preference.id,
-                    ))
-        ));
-    }
-
-    #[tokio::test]
     async fn bounded_empty_expansion_omits_without_reporting_graph_missing() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
@@ -2601,7 +2566,6 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("bounded graph limits");
         context.graph_limits.max_nodes = 0;
-        context.graph_limits.failure_mode = GraphFailureMode::AllowPartialResults;
         context.include_trace = true;
 
         let outcome = pipeline.retrieve(context).await.unwrap();
