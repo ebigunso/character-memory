@@ -1298,7 +1298,6 @@ mod tests {
         store.upsert_links(&links).await.unwrap();
         let policy = GraphExpansionLifecyclePolicy::default();
         let selectors = SparqlGraphSelectors::new(&store.store);
-        MAX_SELECT_ROWS.with(|count| count.set(0));
         let (scope, scope_filtered) = selectors.select_scope_state(&key, policy, 3).unwrap();
         let (subject, subject_filtered) = selectors
             .select_subject_state(fixtures.hub_entity.id, policy, 3, false)

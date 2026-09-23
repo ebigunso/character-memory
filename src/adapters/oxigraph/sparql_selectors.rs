@@ -494,25 +494,6 @@ impl<'a> SparqlGraphSelectors<'a> {
         }
 
         let node_values = sparql_node_iri_values("node", object_refs);
-        let thread_filter = if current_thread_state {
-            format!(
-                r#"
-                BIND(IF(?fromType = "derived_memory", ?from, ?to) AS ?member)
-                FILTER(?relation != "part_of_thread" || NOT EXISTS {{ GRAPH ?resolution {{
-                    ?resolution a <{link_class}> ; <{from_type}> "derived_memory" ;
-                        <{to_type}> "derived_memory" ; <{relation}> ?resolutionKind ; <{to}> ?member .
-                    VALUES ?resolutionKind {{ "resolves" "fulfills_commitment" }}
-                }} }})
-            "#,
-                link_class = vocab::CLASS_MEMORY_LINK,
-                from_type = vocab::FROM_TYPE,
-                to_type = vocab::TO_TYPE,
-                relation = vocab::RELATION,
-                to = vocab::TO
-            )
-        } else {
-            String::new()
-        };
         let query_text = format!(
             r#"
             SELECT DISTINCT ?linkId ?fromId ?fromType ?toId ?toType ?relation WHERE {{
@@ -537,7 +518,6 @@ impl<'a> SparqlGraphSelectors<'a> {
                 ?to <{object_id}> ?toId ;
                     <{object_type}> ?toType .
               }}
-              {thread_filter}
             }}
             "#,
             link_class = vocab::CLASS_MEMORY_LINK,
@@ -565,6 +545,51 @@ impl<'a> SparqlGraphSelectors<'a> {
             };
             if seen.insert(link_ref) {
                 refs.push(link_ref);
+            }
+        }
+        if current_thread_state {
+            let mut members = refs
+                .iter()
+                .filter(|link| link.relation == RelationType::PartOfThread)
+                .flat_map(|link| [link.from, link.to])
+                .filter(|object| object.object_type == ObjectType::DerivedMemory)
+                .collect::<Vec<_>>();
+            members.sort_unstable_by_key(|object| object.id);
+            members.dedup();
+            if !members.is_empty() {
+                let query = format!(
+                    r#"SELECT DISTINCT ?member WHERE {{
+                        {members}
+                        GRAPH ?g {{
+                            ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
+                                <{to_type}> "derived_memory" ; <{relation}> ?kind ; <{to}> ?member .
+                            VALUES ?kind {{ "resolves" "fulfills_commitment" }}
+                        }}
+                    }}"#,
+                    members = sparql_node_iri_values("member", &members),
+                    link_class = vocab::CLASS_MEMORY_LINK,
+                    from_type = vocab::FROM_TYPE,
+                    to_type = vocab::TO_TYPE,
+                    relation = vocab::RELATION,
+                    to = vocab::TO,
+                );
+                let resolved = self
+                    .query_solutions(&query)?
+                    .iter()
+                    .map(|row| match row.get("member") {
+                        Some(Term::NamedNode(member)) => Ok(MemoryObjectRef::new(
+                            ObjectType::DerivedMemory,
+                            super::shared::memory_id_from_resource(member.as_str())?,
+                        )),
+                        value => Err(oxigraph_sparql_error(format!(
+                            "expected resolved member IRI, got {value:?}"
+                        ))),
+                    })
+                    .collect::<Result<HashSet<_>, _>>()?;
+                refs.retain(|link| {
+                    link.relation != RelationType::PartOfThread
+                        || (!resolved.contains(&link.from) && !resolved.contains(&link.to))
+                });
             }
         }
         refs.sort_by_key(|link_ref| {
@@ -647,7 +672,24 @@ impl<'a> SparqlGraphSelectors<'a> {
         if neighbors.is_empty() {
             return Ok(ParticipantOccasions::new());
         }
-        let query_text = format!("SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{ {} }}", participant_occasion_pattern(neighbors));
+        let values = sparql_node_iri_values("node", neighbors);
+        let query_text = format!(
+            r#"SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{
+                {values}
+                GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
+                {{
+                    GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                }} UNION {{
+                    GRAPH ?node {{ ?node <{episode}> ?episode . }}
+                    GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                }}
+            }}"#,
+            object_id = vocab::OBJECT_ID,
+            object_type = vocab::OBJECT_TYPE,
+            retention = vocab::RETENTION_STATE,
+            scene_time = vocab::SCENE_TIME,
+            episode = vocab::EPISODE,
+        );
         self.query_solutions(&query_text)?
             .iter()
             .map(participant_occasion_binding)
@@ -955,27 +997,6 @@ fn participant_occasion_binding(
             episode_retention_state: enum_binding(solution, "episodeRetention")?,
         },
     ))
-}
-
-fn participant_occasion_pattern(neighbors: &[MemoryObjectRef]) -> String {
-    let values = sparql_node_iri_values("node", neighbors);
-    format!(
-        r#"
-        {values}
-        GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
-        {{
-            GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
-        }} UNION {{
-            GRAPH ?node {{ ?node <{episode}> ?episode . }}
-            GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
-        }}
-    "#,
-        object_id = vocab::OBJECT_ID,
-        object_type = vocab::OBJECT_TYPE,
-        retention = vocab::RETENTION_STATE,
-        scene_time = vocab::SCENE_TIME,
-        episode = vocab::EPISODE
-    )
 }
 
 fn occasion_retention_filter(policy: GraphExpansionLifecyclePolicy) -> &'static str {
