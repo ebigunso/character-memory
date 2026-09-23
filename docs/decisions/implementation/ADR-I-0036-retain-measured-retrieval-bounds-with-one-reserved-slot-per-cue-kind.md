@@ -43,7 +43,7 @@ The measured participant, place and topic reservations prevent starvation by ano
 
 ## Decision Boundary
 
-Invariant: retrieval defaults require a measured basis that preserves room for each given cue kind; participant reach measures distinct experiences, and beliefs about a named notion remain outside entity-root selectivity. Hard bounds, conservative fallback and entity-neutrality remain constraints on calibration.
+Invariant: retrieval defaults require a measured basis that preserves room for each given cue kind, or must be explicitly labelled provisional until measured; participant reach measures distinct experiences, and beliefs about a named notion remain outside entity-root selectivity. Hard bounds, conservative fallback and entity-neutrality remain constraints on calibration.
 
 Not covered: replacement values justified by renewed calibration, the formulas and counter representation, the ordering and propagation of individual candidate routes, description-similarity or topic-relevance bounds, and selectivity for non-entity roots. Numeric defaults live in configuration and code; this record does not make their measured values universal constants.
 
@@ -56,7 +56,7 @@ Not covered: replacement values justified by renewed calibration, the formulas a
 
 ## Revisit When
 
-A measured similarity bound for descriptions or a relevance bound for the topic changes which memories compete; a change to retrieval routes or pack admission changes which memories compete; a representative corpus replaces the synthetic workload; or a different statistics regime invalidates the scored-decision calibration. Repeat the affected calibration before changing the values. The scene-overlap measurement uses deterministic synthetic embeddings, so production embedding behavior requires separate evidence.
+An activity-pressure calibration runs; a measured similarity bound for descriptions or a relevance bound for the topic changes which memories compete; a change to retrieval routes or pack admission changes which memories compete; a representative corpus replaces the synthetic workload; or a different statistics regime invalidates the scored-decision calibration. Repeat the affected calibration before changing the values. The scene-overlap measurement uses deterministic synthetic embeddings, so production embedding behavior requires separate evidence.
 
 ## More Information
 

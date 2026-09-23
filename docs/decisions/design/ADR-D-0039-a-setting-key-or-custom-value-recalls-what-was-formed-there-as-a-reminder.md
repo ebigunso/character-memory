@@ -22,7 +22,7 @@ A setting key or custom value identifies a context of formation and recalls memo
 
 ## Why
 
-Knowing which room the character is in does not make everything learned in that room pertinent to the encounter. Treating the context as knowledge about a subject lets a habitual place crowd out what the character holds about the people it is meeting; treating it as a reminder preserves what the place can bring without making that claim.
+Knowing which room the character is in does not make everything learned in that room pertinent to the encounter. Treating the context as knowledge about a subject lets a habitual place crowd out what the character holds about the people it is meeting; treating it as a reminder preserves what the place can bring without making that claim, and each context that helped form a memory can remind the character of it.
 
 ## Rejected Alternatives
 
@@ -37,7 +37,7 @@ Not covered: key representation, candidate ordering, scores, reservation sizes, 
 
 ## Validation
 
-- A memory formed in several contexts can be recalled by each; a context match alone does not open unrelated history.
+- A memory formed in several contexts can be recalled by each; a context match alone does not open connected history.
 - Adding a familiar setting does not remove what is held about the people present by giving place memories the force of known subjects.
 - A memory also reached through its subject, activity or topic keeps that road's reach.
 
@@ -48,4 +48,4 @@ A consumer needs an application-defined context to identify an active subject ra
 ## More Information
 
 - [ADR-D-0022](ADR-D-0022-recall-is-activation-by-scene-cues.md) provides recall by scene cues; [ADR-D-0024](ADR-D-0024-continuity-is-scoped-and-the-scope-is-derived-from-the-scene.md) provides scene-derived scopes. This record depends on both and replaces neither.
-- Load-bearing decisions log, ruling 26 (2026-09-21: presence is not aboutness) and ruling 59 (2026-09-22: a place brings the context of formation), carried into the [consolidation plan](../../coding-agent/plans/active/v0-2-consolidation-plan.md).
+- The consolidation plan, "Recall room is divided by five principles, and every memory says which cues admitted it", carries ruling 26, "On meeting Bob, what comes to mind: what was formed when Bob was present, or what is about Bob?" (2026-09-21), and ruling 59, "What a place brings is where something was formed, not what it is about" (2026-09-22).
