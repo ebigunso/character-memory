@@ -121,6 +121,8 @@ where
                 .allowed_object_types
                 .contains(&ObjectType::DerivedMemory)
         {
+            let contribution = RecallRoad::Place.contribution(&context);
+            let mut place_rows = HashMap::new();
             for key in &keys {
                 let (ids, filtered) = self
                     .graph_store
@@ -130,7 +132,7 @@ where
                             include_suppressed: context.lifecycle_policy.include_suppressed,
                             include_superseded: context.lifecycle_policy.include_superseded,
                         },
-                        RecallRoad::Place.contribution(&context),
+                        contribution,
                     )
                     .await?;
                 assembly
@@ -142,15 +144,19 @@ where
                             &entry.superseded_by,
                         )
                     }));
-                for (rank, row) in ids.into_iter().enumerate() {
-                    explicit_roots.push(CandidateRoot::from_rank(
-                        row,
-                        ObjectType::DerivedMemory,
-                        RecallRoad::Place,
-                        0.0,
-                        rank,
-                    ));
-                }
+                place_rows.extend(ids.into_iter().map(|row| (row.id, row)));
+            }
+            let mut place_rows = place_rows.into_values().collect::<Vec<_>>();
+            place_rows.sort_unstable_by_key(|row| (std::cmp::Reverse(row.time), row.id));
+            place_rows.truncate(contribution);
+            for (rank, row) in place_rows.into_iter().enumerate() {
+                explicit_roots.push(CandidateRoot::from_rank(
+                    row,
+                    ObjectType::DerivedMemory,
+                    RecallRoad::Place,
+                    0.0,
+                    rank,
+                ));
             }
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
@@ -987,7 +993,15 @@ fn build_pack(
     let mut section_counts = SectionCounts::default();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
-        state::order_section_state(&mut ranked_objects, section, state_scopes, scope_kinds);
+        state::order_state_per_kind(
+            &mut ranked_objects,
+            state_scopes,
+            scope_kinds,
+            |object| {
+                (section_for_object(object) == Some(section)).then(|| object.object.object_ref())
+            },
+            |_, _| 0,
+        );
         let candidates = ranked_objects
             .iter()
             .filter(|ranked| section_for_object(ranked) == Some(section))
@@ -1607,15 +1621,13 @@ fn select_candidate_roots(
     }
     let mut merged = by_ref.into_values().collect::<Vec<_>>();
     merged.sort_by_key(CandidateRoot::rank_key);
-    for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
-        let own_scopes = state::scopes_for_kind(scopes, scope_kinds, kind);
-        state::order_state(
-            &mut merged,
-            &own_scopes,
-            |root| Some(root.object),
-            |scope, root| root_order[&(scope, root.object)],
-        );
-    }
+    state::order_state_per_kind(
+        &mut merged,
+        scopes,
+        scope_kinds,
+        |root| Some(root.object),
+        |scope, root| root_order[&(scope, root.object)],
+    );
     let unique_count = merged.len();
     let selection = select_with_cue_floors(
         merged.iter().map(|root| (root.object, root.road_set())),

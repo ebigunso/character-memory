@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 mod road_behavior {
     use super::test_support;
-    use character_memory::api::types::{RetrievalCueFloors, TimeRange};
+    use character_memory::api::types::{CueFloorStage, RetrievalCueFloors, TimeRange};
     use character_memory::*;
     use chrono::{DateTime, Duration, Utc};
 
@@ -365,6 +365,96 @@ mod road_behavior {
                             && row.object.id == id(501, reverse)));
                 }
                 test_support::close_and_remove_root(memory, root).await;
+            }
+        }
+
+        #[tokio::test]
+        async fn place_keys_share_one_newest_first_road_and_budget() {
+            let mut outcomes = Vec::new();
+            for reverse in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut home = RememberInput::new("home memories").with_episode(source(
+                    100,
+                    20,
+                    Some("home"),
+                    reverse,
+                ));
+                for n in 500..503 {
+                    home = home.with_derived_memory(belief(
+                        n,
+                        100,
+                        (503 - n) as i64,
+                        "home memory",
+                        reverse,
+                    ));
+                }
+                write(&memory, home).await;
+                let values = [
+                    ("weather".into(), "rain".into()),
+                    ("mood".into(), "calm".into()),
+                ]
+                .into_iter()
+                .collect();
+                let mut latest = source(200, 20, None, reverse);
+                latest.scene.as_mut().unwrap().custom_values = values;
+                let values = latest.scene.as_ref().unwrap().custom_values.clone();
+                write(
+                    &memory,
+                    RememberInput::new("newest context memory")
+                        .with_episode(latest)
+                        .with_derived_memory(belief(600, 200, 0, "newest memory", reverse)),
+                )
+                .await;
+                for cap in [1, 3] {
+                    let mut context = query(None, cap, 3);
+                    context.scene.setting.key = Some("home".into());
+                    context.scene.custom_values = values.clone();
+                    context.cue_floors.place = 1;
+                    let result = memory.retrieve(context).await.unwrap();
+                    let trace = result.trace.unwrap();
+                    let number = |id: MemoryId| {
+                        if reverse {
+                            100_000 - id.as_u128()
+                        } else {
+                            id.as_u128()
+                        }
+                    };
+                    let floor = trace
+                        .floor_admissions
+                        .iter()
+                        .filter(|row| {
+                            row.cue_kind == CueKind::Place && row.stage == CueFloorStage::GraphRoots
+                        })
+                        .map(|row| number(row.object.id))
+                        .collect::<Vec<_>>();
+                    let mut contributed = trace
+                        .graph_expansions
+                        .iter()
+                        .filter(|row| row.source == GraphRootSource::Place)
+                        .map(|row| number(row.root.id))
+                        .collect::<Vec<_>>();
+                    contributed.sort_unstable();
+                    outcomes.push((reverse, cap, floor, contributed));
+                }
+                test_support::close_and_remove_root(memory, root).await;
+            }
+            // At cap one the floor must promote the newest Place memory past recency.
+            assert!(
+                outcomes
+                    .iter()
+                    .filter(|(_, cap, _, _)| *cap == 1)
+                    .all(|(_, _, floor, _)| floor == &[600]),
+                "{outcomes:?}"
+            );
+            for (_, cap, _, contributed) in outcomes {
+                assert_eq!(
+                    contributed,
+                    if cap == 1 {
+                        vec![600]
+                    } else {
+                        vec![501, 502, 600]
+                    }
+                );
             }
         }
 

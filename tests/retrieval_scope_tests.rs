@@ -357,7 +357,8 @@ async fn scope_priority_survives_both_caps_and_map_order() {
         let mut limited = context(scene(None, &[("z", "42"), ("a", "42")]));
         limited.candidate_limits.max_graph_roots = root_cap;
         limited.section_limits.derived_memories = 1;
-        assert_eq!(ids(&memory.retrieve(limited).await.unwrap()), vec![id(320)]);
+        // One Place road breaks equal-time ties by id, not custom-key spelling.
+        assert_eq!(ids(&memory.retrieve(limited).await.unwrap()), vec![id(310)]);
     }
     memory.close().await.unwrap();
     root.close().unwrap();
@@ -383,9 +384,10 @@ async fn overlapping_place_keys_share_candidates_without_outscoring_the_topic() 
     }
     let mut limited = context(scene(Some("place"), &[("project", "42")]));
     limited.candidate_limits.max_graph_roots = 2;
+    // One Place cap contributes 301 and 302; recency outranks 302 in spare room.
     assert_eq!(
         ids(&memory.retrieve(limited.clone()).await.unwrap()),
-        vec![id(301), id(303)]
+        vec![id(301)]
     );
     let topic = "quasar telescope astronomy spectroscopy";
     let mut topical = belief(901, 104);
