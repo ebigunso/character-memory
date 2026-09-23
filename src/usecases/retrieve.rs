@@ -353,7 +353,10 @@ where
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
-                    assembly.omit_unverified_candidate(candidate, false)
+                    assembly.omit_unverified_candidate(
+                        candidate,
+                        StaleCandidateReason::GraphObjectMissing,
+                    )
                 }
                 Err(error) => return Err(error),
             }
@@ -678,28 +681,37 @@ impl RetrieveAssembly {
         }
 
         if !root_filtered && !root_verified && !self.objects.contains_key(&candidate_ref) {
-            self.omit_unverified_candidate(candidate, bounded_failure.is_some());
+            let reason = if bounded_failure.is_some() {
+                StaleCandidateReason::GraphExpansionBounded
+            } else {
+                StaleCandidateReason::GraphObjectMissing
+            };
+            self.omit_unverified_candidate(candidate, reason);
         }
         Ok(())
     }
 
-    fn omit_unverified_candidate(&mut self, candidate: &CandidateRoot, bounded: bool) {
+    fn omit_unverified_candidate(
+        &mut self,
+        candidate: &CandidateRoot,
+        reason: StaleCandidateReason,
+    ) {
         self.stale_omissions.push(StaleCandidateOmission {
             candidate: candidate.object,
             vector_score: candidate.vector_score,
-            reason: if bounded {
-                StaleCandidateReason::GraphExpansionBounded
-            } else {
-                StaleCandidateReason::GraphObjectMissing
-            },
+            reason,
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: candidate.object,
             superseded_by: Vec::new(),
-            reason: if bounded {
-                LifecycleFilterReason::GraphExpansionBounded
-            } else {
-                LifecycleFilterReason::GraphObjectMissing
+            reason: match reason {
+                StaleCandidateReason::GraphExpansionBounded => {
+                    LifecycleFilterReason::GraphExpansionBounded
+                }
+                StaleCandidateReason::GraphObjectMissing => {
+                    LifecycleFilterReason::GraphObjectMissing
+                }
+                _ => unreachable!("unverified candidates are missing or bounded"),
             },
         });
     }
