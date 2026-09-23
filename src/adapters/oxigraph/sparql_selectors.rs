@@ -19,6 +19,7 @@ use crate::ports::graph_authority::{
     GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy, GraphMemoryRank, GraphObjectQuery,
 };
 
+use super::rdf_mapping::enum_value;
 use super::vocabulary as vocab;
 
 struct State {
@@ -1209,13 +1210,6 @@ fn sparql_object_ref_values(object_refs: &[MemoryObjectRef]) -> String {
 
 fn sparql_string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("serializing a SPARQL string literal cannot fail")
-}
-
-fn enum_value(value: impl serde::Serialize) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
-        .unwrap_or_default()
 }
 
 fn oxigraph_sparql_error(error: impl std::fmt::Display) -> CustomError {
