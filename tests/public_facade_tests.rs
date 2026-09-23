@@ -34,7 +34,7 @@ mod scene_offset_behavior {
     #[tokio::test]
     async fn scene_offsets_and_fractional_instants_survive_write_and_reopen() {
         let mut readings = Vec::new();
-        for seconds in [9 * 3600, 23 * 3600, -23 * 3600, 86_399, -86_399] {
+        for seconds in [9 * 3600, 23 * 3600, -23 * 3600, 86_340, -86_340] {
             let root = tempfile::tempdir().unwrap();
             let collection = test_support::unique_collection_name();
             let time = "2025-09-21T00:30:00.123456789Z"
@@ -64,16 +64,93 @@ mod scene_offset_behavior {
             let after = memory.retrieve(query(now().fixed_offset())).await.unwrap();
             readings.push((
                 time,
-                before.pack.relevant_episodes[0].scene.time,
-                after.pack.relevant_episodes[0].scene.time,
+                before.pack.relevant_episodes[0].scene.clone(),
+                after.pack.relevant_episodes[0].scene.clone(),
             ));
             test_support::close_and_remove_root(memory, root).await;
         }
         for (given, before, after) in readings {
             for saved in [before, after] {
-                assert_eq!(saved.naive_utc(), given.naive_utc());
-                assert_eq!(saved.offset(), given.offset());
+                assert_eq!(saved.time.naive_utc(), given.naive_utc());
+                assert_eq!(saved.time.offset(), given.offset());
+                let json = serde_json::to_string(&saved).unwrap();
+                assert_eq!(serde_json::from_str::<Scene>(&json).unwrap(), saved);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn second_offsets_are_rejected_at_write_and_retrieval_admission() {
+        let mut readings = Vec::new();
+        for seconds in [1, -1, 30, -30, 86_399, -86_399] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let time = now().with_timezone(&FixedOffset::east_opt(seconds).unwrap());
+            let scene = Scene::at(time);
+            let mut draft = EpisodeDraft::new("invalid offset");
+            draft.scene = Some(scene.clone());
+            let domain = matches!(draft.into_domain(), Err(DomainValidationError::InvalidSceneTimeOffset { offset_seconds }) if offset_seconds == seconds);
+            let prepared = memory
+                .prepare(
+                    RememberInput::new("invalid offset").with_scene(scene.clone()),
+                    PrepareOptions::default(),
+                )
+                .await
+                .unwrap();
+            let validations = memory.validate_plan(&prepared).await.unwrap();
+            let expected = CandidateValidationIssue::InvalidSceneTimeOffset {
+                offset_seconds: seconds,
+            };
+            let invalid_episode = |validations: &[CandidateValidation]| {
+                validations.iter().any(|entry| {
+                    entry.candidate_kind == MemoryCandidateKind::Episode
+                        && entry.status == CandidateValidationStatus::Invalid
+                        && entry.errors == vec![expected.clone()]
+                })
+            };
+            let validate = invalid_episode(&validations);
+            // Directly mutated candidates must take the same admission path.
+            let mut authored = plan(MemoryId::from_u128(100), now().fixed_offset());
+            for candidate in &mut authored.candidates {
+                if let MemoryCandidate::Episode(candidate) = candidate {
+                    candidate.draft.scene = Some(Scene {
+                        time,
+                        ..Scene::now()
+                    });
+                }
+            }
+            let mutated_validate = invalid_episode(&memory.validate_plan(&authored).await.unwrap());
+            let commit = matches!(memory.commit(authored, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations }) if invalid_episode(&validations));
+            let remember = matches!(memory.remember(
+                RememberInput::new("invalid offset").with_scene(scene),
+                RememberOptions::default(),
+            ).await, Err(CustomError::WritePlanValidationRejected { validations }) if invalid_episode(&validations));
+            let retrieve = matches!(memory.retrieve(query(time)).await,
+                Err(CustomError::DomainValidation(DomainValidationError::InvalidSceneTimeOffset { offset_seconds })) if offset_seconds == seconds);
+            let unchanged = memory
+                .retrieve(query(now().fixed_offset()))
+                .await
+                .unwrap()
+                .pack
+                .relevant_episodes
+                .is_empty();
+            readings.push((
+                seconds,
+                domain,
+                validate,
+                mutated_validate,
+                commit,
+                remember,
+                retrieve,
+                unchanged,
+            ));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (seconds, domain, validate, mutated_validate, commit, remember, retrieve, unchanged) in
+            readings
+        {
+            assert!(domain && validate && mutated_validate && commit && remember && retrieve && unchanged,
+                "offset {seconds}: domain={domain}, validate={validate}, mutated_validate={mutated_validate}, commit={commit}, remember={remember}, retrieve={retrieve}, unchanged={unchanged}");
         }
     }
 

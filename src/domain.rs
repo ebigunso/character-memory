@@ -240,6 +240,9 @@ pub enum DomainValidationError {
     #[error("a caller-built episode must state its scene")]
     MissingScene,
 
+    #[error("scene time offset {offset_seconds} seconds must be a whole-minute RFC 3339 offset")]
+    InvalidSceneTimeOffset { offset_seconds: i32 },
+
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
 
@@ -310,6 +313,7 @@ pub struct Episode {
 impl Episode {
     pub fn validate(&self) -> Result<(), DomainValidationError> {
         validate_object_type("Episode.object_type", self.object_type, ObjectType::Episode)?;
+        self.scene.validate_time()?;
         if self.summary.trim().is_empty() {
             return Err(DomainValidationError::EmptyEpisodeSummary);
         }

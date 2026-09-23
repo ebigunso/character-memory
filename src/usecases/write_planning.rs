@@ -1629,6 +1629,9 @@ fn candidate_issue_from_domain_error(error: DomainValidationError) -> CandidateV
         }
         DomainValidationError::EmptyEpisodeSummary => CandidateValidationIssue::EmptyEpisodeSummary,
         DomainValidationError::MissingScene => CandidateValidationIssue::MissingScene,
+        DomainValidationError::InvalidSceneTimeOffset { offset_seconds } => {
+            CandidateValidationIssue::InvalidSceneTimeOffset { offset_seconds }
+        }
         DomainValidationError::MissingEpisodeReference => {
             CandidateValidationIssue::MissingEpisodeReference
         }

@@ -3,12 +3,13 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::MemoryId;
+use super::{DomainValidationError, MemoryId};
 
 /// The situation as perceived. Omitted participants do not mean nobody was present.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct Scene {
     /// The supplied instant and offset are preserved; anniversaries use its local day.
+    /// Write and retrieval admission require a whole-minute RFC 3339 offset.
     pub time: DateTime<FixedOffset>,
     pub participants: Vec<SceneParticipant>,
     pub setting: SceneSetting,
@@ -44,6 +45,14 @@ impl Scene {
 
     pub fn now() -> Self {
         Self::at(Utc::now().fixed_offset())
+    }
+
+    pub(crate) fn validate_time(&self) -> Result<(), DomainValidationError> {
+        let offset_seconds = self.time.offset().local_minus_utc();
+        if offset_seconds % 60 != 0 {
+            return Err(DomainValidationError::InvalidSceneTimeOffset { offset_seconds });
+        }
+        Ok(())
     }
 
     pub(crate) fn without_blank_participants(mut self) -> Self {
