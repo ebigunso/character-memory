@@ -288,7 +288,6 @@ where
                     stats_context,
                     context.lifecycle_policy,
                     trace_mode,
-                    candidate.source() == GraphRootSource::Participant,
                 )
                 .await?
             } else {
@@ -1862,18 +1861,12 @@ mod tests {
     use async_trait::async_trait;
     use uuid::Uuid;
 
-    use chrono::{DateTime, Utc};
-
-    use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::ContinuitySectionLimits;
     use crate::domain::RetentionState;
     use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
-    use crate::policy::RetrievalSelectivityPolicy;
-    use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use crate::test_support::{
-        high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
-        TemporaryVectorCandidateStore,
+        in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
 
     #[tokio::test]
@@ -2466,67 +2459,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn entity_neutral_selectivity_rejects_low_selectivity_concept_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &fixture
-                .derived_memories
-                .iter()
-                .map(|memory| memory.id)
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan
-            .traces
-            .iter()
-            .any(|decision| decision.relation == RelationType::About
-                && decision.object_type == ObjectType::DerivedMemory
-                && decision.chosen_fanout == 0
-                && decision.decision
-                    == crate::api::types::SelectivityDecision::LowSelectivityRejected));
-        assert!(!expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap == 0
-                && entry.retained_count == 0
-                && entry.omitted_by_fanout_count > 0));
-    }
-
-    #[tokio::test]
     async fn retrieval_telemetry_preserves_vector_recall_completeness() {
         let cases = [
             VectorRecallCompleteness::NotRequested,
@@ -2558,55 +2490,6 @@ mod tests {
                 0
             );
         }
-    }
-
-    #[tokio::test]
-    async fn selectivity_allows_high_selectivity_entity_about_expansion() {
-        let fixture = high_fanout_graph_fixture();
-        let graph = graph_with(&fixture.objects(), &fixture.links).await;
-        let stats = InMemoryRetrievalStatsStore::new();
-        record_about_edges(
-            &stats,
-            fixture.hub_entity.id,
-            &[fixture.derived_memories[0].id],
-        )
-        .await;
-        record_other_about_edges(&stats, 80).await;
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let plan = selectivity_plan_for_entity(
-            fixture.hub_entity.id,
-            1.0,
-            16,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            crate::api::types::RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let expansion = graph
-            .expand_bounded(
-                &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 2, 96)
-                    .with_fanout_overrides(plan.fanout_overrides)
-                    .with_fanout_utilization_recording(TraceMode::Enabled),
-            )
-            .await
-            .unwrap();
-        assert!(plan.telemetry.high_selectivity_count > 0);
-        assert!(expansion
-            .objects
-            .iter()
-            .any(|object| matches!(object, MemoryObject::DerivedMemory(_))));
-        assert!(expansion
-            .fanout_utilization
-            .iter()
-            .any(|entry| entry.root.id == fixture.hub_entity.id
-                && entry.relation == RelationType::About
-                && entry.object_type == ObjectType::DerivedMemory
-                && entry.selected_cap <= entry.configured_cap
-                && entry.retained_count > 0));
     }
 
     #[tokio::test]
@@ -3481,51 +3364,6 @@ mod tests {
         graph.upsert_objects(objects).await.unwrap();
         graph.upsert_links(links).await.unwrap();
         graph
-    }
-
-    async fn record_about_edges(
-        stats: &InMemoryRetrievalStatsStore,
-        entity_id: MemoryId,
-        derived_memory_ids: &[MemoryId],
-    ) {
-        let edges = derived_memory_ids
-            .iter()
-            .map(|object_id| stats_edge(entity_id, *object_id))
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    async fn record_other_about_edges(stats: &InMemoryRetrievalStatsStore, count: u128) {
-        let edges = (0..count)
-            .map(|offset| {
-                stats_edge(
-                    Uuid::from_u128(0x650e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                    Uuid::from_u128(0x750e_8400_e29b_41d4_a716_4466_5544_0000 + offset),
-                )
-            })
-            .collect::<Vec<_>>();
-        stats.record_edges(&edges).await.unwrap();
-    }
-
-    fn stats_edge(entity_id: MemoryId, object_id: MemoryId) -> RetrievalStatsEdge {
-        let observed_at = timestamp();
-        RetrievalStatsEdge {
-            edge_key: format!("{}:about:derived_memory:{}", entity_id, object_id),
-            entity_id,
-            relation_kind: RelationType::About,
-            object_id,
-            object_type: ObjectType::DerivedMemory,
-            retention_state: RetentionState::Active,
-            is_current: true,
-            first_seen_at: observed_at,
-            last_seen_at: observed_at,
-        }
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 
     fn vector_candidate(

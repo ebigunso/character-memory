@@ -208,16 +208,13 @@ pub(crate) async fn selectivity_plan_for_entity(
     stats_context: &SelectivityStatsContext,
     lifecycle_policy: RetrievalLifecyclePolicy,
     trace_mode: TraceMode,
-    current_subject_state: bool,
 ) -> Result<SelectivityPlan, CustomError> {
     let mut plan = SelectivityPlan::default();
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
-        if current_subject_state
-            && matches!(spec.relation, RelationType::About | RelationType::Mentions)
-        {
+        if matches!(spec.relation, RelationType::About | RelationType::Mentions) {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
             if !plan
                 .fanout_overrides
@@ -572,7 +569,6 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Disabled,
-            false,
         )
         .await
         .unwrap();
@@ -585,17 +581,13 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
 
-        assert_eq!(
-            without_trace.telemetry.decision_count,
-            fanout_routes().len()
-        );
+        assert_eq!(without_trace.telemetry.decision_count, 2);
         assert!(without_trace.traces.is_empty());
-        assert_eq!(with_trace.traces.len(), fanout_routes().len());
+        assert_eq!(with_trace.traces.len(), 2);
     }
 
     #[tokio::test]
@@ -616,15 +608,23 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
+        assert_eq!(plan.telemetry.fallback_count, 2);
+        assert_eq!(
+            plan.traces
+                .iter()
+                .find(|trace| trace.relation == RelationType::PartOfThread)
+                .unwrap()
+                .max_fanout,
+            15
+        );
         assert!(plan
             .fanout_overrides
             .iter()
+            .filter(|override_| override_.relation != RelationType::About)
             .all(|override_| override_.max_fanout == 1));
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
@@ -632,72 +632,6 @@ mod tests {
                 && trace.chosen_fanout == 1
                 && trace.decision == SelectivityDecision::ConservativeFallback
         }));
-    }
-
-    #[tokio::test]
-    async fn selectivity_plan_uses_configured_fanout_budget() {
-        let stats = InMemoryRetrievalStatsStore::new();
-        let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462101").unwrap();
-        let derived_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462102").unwrap();
-        stats
-            .record_edges(&[RetrievalStatsEdge {
-                edge_key: format!("{entity_id}:about:derived_memory:current"),
-                entity_id,
-                relation_kind: RelationType::About,
-                object_id: derived_id,
-                object_type: ObjectType::DerivedMemory,
-                retention_state: crate::domain::RetentionState::Active,
-                is_current: true,
-                first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                last_seen_at: chrono::DateTime::UNIX_EPOCH,
-            }])
-            .await
-            .unwrap();
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-            1.0,
-            1.0,
-            [(RelationType::About, ObjectType::DerivedMemory, 4, 4)],
-        )
-        .unwrap();
-        let candidate = (entity_id, 0.95);
-
-        let plan = selectivity_plan_for_entity(
-            candidate.0,
-            candidate.1,
-            20,
-            &stats,
-            policy,
-            &stats_context,
-            RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-
-        let about = plan
-            .traces
-            .iter()
-            .find(|trace| {
-                trace.relation == RelationType::About
-                    && trace.object_type == ObjectType::DerivedMemory
-            })
-            .unwrap();
-        let part_of_thread = plan
-            .traces
-            .iter()
-            .find(|trace| {
-                trace.relation == RelationType::PartOfThread
-                    && trace.object_type == ObjectType::DerivedMemory
-            })
-            .unwrap();
-        assert_eq!(about.max_fanout, 4);
-        assert_eq!(about.chosen_fanout, 4);
-        assert_eq!(
-            part_of_thread.max_fanout, 15,
-            "pairs without an override keep their default budget"
-        );
     }
 
     #[tokio::test]
@@ -725,7 +659,6 @@ mod tests {
                 &stats_context,
                 RetrievalLifecyclePolicy::default(),
                 TraceMode::Enabled,
-                true,
             )
             .await
             .unwrap();
@@ -759,12 +692,11 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
+        assert_eq!(plan.telemetry.fallback_count, 2);
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
@@ -790,12 +722,11 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
 
-        assert_eq!(plan.telemetry.fallback_count, fanout_routes().len());
+        assert_eq!(plan.telemetry.fallback_count, 2);
         assert!(plan.traces.iter().all(|trace| {
             trace.fallback
                 && trace.chosen_fanout == 1
@@ -827,7 +758,6 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
@@ -865,7 +795,6 @@ mod tests {
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
-            false,
         )
         .await
         .unwrap();
@@ -873,137 +802,6 @@ mod tests {
         assert_eq!(plan.telemetry.decision_count, 0);
         assert!(plan.fanout_overrides.is_empty());
         assert!(plan.traces.is_empty());
-    }
-
-    #[tokio::test]
-    async fn selectivity_plan_uses_lifecycle_scoped_counts() {
-        let stats = InMemoryRetrievalStatsStore::new();
-        let entity_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462003").unwrap();
-        stats
-            .record_edges(&[
-                RetrievalStatsEdge {
-                    edge_key: format!("{entity_id}:about:derived_memory:current"),
-                    entity_id,
-                    relation_kind: RelationType::About,
-                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462004")
-                        .unwrap(),
-                    object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::domain::RetentionState::Active,
-                    is_current: true,
-                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
-                },
-                RetrievalStatsEdge {
-                    edge_key: format!("{entity_id}:about:derived_memory:non_current"),
-                    entity_id,
-                    relation_kind: RelationType::About,
-                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462005")
-                        .unwrap(),
-                    object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::domain::RetentionState::Active,
-                    is_current: false,
-                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
-                },
-                RetrievalStatsEdge {
-                    edge_key: format!("{entity_id}:about:derived_memory:suppressed"),
-                    entity_id,
-                    relation_kind: RelationType::About,
-                    object_id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462006")
-                        .unwrap(),
-                    object_type: ObjectType::DerivedMemory,
-                    retention_state: crate::domain::RetentionState::Suppressed,
-                    is_current: false,
-                    first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                    last_seen_at: chrono::DateTime::UNIX_EPOCH,
-                },
-            ])
-            .await
-            .unwrap();
-        let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
-        let candidate = (entity_id, 0.75);
-
-        let active_plan = selectivity_plan_for_entity(
-            candidate.0,
-            candidate.1,
-            20,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            RetrievalLifecyclePolicy {
-                include_superseded: true,
-                ..RetrievalLifecyclePolicy::default()
-            },
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let current_plan = selectivity_plan_for_entity(
-            candidate.0,
-            candidate.1,
-            20,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            RetrievalLifecyclePolicy::default(),
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-        let total_plan = selectivity_plan_for_entity(
-            candidate.0,
-            candidate.1,
-            20,
-            &stats,
-            RetrievalSelectivityPolicy::default(),
-            &stats_context,
-            RetrievalLifecyclePolicy {
-                include_suppressed: true,
-                ..RetrievalLifecyclePolicy::default()
-            },
-            TraceMode::Enabled,
-            false,
-        )
-        .await
-        .unwrap();
-
-        let active_about = active_plan
-            .traces
-            .iter()
-            .find(|trace| {
-                trace.relation == RelationType::About
-                    && trace.object_type == ObjectType::DerivedMemory
-            })
-            .unwrap();
-        assert_eq!(active_about.count_scope, SelectivityCountScope::Active);
-        assert_eq!(active_about.entity_count, Some(2));
-        assert_eq!(active_about.global_count, Some(2));
-
-        let current_about = current_plan
-            .traces
-            .iter()
-            .find(|trace| {
-                trace.relation == RelationType::About
-                    && trace.object_type == ObjectType::DerivedMemory
-            })
-            .unwrap();
-        assert_eq!(current_about.count_scope, SelectivityCountScope::Current);
-        assert_eq!(current_about.entity_count, Some(1));
-        assert_eq!(current_about.global_count, Some(1));
-
-        let total_about = total_plan
-            .traces
-            .iter()
-            .find(|trace| {
-                trace.relation == RelationType::About
-                    && trace.object_type == ObjectType::DerivedMemory
-            })
-            .unwrap();
-        assert_eq!(total_about.count_scope, SelectivityCountScope::Total);
-        assert_eq!(total_about.entity_count, Some(3));
-        assert_eq!(total_about.global_count, Some(3));
     }
 
     #[test]
