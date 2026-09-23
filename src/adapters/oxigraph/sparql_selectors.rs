@@ -1132,14 +1132,10 @@ fn oxigraph_sparql_error(error: impl std::fmt::Display) -> CustomError {
     CustomError::DatabaseError(format!("Oxigraph SPARQL selector error: {error}"))
 }
 
-// Selectors share the same clock as section ranking. Observation support is its
-// observed time, otherwise its parent scene; write time never substitutes for it.
+// Episode and state selectors share the same clock as section ranking.
 fn memory_time_expression(object_type: ObjectType) -> &'static str {
     match object_type {
         ObjectType::Episode => "xsd:dateTime(?sceneTime)",
-        ObjectType::Observation => {
-            "COALESCE(xsd:dateTime(?observedAt), xsd:dateTime(?parentSceneTime))"
-        }
         _ => "xsd:dateTime(?created)",
     }
 }

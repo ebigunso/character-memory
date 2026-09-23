@@ -1285,9 +1285,7 @@ enum RecallRoad {
 
 #[derive(Clone, Copy)]
 enum Contribution {
-    Notion,
     RootCap,
-    Members,
     CandidateCap,
     Description,
     Room,
@@ -1311,7 +1309,7 @@ impl RecallRoad {
                 GraphRootSource::Participant,
                 true,
                 true,
-                Notion,
+                RootCap,
                 false,
             ),
             Self::Place => (
@@ -1327,7 +1325,7 @@ impl RecallRoad {
                 GraphRootSource::Activity,
                 true,
                 true,
-                Members,
+                RootCap,
                 false,
             ),
             Self::Topic => (
@@ -1406,10 +1404,7 @@ impl RecallRoad {
                 .unwrap_or(0)
         };
         match self.rule().contribution {
-            Contribution::Notion => 1,
-            Contribution::RootCap | Contribution::Members => {
-                context.candidate_limits.max_graph_roots
-            }
+            Contribution::RootCap => context.candidate_limits.max_graph_roots,
             Contribution::CandidateCap => context.candidate_limits.max_vector_candidates,
             Contribution::Description => cue_floor(context.cue_floors, self.rule().kind).max(1),
             Contribution::Room => room(),
