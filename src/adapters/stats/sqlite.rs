@@ -297,24 +297,24 @@ fn initialize_schema(connection: &Connection) -> Result<(), RetrievalStatsStoreE
             );
 
             CREATE TABLE IF NOT EXISTS episode_state_index (
-                    episode_id TEXT PRIMARY KEY,
-                    retention_state TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS episode_counts (
-                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                    total_count INTEGER NOT NULL,
-                    active_count INTEGER NOT NULL
-                );
-                INSERT OR IGNORE INTO episode_counts (singleton, total_count, active_count) VALUES (1, 0, 0);
-                CREATE TABLE IF NOT EXISTS episode_presence_index (
-                    edge_key TEXT PRIMARY KEY,
-                    entity_id TEXT NOT NULL,
-                    episode_id TEXT NOT NULL,
-                    retention_state TEXT NOT NULL,
-                    is_current INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS episode_presence_entity ON episode_presence_index(entity_id, episode_id);
-                CREATE INDEX IF NOT EXISTS episode_presence_episode ON episode_presence_index(episode_id);
+                episode_id TEXT PRIMARY KEY,
+                retention_state TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS episode_counts (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                total_count INTEGER NOT NULL,
+                active_count INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO episode_counts (singleton, total_count, active_count) VALUES (1, 0, 0);
+            CREATE TABLE IF NOT EXISTS episode_presence_index (
+                edge_key TEXT PRIMARY KEY,
+                entity_id TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
+                retention_state TEXT NOT NULL,
+                is_current INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS episode_presence_entity ON episode_presence_index(entity_id, episode_id);
+            CREATE INDEX IF NOT EXISTS episode_presence_episode ON episode_presence_index(episode_id);
             ",
         )
         .map_err(sqlite_error)?;
