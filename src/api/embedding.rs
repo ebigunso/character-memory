@@ -8,7 +8,6 @@ use async_trait::async_trait;
 /// This trait defines the interface for embedding generation services.
 /// Implementations of this trait are responsible for converting text into
 /// numerical vector representations suitable for semantic operations.
-#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     /// Returns the dimensionality of embeddings produced by this provider.
