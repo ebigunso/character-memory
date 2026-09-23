@@ -855,7 +855,6 @@ mod tests {
 
     fn episode(id: MemoryId) -> Episode {
         Episode {
-            scene_local_date: None,
             id,
             object_type: ObjectType::Episode,
             modality: Modality::Chat,

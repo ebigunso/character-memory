@@ -74,6 +74,8 @@ pub enum CandidateValidationIssue {
     EmptyEpisodeSummary,
     #[error("episode scene must be present")]
     MissingScene,
+    #[error("scene time offset {offset_seconds} seconds must be a whole-minute RFC 3339 offset")]
+    InvalidSceneTimeOffset { offset_seconds: i32 },
     #[error("observation episode_id must reference an episode")]
     MissingEpisodeReference,
     #[error("derived memory must cite a source episode or observation, or declare application-given grounding")]

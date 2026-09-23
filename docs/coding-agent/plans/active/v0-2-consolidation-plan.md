@@ -135,6 +135,7 @@
   - `RetrievalContext.scene` loses its serde default, so the scene is required in JSON.
   - The lifecycle fields and filter reasons that only ever hold one value are removed (`api/types/retrieval.rs:713-739`).
   - The stored episode gains the given offset as its own value (seconds east of UTC) beside the unchanged UTC instant literal. Replay equality compares instant and offset, so a same-id write with the same instant and another offset is a new collision rejection.
+  - Scene offsets must be whole minutes within ±23:59 so public RFC 3339 JSON preserves them. Write-plan validation, commit and retrieval reject second-grain offsets with a typed error carrying the offset in seconds. Scene constructors and preparation helpers keep their infallible return shapes.
   - The domain and draft field `scene_local_date` is removed. The local date is `scene.time.date_naive()`, and the stored anniversary index is written from it.
   - The statistics store loses `has_episode_index` and `is_fresh`, and stores written earlier in the phase are no longer read.
   - The crate ports `GraphAuthorityStore`, `VectorCandidateStore` and `MemoryEmbedder` lose their `Box` forwarding impls. The public `EmbeddingProvider` keeps its impl.
@@ -169,7 +170,7 @@
 - A1: The base, the tip of `feature/2026-09-22/phase-correctness`, holds 1d0987f's retrieval shape plus the three phase fixes. The keyed-state read is bounded and ordered in the query, so the place order changes in that one query. Source: the phase fixes brief. Checked by Task_1 at dispatch; it stops and reports if the shape differs.
 - A2: Apart from the changes the tasks list (the anniversary budget, the score clamp, knowing-first by road, description spare turns, place reporting, expansion and order, per-kind section rounds, and the hint link), every acceptance of the scene-words and time plans holds unchanged. Source: those plans' promises restated as rows of the table. Checked by Tasks 1 to 3, which list every changed expectation with before and after from runs.
 - A3: The admitted ranked object's cue kinds can reach `memory_scenes` with no read. Source: pack building at `retrieve.rs:1042-1130` and `memory_scenes` at `scene.rs:350`. Checked by Task_4.
-- A4: Keeping the UTC instant literal unchanged, and storing the offset as a separate value, leaves every time read (recency, range, anniversary, participant occasions) exactly as it is for every offset chrono accepts, including ±23:00. Source: the Tier D probe, which showed that an offset-carrying literal at ±23:00 is left unbound by the query engine's cast while UTC storage works. Checked by Task_6's ±23:00 controls.
+- A4: Keeping the UTC instant literal unchanged, and storing the offset as a separate value, leaves every time read (recency, range, anniversary, participant occasions) exactly as it is for every RFC 3339 offset (whole minutes within ±23:59), including ±23:00. Source: the Tier D probe, which showed that an offset-carrying literal at ±23:00 is left unbound by the query engine's cast while UTC storage works. Checked by Task_6's ±23:00 controls; ruling 74 narrows admission to offsets that public JSON preserves.
 - A5: The keyed-setting and activity-pressure families exist in the evaluation repository, with before-numbers at the base, before Task_1 is dispatched. Source: the practice of ruling 51. This is a precondition of dispatch.
 
 ## Tasks
@@ -446,6 +447,7 @@
 - owns:
   - src/domain.rs
   - src/domain/scene.rs
+  - src/domain/write_validation.rs
   - src/api/types/draft.rs
   - src/adapters/oxigraph/rdf_mapping.rs
   - src/adapters/oxigraph/shared.rs
@@ -454,6 +456,7 @@
   - src/adapters/oxigraph/tests.rs
   - src/usecases/remember.rs
   - src/usecases/write_planning.rs
+  - src/usecases/retrieve.rs
   - src/memory/retrieval_time_tests.rs
   - tests/write_planning_tests.rs
   - tests/public_facade_tests.rs
@@ -471,15 +474,16 @@
 
   Delete the domain field `scene_local_date` (`domain.rs:303`, `api/types/draft.rs:157`, the compatibility read at `shared.rs:314`, and its tests at `oxigraph/tests.rs:129-160`). With the offset stored, `scene.time.date_naive()` gives the local date. Keep the stored year and month-day triples as the anniversary index, written from `scene.time` in `rdf_mapping.rs`.
 
-  Replay and collision equality compare instant and offset. No offset is newly rejected and the input contract does not narrow. The one new rejection is a same-id write with the same instant and a different offset, which is now a collision. Invert the pinning test.
+  Replay and collision equality compare instant and offset. A same-id write with the same instant and a different offset is a collision. Invert the pinning test. Under ruling 74, scene offsets are whole minutes within ±23:59, the offsets RFC 3339 can preserve. A shared scene-time check rejects offsets with a seconds part during write-plan validation before commit and during retrieval input validation, with a typed error carrying the offset in seconds. This catches hand-built and mutated plans too. Scene construction and preparation helpers remain infallible data assembly; no custom serializer or nonstandard JSON time format is added.
 
   `README.md:80` (at 0ce2f35) advises using the writes' offset at retrieval. Rewrite it to say what is true once the offset is stored: a scene time reads back as given, and the anniversary uses the local day of the offset each experience was written with.
 - acceptance:
-  - A +09:00, a +23:00 and a -23:00 scene time each read back with their offsets and exact fractional precision after a write and a reopen.
+  - A +09:00, a +23:00, a -23:00, a +23:59 and a -23:59 scene time each read back with their offsets and exact fractional precision after a write and a reopen, and the returned Scene round-trips through serde_json losslessly.
   - Order by instant is unchanged. Recency, range, anniversary and participant-occasion reads return the same results at ±23:00 as the parent.
   - The anniversary index is written from `scene.time`, and an anniversary at +09:00 and at ±23:00 matches the same local day as at the parent.
-  - A same-id write with the same instant and another offset is rejected as a collision (the new rejection, red at the parent), and the identical write replayed after reopening the store is accepted.
+  - A same-id write with the same instant and another supported offset is rejected as a collision (red at the parent), and the identical write replayed after reopening the store is accepted.
   - `scene_local_date` no longer exists in the domain, the draft type or the reads. A store at the latest schema initializes and reopens.
+  - Offsets of +1 second, ±30 seconds and ±86399 seconds are rejected by write-plan validation, commit and retrieval with the typed offset value; no invalid experience is persisted. Constructor and preparation return shapes are unchanged.
 - validation:
   - kind: command
     required: true
@@ -709,6 +713,13 @@ The tasks run in sequence, one worker at a time, because they share one crate an
   - Tradeoffs considered: none; each item lands in the task that already owns its file.
   - User approval: ruled by the coordinator.
   - Record proposed: none.
+
+- 2026-09-23 Decision: ruling 74 refines ruling 64's offset input contract after the Task_6 returned-Scene JSON probe.
+  - Trigger / new insight: an in-memory or persisted DateTime can retain a second-grain offset, but its RFC 3339 JSON cannot. A +1-second offset shifts the decoded instant; ±86399 seconds serialize as ±24:00 and fail decoding.
+  - Plan delta: accept whole-minute offsets within ±23:59, validate with one shared scene-time check at write-plan and retrieval admission, and test returned Scene JSON after write and reopen. Typed errors retain the rejected offset. Constructors and preparation helpers stay infallible because Scene.time remains public and mutable; validation catches authored and mutated input at the existing Result boundaries.
+  - Tradeoffs considered: a custom nonstandard time serializer was rejected because interoperable public JSON is worth more than retaining second-grain offsets; changing all constructor and preparation return shapes was rejected because it adds API churn without protecting mutable Scene values.
+  - User approval: ruled by the coordinator, including the narrower entry-boundary refinement.
+  - Record proposed: none; this refines the existing Task_6 contract.
 
 ## Notes
 - Risks:

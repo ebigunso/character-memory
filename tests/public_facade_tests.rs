@@ -5,6 +5,287 @@ use character_memory::{
 };
 use uuid::Uuid;
 
+mod scene_offset_behavior {
+    use super::test_support;
+    use character_memory::*;
+    use chrono::{DateTime, Duration, FixedOffset, Utc};
+
+    fn now() -> DateTime<Utc> {
+        "2026-09-23T12:00:00Z".parse().unwrap()
+    }
+
+    fn plan(id: MemoryId, time: DateTime<FixedOffset>) -> RememberWritePlan {
+        let mut episode = EpisodeDraft::new("an experience");
+        episode.id = Some(id);
+        episode.scene = Some(Scene::at(time));
+        RememberInput::new("an experience")
+            .with_episode(episode)
+            .prepare_write_plan(&RememberPlanDefaults::fixed("offset", now()))
+    }
+
+    fn query(time: DateTime<FixedOffset>) -> RetrievalContext {
+        let mut query = RetrievalContext::default()
+            .with_scene(Scene::at(time))
+            .with_trace();
+        query.graph_limits.timeout_ms = None;
+        query
+    }
+
+    #[tokio::test]
+    async fn scene_offsets_and_fractional_instants_survive_write_and_reopen() {
+        let mut readings = Vec::new();
+        for seconds in [9 * 3600, 23 * 3600, -23 * 3600, 86_340, -86_340] {
+            let root = tempfile::tempdir().unwrap();
+            let collection = test_support::unique_collection_name();
+            let time = "2025-09-21T00:30:00.123456789Z"
+                .parse::<DateTime<Utc>>()
+                .unwrap()
+                .with_timezone(&FixedOffset::east_opt(seconds).unwrap());
+            let plan = plan(MemoryId::from_u128(100), time);
+            let memory = test_support::try_setup_persistent_character_memory(
+                collection.clone(),
+                root.path(),
+                None,
+            )
+            .await
+            .unwrap();
+            let first = memory
+                .commit(plan.clone(), CommitOptions::default())
+                .await
+                .unwrap();
+            let before = memory.retrieve(query(now().fixed_offset())).await.unwrap();
+            memory.close().await.unwrap();
+            let memory =
+                test_support::try_setup_persistent_character_memory(collection, root.path(), None)
+                    .await
+                    .unwrap();
+            let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+            assert_eq!(first, replay);
+            let after = memory.retrieve(query(now().fixed_offset())).await.unwrap();
+            readings.push((
+                time,
+                before.pack.relevant_episodes[0].scene.clone(),
+                after.pack.relevant_episodes[0].scene.clone(),
+            ));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (given, before, after) in readings {
+            for saved in [before, after] {
+                assert_eq!(saved.time.naive_utc(), given.naive_utc());
+                assert_eq!(saved.time.offset(), given.offset());
+                let json = serde_json::to_string(&saved).unwrap();
+                assert_eq!(serde_json::from_str::<Scene>(&json).unwrap(), saved);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn second_offsets_are_rejected_at_write_and_retrieval_admission() {
+        let mut readings = Vec::new();
+        for seconds in [1, -1, 30, -30, 86_399, -86_399] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let time = now().with_timezone(&FixedOffset::east_opt(seconds).unwrap());
+            let scene = Scene::at(time);
+            let mut draft = EpisodeDraft::new("invalid offset");
+            draft.scene = Some(scene.clone());
+            let domain = matches!(draft.into_domain(), Err(DomainValidationError::InvalidSceneTimeOffset { offset_seconds }) if offset_seconds == seconds);
+            let prepared = memory
+                .prepare(
+                    RememberInput::new("invalid offset").with_scene(scene.clone()),
+                    PrepareOptions::default(),
+                )
+                .await
+                .unwrap();
+            let validations = memory.validate_plan(&prepared).await.unwrap();
+            let expected = CandidateValidationIssue::InvalidSceneTimeOffset {
+                offset_seconds: seconds,
+            };
+            let invalid_episode = |validations: &[CandidateValidation]| {
+                validations.iter().any(|entry| {
+                    entry.candidate_kind == MemoryCandidateKind::Episode
+                        && entry.status == CandidateValidationStatus::Invalid
+                        && entry.errors == vec![expected.clone()]
+                })
+            };
+            let validate = invalid_episode(&validations);
+            // Directly mutated candidates must take the same admission path.
+            let mut authored = plan(MemoryId::from_u128(100), now().fixed_offset());
+            for candidate in &mut authored.candidates {
+                if let MemoryCandidate::Episode(candidate) = candidate {
+                    candidate.draft.scene = Some(Scene {
+                        time,
+                        ..Scene::now()
+                    });
+                }
+            }
+            let mutated_validate = invalid_episode(&memory.validate_plan(&authored).await.unwrap());
+            let commit = matches!(memory.commit(authored, CommitOptions::default()).await,
+                Err(CustomError::WritePlanValidationRejected { validations }) if invalid_episode(&validations));
+            let remember = matches!(memory.remember(
+                RememberInput::new("invalid offset").with_scene(scene),
+                RememberOptions::default(),
+            ).await, Err(CustomError::WritePlanValidationRejected { validations }) if invalid_episode(&validations));
+            let retrieve = matches!(memory.retrieve(query(time)).await,
+                Err(CustomError::DomainValidation(DomainValidationError::InvalidSceneTimeOffset { offset_seconds })) if offset_seconds == seconds);
+            let unchanged = memory
+                .retrieve(query(now().fixed_offset()))
+                .await
+                .unwrap()
+                .pack
+                .relevant_episodes
+                .is_empty();
+            readings.push((
+                seconds,
+                domain,
+                validate,
+                mutated_validate,
+                commit,
+                remember,
+                retrieve,
+                unchanged,
+            ));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (seconds, domain, validate, mutated_validate, commit, remember, retrieve, unchanged) in
+            readings
+        {
+            assert!(domain && validate && mutated_validate && commit && remember && retrieve && unchanged,
+                "offset {seconds}: domain={domain}, validate={validate}, mutated_validate={mutated_validate}, commit={commit}, remember={remember}, retrieve={retrieve}, unchanged={unchanged}");
+        }
+    }
+
+    #[tokio::test]
+    async fn same_instant_with_another_offset_is_an_episode_collision() {
+        for (hours, other) in [(9, 10), (23, 22), (-23, -22)] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let time = "2025-09-21T12:30:00.123456789Z"
+                .parse::<DateTime<Utc>>()
+                .unwrap()
+                .with_timezone(&FixedOffset::east_opt(hours * 3600).unwrap());
+            let changed = time.with_timezone(&FixedOffset::east_opt(other * 3600).unwrap());
+            // The old local-date equality accepted these: the local day stays the same.
+            assert_eq!(time.date_naive(), changed.date_naive());
+            let id = MemoryId::from_u128(100);
+            memory
+                .commit(plan(id, time), CommitOptions::default())
+                .await
+                .unwrap();
+            let result = memory
+                .commit(plan(id, changed), CommitOptions::default())
+                .await;
+            let collision = matches!(result, Err(CustomError::DeterministicIdCollision { object })
+                if object == MemoryObjectRef::new(ObjectType::Episode, id));
+            test_support::close_and_remove_root(memory, root).await;
+            assert!(collision, "offset pair {hours} -> {other}");
+        }
+    }
+
+    #[tokio::test]
+    async fn time_roads_keep_instant_order_and_the_authored_anniversary_day() {
+        for reverse in [false, true] {
+            let id = |n| MemoryId::from_u128(if reverse { 100_000 - n } else { n });
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut entity = EntityDraft::new();
+            entity.id = Some(id(7));
+            let times = [
+                "2025-09-21T00:30:00.123456789+23:00",
+                "2025-09-20T23:30:00.123456789-23:00",
+                "2025-09-21T00:30:00.123456789+09:00",
+            ]
+            .map(|time| time.parse::<DateTime<FixedOffset>>().unwrap());
+            for (index, time) in times.iter().enumerate() {
+                let mut episode = EpisodeDraft::new("an occasion");
+                episode.id = Some(id(100 + index as u128));
+                let mut scene = Scene::at(*time);
+                scene.participants.push(SceneParticipant {
+                    key: Some(id(7)),
+                    ..Default::default()
+                });
+                episode.scene = Some(scene);
+                let input = RememberInput::new("an occasion")
+                    .with_entity(entity.clone())
+                    .with_episode(episode);
+                memory
+                    .commit(
+                        input.prepare_write_plan(&RememberPlanDefaults::fixed(
+                            format!("offset roads {index}"),
+                            now(),
+                        )),
+                        CommitOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let context = query("2025-09-22T12:00:00Z".parse().unwrap());
+            let range = context
+                .clone()
+                .with_time_range(times[0].to_utc(), times[2].to_utc());
+            let as_of = query(times[2]);
+            let mut participant = query(times[2]);
+            participant.scene.participants.push(SceneParticipant {
+                key: Some(id(7)),
+                ..Default::default()
+            });
+            for (name, context, expected) in [
+                ("recency", context, vec![101, 102, 100]),
+                ("range", range, vec![102, 100]),
+                ("as_of", as_of, vec![102, 100]),
+                ("participant", participant, vec![102, 100]),
+            ] {
+                let result = memory.retrieve(context).await.unwrap();
+                assert_eq!(
+                    result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .map(|episode| episode.id)
+                        .collect::<Vec<_>>(),
+                    expected.into_iter().map(id).collect::<Vec<_>>(),
+                    "{reverse} {name}"
+                );
+                if name == "participant" {
+                    let last = result.scene_references[0].last_interactions[&id(7)]
+                        .as_ref()
+                        .unwrap();
+                    assert_eq!(last.episode_id, id(102));
+                    assert_eq!(last.scene_time, times[2].to_utc());
+                    assert_eq!(last.seconds_since, 0);
+                }
+            }
+            for (name, local, expected) in [
+                ("plus09", "2026-09-21T12:00:00+09:00", vec![102, 100]),
+                ("plus23", "2026-09-21T12:00:00+23:00", vec![102, 100]),
+                ("minus23", "2026-09-20T12:00:00-23:00", vec![101]),
+            ] {
+                let context = query(local.parse().unwrap());
+                for (shift, expected) in [(0, expected), (2, vec![])] {
+                    let mut context = context.clone();
+                    context.scene.time += Duration::days(shift);
+                    let result = memory.retrieve(context).await.unwrap();
+                    let matched = result
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .section_assignments
+                        .iter()
+                        .filter(|row| {
+                            row.object.object_type == ObjectType::Episode
+                                && row.cue_kinds.contains(&CueKind::DateMatch)
+                        })
+                        .map(|row| row.object.id)
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        matched,
+                        expected.into_iter().map(id).collect::<Vec<_>>(),
+                        "{reverse} {name}-{shift}"
+                    );
+                }
+            }
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+}
+
 mod road_behavior {
     use super::test_support;
     use character_memory::api::types::{CueFloorStage, RetrievalCueFloors, TimeRange};

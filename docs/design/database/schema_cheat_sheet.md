@@ -59,7 +59,8 @@ Predicate names in these tables are suffixes under `urn:cmem:vocab:`.
 | `createdAt`, `updatedAt` | Timestamps on the types that declare them |
 | `modality`, `endedAt` | Episode modality and optional interval end |
 | `sceneTime` | Required experience instant, stored in UTC without precision loss |
-| `sceneLocalYear`, `sceneMonthDay` | Local date derived from the supplied scene offset; exact anniversary match and replay equality |
+| `sceneOffsetSeconds` | Required supplied offset in seconds east of UTC; hydration restores it and replay equality compares it |
+| `sceneLocalYear`, `sceneMonthDay` | Anniversary index derived from `scene.time`'s local date |
 | `sceneParticipants` | Lossless JSON array of participants, each with optional key, name and description; a key or nonblank words required |
 | `settingKey`, `settingWords` | Independently optional context key and words; the key is directly queryable |
 | `sceneCustomValues` | Lossless JSON object of string custom values |

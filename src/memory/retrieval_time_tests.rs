@@ -1923,7 +1923,7 @@ fn ann_dates(result: &RetrieveOutcome) -> Vec<u128> {
 }
 
 #[tokio::test]
-async fn anniversary_local_date_is_persisted_content() {
+async fn scene_offset_is_persisted_content() {
     let root = tempfile::tempdir().unwrap();
     let memory = ann_reopen(root.path()).await;
     let plan = ann_episode(
@@ -1952,17 +1952,6 @@ async fn anniversary_local_date_is_persisted_content() {
     assert!(
         matches!(collision, Err(CustomError::DeterministicIdCollision { object }) if object.id == id(900))
     );
-    commit(
-        &memory,
-        ann_episode(
-            RememberWritePlan::new(),
-            900,
-            "2025-09-21T09:00:00.123456789+10:00",
-            false,
-            false,
-        ),
-    )
-    .await;
     let context = ann_query("2026-09-21T20:00:00+09:00", false, false, 8);
     let result = memory.retrieve(context.clone()).await.unwrap();
     let saved = &result.pack.relevant_episodes[0];
@@ -1971,9 +1960,12 @@ async fn anniversary_local_date_is_persisted_content() {
             .scene
             .time
             .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-        "2025-09-20T23:00:00.123456789Z"
+        "2025-09-21T08:00:00.123456789+09:00"
     );
-    assert_eq!(saved.scene_local_date, Some("2025-09-21".parse().unwrap()));
+    assert_eq!(
+        saved.scene.time.date_naive(),
+        "2025-09-21".parse::<chrono::NaiveDate>().unwrap()
+    );
     assert_eq!(ann_dates(&result), [900]);
     let mut no_trace = context;
     no_trace.include_trace = false;
