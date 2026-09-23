@@ -1337,24 +1337,15 @@ impl WritePlanCommitValues {
                     }
                 }
                 MemoryObject::Episode(episode) => {
-                    let sources = std::iter::once(object.object_ref())
-                        .chain(objects.iter().filter_map(|object| match object {
-                            MemoryObject::Observation(observation)
-                                if observation.episode_id == episode.id =>
-                            {
-                                Some(object.object_ref())
-                            }
-                            _ => None,
-                        }))
-                        .collect::<HashSet<_>>();
                     let mut linked = links
                         .iter()
+                        .filter(|link| link.relation == RelationType::Involves)
                         .filter_map(|link| {
                             let from = MemoryObjectRef::new(link.from_type, link.from_id);
                             let to = MemoryObjectRef::new(link.to_type, link.to_id);
-                            if sources.contains(&from) && to.object_type == ObjectType::Entity {
+                            if from == object.object_ref() && to.object_type == ObjectType::Entity {
                                 Some(to.id)
-                            } else if sources.contains(&to)
+                            } else if to == object.object_ref()
                                 && from.object_type == ObjectType::Entity
                             {
                                 Some(from.id)

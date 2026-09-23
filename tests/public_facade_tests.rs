@@ -108,6 +108,87 @@ mod road_behavior {
     }
 
     #[tokio::test]
+    async fn only_episode_involves_deduplicates_present_participants() {
+        let mut outcomes = Vec::new();
+        for reverse in [false, true] {
+            for backward in [false, true] {
+                for relation in [
+                    RelationType::Mentions,
+                    RelationType::About,
+                    RelationType::Involves,
+                ] {
+                    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                    let mut person = EntityDraft::new();
+                    person.id = Some(id(10, reverse));
+                    let mut source = EpisodeDraft::new("Alex was here");
+                    source.id = Some(id(100, reverse));
+                    source.scene = Some(Scene {
+                        participants: vec![SceneParticipant {
+                            key: person.id,
+                            ..Default::default()
+                        }],
+                        ..Scene::at(time().fixed_offset())
+                    });
+                    let mut observation =
+                        ObservationDraft::new(id(100, reverse), "Alex discussed the ferry");
+                    observation.id = Some(id(200, reverse));
+                    let (kind, source_id) = if relation == RelationType::Involves {
+                        (ObjectType::Episode, id(100, reverse))
+                    } else {
+                        (ObjectType::Observation, id(200, reverse))
+                    };
+                    let link = if backward {
+                        MemoryLinkDraft::new(
+                            ObjectType::Entity,
+                            id(10, reverse),
+                            relation,
+                            kind,
+                            source_id,
+                        )
+                    } else {
+                        MemoryLinkDraft::new(
+                            kind,
+                            source_id,
+                            relation,
+                            ObjectType::Entity,
+                            id(10, reverse),
+                        )
+                    };
+                    let plan = RememberInput::new("presence and aboutness")
+                        .with_entity(person)
+                        .with_episode(source)
+                        .with_observation(observation)
+                        .with_memory_link(link)
+                        .prepare_write_plan(&RememberPlanDefaults::fixed(
+                            "presence and aboutness",
+                            time(),
+                        ));
+                    let outcome = memory.commit(plan, CommitOptions::default()).await.unwrap();
+                    test_support::close_and_remove_root(memory, root).await;
+                    outcomes.push((
+                        reverse,
+                        backward,
+                        relation,
+                        outcome.persisted_link_ids.len(),
+                    ));
+                }
+            }
+        }
+        for (reverse, backward, relation, count) in outcomes {
+            // ObservedIn plus presence; caller aboutness is independently preserved.
+            assert_eq!(
+                count,
+                if relation == RelationType::Involves {
+                    2
+                } else {
+                    3
+                },
+                "reverse={reverse} backward={backward} relation={relation:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_present_person_reaches_the_observation_through_its_episode() {
         let mut results = Vec::new();
         for reverse in [false, true] {
