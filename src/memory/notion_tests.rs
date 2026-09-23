@@ -432,13 +432,17 @@ async fn every_belief_subject_is_linked_and_counted_once() {
             )
             .await
             .unwrap();
-        assert_eq!(ordinary_outcome.persisted_link_ids.len(), 1);
+        // Ruling 69: ObservedIn accompanies the subject's About link.
+        assert_eq!(ordinary_outcome.persisted_link_ids.len(), 2);
         let plain_link = graph
             .query_links_by_ids(&ordinary_outcome.persisted_link_ids)
             .await
             .unwrap();
-        assert_eq!(plain_link[0].to_id, subject);
-        assert_eq!(plain_link[0].relation, RelationType::About);
+        let about = plain_link
+            .iter()
+            .find(|link| link.relation == RelationType::About)
+            .unwrap();
+        assert_eq!(about.to_id, subject);
         let counter = memory
             .memory_composition
             .stats_store
@@ -776,7 +780,12 @@ async fn authored_belief_about_links_are_rejected_in_both_directions() {
         .query_links_by_ids(&first.persisted_link_ids)
         .await
         .unwrap();
-    assert!(matches!(derived.as_slice(), [link]
+    // Ruling 69: the structural source link is independent of the derived About link.
+    let about = derived
+        .iter()
+        .filter(|link| link.relation == RelationType::About)
+        .collect::<Vec<_>>();
+    assert!(matches!(about.as_slice(), [link]
         if link.from_id == belief_id && link.from_type == ObjectType::DerivedMemory
         && link.to_id == subject && link.to_type == ObjectType::Entity && link.relation == RelationType::About));
     for draft in &rejected {

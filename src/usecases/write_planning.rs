@@ -164,7 +164,7 @@ impl RememberInput {
             )));
         }
 
-        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id, &scene) {
+        for link in self.caller_hint_links(defaults, refs.episode_id, refs.observation_id) {
             plan = plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
                 link,
                 self.helper_provenance()
@@ -335,7 +335,6 @@ impl RememberInput {
         defaults: &RememberPlanDefaults,
         episode_id: MemoryId,
         observation_id: MemoryId,
-        scene: &Scene,
     ) -> Vec<MemoryLinkDraft> {
         let mut links = Vec::new();
         for (index, entity_id) in self.entity_ids.iter().copied().enumerate() {
@@ -349,24 +348,6 @@ impl RememberInput {
                 ),
                 defaults,
                 defaults.stable_id(format!("hint-link:entity:{index}")),
-            ));
-        }
-        let mut seen = HashSet::new();
-        for (index, participant_id) in scene
-            .participant_keys()
-            .filter(|id| seen.insert(*id))
-            .enumerate()
-        {
-            links.push(complete_link_draft(
-                MemoryLinkDraft::new(
-                    ObjectType::Observation,
-                    observation_id,
-                    RelationType::Mentions,
-                    ObjectType::Entity,
-                    participant_id,
-                ),
-                defaults,
-                defaults.stable_id(format!("hint-link:participant:{index}")),
             ));
         }
         for (index, thread_id) in self.thread_ids.iter().copied().enumerate() {
@@ -1329,6 +1310,32 @@ impl WritePlanCommitValues {
         for object in &objects {
             match object {
                 MemoryObject::DerivedMemory(memory) => links.extend(derived_memory_links(memory)),
+                MemoryObject::Observation(observation) => {
+                    if !links.iter().any(|link| {
+                        link.from_type == ObjectType::Observation
+                            && link.from_id == observation.id
+                            && link.to_type == ObjectType::Episode
+                            && link.to_id == observation.episode_id
+                            && link.relation == RelationType::ObservedIn
+                    }) {
+                        links.push(MemoryLink {
+                            id: deterministic_uuid(&[
+                                b"character_memory.observation.episode_link",
+                                observation.id.as_bytes(),
+                                observation.episode_id.as_bytes(),
+                            ]),
+                            object_type: ObjectType::MemoryLink,
+                            from_id: observation.id,
+                            from_type: ObjectType::Observation,
+                            to_id: observation.episode_id,
+                            to_type: ObjectType::Episode,
+                            relation: RelationType::ObservedIn,
+                            rationale: None,
+                            created_at: observation.created_at,
+                            schema_version: observation.schema_version.clone(),
+                        });
+                    }
+                }
                 MemoryObject::Episode(episode) => {
                     let sources = std::iter::once(object.object_ref())
                         .chain(objects.iter().filter_map(|object| match object {

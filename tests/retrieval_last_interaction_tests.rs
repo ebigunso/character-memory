@@ -394,10 +394,12 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
     assert_eq!(
         tight_occasions,
         vec![
-            BTreeSet::from([id(401)]),
-            BTreeSet::from([id(401)]),
+            // Rulings 46 and 69: recency brings the notion-creation observation.
             BTreeSet::from([id(401), notion_episode]),
             BTreeSet::from([id(401), notion_episode]),
+            // Ruling 69: real Mentions also reaches its parent, which takes the episode slot.
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401)]),
         ]
     );
 }

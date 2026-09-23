@@ -247,6 +247,22 @@ fn selected_cues(result: &RetrieveOutcome, object: MemoryObjectRef) -> &BTreeSet
         .cue_kinds
 }
 
+fn participant_observations(result: &RetrieveOutcome) -> Vec<MemoryId> {
+    result
+        .pack
+        .salient_observations
+        .iter()
+        .filter(|observation| {
+            selected_cues(
+                result,
+                MemoryObjectRef::new(ObjectType::Observation, observation.id),
+            )
+            .contains(&CueKind::Participant)
+        })
+        .map(|observation| observation.id)
+        .collect()
+}
+
 #[tokio::test]
 async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget() {
     let (memory, _) = scene_memory().await;
@@ -280,7 +296,8 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
     let combined = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(
         selected_cues(&combined, object),
-        &BTreeSet::from([CueKind::Topic, CueKind::Participant]),
+        // Rulings 46 and 69: recency also brings the occasion's observation.
+        &BTreeSet::from([CueKind::Topic, CueKind::Participant, CueKind::Recency]),
         "{:#?}",
         combined.trace
     );
@@ -462,7 +479,8 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
     };
     let result = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(counts(&result), (Some(1), Some(2)));
-    assert_eq!(result.pack.salient_observations.len(), 1);
+    // Rulings 46 and 69: recency can bring other observations; this asserts the participant route.
+    assert_eq!(participant_observations(&result).len(), 1);
     memory
         .forget(ForgetMemoryDraft::suppress(
             LifecycleTargetRef::episode(episode),
@@ -617,8 +635,12 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
     context.scene.participants.push(keyed(100));
     context.graph_limits.max_depth = 1;
     let first = memory.retrieve(context.clone()).await.unwrap();
-    let assert_lifecycle_evidence = |result: &RetrieveOutcome| {
-        assert_eq!(result.rationale.lifecycle_omission_count, 1);
+    let assert_lifecycle_evidence = |result: &RetrieveOutcome, excluded: &[MemoryId]| {
+        // Rulings 46 and 69: participant and recency both encounter the suppressed observation.
+        assert_eq!(
+            result.rationale.lifecycle_omission_count,
+            excluded.len() + 1
+        );
         let trace = result.trace.as_ref().unwrap();
         assert_eq!(
             trace
@@ -626,8 +648,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 .iter()
                 .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
                 .map(|decision| decision.object.id)
-                .collect::<Vec<_>>(),
-            vec![latest_observation]
+                .collect::<BTreeSet<_>>(),
+            excluded.iter().copied().collect::<BTreeSet<_>>()
         );
         let utilization = trace
             .fanout_utilization
@@ -640,8 +662,8 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
         // One extra eligible occasion is fetched to retain the omission indication.
         assert_eq!(utilization.omitted_by_fanout_count, 1);
     };
-    assert_lifecycle_evidence(&first);
-    // Suppression after the occasion budget fills must not inflate lifecycle evidence.
+    assert_lifecycle_evidence(&first, &[latest_observation]);
+    // Rulings 46 and 69: the participant budget is unchanged; recency may encounter the old remark.
     memory
         .forget(ForgetMemoryDraft::suppress(
             LifecycleTargetRef::observation(MemoryId::from_u128(50_001)),
@@ -650,21 +672,20 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
         .await
         .unwrap();
     let after_older = memory.retrieve(context.clone()).await.unwrap();
-    assert_lifecycle_evidence(&after_older);
-    assert_eq!(first.pack, after_older.pack);
+    assert_lifecycle_evidence(
+        &after_older,
+        &[latest_observation, MemoryId::from_u128(50_001)],
+    );
+    assert_eq!(
+        participant_observations(&first),
+        participant_observations(&after_older)
+    );
     let mut untraced = context.clone();
     untraced.include_trace = false;
     let untraced = memory.retrieve(untraced).await.unwrap();
-    assert_eq!(untraced.pack, first.pack);
-    assert_eq!(untraced.rationale.lifecycle_omission_count, 1);
-    let observation_ids = |result: RetrieveOutcome| {
-        result
-            .pack
-            .salient_observations
-            .into_iter()
-            .map(|observation| observation.id)
-            .collect::<Vec<_>>()
-    };
+    assert_eq!(untraced.pack, after_older.pack);
+    assert_eq!(untraced.rationale.lifecycle_omission_count, 3);
+    let observation_ids = |result: RetrieveOutcome| participant_observations(&result);
     assert_eq!(
         observation_ids(memory.retrieve(context.clone()).await.unwrap()),
         vec![if active_sibling {
@@ -767,7 +788,15 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
             usize::from(!forget_last)
         );
         assert!(result.pack.salient_observations.is_empty());
-        assert_eq!(result.rationale.lifecycle_omission_count, 2);
+        // Rulings 46 and 69: the surviving recency root also encounters its suppressed observation.
+        assert_eq!(
+            result.rationale.lifecycle_omission_count,
+            2 + usize::from(!forget_last)
+        );
+        let mut excluded = BTreeSet::from([latest_episode, latest_observation]);
+        if !forget_last {
+            excluded.insert(MemoryId::from_u128(50_001));
+        }
         let trace = result.trace.unwrap();
         assert_eq!(
             trace
@@ -776,7 +805,7 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
                 .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
                 .map(|decision| decision.object.id)
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from([latest_episode, latest_observation])
+            excluded
         );
         for row in trace.fanout_utilization {
             if row.root.id != MemoryId::from_u128(100) {
@@ -886,6 +915,17 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                                 .pack
                                 .salient_observations
                                 .iter()
+                                // Rulings 46 and 69: the recency road has its own occasion contribution.
+                                .filter(|observation| {
+                                    selected_cues(
+                                        result,
+                                        MemoryObjectRef::new(
+                                            ObjectType::Observation,
+                                            observation.id,
+                                        ),
+                                    )
+                                    .contains(&CueKind::Participant)
+                                })
                                 .map(|observation| observation.episode_id),
                         )
                         .collect::<BTreeSet<_>>();
@@ -896,7 +936,7 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                     );
                     assert_eq!(result.pack.relevant_episodes.len(), count.min(8) as usize);
                     assert_eq!(
-                        result.pack.salient_observations.len(),
+                        participant_observations(result).len(),
                         usize::from(mentions)
                     );
                 }
@@ -983,11 +1023,20 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 .await
                 .unwrap();
             let trace = result.trace.as_ref().unwrap();
-            let relation = if caller_built {
-                RelationType::Involves
-            } else {
-                RelationType::Mentions
-            };
+            // Ruling 69: both write paths record presence on episodes; assert the recalled beliefs.
+            let relation = RelationType::Involves;
+            assert_eq!(
+                result
+                    .pack
+                    .derived_memories
+                    .iter()
+                    .map(|entry| entry.memory.id)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    MemoryId::from_u128(ubiquitous + 1000),
+                    MemoryId::from_u128(rare + 1000)
+                ]),
+            );
             let retained = |id, relation| {
                 trace
                     .fanout_utilization
@@ -1008,8 +1057,6 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 ubiquitous,
                 retained(ubiquitous, relation),
                 retained(rare, relation),
-                retained(ubiquitous, RelationType::About),
-                result.pack.relevant_episodes.len() + result.pack.salient_observations.len(),
                 counts,
             ));
             assert!(queries.lock().unwrap().is_empty());
@@ -1019,17 +1066,9 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
     let expected = [false, true]
         .into_iter()
         .flat_map(|caller_built| {
-            [100, 101].into_iter().map(move |ubiquitous| {
-                (
-                    caller_built,
-                    ubiquitous,
-                    1,
-                    3,
-                    1,
-                    if caller_built { 8 } else { 12 },
-                    Some((24, 24)),
-                )
-            })
+            [100, 101]
+                .into_iter()
+                .map(move |ubiquitous| (caller_built, ubiquitous, 1, 3, Some((24, 24))))
         })
         .collect::<Vec<_>>();
     assert_eq!(observed, expected);
@@ -1082,7 +1121,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
         })
     );
     assert_eq!(unknown.pack.relevant_episodes.len(), 1);
-    assert_eq!(unknown.memory_scenes.len(), 1);
+    // Rulings 46 and 69: recency reports both the episode and its observation's scene.
+    assert_eq!(unknown.memory_scenes.len(), 2);
     assert_eq!(
         found.activity,
         Some(ActivityResult {
@@ -1100,7 +1140,13 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     );
     assert!(found.pack.active_threads.is_empty());
     assert!(
-        found.trace.as_ref().unwrap().graph_relations.is_empty(),
+        found
+            .trace
+            .as_ref()
+            .unwrap()
+            .graph_relations
+            .iter()
+            .all(|link| link.relation == RelationType::ObservedIn),
         "native affiliation requires no link"
     );
     assert!(queries.lock().unwrap().is_empty());
@@ -1150,7 +1196,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     let empty = memory.retrieve(untraced.clone()).await.unwrap();
     assert_eq!(empty.activity, found.activity);
     assert_eq!(empty.pack.relevant_episodes.len(), 1);
-    assert_eq!(empty.memory_scenes.len(), 1);
+    // Rulings 46 and 69: the observation's scene remains after the beliefs are suppressed.
+    assert_eq!(empty.memory_scenes.len(), 2);
     assert!(empty.trace.is_none());
     untraced.lifecycle_policy.include_suppressed = true;
     assert_eq!(
@@ -1228,7 +1275,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     ] {
         assert_eq!(
             selected_cues(&found, object),
-            &if object.object_type == ObjectType::Episode {
+            // Rulings 46 and 69: recency also reaches the observation on this occasion.
+            &if matches!(
+                object.object_type,
+                ObjectType::Episode | ObjectType::Observation
+            ) {
                 BTreeSet::from([CueKind::Activity, CueKind::Recency])
             } else {
                 BTreeSet::from([CueKind::Activity])
@@ -1282,7 +1333,8 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
             })
         );
         assert_eq!(unknown.pack.relevant_episodes.len(), 3);
-        assert_eq!(unknown.memory_scenes.len(), 3);
+        // Rulings 46 and 69: each recency occasion also brings its observation's scene.
+        assert_eq!(unknown.memory_scenes.len(), 6);
         let expansions = unknown.trace.unwrap().graph_expansions;
         assert_eq!(expansions.len(), 3);
         assert!(expansions
@@ -1321,7 +1373,8 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     let superseded = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(superseded.activity, found.activity);
     assert_eq!(superseded.pack.relevant_episodes[0].id, episode_id);
-    assert_eq!(superseded.memory_scenes.len(), 4);
+    // Rulings 46 and 69: the four recency occasions also bring their observations.
+    assert_eq!(superseded.memory_scenes.len(), 8);
     assert_eq!(
         selected_cues(
             &superseded,
@@ -1531,7 +1584,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .await
         .unwrap();
     assert_eq!(empty.pack.relevant_episodes.len(), 2);
-    assert_eq!(empty.memory_scenes.len(), 2);
+    // Rulings 46 and 69: the two occasions also bring their observations.
+    assert_eq!(empty.memory_scenes.len(), 4);
     assert!(empty.trace.is_none());
     let references = &empty.scene_references;
     assert_eq!(references[0].resolution, SceneReferenceResolution::Unknown);

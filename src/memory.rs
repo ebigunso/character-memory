@@ -220,7 +220,8 @@ mod tests {
             .expect("remember facade should persist through injected parts");
 
         assert!(outcome.persisted_object_ids.contains(&entity_id));
-        assert_eq!(outcome.persisted_link_ids, Vec::<MemoryId>::new());
+        // Ruling 69: the source observation has one structural ObservedIn link.
+        assert_eq!(outcome.persisted_link_ids.len(), 1);
         assert!(!outcome.vector_indexed_object_ids.contains(&entity_id));
         assert_eq!(outcome.vector_indexing_failure, None);
     }
@@ -1556,19 +1557,15 @@ mod tests {
                 let mut distinct = keys.iter().flatten().copied().collect::<Vec<_>>();
                 distinct.sort_unstable();
                 distinct.dedup();
-                assert_eq!(links.len(), distinct.len());
+                // Ruling 69: presence belongs to the episode; observations also have ObservedIn.
+                assert_eq!(links.len(), distinct.len() + usize::from(!episode_only));
                 for key in distinct {
                     assert_eq!(
                         links
                             .iter()
                             .filter(|l| l.to_id == Uuid::from_u128(key)
                                 && l.to_type == ObjectType::Entity
-                                && l.relation
-                                    == if episode_only {
-                                        RelationType::Involves
-                                    } else {
-                                        RelationType::Mentions
-                                    })
+                                && l.relation == RelationType::Involves)
                             .count(),
                         1
                     );

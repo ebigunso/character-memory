@@ -107,6 +107,224 @@ mod road_behavior {
             .collect()
     }
 
+    #[tokio::test]
+    async fn a_present_person_reaches_the_observation_through_its_episode() {
+        let mut results = Vec::new();
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut person = EntityDraft::new();
+            person.id = Some(id(10, reverse));
+            let mut scene = Scene::at((time() - Duration::days(1)).fixed_offset());
+            scene.participants.push(SceneParticipant {
+                key: person.id,
+                ..Default::default()
+            });
+            let mut source = EpisodeDraft::new("Alex described the lighthouse repair");
+            source.id = Some(id(100, reverse));
+            source.scene = Some(scene);
+            let mut observation =
+                ObservationDraft::new(id(100, reverse), "Alex plans to repair the lighthouse");
+            observation.id = Some(id(200, reverse));
+            let plan = RememberInput::new("a conversation with Alex")
+                .with_entity(person)
+                .with_episode(source)
+                .with_observation(observation)
+                .prepare_write_plan(&RememberPlanDefaults::fixed("presence", time()));
+            commit(&memory, plan).await;
+            // Other occasions make this participant selective enough to traverse.
+            let mut background = RememberWritePlan::new();
+            for n in 300..310 {
+                background = episode(background, n, 2, 0.5, None, reverse);
+            }
+            commit(&memory, background).await;
+            let mut context = query(None, 1, 8);
+            context.scene.participants.push(SceneParticipant {
+                key: Some(id(10, reverse)),
+                ..Default::default()
+            });
+            context.cue_floors.participant = 1;
+            context.graph_limits.max_depth = 2;
+            let result = memory.retrieve(context).await.unwrap();
+            test_support::close_and_remove_root(memory, root).await;
+            results.push((reverse, result));
+        }
+        for (reverse, result) in results {
+            let links = &result.trace.as_ref().unwrap().graph_relations;
+            assert!(!links
+                .iter()
+                .any(|link| link.relation == RelationType::Mentions));
+            assert!(links.iter().any(|link| {
+                link.relation == RelationType::Involves
+                    && link.from == MemoryObjectRef::new(ObjectType::Episode, id(100, reverse))
+                    && link.to == MemoryObjectRef::new(ObjectType::Entity, id(10, reverse))
+            }));
+            assert!(links.iter().any(|link| {
+                link.relation == RelationType::ObservedIn
+                    && link.from == MemoryObjectRef::new(ObjectType::Observation, id(200, reverse))
+                    && link.to == MemoryObjectRef::new(ObjectType::Episode, id(100, reverse))
+                    && link.proximity == 2
+            }));
+            assert!(result
+                .pack
+                .salient_observations
+                .iter()
+                .any(|o| o.id == id(200, reverse)));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reminder_keeps_its_observations_without_opening_other_occasions() {
+        let mut results = Vec::new();
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut person = EntityDraft::new();
+            person.id = Some(id(10, reverse));
+            let mut thread = MemoryThreadDraft::new("repairs", "ongoing repairs");
+            thread.id = Some(id(900, reverse));
+            let mut source = EpisodeDraft::new("lighthouse repair");
+            source.id = Some(id(100, reverse));
+            source.scene = Some(Scene::at(time().fixed_offset()));
+            let mut observation = ObservationDraft::new(id(100, reverse), "Alex will repair it");
+            observation.id = Some(id(200, reverse));
+            commit(
+                &memory,
+                RememberInput::new("a conversation")
+                    .with_entity(person)
+                    .with_memory_thread(thread)
+                    .with_thread_id(id(900, reverse))
+                    .with_episode(source)
+                    .with_observation(observation)
+                    .with_memory_link(MemoryLinkDraft::new(
+                        ObjectType::Observation,
+                        id(200, reverse),
+                        RelationType::Mentions,
+                        ObjectType::Entity,
+                        id(10, reverse),
+                    ))
+                    .prepare_write_plan(&RememberPlanDefaults::fixed("recent observation", time())),
+            )
+            .await;
+            let mut older = EpisodeDraft::new("ferry crossing");
+            older.id = Some(id(101, reverse));
+            older.scene = Some(Scene::at((time() - Duration::days(1)).fixed_offset()));
+            let mut older_observation = ObservationDraft::new(id(101, reverse), "a ferry crossing");
+            older_observation.id = Some(id(201, reverse));
+            commit(
+                &memory,
+                RememberInput::new("a separate occasion")
+                    .with_episode(older)
+                    .with_observation(older_observation)
+                    .with_entity_id(id(10, reverse))
+                    .with_thread_id(id(900, reverse))
+                    .prepare_write_plan(&RememberPlanDefaults::fixed("older observation", time())),
+            )
+            .await;
+            for topic in [None, Some("lighthouse repair")] {
+                let mut context = query(topic, 1, 8);
+                context.graph_limits.max_depth = 4;
+                context.object_type_defaults = vec![ObjectType::Episode];
+                results.push((
+                    reverse,
+                    topic.is_some(),
+                    memory.retrieve(context).await.unwrap(),
+                ));
+            }
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (reverse, topic, result) in results {
+            assert_eq!(result.pack.relevant_episodes[0].id, id(100, reverse));
+            assert!(result
+                .pack
+                .salient_observations
+                .iter()
+                .any(|o| o.id == id(200, reverse)));
+            assert_eq!(
+                result
+                    .pack
+                    .salient_observations
+                    .iter()
+                    .any(|o| o.id == id(201, reverse)),
+                topic
+            );
+            assert_eq!(
+                result
+                    .pack
+                    .relevant_episodes
+                    .iter()
+                    .any(|e| e.id == id(101, reverse)),
+                topic
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_real_mention_reaches_its_occasion_but_not_a_sibling_at_depth_two() {
+        let mut results = Vec::new();
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut person = EntityDraft::new();
+            person.id = Some(id(10, reverse));
+            let mut source = EpisodeDraft::new("a shared occasion");
+            source.id = Some(id(100, reverse));
+            source.scene = Some(Scene::at((time() - Duration::days(1)).fixed_offset()));
+            let mut observation = ObservationDraft::new(id(100, reverse), "Alex will repair it");
+            observation.id = Some(id(200, reverse));
+            let mut plan = RememberInput::new("a conversation")
+                .with_entity(person)
+                .with_episode(source)
+                .with_observation(observation)
+                .with_memory_link(MemoryLinkDraft::new(
+                    ObjectType::Observation,
+                    id(200, reverse),
+                    RelationType::Mentions,
+                    ObjectType::Entity,
+                    id(10, reverse),
+                ))
+                .prepare_write_plan(&RememberPlanDefaults::fixed("real mention", time()));
+            let mut sibling = ObservationDraft::new(id(100, reverse), "the tide is coming in");
+            sibling.id = Some(id(201, reverse));
+            sibling.created_at = Some(time());
+            sibling.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            plan = plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+                sibling,
+                provenance(),
+            )));
+            for n in 300..310 {
+                plan = episode(plan, n, 2, 0.5, None, reverse);
+            }
+            commit(&memory, plan).await;
+            let mut context = query(None, 1, 8);
+            context.scene.participants.push(SceneParticipant {
+                key: Some(id(10, reverse)),
+                ..Default::default()
+            });
+            context.cue_floors.participant = 1;
+            context.graph_limits.max_depth = 2;
+            results.push((reverse, memory.retrieve(context).await.unwrap()));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (reverse, result) in results {
+            assert_eq!(
+                result
+                    .pack
+                    .relevant_episodes
+                    .iter()
+                    .map(|e| e.id)
+                    .collect::<Vec<_>>(),
+                [id(100, reverse)]
+            );
+            assert_eq!(
+                result
+                    .pack
+                    .salient_observations
+                    .iter()
+                    .map(|o| o.id)
+                    .collect::<Vec<_>>(),
+                [id(200, reverse)]
+            );
+        }
+    }
+
     mod place_behavior {
         use super::*;
 

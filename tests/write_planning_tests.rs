@@ -159,7 +159,8 @@ async fn remember_wrapper_commits_equivalent_graph_state() {
         wrapper_outcome.persisted_object_ids,
         vec![episode_id, observation_id, entity_id, derived_id]
     );
-    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 2);
+    // Ruling 69: both public write paths also persist the structural ObservedIn link.
+    assert_eq!(wrapper_outcome.persisted_link_ids.len(), 3);
     assert!(wrapper_outcome.persisted_link_ids.contains(&link_id));
     assert_eq!(
         wrapper_outcome.vector_indexed_object_ids,

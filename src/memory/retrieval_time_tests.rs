@@ -356,7 +356,16 @@ async fn recency_scene_only_room_and_floor_witnesses() {
             .unique_graph_root_candidate_count,
         16
     );
-    assert!(default.pack.salient_observations.is_empty());
+    // Rulings 46 and 69: an occasion brings its own observation through ObservedIn.
+    assert_eq!(
+        default
+            .pack
+            .salient_observations
+            .iter()
+            .map(|o| o.id)
+            .collect::<Vec<_>>(),
+        [id(400)]
+    );
     let mut single = query(false, false);
     single.section_limits = room(1);
     let first = record(
