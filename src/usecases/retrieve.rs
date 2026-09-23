@@ -530,7 +530,6 @@ struct RetrievalDetails {
 #[derive(Debug, Default)]
 struct RetrieveAssembly {
     objects: HashMap<MemoryObjectRef, RankedObject>,
-    superseded_by: HashMap<MemoryId, Vec<MemoryId>>,
     lifecycle_decisions: Vec<LifecycleFilterDecision>,
     stale_omissions: Vec<StaleCandidateOmission>,
     graph_relations: Option<Vec<crate::api::types::GraphRelationTrace>>,
@@ -577,18 +576,6 @@ impl RetrieveAssembly {
         } else {
             HashSet::new()
         };
-
-        for relation in &expansion.relations {
-            if relation.relation == RelationType::Supersedes
-                && relation.from.object_type == ObjectType::DerivedMemory
-                && relation.to.object_type == ObjectType::DerivedMemory
-            {
-                self.superseded_by
-                    .entry(relation.to.id)
-                    .or_default()
-                    .push(relation.from.id);
-            }
-        }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
@@ -747,11 +734,6 @@ impl RetrieveAssembly {
     }
 
     fn ranked_objects(&mut self) -> Vec<RankedObject> {
-        for superseded in self.superseded_by.values_mut() {
-            superseded.sort();
-            superseded.dedup();
-        }
-
         let mut ranked_objects = Vec::new();
         for (_, ranked) in std::mem::take(&mut self.objects) {
             ranked_objects.push(ranked);
