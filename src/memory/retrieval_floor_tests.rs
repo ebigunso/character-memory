@@ -1406,12 +1406,20 @@ mod scene_cohorts {
             }
             // More than one explicit occasion must retain selector order, not ID order.
             memory.memory_composition.selectivity_policy =
-                crate::policy::RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+                crate::policy::RetrievalSelectivityPolicy::with_fanout_budgets(
                     1.0,
                     1.0,
-                    [(RelationType::Involves, ObjectType::Episode, 2, 2)],
-                )
-                .unwrap();
+                    crate::config::Settings::new(Default::default())
+                        .unwrap()
+                        .get_retrieval_fanout_budgets()
+                        .map(|(relation, object_type, budget)| {
+                            if relation == RelationType::Involves {
+                                (relation, object_type, 2, 2)
+                            } else {
+                                (relation, object_type, budget.min(), budget.max())
+                            }
+                        }),
+                );
             let mut query = context();
             query.scene.time += chrono::Duration::days(48);
             query.scene.participants[0].key = Some(MemoryId::from_u128(7));

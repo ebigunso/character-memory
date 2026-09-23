@@ -105,6 +105,64 @@ async fn write_many(
 }
 
 #[tokio::test]
+async fn default_settings_recall_a_ubiquitous_participants_latest_occasion() {
+    let root = tempfile::tempdir().unwrap();
+    let settings = character_memory::Settings::new(
+        test_support::embedded_settings(root.path())
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
+    let memory = CharacterMemory::new_with_embedding_provider(
+        settings,
+        test_support::unique_collection_name(),
+        Box::new(test_support::deterministic_provider(8)),
+    )
+    .await
+    .unwrap();
+    commit_input(
+        &memory,
+        RememberInput::new("companion")
+            .with_entity(entity(7))
+            .with_episode(episode(30, &[7], 0)),
+    )
+    .await;
+    for (episode_id, at) in [(20, 1), (10, 2)] {
+        write(&memory, episode_id, &[7], None, at).await;
+    }
+    // An empty range isolates participant recall from the recency road.
+    let context = RetrievalContext::default()
+        .with_scene(scene(&[7], 3))
+        .with_time_range(time(-2), time(-1))
+        .with_trace();
+    let result = memory.retrieve(context).await.unwrap();
+    test_support::close_and_remove_root(memory, root).await;
+
+    let participant = result
+        .trace
+        .as_ref()
+        .unwrap()
+        .selectivity_decisions
+        .iter()
+        .find(|row| row.relation == RelationType::Involves)
+        .unwrap();
+    assert!(!participant.fallback);
+    assert_eq!(participant.entity_count, Some(3));
+    assert_eq!(participant.global_count, Some(3));
+    assert_eq!(participant.score, Some(0.0));
+    assert_eq!(
+        result
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>(),
+        [MemoryId::from_u128(10)]
+    );
+    assert_eq!(participant.chosen_fanout, 1);
+}
+
+#[tokio::test]
 async fn named_people_share_section_room_in_scope_rounds() {
     let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
     let mut seed = RememberInput::new("six notions");

@@ -322,7 +322,7 @@ impl Settings {
 
     pub(crate) fn get_retrieval_fanout_budgets(
         &self,
-    ) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
+    ) -> [(RelationType, ObjectType, FanoutBudgetSettings); 3] {
         self.retrieval.fanout.budgets()
     }
 
@@ -425,10 +425,10 @@ impl RetrievalFanoutSettings {
         Ok(())
     }
 
-    fn budgets(&self) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
+    fn budgets(&self) -> [(RelationType, ObjectType, FanoutBudgetSettings); 3] {
         let mut budgets = default_retrieval_fanout_budgets();
         if let Some(budget) = self.about_entity.derived_memory {
-            upsert_fanout_budget(
+            override_fanout_budget(
                 &mut budgets,
                 RelationType::About,
                 ObjectType::DerivedMemory,
@@ -436,7 +436,7 @@ impl RetrievalFanoutSettings {
             );
         }
         if let Some(budget) = self.participant_entity.episode {
-            upsert_fanout_budget(
+            override_fanout_budget(
                 &mut budgets,
                 RelationType::Involves,
                 ObjectType::Episode,
@@ -444,7 +444,7 @@ impl RetrievalFanoutSettings {
             );
         }
         if let Some(budget) = self.part_of_thread.derived_memory {
-            upsert_fanout_budget(
+            override_fanout_budget(
                 &mut budgets,
                 RelationType::PartOfThread,
                 ObjectType::DerivedMemory,
@@ -512,8 +512,8 @@ fn default_selectivity_gamma() -> f64 {
 }
 
 pub(crate) fn default_retrieval_fanout_budgets(
-) -> Vec<(RelationType, ObjectType, FanoutBudgetSettings)> {
-    vec![
+) -> [(RelationType, ObjectType, FanoutBudgetSettings); 3] {
+    [
         (
             RelationType::About,
             ObjectType::DerivedMemory,
@@ -522,7 +522,7 @@ pub(crate) fn default_retrieval_fanout_budgets(
         (
             RelationType::Involves,
             ObjectType::Episode,
-            FanoutBudgetSettings::new(0, 5),
+            FanoutBudgetSettings::new(1, 5),
         ),
         (
             RelationType::PartOfThread,
@@ -532,8 +532,8 @@ pub(crate) fn default_retrieval_fanout_budgets(
     ]
 }
 
-fn upsert_fanout_budget(
-    budgets: &mut Vec<(RelationType, ObjectType, FanoutBudgetSettings)>,
+fn override_fanout_budget(
+    budgets: &mut [(RelationType, ObjectType, FanoutBudgetSettings)],
     relation: RelationType,
     object_type: ObjectType,
     budget: FanoutBudgetSettings,
@@ -546,8 +546,6 @@ fn upsert_fanout_budget(
             })
     {
         *existing = budget;
-    } else {
-        budgets.push((relation, object_type, budget));
     }
 }
 
@@ -864,7 +862,7 @@ mod tests {
 
         assert_eq!(
             settings.get_retrieval_fanout_budgets(),
-            vec![
+            [
                 (
                     RelationType::About,
                     ObjectType::DerivedMemory,
