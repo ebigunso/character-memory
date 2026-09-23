@@ -332,62 +332,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "opt-in comparison of time selector costs at 2000 episodes"]
-    async fn time_selector_cost_at_2000_episodes() {
-        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
-        let reference: chrono::DateTime<chrono::Utc> = "2026-09-23T12:00:00Z".parse().unwrap();
-        let source = representative_fixtures().episode;
-        let objects = (0..2000)
-            .map(|index| {
-                let mut episode = source.clone();
-                episode.id = MemoryId::from_u128(10_000 + index);
-                episode.scene.time =
-                    (reference - chrono::Duration::days(index as i64)).fixed_offset();
-                episode.scene_local_date = Some(episode.scene.time.date_naive());
-                episode.salience_score = (index % 10) as f32 / 10.0;
-                MemoryObject::Episode(episode)
-            })
-            .collect::<Vec<_>>();
-        store.upsert_objects(&objects).await.unwrap();
-        for selector in ["recency", "range", "anniversary"] {
-            let mut samples = Vec::new();
-            for run in 0..22 {
-                let started = std::time::Instant::now();
-                let count = if selector == "anniversary" {
-                    store
-                        .query_anniversaries(
-                            reference.date_naive(),
-                            &[],
-                            12,
-                            GraphExpansionLifecyclePolicy::default(),
-                        )
-                        .await
-                        .unwrap()
-                        .len()
-                } else {
-                    store
-                        .query_episodes_by_time(
-                            (selector == "range").then_some(reference - chrono::Duration::days(20)),
-                            reference,
-                            12,
-                            GraphExpansionLifecyclePolicy::default(),
-                        )
-                        .await
-                        .unwrap()
-                        .len()
-                };
-                let micros = started.elapsed().as_micros();
-                assert_eq!(count, if selector == "anniversary" { 5 } else { 12 });
-                if run != 0 {
-                    samples.push(micros);
-                }
-            }
-            samples.sort_unstable();
-            println!("TIME_SELECTOR_COST {selector} episodes=2000 samples=21 median_us={} min_us={} max_us={}", samples[10], samples[0], samples[20]);
-        }
-    }
-
-    #[tokio::test]
     async fn oxigraph_round_trips_subsecond_object_and_link_timestamps() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let mut fixtures = representative_fixtures();
