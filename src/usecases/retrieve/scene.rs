@@ -237,7 +237,11 @@ where
                     eligible
                 };
                 for candidate in &mut candidates {
-                    candidate.score = candidate.score.max(0.0);
+                    candidate.score = if candidate.score > 0.0 {
+                        candidate.score
+                    } else {
+                        0.0
+                    };
                 }
                 if road == RecallRoad::Topic {
                     candidates = CanonicalCandidates::new(candidates).to_vec();

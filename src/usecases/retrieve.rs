@@ -1453,7 +1453,7 @@ impl CandidateRoot {
             roads: BTreeMap::from([(
                 road,
                 RoadReach {
-                    score: score.max(0.0),
+                    score: if score > 0.0 { score } else { 0.0 },
                     position,
                 },
             )]),
@@ -1962,6 +1962,32 @@ mod tests {
         high_fanout_graph_fixture, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
+
+    #[tokio::test]
+    async fn search_and_explicit_roots_canonicalize_nonpositive_scores() {
+        let graph = graph_with(&[], &[]).await;
+        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
+        for score in [-0.0_f32, 0.0, -0.5, 0.75] {
+            let expected = if score > 0.0 { score } else { 0.0 };
+            let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
+            let vector = VectorRecallOverride {
+                inner: TemporaryVectorCandidateStore::open(2).await,
+                completeness: None,
+                candidate: Some(vector_candidate(object.id, object.object_type, score)),
+            };
+            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
+                .recall_cues(&RetrievalContext::new("score boundary"))
+                .await
+                .unwrap();
+            assert_eq!(
+                cues.candidates.iter().next().unwrap().score.to_bits(),
+                expected.to_bits()
+            );
+            let root = CandidateRoot::new(object, RecallRoad::Topic, score, 0);
+            assert_eq!(root.score().to_bits(), expected.to_bits());
+            vector.close().await.unwrap();
+        }
+    }
 
     #[test]
     fn resolution_metadata_stays_on_derived_memory_when_ids_collide() {
