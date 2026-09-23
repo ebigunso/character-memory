@@ -102,7 +102,6 @@ async fn lifecycle_evidence_fixture(relation: RelationType) {
         request.graph_limits.max_depth = 2;
         request.graph_limits.max_nodes = 3;
         request.graph_limits.max_fanout_per_node = 2;
-        request.graph_limits.timeout_ms = None;
         request.include_trace = trace;
         request.lifecycle_policy.include_superseded = relation == RelationType::Supersedes;
         outcomes.push(memory.retrieve(request).await.unwrap());

@@ -362,8 +362,14 @@ async fn every_belief_subject_is_linked_once() {
                 .with_max_hub_edges(1)
                 .with_max_fanout_per_node(1)
                 .with_fanout_utilization_recording(TraceMode::Enabled);
+            let adapter_expansion = graph.expand_bounded(&query).await.unwrap();
+            assert!(!adapter_expansion.fanout_utilization.is_empty());
+            assert!(adapter_expansion
+                .fanout_utilization
+                .iter()
+                .all(|item| item.retained_count == 1 && item.omitted_by_fanout_count == 0));
             for expanded in [
-                graph.expand_bounded(&query).await.unwrap(),
+                adapter_expansion,
                 crate::policy::graph_expansion::bounded_expansion(
                     &query,
                     objects.clone(),
@@ -376,10 +382,6 @@ async fn every_belief_subject_is_linked_once() {
                 assert_eq!(expanded.links.len(), 1);
                 assert_eq!(expanded.relations.len(), 1);
                 assert!(expanded.bounded_failure.is_none());
-                assert!(expanded
-                    .fanout_utilization
-                    .iter()
-                    .all(|item| item.retained_count == 1 && item.omitted_by_fanout_count == 0));
             }
         }
         let counter = memory

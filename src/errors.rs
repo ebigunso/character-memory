@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
-    CandidateValidation, DomainValidationError, GraphExpansionBoundedFailureTrace,
-    LifecycleDtoValidationError, MemoryId, MemoryObjectRef, ObjectType, SourceReferenceKind,
+    CandidateValidation, DomainValidationError, LifecycleDtoValidationError, MemoryId,
+    MemoryObjectRef, ObjectType, SourceReferenceKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -483,9 +483,6 @@ pub enum CustomError {
         object_type: ObjectType,
         object_id: MemoryId,
     },
-
-    #[error("graph expansion bounded by retrieval policy: {0}")]
-    GraphExpansionBounded(GraphExpansionBoundedFailureTrace),
 
     #[error(transparent)]
     LifecycleDraftInvalid(#[from] LifecycleDtoValidationError),
