@@ -126,10 +126,7 @@ where
                     .graph_store
                     .query_scope_state(
                         key,
-                        GraphExpansionLifecyclePolicy {
-                            include_suppressed: context.lifecycle_policy.include_suppressed,
-                            include_superseded: context.lifecycle_policy.include_superseded,
-                        },
+                        GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
                         contribution,
                     )
                     .await?;
@@ -189,10 +186,7 @@ where
                     .time_range
                     .map_or(context.scene.time.to_utc(), |range| range.end),
                 read_limit,
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
             )
             .await?;
         let time_range_has_more = context.time_range.map(|_| window.len() > contribution);
@@ -227,10 +221,7 @@ where
                     .map(|road| road.contribution(&context))
                     .max()
                     .unwrap_or(0),
-                GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                },
+                GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
             )
             .await?;
         for road in anniversary_roads {
@@ -1675,10 +1666,9 @@ fn graph_query_for_candidate(
     .with_fanout_overrides(fanout_overrides)
     .with_max_fanout_per_node(context.graph_limits.max_fanout_per_node)
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
-    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-        include_suppressed: context.lifecycle_policy.include_suppressed,
-        include_superseded: context.lifecycle_policy.include_superseded,
-    })
+    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
+        context.lifecycle_policy,
+    ))
     .with_failure_policy(GraphExpansionFailurePolicy {
         timeout_ms: context.graph_limits.timeout_ms,
         mode: context.graph_limits.failure_mode,

@@ -72,10 +72,9 @@ where
         match object {
             MemoryObject::MemoryThread(thread) => {
                 let query = GraphDerivedMemoryThreadQuery::by_threads(vec![thread.id])
-                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy {
-                        include_suppressed: context.lifecycle_policy.include_suppressed,
-                        include_superseded: context.lifecycle_policy.include_superseded,
-                    });
+                    .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
+                        context.lifecycle_policy,
+                    ));
                 let (memories, omitted) = self
                     .graph_store
                     .query_thread_state(&query, RecallRoad::Activity.contribution(context))
@@ -128,10 +127,7 @@ where
                     })
                     .collect::<Vec<_>>();
                 let occasions = self.graph_store.query_episode_occasions(&sources).await?;
-                let policy = GraphExpansionLifecyclePolicy {
-                    include_suppressed: context.lifecycle_policy.include_suppressed,
-                    include_superseded: context.lifecycle_policy.include_superseded,
-                };
+                let policy = GraphExpansionLifecyclePolicy::from(context.lifecycle_policy);
                 members.retain(|reference| {
                     if let Some((object_ref, reason)) = occasions
                         .get(reference)

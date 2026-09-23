@@ -94,10 +94,7 @@ where
         }
         let mut seen = HashSet::new();
         participants.retain(|id| seen.insert(*id));
-        let policy = GraphExpansionLifecyclePolicy {
-            include_suppressed: context.lifecycle_policy.include_suppressed,
-            include_superseded: context.lifecycle_policy.include_superseded,
-        };
+        let policy = GraphExpansionLifecyclePolicy::from(context.lifecycle_policy);
         let mut last_interactions = HashMap::new();
         for &participant in &participants {
             let last = self

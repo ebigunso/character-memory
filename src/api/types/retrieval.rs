@@ -228,6 +228,17 @@ impl RetrievalLifecyclePolicy {
     }
 }
 
+impl From<RetrievalLifecyclePolicy>
+    for crate::ports::graph_authority::GraphExpansionLifecyclePolicy
+{
+    fn from(policy: RetrievalLifecyclePolicy) -> Self {
+        Self {
+            include_suppressed: policy.include_suppressed,
+            include_superseded: policy.include_superseded,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrieveOutcome {
     /// An unset or empty part means not given. A scene is never complete: people
