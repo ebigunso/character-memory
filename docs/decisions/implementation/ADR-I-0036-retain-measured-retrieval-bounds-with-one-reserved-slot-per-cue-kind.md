@@ -61,5 +61,5 @@ A measured similarity bound for descriptions or a relevance bound for the topic 
 ## More Information
 
 - [ADR-I-0010](ADR-I-0010-use-continuous-selectivity-and-smooth-fanout.md) defines continuous selectivity; [ADR-D-0022](../design/ADR-D-0022-recall-is-activation-by-scene-cues.md) requires recall by scene cues and room for each kind.
-- The public companion evaluation repository, `CharacterMemoryEvals`, retains the scene reminder calibration at `docs/evidence/calibration/scene-reminders-2026-09-21/after-the-fix.md`, with compressed raw measurements beside it; its tooling is a development aid, not core library functionality.
+- The public companion evaluation repository, `CharacterMemoryEvals`, retains the scene reminder calibration at `docs/evidence/calibration/scene-reminders-2026-09-21/corrected-description-reading.md`, with the complete table and raw measurements recoverable at `CharacterMemoryEvals@784c2784260196352d7cc5184e0992260f0b1b0b`; its tooling is a development aid, not core library functionality. The first reading in that directory rested on a probe whose wording carried the same vector as a stored wording, so it is kept and marked superseded rather than removed.
 - The [retrieval calibration closeout](../../roadmap/roadmap-phases/v0_1_5_closeout_report.md) points to the binding-scale sweeps and their limitations.
