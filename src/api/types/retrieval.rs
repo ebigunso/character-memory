@@ -756,6 +756,7 @@ pub enum LifecycleFilterReason {
     GraphObjectMissing,
     GraphExpansionBounded,
     ResolvedOmitted,
+    LaterThanReferenceTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -773,6 +774,7 @@ pub enum StaleCandidateReason {
     Superseded,
     SectionLimit,
     GraphExpansionBounded,
+    LaterThanReferenceTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

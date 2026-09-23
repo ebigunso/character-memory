@@ -17,7 +17,8 @@ use crate::policy::graph_expansion::{
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
-    GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionQuery,
+    GraphExpansionFanoutUtilization, GraphExpansionFilteredNode, GraphExpansionFilteredReason,
+    GraphExpansionQuery,
 };
 
 use super::rdf_mapping::{RdfObject, RdfTriple};
@@ -715,6 +716,26 @@ pub(super) fn bounded_graph_visible_refs(
                 .map(|(object, _)| *object)
                 .collect::<HashSet<_>>();
             participant_occasions.extend(occasions);
+            for link in &link_refs {
+                if !query.allowed_relation_types.is_empty()
+                    && !query.allowed_relation_types.contains(&link.relation)
+                {
+                    continue;
+                }
+                for (from, to) in [(link.from, link.to), (link.to, link.from)] {
+                    if frontier.contains(&from)
+                        && !future.contains(&from)
+                        && future.contains(&to)
+                        && query.allows_incident_link(from, link.relation, to)
+                    {
+                        filtered_nodes.push(GraphExpansionFilteredNode {
+                            object_ref: to,
+                            reason: GraphExpansionFilteredReason::LaterThanReferenceTime,
+                            superseded_by: Vec::new(),
+                        });
+                    }
+                }
+            }
             frontier.retain(|object| !future.contains(object));
             link_refs.retain(|link| !future.contains(&link.from) && !future.contains(&link.to));
         }

@@ -1918,8 +1918,14 @@ mod tests {
                         );
                         assert_eq!(
                             actual.filtered_nodes.len(),
-                            2 * usize::from(suppressed != 0)
+                            2 * usize::from(suppressed != 0) + 1
                         );
+                        assert!(actual.filtered_nodes.iter().any(|filtered| {
+                            filtered.object_ref
+                                == MemoryObjectRef::new(ObjectType::Observation, id(175))
+                                && filtered.reason
+                                    == GraphExpansionFilteredReason::LaterThanReferenceTime
+                        }));
                         assert!(actual
                             .objects
                             .contains(&MemoryObject::DerivedMemory(belief.clone())));
