@@ -670,8 +670,9 @@ mod tests {
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
+            limit: usize,
         ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            let _ = (key, policy);
+            let _ = (key, policy, limit);
             unreachable!("scope selector is not used by this failure fixture")
         }
 

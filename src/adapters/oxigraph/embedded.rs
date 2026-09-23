@@ -245,7 +245,7 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
             .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, *id))
             .collect::<Vec<_>>();
         let mut ids = SparqlGraphSelectors::new(&self.store)
-            .select_links_touching(&refs)
+            .select_links_touching(&refs, false)
             .map_err(|error| GraphQueryError::Selection {
                 detail: error.to_string(),
             })?
@@ -287,7 +287,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
                 .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
-        let links = hydrate_all_links_from_store(&self.store)?;
+        let link_ids = SparqlGraphSelectors::new(&self.store).select_link_ids_touching(
+            &objects
+                .iter()
+                .map(MemoryObject::object_ref)
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_ids_from_store(&self.store, &link_ids)?;
         Ok(derived_memories_by_provenance(
             query,
             objects.into_iter().filter(
@@ -301,6 +307,24 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         query: &GraphDerivedMemoryThreadQuery,
     ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        if let Some(limit) = query.current_state_limit {
+            let (ids, filtered) =
+                SparqlGraphSelectors::new(&self.store).select_thread_state(query, limit)?;
+            let objects = hydrate_objects_by_refs_from_store(
+                &self.store,
+                &ids.into_iter()
+                    .map(|id| MemoryObjectRef::new(ObjectType::DerivedMemory, id))
+                    .collect::<Vec<_>>(),
+            )?;
+            let memories = objects
+                .into_iter()
+                .filter_map(|object| match object {
+                    MemoryObject::DerivedMemory(memory) => Some(memory),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            return Ok((memories, filtered));
+        }
         let selected_ids = SparqlGraphSelectors::new(&self.store)
             .select_derived_memories_by_thread(query)?
             .into_iter()
@@ -314,7 +338,13 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
                 .map(|id| MemoryObjectRef::from_id_type(id, ObjectType::DerivedMemory))
                 .collect::<Vec<_>>(),
         )?;
-        let links = hydrate_all_links_from_store(&self.store)?;
+        let link_ids = SparqlGraphSelectors::new(&self.store).select_link_ids_touching(
+            &objects
+                .iter()
+                .map(MemoryObject::object_ref)
+                .collect::<Vec<_>>(),
+        )?;
+        let links = hydrate_links_by_ids_from_store(&self.store, &link_ids)?;
         Ok(derived_memories_by_thread(
             query,
             objects.into_iter().filter(
@@ -328,8 +358,9 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        SparqlGraphSelectors::new(&self.store).select_scope_state(key, policy)
+        SparqlGraphSelectors::new(&self.store).select_scope_state(key, policy, limit)
     }
 
     async fn expand_bounded(

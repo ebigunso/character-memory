@@ -133,3 +133,6 @@ jobs:
 
       - name: Run service parity tests
         run: cargo test --verbose --test vector_port_contract_tests service_and_embedded_
+
+      - name: Verify service deletes preserve other typed objects
+        run: cargo test --verbose --lib adapters::qdrant::store::tests::port_contract::service_delete_removes_every_surface_of_only_the_requested_object -- --exact
