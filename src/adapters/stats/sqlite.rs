@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::domain::{ObjectType, RelationType, RetentionState};
-use crate::errors::{IoErrorKind, RetrievalStatsHealthCause, RetrievalStatsStoreError};
+use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
 use crate::ports::retrieval_stats::{
     is_counted_relation, object_type_key, relation_type_key, retention_state_key,
     RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
@@ -25,7 +25,7 @@ impl SqliteRetrievalStatsStore {
             if !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent).map_err(|error| {
                     RetrievalStatsStoreError::Filesystem {
-                        io_kind: IoErrorKind::from(error.kind()),
+                        io_kind: error.kind().to_string(),
                         detail: format!(
                             "failed to create retrieval stats directory {}: {error}",
                             parent.display()
