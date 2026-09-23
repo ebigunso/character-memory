@@ -1,24 +1,11 @@
 // Typed-link pipeline used by the public facade and internal tests. Some
 // helpers remain available for focused test and validation paths.
 use crate::api::types::{DraftDefaults, LinkOutcome, MemoryLinkDraft};
-use crate::domain::{MemoryLink, MemoryObjectRef, ObjectType, RelationType};
+use crate::domain::{MemoryLink, MemoryObjectRef, ObjectType};
 use crate::errors::CustomError;
 use crate::ports::graph_authority::GraphAuthorityStore;
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::usecases::StatsProjectionService;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LinkAdmissionEvidence {
-    ExplicitCallerIntent,
-    #[cfg(test)]
-    LowSelectivityCoOccurrenceOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LinkAdmissionDecision {
-    Accepted,
-    RejectedLowInformationCoOccurrence,
-}
 
 pub(crate) struct LinkPipeline<'a, G>
 where
@@ -60,22 +47,8 @@ where
         draft: MemoryLinkDraft,
         defaults: &mut DraftDefaults,
     ) -> Result<LinkOutcome, CustomError> {
-        self.link_with_evidence(draft, defaults, LinkAdmissionEvidence::ExplicitCallerIntent)
-            .await
-    }
-
-    async fn link_with_evidence(
-        &self,
-        draft: MemoryLinkDraft,
-        defaults: &mut DraftDefaults,
-        evidence: LinkAdmissionEvidence,
-    ) -> Result<LinkOutcome, CustomError> {
         let default_created_at = draft.created_at.is_none();
         let mut link = draft.into_domain_with_defaults(defaults)?;
-        if admit_link(&link, evidence) == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-        {
-            return Err(CustomError::LowInformationCoOccurrence { link_id: link.id });
-        }
         let existing = self.graph_store.query_links_by_ids(&[link.id]).await?;
         if default_created_at {
             if let Some(previous) = existing.first() {
@@ -120,23 +93,6 @@ pub(crate) fn reject_divergent_links(
         }
     }
     Ok(())
-}
-
-pub(crate) fn admit_link(
-    link: &MemoryLink,
-    evidence: LinkAdmissionEvidence,
-) -> LinkAdmissionDecision {
-    if link.relation != RelationType::AssociatedWith {
-        return LinkAdmissionDecision::Accepted;
-    }
-
-    match evidence {
-        #[cfg(test)]
-        LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly => {
-            LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-        }
-        LinkAdmissionEvidence::ExplicitCallerIntent => LinkAdmissionDecision::Accepted,
-    }
 }
 
 #[cfg(test)]
@@ -361,34 +317,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn low_information_guard_rejects_weak_associated_with_candidate_without_graph_write() {
-        let graph = in_memory_graph_store();
-        let stats = InMemoryRetrievalStatsStore::new();
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let mut defaults = DraftDefaults::at(timestamp());
-
-        let error = pipeline
-            .link_with_evidence(
-                associated_with_link_draft(),
-                &mut defaults,
-                LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
-            )
-            .await
-            .unwrap_err();
-
-        let rejected_link_id = id("550e8400-e29b-41d4-a716-446655444042");
-        assert!(matches!(
-            error,
-            CustomError::LowInformationCoOccurrence { link_id } if link_id == rejected_link_id
-        ));
-        assert!(graph
-            .query_links_by_ids(&[rejected_link_id])
-            .await
-            .unwrap()
-            .is_empty());
-    }
-
-    #[tokio::test]
     async fn explicit_intent_allows_associated_with_links_by_default() {
         let graph = in_memory_graph_store();
         let stats = InMemoryRetrievalStatsStore::new();
@@ -401,37 +329,6 @@ mod tests {
             .link;
 
         assert_eq!(persisted.relation, RelationType::AssociatedWith);
-    }
-
-    #[tokio::test]
-    async fn entity_neutral_low_information_guard_does_not_check_roles() {
-        let graph = in_memory_graph_store();
-        let stats = InMemoryRetrievalStatsStore::new();
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-
-        for (from_type, to_type) in [
-            (ObjectType::Episode, ObjectType::Episode),
-            (ObjectType::DerivedMemory, ObjectType::Observation),
-        ] {
-            let mut draft = associated_with_link_draft();
-            draft.from_type = from_type;
-            draft.to_type = to_type;
-            let rejected_link_id = draft.id.unwrap();
-            let mut defaults = DraftDefaults::at(timestamp());
-            let error = pipeline
-                .link_with_evidence(
-                    draft,
-                    &mut defaults,
-                    LinkAdmissionEvidence::LowSelectivityCoOccurrenceOnly,
-                )
-                .await
-                .unwrap_err();
-
-            assert!(matches!(
-                error,
-                CustomError::LowInformationCoOccurrence { link_id } if link_id == rejected_link_id
-            ));
-        }
     }
 
     #[tokio::test]

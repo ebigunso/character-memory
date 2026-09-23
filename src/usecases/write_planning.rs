@@ -630,7 +630,6 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
-use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WritePlanValidationVerdict {
@@ -1559,11 +1558,6 @@ fn validate_link(link: &MemoryLink) -> Vec<CandidateValidationIssue> {
     }
     if link.schema_version.trim().is_empty() {
         errors.push(CandidateValidationIssue::MissingObjectSchemaVersion);
-    }
-    if admit_link(link, LinkAdmissionEvidence::ExplicitCallerIntent)
-        == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-    {
-        errors.push(CandidateValidationIssue::MemoryLinkRejectedByAdmissionPolicy);
     }
     errors
 }
