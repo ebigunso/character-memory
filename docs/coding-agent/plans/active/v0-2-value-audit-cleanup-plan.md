@@ -665,6 +665,37 @@ This change is not work of this plan. The evals cleanup plan carries it on its b
 - acceptance: the companion's `cargo test` passes against both c0ed9e21 and this plan's final tip.
 - gate for this plan: before the stack merges, the orchestrator pins the companion checkout to the evals cleanup branch tip that contains this change, and runs the companion's `cargo test` against this plan's final tip.
 
+### Task_13: A person reached through an experience is hub-checked on the links actually traversed
+- type: impl
+- effort: 3 worker-hours
+- worker: cm-worker
+- owns:
+  - src/policy/graph_expansion.rs
+  - src/adapters/oxigraph/shared.rs (the bounded incident-link call path only)
+  - the test modules of those two files, and one integration test file for the regression
+- depends_on: [Task_4]
+- description: |
+  Found during the obligations instrument work (evidence in the evals repository at `.agent-work/worker/obligations-hub-limit-evidence/`; investigation at `.agent-work/reviewer/hub-limit-investigation.md`). When an experience or belief found by topic reaches a person who is not a root, both `bounded_incident_link_refs` and the materialized `bounded_expansion_plan` count every eligible incident link against the hub limit (64) before applying the fanout bound (16). A person the character knows well, with more than 64 links, then records HubLimit and recall comes back degraded, although the traversal read at most 16 links. This contradicts ruling 66 and `docs/design/database/graph_schema_design.md:131`.
+
+  The fix: apply the existing fanout selection first, then hub-check and, if needed, truncate the selected prefix, in both places. Keep the deterministic order, the root-only overrides, subject and participant eligibility, and trace-evidence exclusion. No new selector, API or setting, and no raised limit. A selected prefix genuinely over the hub limit (a caller fanout above 64) still records the bound.
+- acceptance:
+  - A regression test through the real adapter: an experience root reaching a person with 71 incident links returns the same objects and links as with 16, and records no HubLimit. It fails at the Task_4 tip and passes after.
+  - A test where the selected prefix really exceeds the hub limit still records it.
+  - The trace's fanout utilization is unchanged apart from the removed false bound.
+- validation:
+  - kind: command
+    required: true
+    owner: worker
+    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test with counts; pre-commit; the regression shown failing at the Task_4 tip"
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier D diff review by cm-reviewer, who found the defect: both paths fixed, the root-only protections unchanged, a real over-limit prefix still bounded"
+  - kind: command
+    required: true
+    owner: orchestrator
+    detail: "Measurement, run by an evals worker: the recorded failing query from the obligations evidence (evals b4a8ab5 fixture, library before and after this task) records zero bounded failures after and returns the same pack as before apart from the degraded flag. The final-tip behavior-free proof then allows exactly this change: bounded-failure counts may only fall."
+
 ## Integration
 - Branch: `feature/2026-09-24/value-audit-cleanup`, cut from `origin/feature/2026-09-23/consolidation-records` at c0ed9e21. It holds this plan. Each task is one PR, stacked in task-number order on the one below (`gh stack link`).
 - Lanes:
@@ -743,6 +774,12 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
     - Adding an `admitted_by` observer to the instrument was rejected, because it would need a new BEFORE for a field that library tests already pin.
   - User approval: ruled by the coordinator.
   - Record proposed: none.
+
+- 2026-09-24 Task_13 added: a hub-limit defect contrary to ruling 66.
+  Trigger / new insight: the obligations instrument at evals b4a8ab5 failed closed with seven HubLimit failures. cm-reviewer traced them to a person reached through an experience, not as a root: the hub limit counted the person's whole eligible neighbourhood (71 links) before the fanout bound (16) chose what to traverse. Ruling 66's fix covered only people who are roots.
+  - Plan delta (what changed): Task_13 follows Task_4, which edits the same file. It is a behavior change on reported health (the false degraded flag goes, recall content is unchanged), so it carries its own small measurement, and the final-tip proof allows bounded-failure counts only to fall. Wave 2 went out before Task_1's measurement by the orchestrator's ruling, because the final-tip proof covers it and no Wave 2 task depends on the fanout default.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none; the design doc already states the contract.
 
 ## Notes
 - Risks:
