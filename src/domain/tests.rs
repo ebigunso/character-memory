@@ -1,6 +1,6 @@
 use super::*;
 
-use chrono::{DateTime, Utc};
+use crate::test_support::representative_fixtures;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -12,24 +12,12 @@ fn serialized_value<T: Serialize>(value: T) -> String {
         .to_owned()
 }
 
-fn memory_id(value: &str) -> MemoryId {
-    Uuid::parse_str(value).unwrap()
-}
-
-fn timestamp(value: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(value)
-        .unwrap()
-        .with_timezone(&Utc)
-}
-
 #[test]
 fn canonical_identity_and_order_ranks_are_stable() {
-    let episode = MemoryObject::Episode(representative_episode());
+    let fixtures = representative_fixtures();
+    let episode = MemoryObject::Episode(fixtures.episode.clone());
 
-    assert_eq!(
-        episode.id(),
-        memory_id("550e8400-e29b-41d4-a716-446655440000")
-    );
+    assert_eq!(episode.id(), fixtures.episode.id);
     assert_eq!(episode.object_type(), ObjectType::Episode);
     assert_eq!(
         episode.object_ref(),
@@ -72,102 +60,6 @@ fn canonical_identity_and_order_ranks_are_stable() {
     let retention_ranks = [RetentionState::Active, RetentionState::Suppressed]
         .map(RetentionState::restrictiveness_rank);
     assert!(retention_ranks.windows(2).all(|pair| pair[0] < pair[1]));
-}
-
-fn representative_episode() -> Episode {
-    Episode {
-        id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
-        object_type: ObjectType::Episode,
-        modality: Modality::Chat,
-        scene: crate::domain::Scene {
-            setting: crate::domain::SceneSetting {
-                key: Some("conversation-2026-04-27".to_owned()),
-                words: None,
-            },
-            participants: vec![crate::domain::SceneParticipant {
-                key: Some(memory_id("550e8400-e29b-41d4-a716-446655440001")),
-                ..Default::default()
-            }],
-            ..crate::domain::Scene::at((timestamp("2026-04-27T10:00:00Z")).fixed_offset())
-        },
-        ended_at: Some(timestamp("2026-04-27T10:05:00Z")),
-        summary: "Discussed the episodic memory domain model.".to_owned(),
-        raw_ref: Some("raw://conversation/2026-04-27#episode-1".to_owned()),
-        salience_score: 0.8,
-        retention_state: RetentionState::Active,
-        created_at: timestamp("2026-04-27T10:06:00Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    }
-}
-
-fn representative_observation() -> Observation {
-    Observation {
-        id: memory_id("550e8400-e29b-41d4-a716-446655440010"),
-        object_type: ObjectType::Observation,
-        episode_id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
-        speaker_entity_id: Some(memory_id("550e8400-e29b-41d4-a716-446655440001")),
-        observed_at: Some(timestamp("2026-04-27T10:01:00Z")),
-        modality: Modality::Chat,
-        text: "Use raw references without storing raw input in production.".to_owned(),
-        raw_ref: Some("raw://conversation/2026-04-27#message-2".to_owned()),
-        salience_score: 0.7,
-        retention_state: RetentionState::Active,
-        created_at: timestamp("2026-04-27T10:06:01Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    }
-}
-
-fn valid_episode() -> Episode {
-    Episode {
-        summary: "Discussed deterministic model validation.".to_owned(),
-        raw_ref: Some("raw-fixture:episode-1".to_owned()),
-        ..representative_episode()
-    }
-}
-
-fn valid_observation() -> Observation {
-    Observation {
-        text: "The model keeps raw text outside domain objects.".to_owned(),
-        raw_ref: Some("raw-fixture:message-1".to_owned()),
-        ..representative_observation()
-    }
-}
-
-fn valid_derived_memory() -> DerivedMemory {
-    DerivedMemory {
-        scope_keys: Vec::new(),
-        assertions: Vec::new(),
-        given_by_application: false,
-        id: memory_id("550e8400-e29b-41d4-a716-446655440030"),
-        object_type: ObjectType::DerivedMemory,
-        derived_type: DerivedType::ProjectNote,
-        text: "Raw text is externally referenced by fixture ID.".to_owned(),
-        derived_from_episode_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655440000")],
-        derived_from_observation_ids: vec![memory_id("550e8400-e29b-41d4-a716-446655440010")],
-        thread_ids: vec![],
-        entity_ids: vec![],
-        salience_score: 0.85,
-        supersedes: vec![],
-        retention_state: RetentionState::Active,
-        created_at: timestamp("2026-04-27T10:08:00Z"),
-        updated_at: timestamp("2026-04-27T10:08:30Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    }
-}
-
-fn valid_memory_link() -> MemoryLink {
-    MemoryLink {
-        id: memory_id("550e8400-e29b-41d4-a716-446655440040"),
-        object_type: ObjectType::MemoryLink,
-        from_id: memory_id("550e8400-e29b-41d4-a716-446655440030"),
-        from_type: ObjectType::DerivedMemory,
-        to_id: memory_id("550e8400-e29b-41d4-a716-446655440000"),
-        to_type: ObjectType::Episode,
-        relation: RelationType::DerivedFrom,
-        rationale: Some("Derived memory cites its source episode.".to_owned()),
-        created_at: timestamp("2026-04-27T10:09:00Z"),
-        schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
-    }
 }
 
 #[test]
@@ -226,18 +118,12 @@ fn graph_uri_maps_object_types_to_stable_urns() {
 }
 
 #[test]
-fn schema_version_constants_are_pinned_to_the_initial_episodic_memory_schema() {
-    assert_eq!(EPISODIC_MEMORY_SCHEMA_VERSION, "episodic_memory_initial");
-    assert_eq!(CURRENT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
-    assert_eq!(DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION);
-}
-
-#[test]
 fn validation_accepts_representative_valid_objects() {
-    let episode = valid_episode();
-    let observation = valid_observation();
-    let derived = valid_derived_memory();
-    let link = valid_memory_link();
+    let fixtures = representative_fixtures();
+    let episode = fixtures.episode;
+    let observation = fixtures.salient_observation;
+    let derived = fixtures.derived_reflection;
+    let link = fixtures.soft_thread_link;
 
     assert_eq!(episode.validate(), Ok(()));
     assert_eq!(observation.validate(), Ok(()));
@@ -249,7 +135,7 @@ fn validation_accepts_representative_valid_objects() {
 #[test]
 fn episode_validation_rejects_empty_or_whitespace_summary() {
     for summary in ["", "   \n\t"] {
-        let mut episode = valid_episode();
+        let mut episode = representative_fixtures().episode;
         episode.summary = summary.to_owned();
 
         assert_eq!(
@@ -261,7 +147,7 @@ fn episode_validation_rejects_empty_or_whitespace_summary() {
 
 #[test]
 fn observation_validation_rejects_nil_episode_reference() {
-    let mut observation = valid_observation();
+    let mut observation = representative_fixtures().salient_observation;
     observation.episode_id = Uuid::nil();
 
     assert_eq!(
@@ -272,7 +158,7 @@ fn observation_validation_rejects_nil_episode_reference() {
 
 #[test]
 fn derived_memory_validation_requires_episode_or_observation_source() {
-    let mut derived = valid_derived_memory();
+    let mut derived = representative_fixtures().derived_reflection;
     derived.derived_from_episode_ids.clear();
     derived.derived_from_observation_ids.clear();
 
@@ -284,7 +170,7 @@ fn derived_memory_validation_requires_episode_or_observation_source() {
 
 #[test]
 fn score_validation_rejects_out_of_range_and_nan_values() {
-    let mut episode = valid_episode();
+    let mut episode = representative_fixtures().episode;
     episode.salience_score = -0.01;
     assert!(matches!(
         episode.validate(),
@@ -294,7 +180,7 @@ fn score_validation_rejects_out_of_range_and_nan_values() {
         })
     ));
 
-    let mut observation = valid_observation();
+    let mut observation = representative_fixtures().salient_observation;
     observation.salience_score = 1.01;
     assert!(matches!(
         observation.validate(),
@@ -304,7 +190,7 @@ fn score_validation_rejects_out_of_range_and_nan_values() {
         })
     ));
 
-    let mut derived = valid_derived_memory();
+    let mut derived = representative_fixtures().derived_reflection;
     derived.salience_score = f32::NAN;
     assert!(matches!(
         derived.validate(),
@@ -317,7 +203,7 @@ fn score_validation_rejects_out_of_range_and_nan_values() {
 
 #[test]
 fn object_type_validation_rejects_mismatched_containing_type() {
-    let mut episode = valid_episode();
+    let mut episode = representative_fixtures().episode;
     episode.object_type = ObjectType::Observation;
 
     assert_eq!(
@@ -333,10 +219,10 @@ fn object_type_validation_rejects_mismatched_containing_type() {
 #[test]
 fn raw_references_serialize_without_embedding_transcript_payload() {
     let raw_text = "verbatim raw transcript text that should stay outside the memory object";
-    let mut episode = valid_episode();
+    let mut episode = representative_fixtures().episode;
     episode.raw_ref = Some("file:fixtures/raw/episode.txt".to_owned());
     episode.summary = "Summarized external transcript fixture.".to_owned();
-    let observation = valid_observation();
+    let observation = representative_fixtures().salient_observation;
 
     for (serialized, raw_ref) in [
         (

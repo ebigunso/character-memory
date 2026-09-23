@@ -49,11 +49,6 @@ impl CandidateValidation {
             warnings: Vec::new(),
         }
     }
-
-    pub fn with_warning(mut self, warning: CandidateValidationIssue) -> Self {
-        self.warnings.push(warning);
-        self
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
