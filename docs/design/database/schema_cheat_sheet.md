@@ -99,9 +99,9 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `assertionName` | Supplied name spelling |
 | `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
 
-Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`shared.rs:389`)](../../../src/adapters/oxigraph/shared.rs#L389). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
+Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`belief_assertions_from_rdf`)](../../../src/adapters/oxigraph/shared.rs). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
 
-Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`sparql_selectors.rs:104`)](../../../src/adapters/oxigraph/sparql_selectors.rs#L104).
+Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`select_notions_known_as`)](../../../src/adapters/oxigraph/sparql_selectors.rs).
 
 ### Links And Currency
 
