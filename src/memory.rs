@@ -747,6 +747,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn episode_and_thread_with_the_same_id_keep_distinct_vectors_on_write_and_forget() {
+        let memory = injected_memory().await;
+        let shared_id = MemoryId::from_u128(1901);
+        let episode_text = "A heron crossed the lake at dawn.";
+        let thread_text = "Planning the next observatory visit.";
+        let mut episode = EpisodeDraft::new(episode_text);
+        episode.id = Some(shared_id);
+        let mut thread = MemoryThreadDraft::new("Observatory visit", thread_text);
+        thread.id = Some(shared_id);
+        let plan = memory
+            .prepare(
+                RememberInput::new(episode_text)
+                    .with_episode(episode)
+                    .with_memory_thread(thread),
+                PrepareOptions::default(),
+            )
+            .await
+            .unwrap();
+        let committed = memory.commit(plan, CommitOptions::default()).await.unwrap();
+        assert!(committed.vector_indexing_failure.is_none());
+        let mut recalled = Vec::new();
+        for (object_type, text) in [
+            (ObjectType::Episode, episode_text),
+            (ObjectType::MemoryThread, thread_text),
+        ] {
+            let mut context = RetrievalContext::new(text).with_trace();
+            context.object_type_defaults = vec![object_type];
+            context.graph_limits.max_depth = 0;
+            let outcome = memory.retrieve(context).await.unwrap();
+            let candidates = outcome
+                .trace
+                .unwrap()
+                .vector_candidates
+                .into_iter()
+                .map(|candidate| candidate.object)
+                .collect::<Vec<_>>();
+            let summaries = if object_type == ObjectType::Episode {
+                outcome
+                    .pack
+                    .relevant_episodes
+                    .into_iter()
+                    .map(|episode| (episode.id, episode.summary))
+                    .collect::<Vec<_>>()
+            } else {
+                outcome
+                    .pack
+                    .active_threads
+                    .into_iter()
+                    .map(|thread| (thread.id, thread.summary))
+                    .collect::<Vec<_>>()
+            };
+            recalled.push((candidates, summaries));
+        }
+        assert_eq!(
+            recalled,
+            vec![
+                (
+                    vec![MemoryObjectRef::new(ObjectType::Episode, shared_id)],
+                    vec![(shared_id, episode_text.to_owned())]
+                ),
+                (
+                    vec![MemoryObjectRef::new(ObjectType::MemoryThread, shared_id)],
+                    vec![(shared_id, thread_text.to_owned())]
+                ),
+            ]
+        );
+        let forgotten = memory
+            .forget(ForgetMemoryDraft::suppress(
+                LifecycleTargetRef::episode(shared_id),
+                "Forget the episode, preserving the separate thread.",
+            ))
+            .await
+            .unwrap();
+        assert!(forgotten.vector_maintenance_failure.is_none());
+        let mut context = RetrievalContext::new(thread_text).with_trace();
+        context.object_type_defaults = vec![ObjectType::MemoryThread];
+        context.graph_limits.max_depth = 0;
+        let outcome = memory.retrieve(context).await.unwrap();
+        memory.close().await.unwrap();
+        assert_eq!(
+            outcome
+                .trace
+                .unwrap()
+                .vector_candidates
+                .into_iter()
+                .map(|candidate| candidate.object)
+                .collect::<Vec<_>>(),
+            vec![MemoryObjectRef::new(ObjectType::MemoryThread, shared_id)]
+        );
+        assert_eq!(outcome.pack.active_threads.len(), 1);
+        assert_eq!(outcome.pack.active_threads[0].summary, thread_text);
+    }
+
+    #[tokio::test]
     async fn retrieve_rejects_an_empty_configured_object_type_scope_at_the_boundary() {
         let memory = injected_memory().await;
         let mut context = RetrievalContext::new("invalid empty scope");
@@ -1725,7 +1819,7 @@ mod tests {
             })
         }
 
-        async fn delete_candidates(&self, _object_ids: &[MemoryId]) -> Result<(), CustomError> {
+        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
             Ok(())
         }
     }

@@ -37,7 +37,7 @@ pub(crate) struct GraphDerivedMemoryThreadQuery {
     pub(crate) thread_ids: Vec<MemoryId>,
     pub(crate) lifecycle_policy: GraphExpansionLifecyclePolicy,
     // Activity state excludes resolved members; lifecycle operations still see them.
-    pub(crate) current_state: bool,
+    pub(crate) current_state_limit: Option<usize>,
 }
 
 impl GraphDerivedMemoryProvenanceQuery {
@@ -63,7 +63,7 @@ impl GraphDerivedMemoryThreadQuery {
         Self {
             thread_ids,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
-            current_state: false,
+            current_state_limit: None,
         }
     }
 
@@ -157,7 +157,7 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) current_subject_state: bool,
     pub(crate) reminder_only: bool,
     pub(crate) participant_reference_time: DateTime<Utc>,
-    pub(crate) resolved_thread_members: std::collections::HashSet<MemoryObjectRef>,
+    pub(crate) current_thread_state: bool,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
     pub(crate) trace_mode: TraceMode,
@@ -192,7 +192,7 @@ impl GraphExpansionQuery {
             current_subject_state: false,
             reminder_only: false,
             participant_reference_time: DateTime::<Utc>::MAX_UTC,
-            resolved_thread_members: std::collections::HashSet::new(),
+            current_thread_state: false,
             traversal_link_ids: None,
             trace_mode: TraceMode::Disabled,
             lifecycle_policy: GraphExpansionLifecyclePolicy::default(),
@@ -421,6 +421,7 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError>;
 
     async fn query_last_interaction(
@@ -541,8 +542,9 @@ impl<T: GraphAuthorityStore + ?Sized> GraphAuthorityStore for Box<T> {
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        (**self).query_scope_state(key, policy).await
+        (**self).query_scope_state(key, policy, limit).await
     }
 
     async fn expand_bounded(

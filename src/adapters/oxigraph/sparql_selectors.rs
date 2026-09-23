@@ -1,6 +1,6 @@
 // Internal SPARQL selectors for the embedded Oxigraph authority. These helpers
 // return backend-neutral IDs/refs; canonical object hydration reads RDF state.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use oxigraph::model::Term;
@@ -219,56 +219,130 @@ impl<'a> SparqlGraphSelectors<'a> {
         )
     }
 
-    // Do not LIMIT here: own-subject metadata can exist without a traversable About
-    // link. Limiting before that intersection can leave the state bucket underfilled.
     pub(crate) fn select_subject_state(
         &self,
         subject_id: MemoryId,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+        read_more: bool,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        if limit == 0 && !read_more {
+            return Ok((Vec::new(), Vec::new()));
+        }
         let subject = graph_uri(ObjectType::Entity, subject_id);
-        self.select_state(&format!("<{}> <{subject}>", vocab::ABOUT_ENTITY), policy)
+        // Keep About membership separate from the keyed rank scan: joining every
+        // candidate to its links makes the planner repeat work before the budget.
+        let about_query = format!(
+            r#"SELECT DISTINCT ?memory WHERE {{
+                {{ GRAPH ?g {{ ?link a <{link_class}> ; <{relation}> "about" ;
+                    <{from}> ?memory ; <{from_type}> "derived_memory" ;
+                    <{to}> <{subject}> ; <{to_type}> "entity" . }} }}
+                UNION {{ GRAPH ?g {{ ?link a <{link_class}> ; <{relation}> "about" ;
+                    <{to}> ?memory ; <{to_type}> "derived_memory" ;
+                    <{from}> <{subject}> ; <{from_type}> "entity" . }} }}
+            }}"#,
+            link_class = vocab::CLASS_MEMORY_LINK,
+            relation = vocab::RELATION,
+            from = vocab::FROM,
+            to = vocab::TO,
+            from_type = vocab::FROM_TYPE,
+            to_type = vocab::TO_TYPE,
+        );
+        let traversable = self
+            .query_solutions(&about_query)?
+            .iter()
+            .map(|row| match row.get("memory") {
+                Some(Term::NamedNode(memory)) => {
+                    super::shared::memory_id_from_resource(memory.as_str())
+                }
+                value => Err(oxigraph_sparql_error(format!(
+                    "expected About memory IRI, got {value:?}"
+                ))),
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+        self.select_state(
+            &format!("?memory <{}> <{subject}> .", vocab::ABOUT_ENTITY),
+            policy,
+            limit,
+            read_more,
+            true,
+            Some(&traversable),
+        )
     }
 
     pub(crate) fn select_scope_state(
         &self,
         key: &crate::domain::ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let value = serde_json::to_string(key).expect("scope keys contain strings only");
         let predicate = format!(
-            "<{}> {}",
+            "?memory <{}> {} .",
             vocab::SCOPE_KEY,
             oxigraph::model::Literal::new_simple_literal(value)
         );
-        self.select_state(&predicate, policy)
+        self.select_state(&predicate, policy, limit, false, true, None)
+    }
+
+    pub(crate) fn select_thread_state(
+        &self,
+        query: &GraphDerivedMemoryThreadQuery,
+        limit: usize,
+    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        if query.thread_ids.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let threads = query
+            .thread_ids
+            .iter()
+            .map(|id| graph_uri(ObjectType::MemoryThread, *id))
+            .collect::<Vec<_>>();
+        let predicate = format!(
+            "{} ?memory <{}> ?thread .",
+            sparql_iri_values("thread", threads.iter().map(String::as_str)),
+            vocab::PART_OF_THREAD,
+        );
+        self.select_state(
+            &predicate,
+            query.lifecycle_policy,
+            limit,
+            false,
+            false,
+            None,
+        )
     }
 
     fn select_state(
         &self,
         scope_predicate: &str,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+        read_more: bool,
+        salience_first: bool,
+        traversable: Option<&HashSet<MemoryId>>,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        let eligible_limit = limit.saturating_add(usize::from(read_more));
+        if eligible_limit == 0 {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        // ponytail: scan keyed rank rows; reshape selectors if this compact scan
+        // grows costly. Full RDF hydration stays behind the eligible/evidence caps.
         let query = format!(
-            r#"
-            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT ?id ?retention ?relation ?source WHERE {{
-              GRAPH ?g {{
-                ?memory a <{derived_class}> ; <{object_id}> ?id ;
-                  {scope_predicate} ; <{salience}> ?salience ;
-                  <{created}> ?created ; <{retention}> ?retention .
-              }}
-              OPTIONAL {{
-                GRAPH ?linkGraph {{
-                  ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
-                    <{to_type}> "derived_memory" ; <{relation}> ?relation ;
-                    <{from}> ?source ; <{to}> ?memory .
-                  VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
+            r#"SELECT ?id ?retention ?salience ?created ?relation ?source WHERE {{
+                GRAPH ?g {{
+                    ?memory a <{derived_class}> ; <{object_id}> ?id ;
+                        <{salience}> ?salience ; <{created}> ?created ;
+                        <{retention}> ?retention .
+                    {scope_predicate}
                 }}
-              }}
-            }}
-            ORDER BY DESC(xsd:double(?salience)) DESC(xsd:dateTime(?created)) ?id ?relation ?source
-            "#,
+                OPTIONAL {{ GRAPH ?linkGraph {{
+                    ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
+                        <{to_type}> "derived_memory" ; <{relation}> ?relation ;
+                        <{from}> ?source ; <{to}> ?memory .
+                    VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
+                }} }}
+            }}"#,
             derived_class = vocab::CLASS_DERIVED_MEMORY,
             object_id = vocab::OBJECT_ID,
             salience = vocab::SALIENCE_SCORE,
@@ -281,64 +355,139 @@ impl<'a> SparqlGraphSelectors<'a> {
             from = vocab::FROM,
             to = vocab::TO,
         );
-        // Aggregate all lifecycle rows before filtering: a memory can be both
-        // superseded and resolved, with several incoming links of either kind.
-        let mut states = Vec::<(MemoryId, RetentionState, Vec<MemoryId>, bool)>::new();
-        for solution in self.query_solutions(&query)? {
-            let id = memory_id_binding(&solution, "id")?;
-            if states.last().is_none_or(|entry| entry.0 != id) {
-                states.push((id, enum_binding(&solution, "retention")?, Vec::new(), false));
+        struct State {
+            id: MemoryId,
+            retention: RetentionState,
+            salience: f32,
+            created: DateTime<Utc>,
+            superseded_by: Vec<MemoryId>,
+            resolved: bool,
+        }
+        // Collect every lifecycle row before applying policy or the budget.
+        let mut states = HashMap::<MemoryId, State>::new();
+        for row in self.query_solutions(&query)? {
+            let id = memory_id_binding(&row, "id")?;
+            if traversable.is_some_and(|ids| !ids.contains(&id)) {
+                continue;
             }
-            let state = states.last_mut().unwrap();
-            if let Some(source) = solution.get("source") {
+            if let std::collections::hash_map::Entry::Vacant(entry) = states.entry(id) {
+                entry.insert(State {
+                    id,
+                    retention: enum_binding(&row, "retention")?,
+                    salience: literal_binding(&row, "salience")?
+                        .parse()
+                        .map_err(oxigraph_sparql_error)?,
+                    created: literal_binding(&row, "created")?
+                        .parse()
+                        .map_err(oxigraph_sparql_error)?,
+                    superseded_by: Vec::new(),
+                    resolved: false,
+                });
+            }
+            let state = states.get_mut(&id).unwrap();
+            if let Some(source) = row.get("source") {
                 let Term::NamedNode(source) = source else {
                     return Err(oxigraph_sparql_error(format!(
                         "expected lifecycle source IRI, got {source}"
                     )));
                 };
-                match enum_binding::<RelationType>(&solution, "relation")? {
+                match enum_binding::<RelationType>(&row, "relation")? {
                     RelationType::Supersedes => state
-                        .2
+                        .superseded_by
                         .push(super::shared::memory_id_from_resource(source.as_str())?),
-                    RelationType::Resolves | RelationType::FulfillsCommitment => state.3 = true,
+                    RelationType::Resolves | RelationType::FulfillsCommitment => {
+                        state.resolved = true
+                    }
                     _ => unreachable!("query restricts lifecycle relations"),
                 }
             }
         }
-        let mut ranked_ids = Vec::new();
-        let mut historical_ids = Vec::new();
-        let mut filtered = Vec::new();
-        for (id, retention, mut superseded_by, resolved) in states {
-            superseded_by.sort_unstable();
-            superseded_by.dedup();
-            let reason = if retention == RetentionState::Suppressed && !policy.include_suppressed {
-                Some(GraphExpansionFilteredReason::Suppressed)
-            } else if !superseded_by.is_empty() && !policy.include_superseded {
-                Some(GraphExpansionFilteredReason::Superseded)
-            } else if resolved {
-                Some(GraphExpansionFilteredReason::Resolved)
-            } else {
-                None
-            };
+        let mut eligible = Vec::new();
+        let mut excluded = Vec::new();
+        for mut state in states.into_values() {
+            state.superseded_by.sort_unstable();
+            state.superseded_by.dedup();
+            let reason =
+                if state.retention == RetentionState::Suppressed && !policy.include_suppressed {
+                    Some(GraphExpansionFilteredReason::Suppressed)
+                } else if !state.superseded_by.is_empty() && !policy.include_superseded {
+                    Some(GraphExpansionFilteredReason::Superseded)
+                } else if state.resolved {
+                    Some(GraphExpansionFilteredReason::Resolved)
+                } else {
+                    None
+                };
             if let Some(reason) = reason {
-                filtered.push(GraphExpansionFilteredNode {
-                    object_ref: MemoryObjectRef::new(ObjectType::DerivedMemory, id),
-                    reason,
-                    superseded_by,
-                });
-            } else if superseded_by.is_empty() {
-                ranked_ids.push(id);
+                excluded.push((
+                    state.created,
+                    GraphExpansionFilteredNode {
+                        object_ref: MemoryObjectRef::new(ObjectType::DerivedMemory, state.id),
+                        reason,
+                        superseded_by: state.superseded_by,
+                    },
+                ));
             } else {
-                historical_ids.push(id);
+                eligible.push(state);
             }
         }
-        ranked_ids.extend(historical_ids);
-        Ok((ranked_ids, filtered))
+        eligible.sort_by(|a, b| {
+            (if salience_first {
+                b.superseded_by
+                    .is_empty()
+                    .cmp(&a.superseded_by.is_empty())
+                    .then_with(|| b.salience.total_cmp(&a.salience))
+            } else {
+                std::cmp::Ordering::Equal
+            })
+            .then_with(|| b.created.cmp(&a.created))
+            .then_with(|| a.id.cmp(&b.id))
+        });
+        excluded.sort_by_key(|(created, entry)| (std::cmp::Reverse(*created), entry.object_ref.id));
+        Ok((
+            eligible
+                .into_iter()
+                .take(eligible_limit)
+                .map(|state| state.id)
+                .collect(),
+            excluded
+                .into_iter()
+                .take(limit)
+                .map(|(_, entry)| entry)
+                .collect(),
+        ))
+    }
+
+    pub(crate) fn select_link_ids_touching(
+        &self,
+        object_refs: &[MemoryObjectRef],
+    ) -> Result<Vec<MemoryId>, CustomError> {
+        if object_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query = format!(
+            r#"SELECT DISTINCT ?id WHERE {{
+                {nodes}
+                GRAPH ?link {{
+                    ?link a <{link_class}> ; <{object_id}> ?id .
+                    {{ ?link <{from}> ?node . }} UNION {{ ?link <{to}> ?node . }}
+                }}
+            }} ORDER BY ?id"#,
+            nodes = sparql_node_iri_values("node", object_refs),
+            link_class = vocab::CLASS_MEMORY_LINK,
+            object_id = vocab::OBJECT_ID,
+            from = vocab::FROM,
+            to = vocab::TO,
+        );
+        self.query_solutions(&query)?
+            .iter()
+            .map(|row| memory_id_binding(row, "id"))
+            .collect()
     }
 
     pub(crate) fn select_links_touching(
         &self,
         object_refs: &[MemoryObjectRef],
+        current_thread_state: bool,
     ) -> Result<Vec<SparqlLinkRef>, CustomError> {
         if object_refs.is_empty() {
             return Ok(Vec::new());
@@ -396,6 +545,51 @@ impl<'a> SparqlGraphSelectors<'a> {
             };
             if seen.insert(link_ref) {
                 refs.push(link_ref);
+            }
+        }
+        if current_thread_state {
+            let mut members = refs
+                .iter()
+                .filter(|link| link.relation == RelationType::PartOfThread)
+                .flat_map(|link| [link.from, link.to])
+                .filter(|object| object.object_type == ObjectType::DerivedMemory)
+                .collect::<Vec<_>>();
+            members.sort_unstable_by_key(|object| object.id);
+            members.dedup();
+            if !members.is_empty() {
+                let query = format!(
+                    r#"SELECT DISTINCT ?member WHERE {{
+                        {members}
+                        GRAPH ?g {{
+                            ?link a <{link_class}> ; <{from_type}> "derived_memory" ;
+                                <{to_type}> "derived_memory" ; <{relation}> ?kind ; <{to}> ?member .
+                            VALUES ?kind {{ "resolves" "fulfills_commitment" }}
+                        }}
+                    }}"#,
+                    members = sparql_node_iri_values("member", &members),
+                    link_class = vocab::CLASS_MEMORY_LINK,
+                    from_type = vocab::FROM_TYPE,
+                    to_type = vocab::TO_TYPE,
+                    relation = vocab::RELATION,
+                    to = vocab::TO,
+                );
+                let resolved = self
+                    .query_solutions(&query)?
+                    .iter()
+                    .map(|row| match row.get("member") {
+                        Some(Term::NamedNode(member)) => Ok(MemoryObjectRef::new(
+                            ObjectType::DerivedMemory,
+                            super::shared::memory_id_from_resource(member.as_str())?,
+                        )),
+                        value => Err(oxigraph_sparql_error(format!(
+                            "expected resolved member IRI, got {value:?}"
+                        ))),
+                    })
+                    .collect::<Result<HashSet<_>, _>>()?;
+                refs.retain(|link| {
+                    link.relation != RelationType::PartOfThread
+                        || (!resolved.contains(&link.from) && !resolved.contains(&link.to))
+                });
             }
         }
         refs.sort_by_key(|link_ref| {
@@ -478,50 +672,87 @@ impl<'a> SparqlGraphSelectors<'a> {
         if neighbors.is_empty() {
             return Ok(ParticipantOccasions::new());
         }
-        let node_values = sparql_node_iri_values("node", neighbors);
+        let values = sparql_node_iri_values("node", neighbors);
         let query_text = format!(
-            r#"
-            SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{
-              {node_values}
-              GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
-              {{
-                GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
-              }} UNION {{
-                GRAPH ?node {{ ?node <{episode}> ?episode . }}
-                GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
-              }}
-            }}
-        "#,
+            r#"SELECT DISTINCT ?id ?objectType ?episodeId ?sceneTime ?retention ?episodeRetention WHERE {{
+                {values}
+                GRAPH ?node {{ ?node <{object_id}> ?id ; <{object_type}> ?objectType ; <{retention}> ?retention . }}
+                {{
+                    GRAPH ?node {{ ?node <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                }} UNION {{
+                    GRAPH ?node {{ ?node <{episode}> ?episode . }}
+                    GRAPH ?episode {{ ?episode <{object_id}> ?episodeId ; <{scene_time}> ?sceneTime ; <{retention}> ?episodeRetention . }}
+                }}
+            }}"#,
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
+            retention = vocab::RETENTION_STATE,
             scene_time = vocab::SCENE_TIME,
             episode = vocab::EPISODE,
-            retention = vocab::RETENTION_STATE,
         );
-        let mut occasions = ParticipantOccasions::new();
-        for solution in self.query_solutions(&query_text)? {
-            let neighbor = MemoryObjectRef::from_id_type(
-                memory_id_binding(&solution, "id")?,
-                enum_binding(&solution, "objectType")?,
-            );
-            let time = literal_binding(&solution, "sceneTime")?
-                .parse()
-                .map_err(|error| {
-                    CustomError::DatabaseError(format!(
-                        "Oxigraph SPARQL invalid Scene.time: {error}"
-                    ))
-                })?;
-            occasions.insert(
-                neighbor,
-                ParticipantOccasion {
-                    episode_id: memory_id_binding(&solution, "episodeId")?,
-                    time,
-                    retention_state: enum_binding(&solution, "retention")?,
-                    episode_retention_state: enum_binding(&solution, "episodeRetention")?,
-                },
+        self.query_solutions(&query_text)?
+            .iter()
+            .map(participant_occasion_binding)
+            .collect()
+    }
+
+    pub(crate) fn select_bounded_participant_occasions(
+        &self,
+        neighbors: &[MemoryObjectRef],
+        query: &crate::ports::graph_authority::GraphExpansionQuery,
+    ) -> Result<ParticipantOccasions, CustomError> {
+        let budget =
+            crate::policy::graph_expansion::participant_occasion_budget(query).unwrap_or(0);
+        if neighbors.is_empty() || budget == 0 {
+            return Ok(ParticipantOccasions::new());
+        }
+        let mut occasions = self.select_participant_occasions(neighbors)?;
+        occasions.retain(|_, occasion| {
+            !query.current_subject_state || occasion.time <= query.participant_reference_time
+        });
+        let mut episodes = occasions
+            .iter()
+            .map(|(neighbor, occasion)| {
+                (
+                    occasion.time,
+                    occasion.episode_id,
+                    occasion
+                        .filtered_reason(*neighbor, query.lifecycle_policy)
+                        .is_none(),
+                )
+            })
+            .collect::<Vec<_>>();
+        episodes.sort_unstable_by_key(|(time, id, eligible)| {
+            (std::cmp::Reverse(*time), *id, *eligible)
+        });
+        episodes.dedup();
+        let mut selected_episodes = HashSet::new();
+        for eligible in [true, false] {
+            let limit =
+                budget.saturating_add(usize::from(eligible && query.trace_mode.is_enabled()));
+            selected_episodes.extend(
+                episodes
+                    .iter()
+                    .filter(|(_, _, allowed)| *allowed == eligible)
+                    .take(limit)
+                    .map(|(_, id, _)| (*id, eligible)),
             );
         }
-        Ok(occasions)
+        // Keep the first input route per episode/type/eligibility, as the graph
+        // limiter does; all following object hydration sees only these prefixes.
+        let mut seen_routes = HashSet::new();
+        Ok(neighbors
+            .iter()
+            .filter_map(|neighbor| {
+                let occasion = occasions.remove(neighbor)?;
+                let eligible = occasion
+                    .filtered_reason(*neighbor, query.lifecycle_policy)
+                    .is_none();
+                (selected_episodes.contains(&(occasion.episode_id, eligible))
+                    && seen_routes.insert((occasion.episode_id, neighbor.object_type, eligible)))
+                .then_some((*neighbor, occasion))
+            })
+            .collect())
     }
 
     pub(crate) fn select_anniversaries(
@@ -728,10 +959,44 @@ impl<'a> SparqlGraphSelectors<'a> {
             ));
         };
 
-        solutions
+        let rows = solutions
             .collect::<Result<Vec<_>, _>>()
-            .map_err(oxigraph_sparql_error)
+            .map_err(oxigraph_sparql_error)?;
+        #[cfg(test)]
+        MAX_SELECT_ROWS.with(|count| count.set(count.get().max(rows.len())));
+        #[cfg(test)]
+        SELECT_CALLS.with(|count| count.set(count.get() + 1));
+        Ok(rows)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static MAX_SELECT_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static SELECT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn participant_occasion_binding(
+    solution: &QuerySolution,
+) -> Result<(MemoryObjectRef, ParticipantOccasion), CustomError> {
+    let neighbor = MemoryObjectRef::from_id_type(
+        memory_id_binding(solution, "id")?,
+        enum_binding(solution, "objectType")?,
+    );
+    let time = literal_binding(solution, "sceneTime")?
+        .parse()
+        .map_err(|error| {
+            CustomError::DatabaseError(format!("Oxigraph SPARQL invalid Scene.time: {error}"))
+        })?;
+    Ok((
+        neighbor,
+        ParticipantOccasion {
+            episode_id: memory_id_binding(solution, "episodeId")?,
+            time,
+            retention_state: enum_binding(solution, "retention")?,
+            episode_retention_state: enum_binding(solution, "episodeRetention")?,
+        },
+    ))
 }
 
 fn occasion_retention_filter(policy: GraphExpansionLifecyclePolicy) -> &'static str {

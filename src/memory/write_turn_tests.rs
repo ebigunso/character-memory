@@ -636,8 +636,9 @@ impl GraphAuthorityStore for GatedGraph {
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
     ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        self.store.query_scope_state(key, policy).await
+        self.store.query_scope_state(key, policy, limit).await
     }
 
     async fn expand_bounded(
@@ -671,8 +672,8 @@ impl VectorCandidateStore for GatedVector {
     ) -> Result<VectorCandidateRecall, CustomError> {
         self.store.search_candidates(query).await
     }
-    async fn delete_candidates(&self, ids: &[MemoryId]) -> Result<(), CustomError> {
-        self.store.delete_candidates(ids).await
+    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        self.store.delete_candidates(objects).await
     }
 }
 
