@@ -755,6 +755,14 @@ The tasks run in sequence, one worker at a time, because they share one crate an
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
+- 2026-09-24 Timing read: the slowdown is real, it is Task_3's, and its fix is routed to the value-audit cleanup plan.
+  Trigger / new insight: an interleaved timing (both pins alternating per query, three warm samples each, the same load on both) confirmed the slice-end AFTER's apparent 1.5x. Keyless ran at 1.58x and time at 1.64x, and queries whose membership and order were unchanged ran at about 1.6x, so the cost is code, not pack size. Adjacent-step interleaving put it all in Task_3: parent to Task_1 1.01, Task_1 to Task_2 0.99, Task_2 to Task_3 1.59, Task_3 to final 1.03.
+  - Cause: Task_3 adds three occasion-metadata queries per expanded root where one is new, and its ObservedIn level multiplies a pre-existing whole-store link hydration that runs once per expanded root. The pre-existing hydration contradicts ruling 67.
+  - What it means for the character: the same memories come to mind, a quarter of a second later at this store size, and the delay grows with the store because of the whole-store read.
+  - Verdict: behavior direction confirmed as read above; the timing direction is questioned for Task_3's read path, not its design. The value-audit cleanup plan's Task_14 fixes both reads without changing outcomes and is timed against this plan's parent. This plan closes on that routing; its timing claim is settled by Task_14's reading.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
 ## Notes
 - Risks:
   - Treating a keyed place as a reminder removes the only route by which a setting key brings where things stand at full strength. A deployment that keys only the place and names no one now gets place memories at floor and unclaimed room. The keyed-setting family measures this.
