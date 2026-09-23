@@ -5,6 +5,625 @@ use character_memory::{
 };
 use uuid::Uuid;
 
+mod road_behavior {
+    use super::test_support;
+    use character_memory::api::types::{RetrievalCueFloors, TimeRange};
+    use character_memory::*;
+    use chrono::{DateTime, Duration, Utc};
+
+    fn time() -> DateTime<Utc> {
+        "2026-09-23T12:00:00Z".parse().unwrap()
+    }
+    fn id(n: u128, reverse: bool) -> MemoryId {
+        MemoryId::from_u128(if reverse { 100_000 - n } else { n })
+    }
+    fn provenance() -> CandidateProvenance {
+        CandidateProvenance::caller("recall behavior")
+    }
+    fn indexed(
+        plan: RememberWritePlan,
+        kind: ObjectType,
+        n: u128,
+        reverse: bool,
+    ) -> RememberWritePlan {
+        plan.with_candidate(MemoryCandidate::VectorIndex(VectorIndexCandidate::new(
+            MemoryObjectRef::new(kind, id(n, reverse)),
+            provenance(),
+        )))
+    }
+    fn episode(
+        plan: RememberWritePlan,
+        n: u128,
+        days: i64,
+        salience: f32,
+        text: Option<&str>,
+        reverse: bool,
+    ) -> RememberWritePlan {
+        let mut draft = EpisodeDraft::new(text.unwrap_or("ordinary occasion"));
+        draft.id = Some(id(n, reverse));
+        draft.scene = Some(Scene::at((time() - Duration::days(days)).fixed_offset()));
+        draft.created_at = Some(time());
+        draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+        draft.salience_score = salience;
+        let plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+            draft,
+            provenance(),
+        )));
+        if text.is_some() {
+            indexed(plan, ObjectType::Episode, n, reverse)
+        } else {
+            plan
+        }
+    }
+    async fn commit(memory: &CharacterMemory, plan: RememberWritePlan) {
+        let result = memory.commit(plan, CommitOptions::default()).await.unwrap();
+        assert!(result.vector_indexing_failure.is_none());
+        assert!(result.diagnostics.messages.is_empty(), "{result:?}");
+    }
+    fn query(topic: Option<&str>, roots: usize, room: usize) -> RetrievalContext {
+        let mut context = RetrievalContext::default()
+            .with_scene(Scene::at(time().fixed_offset()))
+            .with_trace();
+        context.topic = topic.map(str::to_owned);
+        context.graph_limits.max_depth = 0;
+        context.graph_limits.timeout_ms = None;
+        context.candidate_limits.max_graph_roots = roots;
+        context.candidate_limits.max_vector_candidates = 32;
+        context.section_limits = ContinuitySectionLimits {
+            active_threads: room,
+            relevant_episodes: room,
+            salient_observations: room,
+            derived_memories: room,
+            preferences: room,
+            relationship_notes: room,
+            open_loops: room,
+            commitments: room,
+            character_signals: room,
+        };
+        context.cue_floors = RetrievalCueFloors {
+            participant: 0,
+            place: 0,
+            activity: 0,
+            date_match: 0,
+            topic: 0,
+            recency: 0,
+        };
+        context
+    }
+    fn roots(result: &RetrieveOutcome) -> Vec<MemoryId> {
+        result
+            .trace
+            .as_ref()
+            .unwrap()
+            .graph_expansions
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.outcome,
+                    GraphExpansionOutcome::Expanded | GraphExpansionOutcome::Bounded
+                )
+            })
+            .map(|row| row.root.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_range_replaces_the_recency_window() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let plan = episode(
+                episode(RememberWritePlan::new(), 10, 0, 0.0, None, reverse),
+                20,
+                8,
+                0.0,
+                None,
+                reverse,
+            );
+            commit(&memory, plan).await;
+            let mut context = query(None, 4, 2);
+            context.time_range = Some(TimeRange {
+                start: time() - Duration::days(9),
+                end: time() - Duration::days(7),
+            });
+            let ranged = memory.retrieve(context).await.unwrap();
+            assert!(ranged
+                .pack
+                .relevant_episodes
+                .iter()
+                .any(|episode| episode.id == id(20, reverse)));
+            assert!(!ranged
+                .pack
+                .relevant_episodes
+                .iter()
+                .any(|episode| episode.id == id(10, reverse)));
+            assert!(ranged
+                .trace
+                .unwrap()
+                .section_assignments
+                .iter()
+                .all(|row| !row.cue_kinds.contains(&CueKind::Recency)));
+            let recent = memory.retrieve(query(None, 1, 1)).await.unwrap();
+            assert_eq!(recent.pack.relevant_episodes[0].id, id(10, reverse));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_salient_or_shared_anniversary_can_survive_a_year_of_daily_occasions() {
+        let ordinary = EpisodeDraft::new("ordinary").salience_score;
+        for reverse in [false, true] {
+            for (salience, shared) in [(ordinary, false), (1.0, false), (ordinary, true)] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut plan = RememberWritePlan::new();
+                if shared {
+                    let mut entity = EntityDraft::new();
+                    entity.id = Some(id(77, reverse));
+                    entity.created_at = Some(time());
+                    entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                    plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+                        entity,
+                        provenance(),
+                    )));
+                }
+                for days in 0..367 {
+                    plan = episode(
+                        plan,
+                        1000 + days as u128,
+                        days,
+                        if days == 365 { salience } else { ordinary },
+                        None,
+                        reverse,
+                    );
+                }
+                if shared {
+                    for candidate in &mut plan.candidates {
+                        if let MemoryCandidate::Episode(candidate) = candidate {
+                            if candidate.draft.id == Some(id(1365, reverse)) {
+                                candidate.draft.scene.as_mut().unwrap().participants.push(
+                                    SceneParticipant {
+                                        key: Some(id(77, reverse)),
+                                        ..Default::default()
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+                commit(&memory, plan).await;
+                let mut context = query(None, 12, 12);
+                if shared {
+                    context.scene.participants.push(SceneParticipant {
+                        key: Some(id(77, reverse)),
+                        ..Default::default()
+                    });
+                    context.cue_floors.date_match = 1;
+                }
+                let result = memory.retrieve(context).await.unwrap();
+                assert_eq!(
+                    result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .any(|episode| episode.id == id(1365, reverse)),
+                    shared || salience > ordinary
+                );
+                if !shared && salience == ordinary {
+                    assert!(result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .all(|episode| episode.scene.time >= time() - Duration::days(11)));
+                }
+                test_support::close_and_remove_root(memory, root).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_and_unshared_anniversaries_have_independent_room() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut entity = EntityDraft::new();
+            entity.id = Some(id(77, reverse));
+            entity.created_at = Some(time());
+            entity.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Entity(
+                EntityCandidate::new(entity, provenance()),
+            ));
+            for (n, year, shared) in [
+                (200, 2025, false),
+                (201, 2024, false),
+                (202, 2023, false),
+                (300, 2022, true),
+                (301, 2021, true),
+                (302, 2020, true),
+            ] {
+                let mut draft = EpisodeDraft::new("anniversary occasion");
+                draft.id = Some(id(n, reverse));
+                draft.created_at = Some(time());
+                draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                draft.salience_score = 1.0;
+                let mut scene = Scene::at(format!("{year}-09-23T12:00:00Z").parse().unwrap());
+                if shared {
+                    scene.participants.push(SceneParticipant {
+                        key: Some(id(77, reverse)),
+                        ..Default::default()
+                    });
+                }
+                draft.scene = Some(scene);
+                plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+                    draft,
+                    provenance(),
+                )));
+            }
+            commit(&memory, plan).await;
+            let mut context = query(None, 7, 3);
+            context.scene.participants.push(SceneParticipant {
+                key: Some(id(77, reverse)),
+                ..Default::default()
+            });
+            context.cue_floors.date_match = 1;
+            let result = memory.retrieve(context).await.unwrap();
+            let selected = roots(&result);
+            assert_eq!(
+                (200..203)
+                    .filter(|&n| selected.contains(&id(n, reverse)))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                (300..303)
+                    .filter(|&n| selected.contains(&id(n, reverse)))
+                    .count(),
+                3
+            );
+            assert!(result
+                .pack
+                .relevant_episodes
+                .iter()
+                .any(|episode| episode.id == id(300, reverse)));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn descriptions_do_not_take_spare_root_turns() {
+        for reverse in [false, true] {
+            for setting in [false, true] {
+                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let mut plan = episode(
+                    episode(
+                        RememberWritePlan::new(),
+                        100,
+                        30,
+                        0.0,
+                        Some("orchid"),
+                        reverse,
+                    ),
+                    101,
+                    31,
+                    0.0,
+                    Some("orchid"),
+                    reverse,
+                );
+                plan = episode(plan, 200, 2, 0.0, Some("quiet afternoon"), reverse);
+                for candidate in &mut plan.candidates {
+                    if let MemoryCandidate::Episode(candidate) = candidate {
+                        if candidate.draft.id == Some(id(200, reverse)) {
+                            let scene = candidate.draft.scene.as_mut().unwrap();
+                            scene.setting.words = Some("botanist astronomer".into());
+                            scene.participants.push(SceneParticipant {
+                                description: Some("botanist astronomer".into()),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+                commit(&memory, plan).await;
+                let mut context = query(Some("Episode summary: orchid"), 2, 2);
+                context.cue_floors.topic = 1;
+                if setting {
+                    context.scene.setting.words = Some("botanist".into());
+                } else {
+                    context.scene.participants.push(SceneParticipant {
+                        description: Some("botanist".into()),
+                        ..Default::default()
+                    });
+                }
+                let result = memory.retrieve(context).await.unwrap();
+                assert!(result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .scene_cue_searches
+                    .iter()
+                    .any(|search| search.best_score.is_some_and(|score| score > 0.0)));
+                assert!(!roots(&result).contains(&id(200, reverse)));
+                test_support::close_and_remove_root(memory, root).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recency_reservation_uses_the_latest_occasion() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let plan = episode(
+                episode(
+                    RememberWritePlan::new(),
+                    100,
+                    30,
+                    0.0,
+                    Some("orchid"),
+                    reverse,
+                ),
+                900,
+                0,
+                0.0,
+                None,
+                reverse,
+            );
+            commit(&memory, plan).await;
+            let mut context = query(Some("orchid"), 1, 2);
+            let unreserved = memory.retrieve(context.clone()).await.unwrap();
+            assert!(!roots(&unreserved).contains(&id(900, reverse)));
+            context.cue_floors.recency = 1;
+            let reserved = memory.retrieve(context).await.unwrap();
+            assert!(roots(&reserved).contains(&id(900, reverse)));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_timestamped_occasion_beats_an_unmatched_topic_tail() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = episode(
+                episode(
+                    RememberWritePlan::new(),
+                    100,
+                    30,
+                    0.0,
+                    Some("orchid"),
+                    reverse,
+                ),
+                101,
+                31,
+                0.0,
+                Some("orchid"),
+                reverse,
+            );
+            plan = episode(plan, 900, 0, 0.0, None, reverse);
+            commit(&memory, plan).await;
+            let mut context = query(Some("zebra"), 2, 1);
+            context.cue_floors.topic = 1;
+            let result = memory.retrieve(context).await.unwrap();
+            assert!(result
+                .trace
+                .as_ref()
+                .unwrap()
+                .vector_candidates
+                .iter()
+                .all(|candidate| candidate.score.to_bits() == 0));
+            assert!(roots(&result).contains(&id(900, reverse)));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_zero_score_overlap_uses_root_time() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let plan = episode(
+                episode(
+                    RememberWritePlan::new(),
+                    100,
+                    30,
+                    0.0,
+                    Some("orchid"),
+                    reverse,
+                ),
+                101,
+                0,
+                0.0,
+                Some("orchid"),
+                reverse,
+            );
+            commit(&memory, plan).await;
+            let positive = memory.retrieve(query(Some("orchid"), 1, 2)).await.unwrap();
+            let first_match = &positive.trace.as_ref().unwrap().vector_candidates[0];
+            assert!(first_match.score > 0.0);
+            assert_eq!(roots(&positive)[0], first_match.object.id);
+            let unmatched = memory.retrieve(query(Some("zebra"), 1, 2)).await.unwrap();
+            assert_eq!(roots(&unmatched)[0], id(101, reverse));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn quiet_recency_preserves_a_saturated_strong_topic_pack() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = RememberWritePlan::new();
+            for n in 100..104 {
+                plan = episode(plan, n, n as i64, 0.0, Some("orchid"), reverse);
+            }
+            commit(&memory, plan).await;
+            let mut context = query(Some("Episode summary: orchid"), 2, 2);
+            context.cue_floors.topic = 1;
+            let before = memory.retrieve(context.clone()).await.unwrap();
+            commit(
+                &memory,
+                episode(RememberWritePlan::new(), 900, 0, 1.0, None, reverse),
+            )
+            .await;
+            let after = memory.retrieve(context).await.unwrap();
+            assert_eq!(roots(&before), roots(&after));
+            assert_eq!(before.pack, after.pack);
+            assert_eq!(before.scene, after.scene);
+            assert_eq!(before.activity, after.activity);
+            assert_eq!(before.time_range, after.time_range);
+            assert_eq!(before.scene_references, after.scene_references);
+            assert_eq!(before.memory_scenes, after.memory_scenes);
+            let scores = |result: &RetrieveOutcome| {
+                result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .section_assignments
+                    .iter()
+                    .filter_map(|row| match &row.reason {
+                        SectionAssignmentReason::Selected { scores } => Some((row.object, *scores)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(scores(&before), scores(&after));
+            assert!(scores(&after)
+                .iter()
+                .all(|(_, scores)| scores.final_score > 0.35));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn section_ties_use_observed_parent_and_creation_times() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut plan = episode(
+                episode(RememberWritePlan::new(), 100, 10, 0.0, None, reverse),
+                101,
+                3,
+                0.0,
+                None,
+                reverse,
+            );
+            for n in [200, 201] {
+                let mut draft = ObservationDraft::new(id(100, reverse), "orchid");
+                draft.id = Some(id(n, reverse));
+                draft.observed_at = (n == 201).then_some(time() - Duration::days(1));
+                draft.created_at = Some(time() - Duration::days(if n == 200 { 0 } else { 20 }));
+                draft.salience_score = 0.0;
+                draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = indexed(
+                    plan.with_candidate(MemoryCandidate::Observation(ObservationCandidate::new(
+                        draft,
+                        provenance(),
+                    ))),
+                    ObjectType::Observation,
+                    n,
+                    reverse,
+                );
+            }
+            for (n, days) in [(300, 5), (301, 1)] {
+                let mut draft = DerivedMemoryDraft::new(DerivedType::Claim, "orchid")
+                    .with_source_episode(id(100, reverse));
+                draft.id = Some(id(n, reverse));
+                draft.created_at = Some(time() - Duration::days(days));
+                draft.updated_at = draft.created_at;
+                draft.salience_score = 0.0;
+                draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = indexed(
+                    plan.with_candidate(MemoryCandidate::DerivedMemory(
+                        DerivedMemoryCandidate::new(draft, provenance()),
+                    )),
+                    ObjectType::DerivedMemory,
+                    n,
+                    reverse,
+                );
+            }
+            commit(&memory, plan).await;
+            let result = memory.retrieve(query(Some("zebra"), 6, 6)).await.unwrap();
+            assert_eq!(result.pack.relevant_episodes[0].id, id(101, reverse));
+            assert_eq!(
+                result
+                    .pack
+                    .salient_observations
+                    .iter()
+                    .map(|object| object.id)
+                    .collect::<Vec<_>>(),
+                [id(201, reverse), id(200, reverse)]
+            );
+            assert_eq!(
+                result
+                    .pack
+                    .derived_memories
+                    .iter()
+                    .map(|object| object.memory.id)
+                    .collect::<Vec<_>>(),
+                [id(301, reverse), id(300, reverse)]
+            );
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_activity_reservation_takes_its_thread_before_a_member() {
+        for reverse in [false, true] {
+            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let mut thread = MemoryThreadDraft::new("work", "work");
+            thread.id = Some(id(600, reverse));
+            thread.created_at = Some(time());
+            thread.updated_at = Some(time());
+            thread.last_touched_at = Some(time());
+            thread.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::MemoryThread(
+                MemoryThreadCandidate::new(thread, provenance()),
+            ));
+            for (source, members) in [
+                (101, vec![301, 302, 303]),
+                (102, vec![311, 312]),
+                (103, vec![321]),
+            ] {
+                let mut scene = Scene::at((time() - Duration::days(10)).fixed_offset());
+                if source == 101 {
+                    scene.setting.key = Some("office".into());
+                }
+                if source == 102 {
+                    scene.custom_values.insert("project".into(), "42".into());
+                }
+                let mut draft = EpisodeDraft::new("source experience");
+                draft.id = Some(id(source, reverse));
+                draft.scene = Some(scene);
+                draft.created_at = Some(time());
+                draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = plan.with_candidate(MemoryCandidate::Episode(EpisodeCandidate::new(
+                    draft,
+                    provenance(),
+                )));
+                for n in members {
+                    let mut draft = DerivedMemoryDraft::new(DerivedType::Claim, "current state")
+                        .with_source_episode(id(source, reverse));
+                    draft.id = Some(id(n, reverse));
+                    draft.created_at = Some(time() - Duration::seconds(i64::from(n == 312)));
+                    draft.updated_at = draft.created_at;
+                    draft.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                    draft.salience_score = if n == 301 { 1.0 } else { 0.5 };
+                    if n == 321 {
+                        draft.thread_ids.push(id(600, reverse));
+                    }
+                    plan = plan.with_candidate(MemoryCandidate::DerivedMemory(
+                        DerivedMemoryCandidate::new(draft, provenance()),
+                    ));
+                }
+            }
+            commit(&memory, plan).await;
+            let mut context = query(None, 3, 8);
+            context.scene.setting.key = Some("office".into());
+            context
+                .scene
+                .custom_values
+                .insert("project".into(), "42".into());
+            context.activity = Some(ActivityRef::Thread(id(600, reverse)));
+            context.cue_floors = RetrievalCueFloors::default();
+            let result = memory.retrieve(context).await.unwrap();
+            assert_eq!(result.pack.active_threads[0].id, id(600, reverse));
+            assert!(!roots(&result).contains(&id(321, reverse)));
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+}
+
 #[path = "support/mod.rs"]
 pub mod test_support;
 

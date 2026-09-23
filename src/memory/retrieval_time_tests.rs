@@ -347,7 +347,7 @@ async fn recency_scene_only_room_and_floor_witnesses() {
     assert_eq!(episodes(&default), [100, 700, 900, 600, 500, 800, 801, 802]);
     assert_eq!(
         roots(&default),
-        [900, 100, 700, 600, 500, 800, 801, 802, 803, 804, 805, 806]
+        [100, 700, 900, 600, 500, 800, 801, 802, 803, 804, 805, 806]
     );
     assert_eq!(
         default
@@ -1193,7 +1193,7 @@ fn date_match_episodes(result: &RetrieveOutcome) -> Vec<u128> {
 }
 
 #[tokio::test]
-async fn time_range_fills_unclaimed_room_before_recency() {
+async fn time_range_replaces_recency_window() {
     let mut rows = Vec::new();
     let mut selected = Vec::new();
     for reverse in [false, true] {
@@ -1215,10 +1215,7 @@ async fn time_range_fills_unclaimed_room_before_recency() {
     println!("TIME_RANGE_ROOM={}", serde_json::to_string(&rows).unwrap());
     assert_eq!(
         selected,
-        [
-            vec![104, 103, 102, 101, 100, 504, 503, 502],
-            vec![200, 201, 202, 203, 204, 600, 601, 602],
-        ]
+        [vec![104, 103, 102, 101, 100], vec![200, 201, 202, 203, 204],]
     );
 }
 
@@ -1323,20 +1320,14 @@ async fn time_range_preserves_other_cues_when_there_is_room() {
         } else {
             [104, 103, 102, 101, 100]
         };
-        let recent = if reverse {
-            [600, 601, 602, 603, 604]
-        } else {
-            [504, 503, 502, 501, 500]
-        };
         assert_eq!(
             episodes(&with),
-            (2000..2002)
-                .chain(dates)
-                .chain(recent)
-                .chain(2002..2014)
-                .collect::<Vec<_>>()
+            (2000..2002).chain(dates).collect::<Vec<_>>()
         );
         let mut reordered = without.pack.clone();
+        reordered
+            .relevant_episodes
+            .retain(|episode| episodes(&with).contains(&episode.id.as_u128()));
         reordered.relevant_episodes.sort_by_key(|episode| {
             episodes(&with)
                 .iter()
@@ -1344,7 +1335,7 @@ async fn time_range_preserves_other_cues_when_there_is_room() {
                 .unwrap()
         });
         assert_eq!(with.pack, reordered);
-        for n in episodes(&without) {
+        for n in episodes(&with) {
             assert_eq!(scores(&with, n), scores(&without, n));
         }
         assert_eq!(date_match_episodes(&with), dates);
@@ -1378,10 +1369,18 @@ async fn time_range_overlap_keeps_standing_and_reminders_stay_on_the_occasion() 
             context,
         )
         .await;
-        assert_eq!(with.pack, without.pack);
+        if topic {
+            assert_eq!(with.pack, without.pack);
+        } else {
+            assert_eq!(roots(&without), [700]);
+        }
         assert_eq!(roots(&with), [900]);
         assert_eq!(date_match_episodes(&with), [900]);
-        assert_eq!(scores(&with, 900), scores(&without, 900));
+        if topic {
+            assert_eq!(scores(&with, 900), scores(&without, 900));
+        } else {
+            assert_eq!(scores(&with, 900).cue_score, Some(0.0));
+        }
         assert_eq!(
             with.trace.as_ref().unwrap().time_range_has_more,
             Some(false)
@@ -1753,7 +1752,7 @@ async fn anniversary_sources_reserve_only_shared_occasions() {
             "next-day" => assert!(ann_dates(&result).is_empty()),
             "unshared-quiet" => {
                 assert!(roots(&result).contains(&700));
-                assert_eq!(ann_dates(&result), [700]);
+                assert_eq!(ann_dates(&result), [900, 700]);
                 assert!(!result
                     .trace
                     .as_ref()
@@ -1810,10 +1809,10 @@ async fn anniversary_sources_reserve_only_shared_occasions() {
             context,
         )
         .await;
-        assert_eq!(ann_dates(&result).len(), floor.max(1));
         assert_eq!(
-            result.trace.as_ref().unwrap().anniversary_has_more,
-            floor < 3
+            ann_dates(&result).len(),
+            3,
+            "contribution does not shrink with the reservation"
         );
     }
     let mut context = ann_query(current, true, false, 2);
@@ -1858,7 +1857,7 @@ async fn anniversary_sources_reserve_only_shared_occasions() {
         ann_query(current, true, false, 2),
     )
     .await;
-    assert_eq!(ann_dates(&forgotten), [700]);
+    assert_eq!(ann_dates(&forgotten), [700, 600]);
     assert!(!roots(&forgotten).contains(&900));
     let mut by_topic = ann_query(current, false, false, 1);
     by_topic.topic = Some("anniversary topic".to_owned());
@@ -2086,7 +2085,6 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
             [900],
             "mentions={mentions} reverse={reverse}"
         );
-        assert!(shared.trace.as_ref().unwrap().anniversary_has_more);
         if mentions {
             memory
                 .forget(ForgetMemoryDraft::suppress(
@@ -2105,59 +2103,6 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
         memory.close().await.unwrap();
         temp.close().unwrap();
     }
-}
-
-#[tokio::test]
-async fn unshared_anniversary_competes_with_recent_daily_occasions_by_score() {
-    let mut selected = Vec::new();
-    let mut spare_roots = Vec::new();
-    let ordinary_salience = EpisodeDraft::new("An ordinary day").salience_score;
-    for anniversary_salience in [ordinary_salience, 1.0] {
-        let (memory, temp) = open().await;
-        let mut plan = RememberWritePlan::new();
-        for days in 0..400 {
-            plan = episode(
-                plan,
-                1000 + days as u128,
-                days,
-                if days == 365 {
-                    anniversary_salience
-                } else {
-                    ordinary_salience
-                },
-                false,
-                false,
-            );
-        }
-        plan = episode(plan, 2000, 800, ordinary_salience, false, true);
-        commit(&memory, plan).await;
-        let result = memory
-            .retrieve(ann_query(&time().to_rfc3339(), false, false, 2))
-            .await
-            .unwrap();
-        assert_eq!(ann_dates(&result), [1365]);
-        assert_eq!(scores(&result, 1365).cue_score, Some(0.0));
-        assert!(!result
-            .trace
-            .as_ref()
-            .unwrap()
-            .floor_admissions
-            .iter()
-            .any(|a| a.cue_kind == CueKind::DateMatch));
-        selected.push(episodes(&result));
-        for topic in [false, true] {
-            let mut context = ann_query(&time().to_rfc3339(), false, topic, 2);
-            context.candidate_limits.max_graph_roots = if topic { 2 } else { 1 };
-            spare_roots.push(roots(&memory.retrieve(context).await.unwrap()));
-        }
-        memory.close().await.unwrap();
-        temp.close().unwrap();
-    }
-    assert_eq!(selected, [vec![1000, 1001], vec![1365, 1000]]);
-    assert_eq!(
-        spare_roots,
-        [vec![1000], vec![2000, 1000], vec![1000], vec![2000, 1000]]
-    );
 }
 
 #[tokio::test]

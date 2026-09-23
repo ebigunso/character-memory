@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 pub(super) struct RecallCues {
     pub candidates: CanonicalCandidates,
     pub roots: Vec<CandidateRoot>,
-    pub orders: BTreeMap<CueKind, Vec<MemoryObjectRef>>,
+    pub orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
     pub dimension: usize,
@@ -126,16 +126,16 @@ where
         }
         let mut searches = HashMap::new();
         let mut embeddings = HashMap::new();
-        let mut kinds: HashMap<MemoryObjectRef, BTreeSet<CueKind>> = HashMap::new();
+        let mut reaches: HashMap<MemoryObjectRef, BTreeMap<RecallRoad, RoadReach>> = HashMap::new();
         let mut all_candidates = Vec::new();
-        let mut candidates_by_kind: BTreeMap<CueKind, Vec<VectorCandidateMatch>> = BTreeMap::new();
-        let mut topic_scores = HashMap::<MemoryObjectRef, f32>::new();
+        let mut candidates_by_kind: BTreeMap<RecallRoad, Vec<VectorCandidateMatch>> =
+            BTreeMap::new();
         let mut scene_cue_searches = Vec::new();
         let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| {
             (
-                CueKind::Topic,
+                RecallRoad::Topic,
                 vec![
                     VectorSurface::Summary,
                     VectorSurface::Text,
@@ -150,15 +150,16 @@ where
             .map(|(surface, text)| {
                 (
                     if surface == VectorSurface::SceneSetting {
-                        CueKind::Place
+                        RecallRoad::SettingWords
                     } else {
-                        CueKind::Participant
+                        RecallRoad::ParticipantDescription
                     },
                     vec![surface],
                     text,
                 )
             });
-        for (kind, surfaces, text) in topic.into_iter().chain(scene_cues) {
+        for (road, surfaces, text) in topic.into_iter().chain(scene_cues) {
+            let kind = road.rule().kind;
             let key = (text.clone(), surfaces.clone());
             if !searches.contains_key(&key) {
                 if !embeddings.contains_key(&text) {
@@ -169,13 +170,13 @@ where
                 dimension = embedding.len();
                 let mut query = VectorCandidateSearch::new(
                     embedding,
-                    context.candidate_limits.max_vector_candidates,
+                    RecallRoad::Topic.contribution(context),
                     context.object_type_defaults.clone(),
                 );
                 query.surfaces = surfaces;
                 let recall = self.vector_store.search_candidates(&query).await?;
                 completeness = merge_completeness(completeness, recall.completeness);
-                let candidates = if kind == CueKind::Topic {
+                let mut candidates = if kind == CueKind::Topic {
                     recall.candidates.iter().cloned().collect::<Vec<_>>()
                 } else {
                     let pool = &recall.scene_pool;
@@ -207,12 +208,7 @@ where
                         )
                     });
                     let count = eligible.len();
-                    let limit = if kind == CueKind::Place {
-                        context.cue_floors.place
-                    } else {
-                        context.cue_floors.participant
-                    }
-                    .max(1);
+                    let limit = road.contribution(context);
                     eligible.truncate(limit);
                     if context.include_trace {
                         scene_cue_searches.push(SceneCueSearchTrace {
@@ -240,23 +236,36 @@ where
                     }
                     eligible
                 };
+                // Clamping changes strength, not this road's raw search order.
+                for candidate in &mut candidates {
+                    candidate.score = if candidate.score > 0.0 {
+                        candidate.score
+                    } else {
+                        0.0
+                    };
+                }
                 all_candidates.extend(candidates.iter().cloned());
                 searches.insert(key.clone(), candidates);
             }
             let search = &searches[&key];
             candidates_by_kind
-                .entry(kind)
+                .entry(road)
                 .or_default()
                 .extend(search.iter().cloned());
-            for candidate in search.iter() {
+            for (position, candidate) in search.iter().enumerate() {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
-                kinds.entry(object).or_default().insert(kind);
-                if kind == CueKind::Topic {
-                    topic_scores
-                        .entry(object)
-                        .and_modify(|score| *score = score.max(candidate.score))
-                        .or_insert(candidate.score);
-                }
+                reaches
+                    .entry(object)
+                    .or_default()
+                    .entry(road)
+                    .and_modify(|reach| {
+                        reach.score = reach.score.max(candidate.score);
+                        reach.position = reach.position.min(position);
+                    })
+                    .or_insert(RoadReach {
+                        score: candidate.score,
+                        position,
+                    });
             }
         }
         references.extend(
@@ -298,23 +307,18 @@ where
             .iter()
             .map(|candidate| {
                 let object = MemoryObjectRef::new(candidate.object_type, candidate.object_id);
-                CandidateRoot::from_vector(
-                    candidate,
-                    kinds[&object].clone(),
-                    topic_scores.get(&object).copied(),
-                )
+                CandidateRoot {
+                    object,
+                    roads: reaches.remove(&object).unwrap(),
+                    vector_score: Some(candidate.score),
+                    memory_rank: None,
+                }
             })
             .collect::<Vec<_>>();
         let selection = select_with_cue_floors(
-            roots.iter().map(|root| {
-                (
-                    MemoryObjectRef::new(root.object_type, root.object_id),
-                    &root.cue_kinds,
-                    root.reminder_only(),
-                )
-            }),
+            roots.iter().map(|root| (root.object, root.road_set())),
             &orders,
-            context.candidate_limits.max_vector_candidates,
+            RecallRoad::Topic.contribution(context),
             context.cue_floors,
             CueFloorStage::CandidateMerge,
         );
