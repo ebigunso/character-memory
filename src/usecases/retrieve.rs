@@ -2,8 +2,6 @@ mod activity;
 mod scene;
 mod state;
 
-// Continuity retrieval pipeline used by the public facade and internal tests.
-// Some helper APIs are intentionally retained for retrieval policy validation.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::api::types::{

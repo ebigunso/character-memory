@@ -16,7 +16,7 @@
 // Both flavors share the same hub/fanout limiting primitives
 // (`apply_fanout_limits_by_pair`, `bounded_hub_retention_limit`), filters
 // (`relation_allowed`, `object_type_allowed`), and bounded-failure error
-// construction (`graph_expansion_bounded_error`).
+// construction (`graph_expansion_bounded_failure_trace`).
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
