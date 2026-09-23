@@ -737,7 +737,10 @@ mod tests {
             outcome.pack.preferences[0].memory.id,
             fixtures.user_preference.id
         );
-        assert_eq!(outcome.rationale.vector_candidate_count, 1);
+        assert_eq!(
+            outcome.rationale.telemetry.returned_vector_candidate_count,
+            1
+        );
         assert_eq!(outcome.rationale.graph_verified_count, 2);
         assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
         memory.close().await.unwrap();
