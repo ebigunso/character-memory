@@ -329,7 +329,7 @@ fn bounded_expansion_plan<'a>(
             reason,
             at: Some(root),
         };
-        fail_if_closed(query.failure_policy.mode, Some(failure))?;
+        fail_if_closed(query.failure_policy.mode, failure)?;
         return Ok(BoundedExpansionPlan {
             bounded_failure: Some(failure),
             ..Default::default()
@@ -456,7 +456,7 @@ fn bounded_expansion_plan<'a>(
                 reason: GraphExpansionBoundedFailureReason::NodeLimit,
                 at: Some(object_ref),
             };
-            fail_if_closed(query.failure_policy.mode, Some(failure))?;
+            fail_if_closed(query.failure_policy.mode, failure)?;
             bounded_failure.get_or_insert(failure);
             continue;
         }
@@ -586,7 +586,7 @@ fn bounded_expansion_plan<'a>(
                 reason: GraphExpansionBoundedFailureReason::HubLimit,
                 at: Some(object_ref),
             };
-            fail_if_closed(query.failure_policy.mode, Some(failure))?;
+            fail_if_closed(query.failure_policy.mode, failure)?;
             bounded_failure.get_or_insert(failure);
         }
         if exceeds_hub_limit {
@@ -636,7 +636,7 @@ fn bounded_expansion_plan<'a>(
                     reason: GraphExpansionBoundedFailureReason::NodeLimit,
                     at: Some(neighbor),
                 };
-                fail_if_closed(query.failure_policy.mode, Some(failure))?;
+                fail_if_closed(query.failure_policy.mode, failure)?;
                 bounded_failure.get_or_insert(failure);
                 continue;
             }
@@ -874,14 +874,12 @@ fn fanout_limit_for_pair_with_override_mode(
 
 pub(crate) fn fail_if_closed(
     mode: GraphFailureMode,
-    failure: Option<GraphExpansionBoundedFailure>,
+    failure: GraphExpansionBoundedFailure,
 ) -> Result<(), CustomError> {
     if mode == GraphFailureMode::FailClosed {
-        if let Some(failure) = failure {
-            return Err(CustomError::GraphExpansionBounded(
-                graph_expansion_bounded_failure_trace(failure),
-            ));
-        }
+        return Err(CustomError::GraphExpansionBounded(
+            graph_expansion_bounded_failure_trace(failure),
+        ));
     }
     Ok(())
 }
@@ -1086,7 +1084,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             reason: GraphExpansionBoundedFailureReason::HubLimit,
             at: Some(object_ref),
         };
-        fail_if_closed(query.failure_policy.mode, Some(failure))?;
+        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
     }
     if exceeds_hub_limit {

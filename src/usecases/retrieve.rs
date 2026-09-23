@@ -317,7 +317,9 @@ where
                     if let Some(traces) = &mut fanout_utilization_traces {
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
-                    fail_if_closed(context.graph_limits.failure_mode, expansion.bounded_failure)?;
+                    if let Some(failure) = expansion.bounded_failure {
+                        fail_if_closed(context.graph_limits.failure_mode, failure)?;
+                    }
                     if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
                             .participants

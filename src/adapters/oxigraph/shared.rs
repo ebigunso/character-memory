@@ -74,7 +74,7 @@ pub(super) fn insert_visible_ref(
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        fail_if_closed(query.failure_policy.mode, Some(failure))?;
+        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
         return Ok(());
     }
