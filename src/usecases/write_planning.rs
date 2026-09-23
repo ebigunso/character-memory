@@ -801,6 +801,12 @@ impl PlanValidationContext {
 
     fn collect_referenced_refs(&mut self, candidate: &MemoryCandidate) {
         match candidate {
+            MemoryCandidate::Observation(candidate) => {
+                self.add_ref_to_check(MemoryObjectRef::new(
+                    ObjectType::Episode,
+                    candidate.draft.episode_id,
+                ));
+            }
             MemoryCandidate::Episode(candidate) => {
                 if let Some(scene) = &candidate.draft.scene {
                     for id in scene.participant_keys() {
@@ -914,6 +920,10 @@ impl PlanValidationContext {
             }
             MemoryCandidate::Observation(candidate) => {
                 errors.extend(validate_provenance(&candidate.provenance));
+                errors.extend(self.validate_graph_authoritative_ref(
+                    MemoryObjectRef::new(ObjectType::Episode, candidate.draft.episode_id),
+                    CandidateReferenceRole::ObservationEpisode,
+                ));
                 errors.extend(validate_required_candidate_identity(
                     "observation candidate",
                     candidate.draft.id,

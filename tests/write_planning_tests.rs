@@ -16,6 +16,75 @@ pub mod test_support;
 use test_support as base;
 
 #[tokio::test]
+async fn an_observation_requires_its_episode_in_the_plan_or_store() {
+    use character_memory::{
+        CandidateProvenance, EpisodeCandidate, ObservationCandidate, ObservationDraft, Scene,
+        DEFAULT_SCHEMA_VERSION,
+    };
+    let mut results = Vec::new();
+    for reverse in [false, true] {
+        for parent in ["missing", "stored", "planned"] {
+            let (memory, root) = setup_basic().await;
+            let eid = MemoryId::from_u128(if reverse { 99900 } else { 100 });
+            let oid = MemoryId::from_u128(if reverse { 99800 } else { 200 });
+            let mut episode = EpisodeDraft::new("a known occasion");
+            episode.id = Some(eid);
+            episode.created_at = Some(fixed_timestamp());
+            episode.scene = Some(Scene::at(fixed_timestamp().fixed_offset()));
+            episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            let episode = MemoryCandidate::Episode(EpisodeCandidate::new(
+                episode,
+                CandidateProvenance::caller("occasion"),
+            ));
+            if parent == "stored" {
+                memory
+                    .commit(
+                        RememberWritePlan::new().with_candidate(episode.clone()),
+                        CommitOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let mut observation = ObservationDraft::new(eid, "a remark on the occasion");
+            observation.id = Some(oid);
+            observation.created_at = Some(fixed_timestamp());
+            observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
+                ObservationCandidate::new(observation, CandidateProvenance::caller("remark")),
+            ));
+            if parent == "planned" {
+                plan = plan.with_candidate(episode);
+            }
+            let validations = memory.validate_plan(&plan).await.unwrap();
+            let outcome = memory.commit(plan, CommitOptions::default()).await;
+            base::close_and_remove_root(memory, root).await;
+            results.push((reverse, parent, eid, validations, outcome));
+        }
+    }
+    for (reverse, parent, eid, validations, outcome) in results {
+        if parent == "missing" {
+            assert_eq!(
+                validations[0].status,
+                CandidateValidationStatus::Invalid,
+                "reverse={reverse}"
+            );
+            assert!(validations[0].errors.iter().any(|issue| matches!(issue,
+                CandidateValidationIssue::UnknownObjectRef { role: character_memory::CandidateReferenceRole::ObservationEpisode, referenced }
+                    if referenced.object_type == ObjectType::Episode && referenced.id == eid)));
+            assert!(matches!(
+                outcome,
+                Err(character_memory::CustomError::WritePlanValidationRejected { .. })
+            ));
+        } else {
+            assert!(validations
+                .iter()
+                .all(|row| row.status == CandidateValidationStatus::Valid));
+            assert_eq!(outcome.unwrap().persisted_link_ids.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
 async fn core_commit_flow_works_in_in_memory_graph_mode() {
     let (memory, root) = setup_basic().await;
 
