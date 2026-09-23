@@ -575,6 +575,12 @@ fn bounded_expansion_plan<'a>(
             occasions,
             |(link, neighbor)| (link.relation, *neighbor),
         );
+        incident_links = apply_fanout_limits_by_pair(
+            query,
+            incident_links,
+            root_fanout_mode,
+            |(link, neighbor)| (link.relation, neighbor.object_type),
+        );
         let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
         if exceeds_hub_limit {
             let failure = GraphExpansionBoundedFailure {
@@ -586,12 +592,6 @@ fn bounded_expansion_plan<'a>(
         if exceeds_hub_limit {
             incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
         }
-        incident_links = apply_fanout_limits_by_pair(
-            query,
-            incident_links,
-            root_fanout_mode,
-            |(link, neighbor)| (link.relation, neighbor.object_type),
-        );
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
                 relations.push(GraphExpansionRelation {
@@ -707,18 +707,15 @@ pub(crate) fn order_current_subject_links<T: Copy>(
     ordered
 }
 
-fn apply_fanout_limits_with_utilization_by_pair<T>(
+fn fanout_utilization_by_pair<T>(
     query: &GraphExpansionQuery,
     root: MemoryObjectRef,
-    incident_items: Vec<T>,
+    retained: &[T],
     pre_limit_counts: FanoutCounts,
     root_fanout_mode: RootFanoutMode,
     pair_for_item: impl Fn(&T) -> (RelationType, ObjectType),
-) -> (Vec<T>, Vec<GraphExpansionFanoutUtilization>) {
-    let retained = apply_fanout_limits_by_pair(query, incident_items, root_fanout_mode, |item| {
-        pair_for_item(item)
-    });
-    let retained_counts = fanout_counts_by_pair(&retained, &pair_for_item);
+) -> Vec<GraphExpansionFanoutUtilization> {
+    let retained_counts = fanout_counts_by_pair(retained, &pair_for_item);
     let mut utilization = pre_limit_counts
         .into_iter()
         .map(|((relation, object_type), before_count)| {
@@ -749,7 +746,7 @@ fn apply_fanout_limits_with_utilization_by_pair<T>(
         )
     });
     utilization.retain(|entry| entry.retained_count > 0 || entry.omitted_by_fanout_count > 0);
-    (retained, utilization)
+    utilization
 }
 
 type FanoutCounts = HashMap<(RelationType, ObjectType), usize>;
@@ -1043,7 +1040,11 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             (link.relation(), link.other_endpoint(object_ref).object_type)
         });
     }
-    let exceeds_hub_limit = incident_links.len() > query.max_hub_edges;
+    let mut links =
+        apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link: &T| {
+            (link.relation(), link.other_endpoint(object_ref).object_type)
+        });
+    let exceeds_hub_limit = links.len() > query.max_hub_edges;
     if exceeds_hub_limit {
         let failure = GraphExpansionBoundedFailure {
             reason: GraphExpansionBoundedFailureReason::HubLimit,
@@ -1052,13 +1053,13 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         bounded_failure.get_or_insert(failure);
     }
     if exceeds_hub_limit {
-        incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
+        links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
     }
-    let (links, mut utilization) = if let Some(pre_limit_counts) = pre_limit_counts {
-        apply_fanout_limits_with_utilization_by_pair(
+    let mut utilization = if let Some(pre_limit_counts) = pre_limit_counts {
+        fanout_utilization_by_pair(
             query,
             object_ref,
-            incident_links,
+            &links,
             pre_limit_counts,
             root_fanout_mode,
             |link_ref| {
@@ -1067,12 +1068,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             },
         )
     } else {
-        (
-            apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link: &T| {
-                (link.relation(), link.other_endpoint(object_ref).object_type)
-            }),
-            Vec::new(),
-        )
+        Vec::new()
     };
     let mut filtered_nodes = Vec::new();
     exclusions.record(&mut utilization, &mut filtered_nodes);
