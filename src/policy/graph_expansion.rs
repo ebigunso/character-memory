@@ -295,83 +295,6 @@ fn provenance_linked_derived_memory_id(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn bounded_expansion_node_set(
-    query: &GraphExpansionQuery,
-    root_exists: bool,
-    links: impl IntoIterator<Item = MemoryLink>,
-) -> Result<HashSet<(MemoryId, ObjectType)>, CustomError> {
-    if query.max_fanout_per_node != usize::MAX
-        || query.max_hub_edges != usize::MAX
-        || !query.allowed_relation_types.is_empty()
-        || !query.fanout_overrides.is_empty()
-        || query.lifecycle_policy != GraphExpansionLifecyclePolicy::default()
-        || query.failure_policy != GraphExpansionFailurePolicy::default()
-    {
-        panic!("bounded_expansion_node_set only supports basic depth/node/object-type bounds");
-    }
-
-    if query.root_type == ObjectType::MemoryLink {
-        panic!("bounded_expansion_node_set does not support MemoryLink roots");
-    }
-
-    if !root_exists {
-        return Err(CustomError::GraphExpansionRootNotFound {
-            object_type: query.root_type,
-            object_id: query.root_id,
-        });
-    }
-
-    if query.max_nodes == 0 {
-        return Ok(HashSet::new());
-    }
-
-    let links = links.into_iter().collect::<Vec<_>>();
-    let mut visited = HashSet::new();
-    let mut queue = VecDeque::from([(query.root_id, query.root_type, 0_u8)]);
-
-    while let Some((object_id, object_type, depth)) = queue.pop_front() {
-        if visited.len() >= query.max_nodes || !visited.insert((object_id, object_type)) {
-            continue;
-        }
-
-        if depth >= query.max_depth || !query.may_continue_from(object_type) {
-            continue;
-        }
-
-        let mut neighbors: Vec<_> = links
-            .iter()
-            .filter_map(|link| {
-                let neighbor = if link.from_id == object_id && link.from_type == object_type {
-                    (link.to_id, link.to_type)
-                } else if link.to_id == object_id && link.to_type == object_type {
-                    (link.from_id, link.from_type)
-                } else {
-                    return None;
-                };
-                query
-                    .allows_incident_link(
-                        MemoryObjectRef::new(object_type, object_id),
-                        link.relation,
-                        MemoryObjectRef::new(neighbor.1, neighbor.0),
-                    )
-                    .then_some(neighbor)
-            })
-            .collect();
-        neighbors
-            .sort_by_key(|node| MemoryObjectRef::from_id_type(node.0, node.1).stable_order_key());
-
-        for neighbor in neighbors {
-            if visited.len() + queue.len() >= query.max_nodes && !visited.contains(&neighbor) {
-                continue;
-            }
-            queue.push_back((neighbor.0, neighbor.1, depth + 1));
-        }
-    }
-
-    Ok(visited)
-}
-
 fn bounded_expansion_plan<'a>(
     query: &GraphExpansionQuery,
     objects: impl IntoIterator<Item = &'a MemoryObject>,
@@ -1504,18 +1427,6 @@ mod tests {
         assert!(matches!(
             error,
             CustomError::UnsupportedExpansionRoot { object } if object == root
-        ));
-    }
-
-    #[test]
-    fn bounded_expansion_validates_missing_root_before_zero_node_limit() {
-        let query = GraphExpansionQuery::new(MemoryId::new_v4(), ObjectType::Entity, 1, 0);
-
-        let error = bounded_expansion_node_set(&query, false, Vec::new()).unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::GraphExpansionRootNotFound { .. }
         ));
     }
 
