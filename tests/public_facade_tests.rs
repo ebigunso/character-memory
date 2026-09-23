@@ -504,7 +504,7 @@ mod road_behavior {
                         id(11, reverse),
                     ))
                     .prepare_write_plan(&RememberPlanDefaults::fixed(
-                        &format!("background {n}"),
+                        format!("background {n}"),
                         time(),
                     ));
                 plan.candidates.extend(background.candidates);
