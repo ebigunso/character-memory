@@ -1128,46 +1128,37 @@ fn section_pressure_for(
         .expect("every pack section has a pressure summary")
 }
 
+fn count_reasons<R: Copy>(
+    reasons: impl Iterator<Item = R>,
+    rank: impl Fn(R) -> u8,
+) -> impl Iterator<Item = (R, usize)> {
+    let mut counts = BTreeMap::new();
+    for reason in reasons {
+        counts.entry(rank(reason)).or_insert((reason, 0)).1 += 1;
+    }
+    counts.into_values()
+}
+
 fn summarize_stale_candidate_omissions(
     omissions: &[StaleCandidateOmission],
 ) -> Vec<StaleCandidateOmissionSummary> {
-    let mut summaries = Vec::<StaleCandidateOmissionSummary>::new();
-    for omission in omissions {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == omission.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(StaleCandidateOmissionSummary {
-                reason: omission.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| stale_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        omissions.iter().map(|entry| entry.reason),
+        stale_reason_rank,
+    )
+    .map(|(reason, count)| StaleCandidateOmissionSummary { reason, count })
+    .collect()
 }
 
 fn summarize_lifecycle_omissions(
     decisions: &[LifecycleFilterDecision],
 ) -> Vec<LifecycleOmissionSummary> {
-    let mut summaries = Vec::<LifecycleOmissionSummary>::new();
-    for decision in decisions {
-        if let Some(summary) = summaries
-            .iter_mut()
-            .find(|summary| summary.reason == decision.reason)
-        {
-            summary.count += 1;
-        } else {
-            summaries.push(LifecycleOmissionSummary {
-                reason: decision.reason,
-                count: 1,
-            });
-        }
-    }
-    summaries.sort_by_key(|summary| lifecycle_reason_rank(summary.reason));
-    summaries
+    count_reasons(
+        decisions.iter().map(|entry| entry.reason),
+        lifecycle_reason_rank,
+    )
+    .map(|(reason, count)| LifecycleOmissionSummary { reason, count })
+    .collect()
 }
 
 fn push_derived(
