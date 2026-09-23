@@ -16,7 +16,6 @@ use crate::ports::retrieval_stats::{
 #[derive(Debug)]
 pub(crate) struct SqliteRetrievalStatsStore {
     connection: Mutex<Connection>,
-    has_episode_index: bool,
 }
 
 impl SqliteRetrievalStatsStore {
@@ -37,38 +36,10 @@ impl SqliteRetrievalStatsStore {
         }
         let mut connection = Connection::open(path).map_err(sqlite_error)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        let is_fresh = !table_exists(&transaction, "entity_edge_index")?;
         initialize_schema(&transaction)?;
-        if is_fresh {
-            transaction
-                .execute_batch(
-                    "CREATE TABLE episode_state_index (
-                    episode_id TEXT PRIMARY KEY,
-                    retention_state TEXT NOT NULL
-                );
-                CREATE TABLE episode_counts (
-                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                    total_count INTEGER NOT NULL,
-                    active_count INTEGER NOT NULL
-                );
-                INSERT INTO episode_counts VALUES (1, 0, 0);
-                CREATE TABLE episode_presence_index (
-                    edge_key TEXT PRIMARY KEY,
-                    entity_id TEXT NOT NULL,
-                    episode_id TEXT NOT NULL,
-                    retention_state TEXT NOT NULL,
-                    is_current INTEGER NOT NULL
-                );
-                CREATE INDEX episode_presence_entity ON episode_presence_index(entity_id, episode_id);
-                CREATE INDEX episode_presence_episode ON episode_presence_index(episode_id);",
-                )
-                .map_err(sqlite_error)?;
-        }
-        let has_episode_index = table_exists(&transaction, "episode_presence_index")?;
         transaction.commit().map_err(sqlite_error)?;
         Ok(Self {
             connection: Mutex::new(connection),
-            has_episode_index,
         })
     }
 }
@@ -83,9 +54,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for edge in edges {
             if is_episode_presence(edge.relation_kind, edge.object_type) {
-                if self.has_episode_index {
-                    upsert_episode_presence(&transaction, edge)?;
-                }
+                upsert_episode_presence(&transaction, edge)?;
             } else {
                 upsert_edge(&transaction, edge)?;
             }
@@ -100,13 +69,11 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for state in states {
-            if self.has_episode_index && state.object_type == ObjectType::Episode {
+            if state.object_type == ObjectType::Episode {
                 transaction.execute(
-                            "UPDATE episode_presence_index SET retention_state = ?2, is_current = ?3 WHERE episode_id = ?1",
-                            params![state.object_id.to_string(), retention_state_key(state.retention_state), bool_int(state.is_current)],
-                        ).map_err(sqlite_error)?;
-            }
-            if self.has_episode_index && state.object_type == ObjectType::Episode {
+                    "UPDATE episode_presence_index SET retention_state = ?2, is_current = ?3 WHERE episode_id = ?1",
+                    params![state.object_id.to_string(), retention_state_key(state.retention_state), bool_int(state.is_current)],
+                ).map_err(sqlite_error)?;
                 let previous = transaction
                     .query_row(
                         "SELECT retention_state FROM episode_state_index WHERE episode_id = ?1",
@@ -147,11 +114,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
         let connection = lock(&self.connection)?;
         if is_episode_presence(key.relation_kind, key.object_type) {
-            return if self.has_episode_index {
-                episode_presence_counter(&connection, key.entity_id.to_string())
-            } else {
-                Ok(None)
-            };
+            return episode_presence_counter(&connection, key.entity_id.to_string());
         }
         connection
             .query_row(
@@ -197,9 +160,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     async fn global_episode_counter(
         &self,
     ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-        if !self.has_episode_index {
-            return Ok(None);
-        }
         let connection = lock(&self.connection)?;
         connection
             .query_row(
@@ -250,16 +210,6 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         )?;
         transaction.commit().map_err(sqlite_error)
     }
-}
-
-fn table_exists(connection: &Connection, name: &str) -> Result<bool, RetrievalStatsStoreError> {
-    connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            [name],
-            |row| row.get(0),
-        )
-        .map_err(sqlite_error)
 }
 
 fn is_episode_presence(relation: RelationType, object_type: ObjectType) -> bool {
@@ -346,6 +296,25 @@ fn initialize_schema(connection: &Connection) -> Result<(), RetrievalStatsStoreE
                 value TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS episode_state_index (
+                    episode_id TEXT PRIMARY KEY,
+                    retention_state TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS episode_counts (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    total_count INTEGER NOT NULL,
+                    active_count INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO episode_counts (singleton, total_count, active_count) VALUES (1, 0, 0);
+                CREATE TABLE IF NOT EXISTS episode_presence_index (
+                    edge_key TEXT PRIMARY KEY,
+                    entity_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    retention_state TEXT NOT NULL,
+                    is_current INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS episode_presence_entity ON episode_presence_index(entity_id, episode_id);
+                CREATE INDEX IF NOT EXISTS episode_presence_episode ON episode_presence_index(episode_id);
             ",
         )
         .map_err(sqlite_error)?;
@@ -709,7 +678,7 @@ mod tests {
     use crate::domain::{MemoryId, ObjectType, RelationType};
 
     #[tokio::test]
-    async fn failed_schema_creation_does_not_leave_a_store_classified_as_old() {
+    async fn failed_schema_creation_rolls_back_all_tables() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("stats.sqlite");
         let connection = Connection::open(&path).unwrap();
@@ -717,7 +686,10 @@ mod tests {
             .execute_batch("CREATE TABLE episode_counts (conflict INTEGER);")
             .unwrap();
         assert!(SqliteRetrievalStatsStore::open(&path).is_err());
-        assert!(!table_exists(&connection, "entity_edge_index").unwrap());
+        assert!(!connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entity_edge_index')",
+            [], |row| row.get::<_, bool>(0),
+        ).unwrap());
         connection
             .execute_batch("DROP TABLE episode_counts;")
             .unwrap();
@@ -725,49 +697,6 @@ mod tests {
         assert_eq!(
             store.global_episode_counter().await.unwrap(),
             Some(RetrievalStatsCounter::default())
-        );
-    }
-
-    #[tokio::test]
-    async fn absent_episode_index_remains_missing_after_writes_and_reopen() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("stats.sqlite");
-        let connection = Connection::open(&path).unwrap();
-        initialize_schema(&connection).unwrap();
-        drop(connection);
-        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
-        assert_eq!(store.global_episode_counter().await.unwrap(), None);
-        let edge = test_edge(
-            MemoryId::from_u128(2),
-            MemoryId::from_u128(1),
-            RetentionState::Active,
-            true,
-        );
-        store.record_edges(&[edge]).await.unwrap();
-        store
-            .record_object_states(&[RetrievalStatsObjectState {
-                object_id: crate::domain::MemoryId::from_u128(1),
-                object_type: ObjectType::Episode,
-                retention_state: RetentionState::Active,
-                is_current: true,
-                observed_at: timestamp(),
-            }])
-            .await
-            .unwrap();
-        assert_eq!(store.global_episode_counter().await.unwrap(), None);
-        drop(store);
-        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
-        assert_eq!(reopened.global_episode_counter().await.unwrap(), None);
-        assert_eq!(
-            reopened
-                .counter(&RetrievalStatsCounterKey {
-                    entity_id: MemoryId::from_u128(2),
-                    relation_kind: RelationType::Involves,
-                    object_type: ObjectType::Episode,
-                })
-                .await
-                .unwrap(),
-            None
         );
     }
 
