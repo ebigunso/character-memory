@@ -31,7 +31,6 @@ async fn open() -> (CharacterMemory, tempfile::TempDir) {
     let memory = test_support::try_setup_persistent_character_memory(
         test_support::unique_collection_name(),
         root.path(),
-        None,
     )
     .await
     .unwrap();
