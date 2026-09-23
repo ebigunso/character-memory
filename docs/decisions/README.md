@@ -29,3 +29,7 @@ Separate numbering per track; a number is taken at merge, merged IDs are never r
 
 ## Status values
 `proposed` (a draft on a branch, before a human has accepted it on its own), `accepted` (accepted explicitly; immutable once merged), `superseded` (retired). Acceptance and immutability are separate: acceptance is the human's yes, immutability is the merge.
+
+## Proposed design records
+
+- [ADR-D-0039: A setting key or custom value recalls what was formed there as a reminder](design/ADR-D-0039-a-setting-key-or-custom-value-recalls-what-was-formed-there-as-a-reminder.md) — depends on ADR-D-0022 and ADR-D-0024; replaces neither.
