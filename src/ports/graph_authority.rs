@@ -223,6 +223,19 @@ impl GraphExpansionQuery {
                 || object.id == self.root_id)
     }
 
+    pub(crate) fn allows_incident_link(
+        &self,
+        from: MemoryObjectRef,
+        relation: RelationType,
+        to: MemoryObjectRef,
+    ) -> bool {
+        self.allows_object(to)
+            && (!self.reminder_only
+                || to.object_type != ObjectType::Observation
+                || (relation == RelationType::ObservedIn
+                    && from == MemoryObjectRef::new(ObjectType::Episode, self.root_id)))
+    }
+
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {
         self.allowed_object_types = object_types;
         self

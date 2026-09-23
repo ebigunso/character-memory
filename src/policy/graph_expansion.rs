@@ -333,15 +333,21 @@ pub(crate) fn bounded_expansion_node_set(
         let mut neighbors: Vec<_> = links
             .iter()
             .filter_map(|link| {
-                if link.from_id == object_id && link.from_type == object_type {
-                    Some((link.to_id, link.to_type))
+                let neighbor = if link.from_id == object_id && link.from_type == object_type {
+                    (link.to_id, link.to_type)
                 } else if link.to_id == object_id && link.to_type == object_type {
-                    Some((link.from_id, link.from_type))
+                    (link.from_id, link.from_type)
                 } else {
-                    None
-                }
+                    return None;
+                };
+                query
+                    .allows_incident_link(
+                        MemoryObjectRef::new(object_type, object_id),
+                        link.relation,
+                        MemoryObjectRef::new(neighbor.1, neighbor.0),
+                    )
+                    .then_some(neighbor)
             })
-            .filter(|(id, kind)| query.allows_object(MemoryObjectRef::new(*kind, *id)))
             .collect();
         neighbors
             .sort_by_key(|node| MemoryObjectRef::from_id_type(node.0, node.1).stable_order_key());
@@ -519,7 +525,9 @@ fn bounded_expansion_plan<'a>(
             .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
                 let neighbor = other_endpoint(link, object_ref);
-                if object_refs.contains(&neighbor) && query.allows_object(neighbor) {
+                if object_refs.contains(&neighbor)
+                    && query.allows_incident_link(object_ref, link.relation, neighbor)
+                {
                     Some((*link, neighbor))
                 } else {
                     None
@@ -1022,7 +1030,13 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         .iter()
         .copied()
         .filter(|link_ref| relation_allowed(query, link_ref.relation()))
-        .filter(|link_ref| query.allows_object(link_ref.other_endpoint(object_ref)))
+        .filter(|link_ref| {
+            query.allows_incident_link(
+                object_ref,
+                link_ref.relation(),
+                link_ref.other_endpoint(object_ref),
+            )
+        })
         .collect::<Vec<_>>();
 
     let root_fanout_mode = RootFanoutMode::for_node(depth == 0 && object_ref == root_ref);

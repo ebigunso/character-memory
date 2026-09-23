@@ -397,6 +397,21 @@ mod road_behavior {
                     .prepare_write_plan(&RememberPlanDefaults::fixed("older observation", time())),
             )
             .await;
+            for (from, relation, to) in [
+                (200, RelationType::AssociatedWith, 201),
+                (201, RelationType::Supports, 200),
+            ] {
+                memory
+                    .link(MemoryLinkDraft::new(
+                        ObjectType::Observation,
+                        id(from, reverse),
+                        relation,
+                        ObjectType::Observation,
+                        id(to, reverse),
+                    ))
+                    .await
+                    .unwrap();
+            }
             for topic in [None, Some("lighthouse repair")] {
                 let mut context = query(topic, 1, 8);
                 context.graph_limits.max_depth = 4;
