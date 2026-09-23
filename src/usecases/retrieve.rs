@@ -1007,22 +1007,24 @@ fn build_pack(
         // Section state already has its scope/score order; root recency must not
         // become the section floor order. Reuse this prefix without re-sorting it.
         let mut orders = orders.clone();
-        for road in [
-            RecallRoad::Participant,
-            RecallRoad::Place,
-            RecallRoad::Activity,
-        ] {
-            let kind = road.rule().kind;
-            let state_order = candidates.iter().filter_map(|ranked| {
-                let object = ranked.object.object_ref();
-                state_scopes.get(&object).and_then(|scopes| {
-                    scopes
-                        .iter()
-                        .any(|&scope| scope_kinds[scope] == kind)
-                        .then_some(object)
+        for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
+            let state_order = candidates
+                .iter()
+                .filter_map(|ranked| {
+                    let object = ranked.object.object_ref();
+                    state_scopes.get(&object).and_then(|scopes| {
+                        scopes
+                            .iter()
+                            .any(|&scope| scope_kinds[scope] == kind)
+                            .then_some(object)
+                    })
                 })
-            });
-            orders.entry(road).or_default().splice(..0, state_order);
+                .collect::<Vec<_>>();
+            for (road, order) in &mut orders {
+                if road.rule().kind == kind && road.rule().expands {
+                    order.splice(..0, state_order.iter().copied());
+                }
+            }
         }
         for (index, cause) in select_with_cue_floors(
             candidates
@@ -1624,7 +1626,7 @@ fn select_candidate_roots(
     }
     let mut merged = by_ref.into_values().collect::<Vec<_>>();
     merged.sort_by_key(CandidateRoot::rank_key);
-    for kind in [CueKind::Participant, CueKind::Place, CueKind::Activity] {
+    for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
         let own_scopes = state::scopes_for_kind(scopes, scope_kinds, kind);
         state::order_state(
             &mut merged,
