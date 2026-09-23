@@ -1,9 +1,9 @@
 use character_memory::{
     CorrectMemoryDraft, CorrectionTarget, DerivedMemoryDraft, DerivedType, EpisodeDraft,
-    ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObservationDraft, RememberInput,
-    RememberOptions, ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
+    ForgetMemoryDraft, LifecycleTargetRef, ObservationDraft, RememberInput, RememberOptions,
+    ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
 };
-use uuid::Uuid;
+use test_support::{ensure, parse_id as id};
 
 mod scene_offset_behavior {
     use super::test_support;
@@ -290,11 +290,15 @@ mod road_behavior {
     use super::test_support;
     use character_memory::api::types::{CueFloorStage, RetrievalCueFloors, TimeRange};
     use character_memory::*;
-    use chrono::{DateTime, Duration, Utc};
+    use chrono::{DateTime, Datelike, Duration, Utc};
 
     fn time() -> DateTime<Utc> {
         "2026-09-23T12:00:00Z".parse().unwrap()
     }
+    fn previous_anniversary_days() -> i64 {
+        (time() - time().with_year(time().year() - 1).unwrap()).num_days()
+    }
+
     fn id(n: u128, reverse: bool) -> MemoryId {
         MemoryId::from_u128(if reverse { 100_000 - n } else { n })
     }
@@ -576,7 +580,7 @@ mod road_behavior {
                     });
                 }
             }
-            plan = episode(plan, 600, 365, 0.5, None, reverse);
+            plan = episode(plan, 600, previous_anniversary_days(), 0.5, None, reverse);
             plan = episode(plan, 601, 20, 0.5, None, reverse);
             commit(&memory, plan).await;
             for (case, expected) in [
@@ -665,7 +669,18 @@ mod road_behavior {
                 });
         }
         for n in 101..112 {
-            plan = episode(plan, n, if n == 101 { 365 } else { 2 }, 0.5, None, reverse);
+            plan = episode(
+                plan,
+                n,
+                if n == 101 {
+                    previous_anniversary_days()
+                } else {
+                    2
+                },
+                0.5,
+                None,
+                reverse,
+            );
             for offset in 0..if n == 101 { remarks } else { 1 } {
                 let mut observation =
                     ObservationDraft::new(id(n, reverse), "A remark about someone");
@@ -1646,12 +1661,18 @@ mod road_behavior {
                         provenance(),
                     )));
                 }
+                let anniversary_days = previous_anniversary_days();
+                let anniversary_id = 1000 + anniversary_days as u128;
                 for days in 0..367 {
                     plan = episode(
                         plan,
                         1000 + days as u128,
                         days,
-                        if days == 365 { salience } else { ordinary },
+                        if days == anniversary_days {
+                            salience
+                        } else {
+                            ordinary
+                        },
                         None,
                         reverse,
                     );
@@ -1659,7 +1680,7 @@ mod road_behavior {
                 if shared {
                     for candidate in &mut plan.candidates {
                         if let MemoryCandidate::Episode(candidate) = candidate {
-                            if candidate.draft.id == Some(id(1365, reverse)) {
+                            if candidate.draft.id == Some(id(anniversary_id, reverse)) {
                                 candidate.draft.scene.as_mut().unwrap().participants.push(
                                     SceneParticipant {
                                         key: Some(id(77, reverse)),
@@ -1685,7 +1706,7 @@ mod road_behavior {
                         .pack
                         .relevant_episodes
                         .iter()
-                        .any(|episode| episode.id == id(1365, reverse)),
+                        .any(|episode| episode.id == id(anniversary_id, reverse)),
                     shared || salience > ordinary
                 );
                 if !shared && salience == ordinary {
@@ -2311,16 +2332,4 @@ async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
     .await;
     test_support::close_and_remove_root(memory, root).await;
     test_result.expect("live public lifecycle facade test should pass");
-}
-
-fn id(value: &str) -> MemoryId {
-    Uuid::parse_str(value).unwrap()
-}
-
-fn ensure(condition: bool, message: &'static str) -> Result<(), String> {
-    if condition {
-        Ok(())
-    } else {
-        Err(message.to_owned())
-    }
 }

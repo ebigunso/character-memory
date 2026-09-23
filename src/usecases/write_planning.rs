@@ -509,15 +509,7 @@ mod construction_tests {
     use super::*;
     use crate::domain::DerivedType;
 
-    fn timestamp(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value)
-            .unwrap()
-            .with_timezone(&Utc)
-    }
-
-    fn memory_id(value: &str) -> MemoryId {
-        uuid::Uuid::parse_str(value).unwrap()
-    }
+    use crate::test_support::{parse_id as memory_id, timestamp};
 
     #[test]
     fn same_input_and_fixed_defaults_prepare_identical_plan() {
@@ -1703,8 +1695,8 @@ fn schema_version(object: &MemoryObject) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::parse_id as id;
     use chrono::{DateTime, Utc};
-    use uuid::Uuid;
 
     use super::RememberPlanDefaults;
     use crate::api::types::{
@@ -1717,7 +1709,7 @@ mod tests {
         DEFAULT_SCHEMA_VERSION,
     };
     use crate::test_support::{
-        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
+        deterministic_embedder, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
     use crate::usecases::RememberPipeline;
@@ -2011,7 +2003,7 @@ mod tests {
         assert_eq!(verdict.validations, expected);
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let error = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
             .await
@@ -2557,7 +2549,7 @@ mod tests {
         );
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(
                 plan,
@@ -2650,7 +2642,7 @@ mod tests {
         );
 
         let vector = TemporaryVectorCandidateStore::open(8).await;
-        let embedder = DeterministicMemoryEmbedder::new(8);
+        let embedder = deterministic_embedder(8);
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(
                 plan,
@@ -2780,9 +2772,5 @@ mod tests {
         DateTime::parse_from_rfc3339("2026-07-03T12:00:00Z")
             .unwrap()
             .with_timezone(&Utc)
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
     }
 }

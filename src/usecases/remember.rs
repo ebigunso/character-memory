@@ -328,10 +328,10 @@ mod tests {
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
     use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
+    use crate::test_support::parse_id as id;
+    use crate::test_support::write_time as timestamp;
     use async_trait::async_trait;
-    use chrono::{DateTime, Utc};
     use std::sync::{Arc, Mutex, MutexGuard};
-    use uuid::Uuid;
 
     use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
@@ -1063,16 +1063,6 @@ mod tests {
         let mut draft = MemoryLinkDraft::new(from_type, from_id, relation, to_type, to_id);
         draft.id = Some(id);
         draft
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]

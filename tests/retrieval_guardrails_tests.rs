@@ -7,6 +7,7 @@ use character_memory::{
 };
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
+use test_support::{ensure, parse_id as id};
 use uuid::Uuid;
 
 #[path = "support/mod.rs"]
@@ -501,18 +502,6 @@ fn timestamp() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-06-12T10:00:00Z")
         .unwrap()
         .with_timezone(&Utc)
-}
-
-fn id(value: &str) -> MemoryId {
-    Uuid::parse_str(value).unwrap()
-}
-
-fn ensure(condition: bool, message: &'static str) -> Result<(), String> {
-    if condition {
-        Ok(())
-    } else {
-        Err(message.to_owned())
-    }
 }
 
 fn ensure_no_vector_indexing_failure(

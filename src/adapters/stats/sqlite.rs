@@ -675,7 +675,8 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, RetrievalStatsStoreErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, Utc};
+    use crate::test_support::parse_id as id;
+    use crate::test_support::write_time as timestamp;
     use tempfile::tempdir;
 
     use crate::domain::{MemoryId, ObjectType, RelationType};
@@ -845,15 +846,5 @@ mod tests {
             first_seen_at: timestamp(),
             last_seen_at: timestamp(),
         }
-    }
-
-    fn id(value: &str) -> MemoryId {
-        uuid::Uuid::parse_str(value).unwrap()
-    }
-
-    fn timestamp() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-04-28T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc)
     }
 }

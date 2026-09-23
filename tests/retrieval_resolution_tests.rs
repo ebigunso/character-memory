@@ -1,24 +1,15 @@
 use character_memory::{
     ActivityRef, CharacterMemory, CommitOptions, DerivedMemoryDraft, DerivedType, EntityDraft,
-    EpisodeDraft, ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryId,
-    MemoryLinkDraft, MemoryThreadDraft, ObjectType, RelationType, RememberInput,
-    RememberPlanDefaults, RetentionState, RetrievalContext, RetrieveOutcome, Scene,
-    SceneParticipant,
+    EpisodeDraft, ForgetMemoryDraft, LifecycleFilterReason, LifecycleTargetRef, MemoryLinkDraft,
+    MemoryThreadDraft, ObjectType, RelationType, RememberInput, RememberPlanDefaults,
+    RetentionState, RetrievalContext, RetrieveOutcome, Scene, SceneParticipant,
 };
-use chrono::{DateTime, Utc};
+use test_support::id;
+use test_support::time_at_minute as at;
 
 #[path = "support/mod.rs"]
 pub mod test_support;
 
-fn id(n: u128) -> MemoryId {
-    MemoryId::from_u128(n)
-}
-fn at(n: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-21T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + chrono::Duration::minutes(n)
-}
 async fn commit(memory: &CharacterMemory, input: RememberInput) {
     let defaults = RememberPlanDefaults::fixed(&input.content, at(0));
     memory

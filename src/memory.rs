@@ -17,10 +17,6 @@ mod retrieval_floor_tests;
 #[cfg(test)]
 mod retrieval_scene_tests;
 #[cfg(test)]
-mod retrieval_time_tests;
-#[cfg(test)]
-mod retrieval_turn_tests;
-#[cfg(test)]
 mod scene_tests;
 #[cfg(test)]
 mod write_turn_tests;
@@ -186,9 +182,9 @@ impl CharacterMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::embedder::MemoryEmbedder;
     use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
     use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
+    use crate::test_support::{pack_contains_derived_memory, parse_id as id};
     use crate::*;
     use async_trait::async_trait;
     use uuid::Uuid;
@@ -200,7 +196,7 @@ mod tests {
     };
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
-        in_memory_graph_store, representative_fixtures, DeterministicMemoryEmbedder,
+        deterministic_embedder, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
 
@@ -660,7 +656,7 @@ mod tests {
         let memory = CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
             Box::new(FailingVectorCandidateStore),
-            Box::new(DeterministicMemoryEmbedder::new(8)),
+            Box::new(deterministic_embedder(8)),
         );
         let plan = memory
             .prepare(
@@ -1593,11 +1589,7 @@ mod tests {
     }
 
     async fn injected_memory() -> CharacterMemory {
-        CharacterMemory::from_parts(
-            Box::new(in_memory_graph_store()),
-            Box::new(TemporaryVectorCandidateStore::open(8).await),
-            Box::new(DeterministicMemoryEmbedder::new(8)),
-        )
+        crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
     }
 
     async fn retrieval_memory() -> (CharacterMemory, crate::test_support::RepresentativeFixtures) {
@@ -1617,7 +1609,9 @@ mod tests {
         let memory = CharacterMemory::from_parts(
             Box::new(graph),
             Box::new(vector),
-            Box::new(FixedMemoryEmbedder::new(vec![1.0, 0.0])),
+            Box::new(crate::test_support::TestEmbedder(|_: &EmbeddingInput| {
+                vec![1.0, 0.0]
+            })),
         );
 
         (memory, fixtures)
@@ -1663,7 +1657,7 @@ mod tests {
         let memory = CharacterMemory::from_parts(
             Box::new(graph),
             Box::new(vector),
-            Box::new(DeterministicMemoryEmbedder::new(4)),
+            Box::new(deterministic_embedder(4)),
         );
 
         (memory, fixtures, replacement_id)
@@ -1743,42 +1737,6 @@ mod tests {
         replacement
     }
 
-    fn pack_contains_derived_memory(pack: &ContinuityContextPack, memory_id: MemoryId) -> bool {
-        pack.derived_memories
-            .iter()
-            .chain(pack.preferences.iter())
-            .chain(pack.relationship_notes.iter())
-            .chain(pack.open_loops.iter())
-            .chain(pack.commitments.iter())
-            .chain(pack.character_signals.iter())
-            .any(|included| included.memory.id == memory_id)
-    }
-
-    #[derive(Debug)]
-    struct FixedMemoryEmbedder {
-        embedding: Vec<f32>,
-    }
-
-    impl FixedMemoryEmbedder {
-        fn new(embedding: Vec<f32>) -> Self {
-            Self { embedding }
-        }
-    }
-
-    #[async_trait]
-    impl MemoryEmbedder for FixedMemoryEmbedder {
-        async fn embed(&self, _input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(self.embedding.clone())
-        }
-
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            Ok(vec![self.embedding.clone(); inputs.len()])
-        }
-    }
-
     #[derive(Debug)]
     struct FailingVectorCandidateStore;
 
@@ -1840,9 +1798,5 @@ mod tests {
             }),
             "expected invalid {expected_kind:?} validation for {expected_ref:?}, got {validations:?}"
         );
-    }
-
-    fn id(value: &str) -> MemoryId {
-        Uuid::parse_str(value).unwrap()
     }
 }

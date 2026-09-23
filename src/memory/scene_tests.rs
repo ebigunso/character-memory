@@ -9,9 +9,7 @@ use crate::models::vector::EmbeddingInput;
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::GraphObjectQuery;
 use crate::ports::retrieval_stats::RetrievalStatsCounterKey;
-use crate::test_support::{
-    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
-};
+use crate::test_support::deterministic_embedder;
 use crate::{CharacterMemory, CustomError};
 
 fn time() -> DateTime<Utc> {
@@ -53,23 +51,18 @@ struct RecordingEmbedder(Arc<Mutex<Vec<EmbeddingInput>>>);
 impl MemoryEmbedder for RecordingEmbedder {
     async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
         self.0.lock().unwrap().push(input.clone());
-        DeterministicMemoryEmbedder::new(8).embed(input).await
+        deterministic_embedder(8).embed(input).await
     }
     async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
         self.0.lock().unwrap().extend_from_slice(inputs);
-        DeterministicMemoryEmbedder::new(8)
-            .embed_batch(inputs)
-            .await
+        deterministic_embedder(8).embed_batch(inputs).await
     }
 }
 
 async fn memory() -> (CharacterMemory, Arc<Mutex<Vec<EmbeddingInput>>>) {
     let inputs = Arc::new(Mutex::new(Vec::new()));
-    let memory = CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(8).await),
-        Box::new(RecordingEmbedder(inputs.clone())),
-    );
+    let memory =
+        crate::test_support::memory_with_embedder(8, RecordingEmbedder(inputs.clone())).await;
     (memory, inputs)
 }
 
@@ -250,33 +243,20 @@ async fn scene_without_words_keeps_the_exact_legacy_embedding_text() {
     }
 }
 
-struct TextEmbedder([&'static str; 2]);
-#[async_trait]
-impl MemoryEmbedder for TextEmbedder {
-    async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-        Ok(vec![
-            f32::from(input.text.contains(self.0[0])),
-            f32::from(input.text.contains(self.0[1])),
+fn text_embedder(words: [&'static str; 2]) -> impl MemoryEmbedder {
+    crate::test_support::TestEmbedder(move |input: &EmbeddingInput| {
+        vec![
+            f32::from(input.text.contains(words[0])),
+            f32::from(input.text.contains(words[1])),
             1.0,
-        ])
-    }
-
-    async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
-        let mut embeddings = Vec::new();
-        for input in inputs {
-            embeddings.push(self.embed(input).await?);
-        }
-        Ok(embeddings)
-    }
+        ]
+    })
 }
 
 #[tokio::test]
 async fn remember_keeps_distinct_vectors_for_episode_and_observation_with_the_same_uuid() {
-    let memory = CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(3).await),
-        Box::new(TextEmbedder(["volcano", "harbor"])),
-    );
+    let memory =
+        crate::test_support::memory_with_embedder(3, text_embedder(["volcano", "harbor"])).await;
     let id = MemoryId::from_u128(8801);
     let mut episode = episode_draft(id.as_u128(), Some(Scene::at((time()).fixed_offset())));
     episode.summary = "A volcano erupted".to_owned();
@@ -393,35 +373,20 @@ async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forg
 #[tokio::test]
 async fn setting_words_recall_the_episode_when_the_summary_does_not_name_the_place() {
     // A lexical provider makes the recall test depend on words, not hash collisions.
-    struct PlaceEmbedder;
-    #[async_trait]
-    impl MemoryEmbedder for PlaceEmbedder {
-        async fn embed(&self, input: &EmbeddingInput) -> Result<Vec<f32>, CustomError> {
-            Ok(vec![
+    let memory = crate::test_support::memory_with_embedder(
+        2,
+        crate::test_support::TestEmbedder(|input: &EmbeddingInput| {
+            vec![
                 1.0,
                 input
                     .text
                     .split_whitespace()
                     .filter(|word| *word == "observatory")
                     .count() as f32,
-            ])
-        }
-        async fn embed_batch(
-            &self,
-            inputs: &[EmbeddingInput],
-        ) -> Result<Vec<Vec<f32>>, CustomError> {
-            let mut embeddings = Vec::new();
-            for input in inputs {
-                embeddings.push(self.embed(input).await?);
-            }
-            Ok(embeddings)
-        }
-    }
-    let memory = CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(2).await),
-        Box::new(PlaceEmbedder),
-    );
+            ]
+        }),
+    )
+    .await;
     let control = MemoryId::from_u128(8701);
     let situated = MemoryId::from_u128(8702);
     for (id, words) in [(control, None), (situated, Some("observatory"))] {
@@ -691,11 +656,8 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
 
 #[tokio::test]
 async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
-    let memory = CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(3).await),
-        Box::new(TextEmbedder(["Monday", "Tuesday"])),
-    );
+    let memory =
+        crate::test_support::memory_with_embedder(3, text_embedder(["Monday", "Tuesday"])).await;
     let old_id = MemoryId::from_u128(8902);
     let mut old = DerivedMemoryDraft::new(DerivedType::Claim, "The meeting is Monday.");
     old.id = Some(old_id);

@@ -18,7 +18,7 @@ use crate::ports::graph_authority::*;
 use crate::ports::retrieval_stats::*;
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 use crate::test_support::{
-    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
+    deterministic_embedder, in_memory_graph_store, TemporaryVectorCandidateStore,
 };
 use crate::{CharacterMemory, CustomError};
 
@@ -103,7 +103,7 @@ impl Fixture {
                 gate: vector.clone(),
             }),
             Box::new(GatedEmbedder {
-                inner: DeterministicMemoryEmbedder::new(8),
+                inner: Box::new(deterministic_embedder(8)),
                 gate: embed.clone(),
             }),
         );
@@ -516,7 +516,7 @@ async fn precomputed_embedding_errors_still_commit_graph_and_stats_then_allow_re
         (REPLACEMENT, RetentionState::Active, true),
     ]);
 
-    fixture.memory.memory_composition.embedder = Box::new(DeterministicMemoryEmbedder::new(8));
+    fixture.memory.memory_composition.embedder = Box::new(deterministic_embedder(8));
     let repaired = fixture
         .memory
         .commit(plan, CommitOptions::default())
@@ -700,7 +700,7 @@ impl VectorCandidateStore for GatedVector {
 }
 
 struct GatedEmbedder {
-    inner: DeterministicMemoryEmbedder,
+    inner: Box<dyn MemoryEmbedder>,
     gate: Arc<Gate>,
 }
 

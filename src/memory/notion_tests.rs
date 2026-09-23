@@ -2,9 +2,7 @@ use crate::api::types::*;
 use crate::domain::*;
 use crate::ports::graph_authority::{GraphExpansionQuery, GraphObjectQuery, TraceMode};
 use crate::ports::retrieval_stats::RetrievalStatsCounterKey;
-use crate::test_support::{
-    in_memory_graph_store, DeterministicMemoryEmbedder, TemporaryVectorCandidateStore,
-};
+use crate::test_support::deterministic_embedder;
 use crate::{CharacterMemory, CustomError};
 
 fn assertion(subject: MemoryId, name: &str) -> BeliefAssertion {
@@ -52,11 +50,7 @@ fn plan_with_belief(draft: DerivedMemoryDraft, create_notion: bool) -> RememberW
 }
 
 async fn memory() -> CharacterMemory {
-    CharacterMemory::from_parts(
-        Box::new(in_memory_graph_store()),
-        Box::new(TemporaryVectorCandidateStore::open(8).await),
-        Box::new(DeterministicMemoryEmbedder::new(8)),
-    )
+    crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
 }
 
 #[tokio::test]
