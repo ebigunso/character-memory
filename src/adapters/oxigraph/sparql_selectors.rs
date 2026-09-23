@@ -723,13 +723,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             .into_iter()
             .next()
             .map(|solution| {
-                let time = literal_binding(&solution, "sceneTime")?
-                    .parse()
-                    .map_err(|error| {
-                        CustomError::DatabaseError(format!(
-                            "Oxigraph SPARQL invalid Scene.time: {error}"
-                        ))
-                    })?;
+                let time = scene_time_binding(&solution)?;
                 Ok((memory_id_binding(&solution, "episodeId")?, time))
             })
             .transpose()
@@ -1077,6 +1071,14 @@ thread_local! {
     pub(super) static SELECT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+fn scene_time_binding(solution: &QuerySolution) -> Result<DateTime<Utc>, CustomError> {
+    literal_binding(solution, "sceneTime")?
+        .parse()
+        .map_err(|error| {
+            CustomError::DatabaseError(format!("Oxigraph SPARQL invalid Scene.time: {error}"))
+        })
+}
+
 fn participant_occasion_binding(
     solution: &QuerySolution,
 ) -> Result<(MemoryObjectRef, ParticipantOccasion), CustomError> {
@@ -1084,11 +1086,7 @@ fn participant_occasion_binding(
         memory_id_binding(solution, "id")?,
         enum_binding(solution, "objectType")?,
     );
-    let time = literal_binding(solution, "sceneTime")?
-        .parse()
-        .map_err(|error| {
-            CustomError::DatabaseError(format!("Oxigraph SPARQL invalid Scene.time: {error}"))
-        })?;
+    let time = scene_time_binding(solution)?;
     Ok((
         neighbor,
         ParticipantOccasion {
