@@ -1755,7 +1755,8 @@ async fn anniversary_sources_reserve_only_shared_occasions() {
                         .iter()
                         .filter(|a| a.object.id == id(900) && a.cue_kind == CueKind::DateMatch)
                         .count(),
-                    2
+                    // Participant aboutness already brings the occasion into the section.
+                    1
                 );
             }
             "next-day" => assert!(ann_dates(&result).is_empty()),

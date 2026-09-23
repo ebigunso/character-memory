@@ -107,63 +107,132 @@ mod road_behavior {
             .collect()
     }
 
+    async fn presence_and_mentions(
+        remarks: u128,
+        reverse: bool,
+    ) -> (CharacterMemory, tempfile::TempDir) {
+        let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+        let mut plan = RememberWritePlan::new();
+        for n in [10, 11] {
+            let mut person = EntityDraft::new();
+            person.id = Some(id(n, reverse));
+            person.created_at = Some(time());
+            person.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+            plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
+                person,
+                provenance(),
+            )));
+        }
+        plan = episode(plan, 100, 1, 0.5, None, reverse);
+        if let MemoryCandidate::Episode(candidate) = plan.candidates.last_mut().unwrap() {
+            candidate
+                .draft
+                .scene
+                .as_mut()
+                .unwrap()
+                .participants
+                .push(SceneParticipant {
+                    key: Some(id(10, reverse)),
+                    ..Default::default()
+                });
+        }
+        for n in 101..112 {
+            plan = episode(plan, n, if n == 101 { 365 } else { 2 }, 0.5, None, reverse);
+            for offset in 0..if n == 101 { remarks } else { 1 } {
+                let mut observation =
+                    ObservationDraft::new(id(n, reverse), "A remark about someone");
+                let oid = id(n * 100 + offset, reverse);
+                observation.id = Some(oid);
+                observation.created_at = Some(time());
+                observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = plan.with_candidate(MemoryCandidate::Observation(
+                    ObservationCandidate::new(observation, provenance()),
+                ));
+                let mut link = MemoryLinkDraft::new(
+                    ObjectType::Observation,
+                    oid,
+                    RelationType::Mentions,
+                    ObjectType::Entity,
+                    id(if n == 101 { 10 } else { 11 }, reverse),
+                );
+                link.id = Some(id(5000 + n * 100 + offset, reverse));
+                link.created_at = Some(time());
+                link.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+                plan = plan.with_candidate(MemoryCandidate::MemoryLink(MemoryLinkCandidate::new(
+                    link,
+                    provenance(),
+                )));
+            }
+        }
+        commit(&memory, plan).await;
+        (memory, root)
+    }
+
+    #[tokio::test]
+    async fn frequent_mentions_cannot_make_present_person_recall_fail() {
+        let mut results = Vec::new();
+        for reverse in [false, true] {
+            let (memory, root) = presence_and_mentions(75, reverse).await;
+            let mut context = query(None, 1, 16);
+            context.scene.participants.push(SceneParticipant {
+                key: Some(id(10, reverse)),
+                ..Default::default()
+            });
+            context.cue_floors.participant = 1;
+            context.graph_limits.max_depth = 1;
+            context.graph_limits.max_hub_edges = 64;
+            context.graph_limits.max_fanout_per_node = 16;
+            context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
+            let mut suppressed = 0;
+            for prefix in [0, 64, 75] {
+                for offset in suppressed..prefix {
+                    let offset = if reverse { 74 - offset } else { offset };
+                    memory
+                        .forget(ForgetMemoryDraft::suppress(
+                            LifecycleTargetRef::observation(id(10100 + offset, reverse)),
+                            "forget a remark",
+                        ))
+                        .await
+                        .unwrap();
+                }
+                suppressed = prefix;
+                let traced = memory.retrieve(context.clone()).await;
+                let mut untraced = context.clone();
+                untraced.include_trace = false;
+                let untraced = memory.retrieve(untraced).await;
+                results.push((reverse, prefix, traced, untraced));
+            }
+            test_support::close_and_remove_root(memory, root).await;
+        }
+        for (reverse, prefix, traced, untraced) in results {
+            let traced = traced
+                .unwrap_or_else(|error| panic!("reverse={reverse}, prefix={prefix}: {error:?}"));
+            let untraced = untraced.unwrap();
+            assert_eq!(traced.pack, untraced.pack);
+            assert_eq!(
+                traced.rationale.lifecycle_omission_count,
+                untraced.rationale.lifecycle_omission_count
+            );
+            assert!(traced
+                .pack
+                .relevant_episodes
+                .iter()
+                .any(|episode| episode.id == id(100, reverse)));
+            if prefix < 75 {
+                assert!(!traced.pack.salient_observations.is_empty());
+            } else {
+                assert!(traced.pack.salient_observations.is_empty());
+            }
+            assert!(traced.pack.salient_observations.len() <= 16);
+            assert!(traced.rationale.lifecycle_omission_count <= 16);
+        }
+    }
+
     #[tokio::test]
     async fn talking_about_someone_is_independent_of_being_with_them() {
         let mut results = Vec::new();
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
-            let mut plan = RememberWritePlan::new();
-            for n in [10, 11] {
-                let mut person = EntityDraft::new();
-                person.id = Some(id(n, reverse));
-                person.created_at = Some(time());
-                person.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
-                plan = plan.with_candidate(MemoryCandidate::Entity(EntityCandidate::new(
-                    person,
-                    provenance(),
-                )));
-            }
-            plan = episode(plan, 100, 1, 0.5, None, reverse);
-            if let MemoryCandidate::Episode(candidate) = plan.candidates.last_mut().unwrap() {
-                candidate
-                    .draft
-                    .scene
-                    .as_mut()
-                    .unwrap()
-                    .participants
-                    .push(SceneParticipant {
-                        key: Some(id(10, reverse)),
-                        ..Default::default()
-                    });
-            }
-            for n in 101..112 {
-                plan = episode(plan, n, if n == 101 { 365 } else { 2 }, 0.5, None, reverse);
-                for offset in 0..if n == 101 { 3 } else { 1 } {
-                    let mut observation =
-                        ObservationDraft::new(id(n, reverse), "A remark about someone");
-                    let oid = id(n * 10 + offset, reverse);
-                    observation.id = Some(oid);
-                    observation.created_at = Some(time());
-                    observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
-                    plan = plan.with_candidate(MemoryCandidate::Observation(
-                        ObservationCandidate::new(observation, provenance()),
-                    ));
-                    let mut link = MemoryLinkDraft::new(
-                        ObjectType::Observation,
-                        oid,
-                        RelationType::Mentions,
-                        ObjectType::Entity,
-                        id(if n == 101 { 10 } else { 11 }, reverse),
-                    );
-                    link.id = Some(id(5000 + n * 10 + offset, reverse));
-                    link.created_at = Some(time());
-                    link.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
-                    plan = plan.with_candidate(MemoryCandidate::MemoryLink(
-                        MemoryLinkCandidate::new(link, provenance()),
-                    ));
-                }
-            }
-            commit(&memory, plan).await;
+            let (memory, root) = presence_and_mentions(3, reverse).await;
             let mut context = query(None, 1, 16);
             context.scene.participants.push(SceneParticipant {
                 key: Some(id(10, reverse)),
@@ -186,16 +255,18 @@ mod road_behavior {
                 .iter()
                 .find(|row| row.relation == RelationType::Involves)
                 .unwrap();
-            let mentions = trace
+            assert_eq!(presence.entity_count, Some(1));
+            // Mentions now shares the subject's About budget, without a ubiquity gate.
+            assert!(trace
                 .selectivity_decisions
+                .iter()
+                .all(|row| row.relation != RelationType::Mentions));
+            let mentions = trace
+                .fanout_utilization
                 .iter()
                 .find(|row| row.relation == RelationType::Mentions)
                 .unwrap();
-            assert_eq!(presence.entity_count, Some(1));
-            assert_eq!(
-                (mentions.entity_count, mentions.global_count),
-                (Some(3), Some(13))
-            );
+            assert_eq!(mentions.retained_count, 3);
             assert_eq!(result.pack.salient_observations.len(), 3);
             assert!(
                 !roots(&anniversary).contains(&id(101, reverse)),

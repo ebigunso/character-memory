@@ -290,13 +290,10 @@ async fn named_subject_fanout_selects_current_salient_then_recent_state() {
             .filter(|id| id.as_u128() != 9500)
             .map(|id| id.as_u128())
             .collect::<Vec<_>>();
-        // Principle 4 keeps salient state first, then breaks ties by memory time.
+        // Presence takes two of the sixteen turns; state stays salient then recent.
         assert_eq!(
-            &states[..16],
-            &[
-                2003, 2017, 2022, 2023, 2024, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012,
-                2011, 2010
-            ]
+            &states[..14],
+            &[2003, 2017, 2022, 2023, 2024, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012]
         );
         assert!(states.iter().all(|id| !(1980..1996).contains(id)));
     }

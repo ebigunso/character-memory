@@ -14,6 +14,7 @@ use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
     bounded_incident_link_refs, graph_expansion_bounded_error, is_participant_pair,
     order_current_subject_links, BoundedExpansionLinkRef, ParticipantOccasions,
+    SUBJECT_ABOUTNESS_ROUTES,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -628,26 +629,24 @@ pub(super) fn bounded_graph_visible_refs(
     let mut filtered_nodes = Vec::new();
     let mut bounded_failure = None;
     let mut frontier = vec![root_ref];
-    let (state_ids, state_filtered) = if query.current_subject_state {
-        selectors.select_subject_state(
-            query.root_id,
-            query.lifecycle_policy,
-            crate::policy::graph_expansion::fanout_limit_for_pair(
-                query,
-                RelationType::About,
-                ObjectType::DerivedMemory,
-            ),
-            query.trace_mode.is_enabled(),
-        )?
+    let (state_refs, state_filtered) = if query.current_subject_state {
+        selectors.select_subject_state(query)?
     } else {
         (Vec::new(), Vec::new())
     };
-    let state_ranks = state_ids
+    let state_ranks = state_refs
         .into_iter()
         .enumerate()
-        .map(|(rank, id)| (id, rank))
+        .map(|(rank, object)| (object, rank))
         .collect();
-    let mut participant_occasions = ParticipantOccasions::new();
+    let mut participant_occasions = if matches!(
+        root_ref.object_type,
+        ObjectType::Episode | ObjectType::Observation
+    ) {
+        selectors.select_participant_occasions(&[root_ref])?
+    } else {
+        ParticipantOccasions::new()
+    };
 
     for depth in 0..query.max_depth {
         frontier.retain(|object| query.may_continue_from(object.object_type));
@@ -688,6 +687,36 @@ pub(super) fn bounded_graph_visible_refs(
                     || participant_occasions.contains_key(&neighbor)
             });
         }
+        // Every road is as-of the scene, including an observation's parent hop.
+        if query.participant_reference_time != DateTime::<Utc>::MAX_UTC
+            || query.current_subject_state
+        {
+            let memories = link_refs
+                .iter()
+                .flat_map(|link| [link.from, link.to])
+                .chain(frontier.iter().copied())
+                .filter(|object| {
+                    matches!(
+                        object.object_type,
+                        ObjectType::Episode | ObjectType::Observation
+                    )
+                })
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let occasions = selectors.select_participant_occasions(&memories)?;
+            let future = occasions
+                .iter()
+                .filter(|(object, occasion)| {
+                    occasion.memory_time(object.object_type) > query.participant_reference_time
+                        && !(query.allow_future_root && **object == root_ref)
+                })
+                .map(|(object, _)| *object)
+                .collect::<HashSet<_>>();
+            participant_occasions.extend(occasions);
+            frontier.retain(|object| !future.contains(object));
+            link_refs.retain(|link| !future.contains(&link.from) && !future.contains(&link.to));
+        }
         let link_refs_by_endpoint = link_refs_by_endpoint(&link_refs);
         let mut next_frontier = Vec::new();
         for object_ref in &frontier {
@@ -697,33 +726,35 @@ pub(super) fn bounded_graph_visible_refs(
                 .unwrap_or_default();
             let ordered;
             let incident_link_refs = if depth == 0 && query.current_subject_state {
-                if (query.allowed_relation_types.is_empty()
-                    || query.allowed_relation_types.contains(&RelationType::About))
-                    && (query.allowed_object_types.is_empty()
-                        || query
-                            .allowed_object_types
-                            .contains(&ObjectType::DerivedMemory))
-                {
-                    let about_refs = incident_link_refs
+                let about_refs = incident_link_refs
+                    .iter()
+                    .filter_map(|link| {
+                        let neighbor = link.other_endpoint(*object_ref);
+                        (SUBJECT_ABOUTNESS_ROUTES.contains(&(link.relation, neighbor.object_type))
+                            && query.allows_object(neighbor)
+                            && (query.allowed_relation_types.is_empty()
+                                || query.allowed_relation_types.contains(&link.relation)))
+                        .then_some(neighbor)
+                    })
+                    .collect::<HashSet<_>>();
+                filtered_nodes.extend(
+                    state_filtered
                         .iter()
-                        .filter(|link| link.relation == RelationType::About)
-                        .map(|link| link.other_endpoint(*object_ref))
-                        .collect::<HashSet<_>>();
-                    filtered_nodes.extend(
-                        state_filtered
-                            .iter()
-                            .filter(|entry| about_refs.contains(&entry.object_ref))
-                            .cloned(),
-                    );
-                }
+                        .filter(|entry| about_refs.contains(&entry.object_ref))
+                        .cloned(),
+                );
+                let cap = crate::policy::graph_expansion::fanout_limit_for_pair(
+                    query,
+                    RelationType::About,
+                    ObjectType::DerivedMemory,
+                );
                 ordered = order_current_subject_links(
                     incident_link_refs.to_vec(),
                     &state_ranks,
+                    cap.saturating_add(usize::from(query.trace_mode.is_enabled())),
                     |link| {
                         let neighbor = link.other_endpoint(*object_ref);
-                        (link.relation == RelationType::About
-                            && neighbor.object_type == ObjectType::DerivedMemory)
-                            .then_some(neighbor.id)
+                        (link.relation, neighbor)
                     },
                 );
                 &ordered

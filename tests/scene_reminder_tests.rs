@@ -455,12 +455,12 @@ async fn recent_occasions_use_scene_time_across_the_full_pool() {
         .await
         .unwrap();
     assert!(
-        topic
+        !topic
             .pack
             .relevant_episodes
             .iter()
             .any(|episode| episode.id == id(10)),
-        "scene cutoff is not a retrieval-wide as-of filter"
+        "a topic match cannot recall a future occasion"
     );
     memory.close().await.unwrap();
     root.close().unwrap();

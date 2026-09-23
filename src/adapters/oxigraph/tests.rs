@@ -1321,8 +1321,16 @@ mod tests {
         let selectors = SparqlGraphSelectors::new(&store.store);
         let (scope, scope_filtered) = selectors.select_scope_state(&key, policy, 3).unwrap();
         let (subject, subject_filtered) = selectors
-            .select_subject_state(fixtures.hub_entity.id, policy, 3, false)
+            .select_subject_state(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                    .with_max_fanout_per_node(3)
+                    .with_allowed_object_types(vec![ObjectType::DerivedMemory]),
+            )
             .unwrap();
+        let subject = subject
+            .into_iter()
+            .map(|object| object.id)
+            .collect::<Vec<_>>();
         let quad_budget = |ids: &[MemoryId]| {
             ids.iter()
                 .map(|id| {
@@ -1520,7 +1528,10 @@ mod tests {
             .0
             .is_empty());
         assert!(selectors
-            .select_subject_state(fixtures.hub_entity.id, policy, 0, false)
+            .select_subject_state(
+                &GraphExpansionQuery::new(fixtures.hub_entity.id, ObjectType::Entity, 1, 10)
+                    .with_max_fanout_per_node(0)
+            )
             .unwrap()
             .0
             .is_empty());
@@ -1745,6 +1756,146 @@ mod tests {
             .map(MemoryObject::id)
             .collect::<Vec<_>>();
         assert_eq!(members, [MemoryId::from_u128(5002)]);
+    }
+
+    #[tokio::test]
+    async fn subject_aboutness_bounds_and_orders_mentions_before_both_hub_checks() {
+        use crate::policy::graph_expansion::{bounded_expansion, ParticipantOccasions};
+        use crate::ports::graph_authority::TraceMode;
+        for reverse in [false, true] {
+            for backward in [false, true] {
+                let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+                let fixtures = representative_fixtures();
+                let id = |n: u128| MemoryId::from_u128(if reverse { 100_000 - n } else { n });
+                let mut parent = fixtures.episode.clone();
+                parent.retention_state = RetentionState::Suppressed;
+                let mut objects = vec![
+                    MemoryObject::Entity(fixtures.hub_entity.clone()),
+                    MemoryObject::Episode(parent.clone()),
+                ];
+                let mut links = Vec::new();
+                for n in 0..76 {
+                    let mut observation = fixtures.salient_observation.clone();
+                    observation.id = id(100 + n);
+                    observation.episode_id = if n == 0 { id(3000) } else { parent.id };
+                    observation.observed_at =
+                        Some(observation.created_at + chrono::Duration::minutes(n as i64));
+                    observation.created_at -= chrono::Duration::minutes(n as i64);
+                    observation.salience_score = if n == 0 || n == 75 { 1.0 } else { 0.5 };
+                    let mut link = fixtures.soft_thread_link.clone();
+                    link.id = id(1000 + n);
+                    link.from_type = ObjectType::Observation;
+                    link.from_id = observation.id;
+                    link.to_type = ObjectType::Entity;
+                    link.to_id = fixtures.hub_entity.id;
+                    link.relation = RelationType::Mentions;
+                    if backward {
+                        std::mem::swap(&mut link.from_type, &mut link.to_type);
+                        std::mem::swap(&mut link.from_id, &mut link.to_id);
+                    }
+                    links.push(link);
+                    objects.push(MemoryObject::Observation(observation));
+                }
+                // Object kinds can share an ID; About's rank must stay independent.
+                let mut belief = fixtures.user_preference.clone();
+                belief.id = id(100);
+                belief.entity_ids = vec![fixtures.hub_entity.id];
+                belief.salience_score = 0.75;
+                belief.created_at += chrono::Duration::days(3);
+                let mut about = links[0].clone();
+                about.id = id(2000);
+                about.from_type = ObjectType::DerivedMemory;
+                about.from_id = belief.id;
+                about.to_type = ObjectType::Entity;
+                about.to_id = fixtures.hub_entity.id;
+                about.relation = RelationType::About;
+                links.push(about);
+                objects.push(MemoryObject::DerivedMemory(belief.clone()));
+                let mut future_parent = parent.clone();
+                future_parent.id = id(3000);
+                future_parent.scene.time += chrono::Duration::days(365);
+                objects.push(MemoryObject::Episode(future_parent));
+                store.upsert_links(&links).await.unwrap();
+                for suppressed in [0, 64, 75] {
+                    for n in 0..suppressed {
+                        if let MemoryObject::Observation(observation) = &mut objects[2 + n] {
+                            observation.retention_state = RetentionState::Suppressed;
+                        }
+                    }
+                    store.upsert_objects(&objects).await.unwrap();
+                    let mut outputs = Vec::new();
+                    for trace in [TraceMode::Disabled, TraceMode::Enabled] {
+                        let mut query = GraphExpansionQuery::new(
+                            fixtures.hub_entity.id,
+                            ObjectType::Entity,
+                            1,
+                            8,
+                        )
+                        .with_max_fanout_per_node(2)
+                        .with_fanout_overrides(vec![
+                            GraphExpansionFanoutOverride {
+                                relation: RelationType::Mentions,
+                                object_type: ObjectType::Observation,
+                                max_fanout: 2,
+                            },
+                            GraphExpansionFanoutOverride {
+                                relation: RelationType::About,
+                                object_type: ObjectType::DerivedMemory,
+                                max_fanout: 2,
+                            },
+                        ])
+                        .with_max_hub_edges(2)
+                        .with_fanout_utilization_recording(trace)
+                        .with_failure_policy(GraphExpansionFailurePolicy {
+                            timeout_ms: None,
+                            mode: crate::domain::GraphFailureMode::FailClosed,
+                        });
+                        query.current_subject_state = true;
+                        query.participant_reference_time =
+                            fixtures.salient_observation.created_at + chrono::Duration::minutes(74);
+                        let actual = store.expand_bounded(&query).await.unwrap();
+                        let hydrated = bounded_expansion(
+                            &query,
+                            objects.clone(),
+                            links.clone(),
+                            &ParticipantOccasions::new(),
+                        )
+                        .unwrap();
+                        assert_eq!(actual.objects, hydrated.objects);
+                        assert_eq!(actual.selection_order, hydrated.selection_order);
+                        assert_eq!(actual.filtered_nodes, hydrated.filtered_nodes);
+                        assert_eq!(actual.fanout_utilization, hydrated.fanout_utilization);
+                        let observations = actual
+                            .objects
+                            .iter()
+                            .filter(|object| object.object_type() == ObjectType::Observation)
+                            .map(MemoryObject::id)
+                            .collect::<Vec<_>>();
+                        assert_eq!(
+                            observations,
+                            match suppressed {
+                                0 => vec![id(100)],
+                                64 => vec![id(174)],
+                                _ => vec![],
+                            }
+                        );
+                        assert_eq!(
+                            actual.filtered_nodes.len(),
+                            2 * usize::from(suppressed != 0)
+                        );
+                        assert!(actual
+                            .objects
+                            .contains(&MemoryObject::DerivedMemory(belief.clone())));
+                        outputs.push((
+                            actual.objects,
+                            actual.selection_order,
+                            actual.filtered_nodes,
+                        ));
+                    }
+                    assert_eq!(outputs[0], outputs[1]);
+                }
+            }
+        }
     }
 
     #[tokio::test]

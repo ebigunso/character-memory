@@ -317,6 +317,25 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
     memory.close().await.unwrap();
 }
 
+async fn mention_counts(memory: &CharacterMemory, participant: MemoryId) -> (u64, u64) {
+    let stats = &memory.memory_composition.stats_store;
+    let entity = stats
+        .counter(&crate::ports::retrieval_stats::RetrievalStatsCounterKey {
+            entity_id: participant,
+            relation_kind: RelationType::Mentions,
+            object_type: ObjectType::Observation,
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let global = stats
+        .global_counter(RelationType::Mentions, ObjectType::Observation)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    (entity.current_count, global.current_count)
+}
+
 #[tokio::test]
 async fn observation_forget_recounts_mentions_without_removing_presence() {
     for sqlite in [false, true] {
@@ -390,18 +409,12 @@ async fn observation_forget_recounts_mentions_without_removing_presence() {
                 }
                 let result = memory.retrieve(context.clone()).await.unwrap();
                 let decisions = result.trace.unwrap().selectivity_decisions;
-                let decision = decisions
+                // Present-subject aboutness bypasses selectivity; counters still follow retention.
+                assert!(decisions
                     .iter()
-                    .find(|row| {
-                        row.root.id == MemoryId::from_u128(100)
-                            && row.relation == RelationType::Mentions
-                    })
-                    .unwrap();
-                assert_eq!(
-                    (decision.entity_count, decision.global_count),
-                    if expected == 0 { (None, None) } else { (Some(expected), Some(expected)) },
-                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}"
-                );
+                    .all(|row| row.relation != RelationType::Mentions));
+                assert_eq!(mention_counts(&memory, MemoryId::from_u128(100)).await, (expected, expected),
+                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}");
                 // Mentions tracks remarks; presence is independent of their retention.
                 let presence = decisions
                     .iter()
@@ -467,23 +480,17 @@ async fn mentions_count_observations_independently_of_parent_lifecycle() {
         key: Some(participant),
         ..Default::default()
     }];
-    let counts = |result: &RetrieveOutcome| {
-        let decision = result
-            .trace
-            .as_ref()
-            .unwrap()
-            .selectivity_decisions
-            .iter()
-            .find(|decision| {
-                decision.root.id == participant && decision.relation == RelationType::Mentions
-            })
-            .unwrap();
-        (decision.entity_count, decision.global_count)
-    };
     let result = memory.retrieve(context.clone()).await.unwrap();
-    assert_eq!(counts(&result), (Some(2), Some(2)));
-    // Ubiquitous aboutness has zero selectivity; it has no presence reservation.
-    assert!(participant_observations(&result).is_empty());
+    assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+    // One subject aboutness budget admits both remarks despite their ubiquity.
+    assert_eq!(participant_observations(&result).len(), 2);
+    assert!(result
+        .trace
+        .as_ref()
+        .unwrap()
+        .selectivity_decisions
+        .iter()
+        .all(|row| row.relation != RelationType::Mentions));
     memory
         .forget(ForgetMemoryDraft::suppress(
             LifecycleTargetRef::episode(episode),
@@ -491,20 +498,17 @@ async fn mentions_count_observations_independently_of_parent_lifecycle() {
         ))
         .await
         .unwrap();
-    assert_eq!(
-        counts(&memory.retrieve(context.clone()).await.unwrap()),
-        (Some(2), Some(2))
-    );
-    context.lifecycle_policy.include_suppressed = true;
-    assert_eq!(
-        counts(&memory.retrieve(context).await.unwrap()),
-        (Some(2), Some(2))
-    );
+    for include_suppressed in [false, true] {
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+        assert_eq!(participant_observations(&result).len(), 2);
+    }
     memory.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_topic() {
+async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_aboutness() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
     let episode = write_episode(&memory, 50_100, scene()).await;
@@ -533,17 +537,12 @@ async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_t
         context.scene.participants.push(keyed(100));
         context.graph_limits.max_depth = 1;
         let result = memory.retrieve(context).await.unwrap();
+        assert_eq!(result.pack.salient_observations.len(), 1);
+        assert_eq!(result.pack.salient_observations[0].id, observation);
         assert_eq!(
-            result.pack.salient_observations.len(),
-            usize::from(has_topic)
+            result.pack.salient_observations[0].retention_state,
+            RetentionState::Active
         );
-        if has_topic {
-            assert_eq!(result.pack.salient_observations[0].id, observation);
-            assert_eq!(
-                result.pack.salient_observations[0].retention_state,
-                RetentionState::Active
-            );
-        }
         let trace = result.trace.unwrap();
         let omissions = trace
             .lifecycle_filter_decisions
@@ -564,9 +563,9 @@ async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_t
                     && row.object_type == ObjectType::Observation
             })
             .unwrap();
-        // An eligible remark is governed by its own retention and aboutness selectivity.
-        assert_eq!(utilization.retained_count, 0);
-        assert_eq!(utilization.omitted_by_fanout_count, 1);
+        // The remark enters the subject aboutness prefix on its own retention.
+        assert_eq!(utilization.retained_count, 1);
+        assert_eq!(utilization.omitted_by_fanout_count, 0);
     }
     memory.close().await.unwrap();
 }

@@ -336,6 +336,16 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         assert_eq!(last(&result), (!mentions).then_some(&fact(401, recent)));
         assert!(occasions(&result).contains(&id(401)));
         assert!(!occasions(&result).contains(&id(499)));
+        let mut ranged = request(vec![keyed(100)]);
+        ranged.time_range = Some(character_memory::api::types::TimeRange {
+            start: old,
+            end: recent,
+        });
+        let ranged = memory.retrieve(ranged).await.unwrap();
+        assert!(
+            !occasions(&ranged).contains(&id(499)),
+            "a range does not exempt ordinary expansion"
+        );
         let mut tight = request(vec![keyed(100)]);
         tight.section_limits.relevant_episodes = 1;
         tight.section_limits.salient_observations = 1;
@@ -401,9 +411,9 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
             // Rulings 46 and 69: recency brings the notion-creation observation.
             BTreeSet::from([id(401), notion_episode]),
             BTreeSet::from([id(401), notion_episode]),
-            // Aboutness has no presence reservation; recency keeps the newest occasion.
-            BTreeSet::from([notion_episode]),
-            BTreeSet::from([notion_episode]),
+            // Bounded aboutness now brings the remark and its occasion before recency.
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401)]),
         ]
     );
 }
