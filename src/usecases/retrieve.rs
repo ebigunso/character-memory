@@ -15,12 +15,12 @@ use crate::api::types::{
     VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, GraphFailureMode, MemoryId,
-    MemoryObject, MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
+    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
+    MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
-use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
+use crate::policy::graph_expansion::{fail_if_closed, graph_expansion_bounded_failure_trace};
 use crate::policy::{
     selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
@@ -317,11 +317,7 @@ where
                     if let Some(traces) = &mut fanout_utilization_traces {
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
-                    if let Some(failure) = expansion.bounded_failure {
-                        if context.graph_limits.failure_mode == GraphFailureMode::FailClosed {
-                            return Err(bounded_failure_error(failure));
-                        }
-                    }
+                    fail_if_closed(context.graph_limits.failure_mode, expansion.bounded_failure)?;
                     if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
                             .participants
@@ -1625,10 +1621,6 @@ fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &Selecti
     total.fallback_count += next.fallback_count;
 }
 
-fn bounded_failure_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
-}
-
 fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
     telemetry.expanded_object_count += expansion.objects.len();
     telemetry.expanded_relation_count += expansion.relations.len();
@@ -1853,6 +1845,7 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::GraphFailureMode;
     use crate::domain::ScopeKey;
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
 

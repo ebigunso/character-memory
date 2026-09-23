@@ -56,7 +56,7 @@ impl RootFanoutMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct BoundedExpansionPlan {
     pub(crate) visited: HashSet<MemoryObjectRef>,
     pub(crate) selection_order: Vec<MemoryObjectRef>,
@@ -320,41 +320,22 @@ fn bounded_expansion_plan<'a>(
         });
     }
 
-    if let Some(0) = query.failure_policy.timeout_ms {
-        let bounded_failure = GraphExpansionBoundedFailure {
-            reason: GraphExpansionBoundedFailureReason::Timeout,
+    let initial_failure = if query.failure_policy.timeout_ms == Some(0) {
+        Some(GraphExpansionBoundedFailureReason::Timeout)
+    } else if query.max_nodes == 0 {
+        Some(GraphExpansionBoundedFailureReason::NodeLimit)
+    } else {
+        None
+    };
+    if let Some(reason) = initial_failure {
+        let failure = GraphExpansionBoundedFailure {
+            reason,
             at: Some(root),
         };
-        if query.failure_policy.mode == GraphFailureMode::AllowPartialResults {
-            return Ok(BoundedExpansionPlan {
-                visited: HashSet::new(),
-                selection_order: Vec::new(),
-                expanded_nodes: HashSet::new(),
-                relations: Vec::new(),
-                filtered_nodes: Vec::new(),
-                fanout_utilization: Vec::new(),
-                bounded_failure: Some(bounded_failure),
-            });
-        }
-        return Err(graph_expansion_bounded_error(bounded_failure));
-    }
-
-    if query.max_nodes == 0 {
-        let bounded_failure = GraphExpansionBoundedFailure {
-            reason: GraphExpansionBoundedFailureReason::NodeLimit,
-            at: Some(root),
-        };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(bounded_failure));
-        }
+        fail_if_closed(query.failure_policy.mode, Some(failure))?;
         return Ok(BoundedExpansionPlan {
-            visited: HashSet::new(),
-            selection_order: Vec::new(),
-            expanded_nodes: HashSet::new(),
-            relations: Vec::new(),
-            filtered_nodes: Vec::new(),
-            fanout_utilization: Vec::new(),
-            bounded_failure: Some(bounded_failure),
+            bounded_failure: Some(failure),
+            ..Default::default()
         });
     }
 
@@ -478,9 +459,7 @@ fn bounded_expansion_plan<'a>(
                 reason: GraphExpansionBoundedFailureReason::NodeLimit,
                 at: Some(object_ref),
             };
-            if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                return Err(graph_expansion_bounded_error(failure));
-            }
+            fail_if_closed(query.failure_policy.mode, Some(failure))?;
             bounded_failure.get_or_insert(failure);
             continue;
         }
@@ -613,9 +592,7 @@ fn bounded_expansion_plan<'a>(
                 reason: GraphExpansionBoundedFailureReason::HubLimit,
                 at: Some(object_ref),
             };
-            if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                return Err(graph_expansion_bounded_error(failure));
-            }
+            fail_if_closed(query.failure_policy.mode, Some(failure))?;
             bounded_failure.get_or_insert(failure);
         }
         if exceeds_hub_limit {
@@ -658,9 +635,7 @@ fn bounded_expansion_plan<'a>(
                     reason: GraphExpansionBoundedFailureReason::NodeLimit,
                     at: Some(neighbor),
                 };
-                if query.failure_policy.mode == GraphFailureMode::FailClosed {
-                    return Err(graph_expansion_bounded_error(failure));
-                }
+                fail_if_closed(query.failure_policy.mode, Some(failure))?;
                 bounded_failure.get_or_insert(failure);
                 continue;
             }
@@ -925,8 +900,18 @@ fn fanout_limit_for_pair_with_override_mode(
         .min(query.max_fanout_per_node)
 }
 
-pub(crate) fn graph_expansion_bounded_error(failure: GraphExpansionBoundedFailure) -> CustomError {
-    CustomError::GraphExpansionBounded(graph_expansion_bounded_failure_trace(failure))
+pub(crate) fn fail_if_closed(
+    mode: GraphFailureMode,
+    failure: Option<GraphExpansionBoundedFailure>,
+) -> Result<(), CustomError> {
+    if mode == GraphFailureMode::FailClosed {
+        if let Some(failure) = failure {
+            return Err(CustomError::GraphExpansionBounded(
+                graph_expansion_bounded_failure_trace(failure),
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn graph_expansion_bounded_failure_trace(
@@ -1129,9 +1114,7 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
             reason: GraphExpansionBoundedFailureReason::HubLimit,
             at: Some(object_ref),
         };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(failure));
-        }
+        fail_if_closed(query.failure_policy.mode, Some(failure))?;
         bounded_failure.get_or_insert(failure);
     }
     if exceeds_hub_limit {

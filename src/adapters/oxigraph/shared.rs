@@ -7,14 +7,13 @@ use oxigraph::store::Store;
 use serde::de::DeserializeOwned;
 
 use crate::domain::{
-    graph_uri, DerivedMemory, Entity, Episode, GraphFailureMode, MemoryId, MemoryLink,
-    MemoryObject, MemoryObjectRef, MemoryThread, ObjectType, Observation, RelationType,
+    graph_uri, DerivedMemory, Entity, Episode, MemoryId, MemoryLink, MemoryObject, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType,
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, graph_expansion_bounded_error, is_participant_pair,
-    order_current_subject_links, BoundedExpansionLinkRef, ParticipantOccasions,
-    SUBJECT_ABOUTNESS_ROUTES,
+    bounded_incident_link_refs, fail_if_closed, is_participant_pair, order_current_subject_links,
+    BoundedExpansionLinkRef, ParticipantOccasions, SUBJECT_ABOUTNESS_ROUTES,
 };
 use crate::ports::graph_authority::{
     GraphExpansion, GraphExpansionBoundedFailure, GraphExpansionBoundedFailureReason,
@@ -75,9 +74,7 @@ pub(super) fn insert_visible_ref(
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        if query.failure_policy.mode == GraphFailureMode::FailClosed {
-            return Err(graph_expansion_bounded_error(failure));
-        }
+        fail_if_closed(query.failure_policy.mode, Some(failure))?;
         bounded_failure.get_or_insert(failure);
         return Ok(());
     }
