@@ -356,7 +356,7 @@ where
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
-                    assembly.omit_missing_candidate(candidate)
+                    assembly.omit_unverified_candidate(candidate, false)
                 }
                 Err(error) => return Err(error),
             }
@@ -683,38 +683,29 @@ impl RetrieveAssembly {
         }
 
         if !root_filtered && !root_verified && !self.objects.contains_key(&candidate_ref) {
-            if bounded_failure.is_some() {
-                self.omit_bounded_candidate(candidate);
-            } else {
-                self.omit_missing_candidate(candidate);
-            }
+            self.omit_unverified_candidate(candidate, bounded_failure.is_some());
         }
         Ok(())
     }
 
-    fn omit_bounded_candidate(&mut self, candidate: &CandidateRoot) {
+    fn omit_unverified_candidate(&mut self, candidate: &CandidateRoot, bounded: bool) {
         self.stale_omissions.push(StaleCandidateOmission {
             candidate: candidate.object,
             vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphExpansionBounded,
+            reason: if bounded {
+                StaleCandidateReason::GraphExpansionBounded
+            } else {
+                StaleCandidateReason::GraphObjectMissing
+            },
         });
         self.lifecycle_decisions.push(LifecycleFilterDecision {
             object: candidate.object,
             superseded_by: Vec::new(),
-            reason: LifecycleFilterReason::GraphExpansionBounded,
-        });
-    }
-
-    fn omit_missing_candidate(&mut self, candidate: &CandidateRoot) {
-        self.stale_omissions.push(StaleCandidateOmission {
-            candidate: candidate.object,
-            vector_score: candidate.vector_score,
-            reason: StaleCandidateReason::GraphObjectMissing,
-        });
-        self.lifecycle_decisions.push(LifecycleFilterDecision {
-            object: candidate.object,
-            superseded_by: Vec::new(),
-            reason: LifecycleFilterReason::GraphObjectMissing,
+            reason: if bounded {
+                LifecycleFilterReason::GraphExpansionBounded
+            } else {
+                LifecycleFilterReason::GraphObjectMissing
+            },
         });
     }
 
