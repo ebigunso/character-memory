@@ -70,13 +70,6 @@ impl RetrievalStatsStore for InMemoryRetrievalStatsStore {
                     .insert(object_state.object_id, object_state.retention_state);
             }
             for edge in state.edges.values_mut() {
-                if object_state.object_type == ObjectType::Observation {
-                    if let Some((id, retention)) = &mut edge.source_observation {
-                        if *id == object_state.object_id {
-                            *retention = object_state.retention_state;
-                        }
-                    }
-                }
                 if edge.object_id == object_state.object_id
                     && edge.object_type == object_state.object_type
                 {

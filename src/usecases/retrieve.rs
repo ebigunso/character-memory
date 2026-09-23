@@ -3519,7 +3519,6 @@ mod tests {
             is_current: true,
             first_seen_at: observed_at,
             last_seen_at: observed_at,
-            source_observation: None,
         }
     }
 

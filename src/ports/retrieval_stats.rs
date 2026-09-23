@@ -52,15 +52,11 @@ pub(crate) struct RetrievalStatsEdge {
     pub(crate) is_current: bool,
     pub(crate) first_seen_at: DateTime<Utc>,
     pub(crate) last_seen_at: DateTime<Utc>,
-    pub(crate) source_observation: Option<(MemoryId, RetentionState)>,
 }
 
 impl RetrievalStatsEdge {
     pub(crate) fn is_active(&self) -> bool {
         self.retention_state == RetentionState::Active
-            && self
-                .source_observation
-                .is_none_or(|(_, state)| state == RetentionState::Active)
     }
 }
 
@@ -300,12 +296,6 @@ fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) 
     existing.retention_state =
         more_restrictive_retention(existing.retention_state, incoming.retention_state);
     existing.is_current = existing.is_current && incoming.is_current;
-    if let (Some((_, state)), Some((_, incoming_state))) = (
-        &mut existing.source_observation,
-        incoming.source_observation,
-    ) {
-        *state = more_restrictive_retention(*state, incoming_state);
-    }
 }
 
 fn more_restrictive_retention(left: RetentionState, right: RetentionState) -> RetentionState {
@@ -341,7 +331,6 @@ fn edge(
         is_current,
         first_seen_at: observed_at,
         last_seen_at: observed_at,
-        source_observation: None,
     }
 }
 

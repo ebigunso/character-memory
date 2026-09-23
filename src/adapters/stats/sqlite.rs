@@ -56,14 +56,11 @@ impl SqliteRetrievalStatsStore {
                     edge_key TEXT PRIMARY KEY,
                     entity_id TEXT NOT NULL,
                     episode_id TEXT NOT NULL,
-                    source_observation_id TEXT,
                     retention_state TEXT NOT NULL,
-                    source_retention_state TEXT NOT NULL,
                     is_current INTEGER NOT NULL
                 );
                 CREATE INDEX episode_presence_entity ON episode_presence_index(entity_id, episode_id);
-                CREATE INDEX episode_presence_episode ON episode_presence_index(episode_id);
-                CREATE INDEX episode_presence_observation ON episode_presence_index(source_observation_id);",
+                CREATE INDEX episode_presence_episode ON episode_presence_index(episode_id);",
                 )
                 .map_err(sqlite_error)?;
         }
@@ -103,22 +100,11 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
         for state in states {
-            if self.has_episode_index {
-                match state.object_type {
-                    ObjectType::Episode => {
-                        transaction.execute(
+            if self.has_episode_index && state.object_type == ObjectType::Episode {
+                transaction.execute(
                             "UPDATE episode_presence_index SET retention_state = ?2, is_current = ?3 WHERE episode_id = ?1",
                             params![state.object_id.to_string(), retention_state_key(state.retention_state), bool_int(state.is_current)],
                         ).map_err(sqlite_error)?;
-                    }
-                    ObjectType::Observation => {
-                        transaction.execute(
-                            "UPDATE episode_presence_index SET source_retention_state = ?2 WHERE source_observation_id = ?1",
-                            params![state.object_id.to_string(), retention_state_key(state.retention_state)],
-                        ).map_err(sqlite_error)?;
-                    }
-                    _ => {}
-                }
             }
             if self.has_episode_index && state.object_type == ObjectType::Episode {
                 let previous = transaction
@@ -286,15 +272,13 @@ fn upsert_episode_presence(
 ) -> Result<(), RetrievalStatsStoreError> {
     connection.execute(
         "INSERT INTO episode_presence_index
-         (edge_key, entity_id, episode_id, source_observation_id, retention_state, source_retention_state, is_current)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         (edge_key, entity_id, episode_id, retention_state, is_current)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(edge_key) DO UPDATE SET
              retention_state = CASE WHEN episode_presence_index.retention_state = 'suppressed' THEN 'suppressed' ELSE excluded.retention_state END,
-             source_retention_state = CASE WHEN episode_presence_index.source_retention_state = 'suppressed' THEN 'suppressed' ELSE excluded.source_retention_state END,
              is_current = episode_presence_index.is_current AND excluded.is_current",
         params![edge.edge_key, edge.entity_id.to_string(), edge.object_id.to_string(),
-            edge.source_observation.map(|(id, _)| id.to_string()), retention_state_key(edge.retention_state),
-            retention_state_key(edge.source_observation.map_or(RetentionState::Active, |(_, state)| state)), bool_int(edge.is_current)],
+            retention_state_key(edge.retention_state), bool_int(edge.is_current)],
     ).map_err(sqlite_error)?;
     Ok(())
 }
@@ -303,14 +287,19 @@ fn episode_presence_counter(
     connection: &Connection,
     entity_id: String,
 ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-    let counter = connection.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(active), 0), COALESCE(SUM(current), 0) FROM (
-            SELECT MAX(retention_state = 'active' AND source_retention_state = 'active') AS active,
-                   MAX(retention_state = 'active' AND source_retention_state = 'active' AND is_current) AS current
+    let counter = connection
+        .query_row(
+            "SELECT COUNT(*), COALESCE(SUM(active), 0), COALESCE(SUM(current), 0) FROM (
+            SELECT MAX(retention_state = 'active') AS active,
+                   MAX(retention_state = 'active' AND is_current) AS current
             FROM episode_presence_index WHERE entity_id = ?1
             GROUP BY entity_id, episode_id
-        )", [entity_id], raw_counter_row,
-    ).map_err(sqlite_error).and_then(counter_from_raw)?;
+        )",
+            [entity_id],
+            raw_counter_row,
+        )
+        .map_err(sqlite_error)
+        .and_then(counter_from_raw)?;
     Ok((counter.total_count > 0).then_some(counter))
 }
 
@@ -923,7 +912,6 @@ mod tests {
             is_current,
             first_seen_at: timestamp(),
             last_seen_at: timestamp(),
-            source_observation: None,
         }
     }
 
