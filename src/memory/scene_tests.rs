@@ -180,6 +180,19 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
                 .collect::<Vec<_>>(),
             expected
         );
+        for input in recorded.iter().filter(|input| {
+            matches!(
+                input.surface,
+                VectorSurface::SceneSetting | VectorSurface::SceneParticipants
+            )
+        }) {
+            for excluded in ["session", "session/42", "empty"] {
+                assert!(
+                    !input.text.contains(excluded),
+                    "direct={direct}: custom key/value {excluded:?} leaked into {input:?}"
+                );
+            }
+        }
         let result = memory
             .retrieve(RetrievalContext::default().with_scene(supplied))
             .await
