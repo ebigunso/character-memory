@@ -187,8 +187,9 @@ where
         } else {
             RecallRoad::Recency
         };
-        let read_limit = time_road.contribution(&context);
-        let contribution = read_limit.saturating_sub(usize::from(context.time_range.is_some()));
+        let contribution = time_road.contribution(&context);
+        // Only a caller range needs an extra row to report that more exists.
+        let read_limit = contribution.saturating_add(usize::from(context.time_range.is_some()));
         let window = self
             .graph_store
             .query_episodes_by_time(
@@ -1290,7 +1291,6 @@ enum Contribution {
     CandidateCap,
     Description,
     Room,
-    Range,
 }
 
 struct RoadRule {
@@ -1359,7 +1359,7 @@ impl RecallRoad {
                 GraphRootSource::DateMatch,
                 false,
                 true,
-                Range,
+                Room,
                 true,
             ),
             Self::SharedAnniversary => (
@@ -1413,7 +1413,6 @@ impl RecallRoad {
             Contribution::CandidateCap => context.candidate_limits.max_vector_candidates,
             Contribution::Description => cue_floor(context.cue_floors, self.rule().kind).max(1),
             Contribution::Room => room(),
-            Contribution::Range => room().saturating_add(1),
         }
     }
 }
