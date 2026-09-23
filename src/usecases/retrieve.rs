@@ -1139,15 +1139,20 @@ fn section_pressure_for(
         .expect("every pack section has a pressure summary")
 }
 
-fn count_reasons<R: Copy>(
+fn count_reasons<R: Copy + Eq>(
     reasons: impl Iterator<Item = R>,
     rank: impl Fn(R) -> u8,
 ) -> impl Iterator<Item = (R, usize)> {
-    let mut counts = BTreeMap::new();
+    let mut counts = Vec::<(R, usize)>::new();
     for reason in reasons {
-        counts.entry(rank(reason)).or_insert((reason, 0)).1 += 1;
+        if let Some((_, count)) = counts.iter_mut().find(|(value, _)| *value == reason) {
+            *count += 1;
+        } else {
+            counts.push((reason, 1));
+        }
     }
-    counts.into_values()
+    counts.sort_by_key(|(reason, _)| rank(*reason));
+    counts.into_iter()
 }
 
 fn summarize_stale_candidate_omissions(
