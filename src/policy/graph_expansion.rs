@@ -593,17 +593,24 @@ fn bounded_expansion_plan<'a>(
             incident_links.truncate(bounded_hub_retention_limit(query, root_fanout_mode));
         }
         if let Some(pre_limit_counts) = pre_limit_counts {
-            let (limited_incident_links, utilization) = apply_fanout_limits_with_utilization(
-                query,
-                object_ref,
-                incident_links,
-                pre_limit_counts,
-                root_fanout_mode,
-            );
+            let (limited_incident_links, utilization) =
+                apply_fanout_limits_with_utilization_by_pair(
+                    query,
+                    object_ref,
+                    incident_links,
+                    pre_limit_counts,
+                    root_fanout_mode,
+                    |(link, neighbor)| (link.relation, neighbor.object_type),
+                );
             incident_links = limited_incident_links;
             fanout_utilization.extend(utilization);
         } else {
-            incident_links = apply_fanout_limits(query, incident_links, root_fanout_mode);
+            incident_links = apply_fanout_limits_by_pair(
+                query,
+                incident_links,
+                root_fanout_mode,
+                |(link, neighbor)| (link.relation, neighbor.object_type),
+            );
         }
         for (link, neighbor) in incident_links {
             if relation_link_ids.insert(link.id) {
@@ -716,39 +723,6 @@ pub(crate) fn order_current_subject_links<T: Copy>(
             && !SUBJECT_ABOUTNESS_ROUTES.contains(&(relation, object.object_type))
     }));
     ordered
-}
-
-fn apply_fanout_limits<'a>(
-    query: &GraphExpansionQuery,
-    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    root_fanout_mode: RootFanoutMode,
-) -> Vec<(&'a MemoryLink, MemoryObjectRef)> {
-    apply_fanout_limits_by_pair(
-        query,
-        incident_links,
-        root_fanout_mode,
-        |(link, neighbor)| (link.relation, neighbor.object_type),
-    )
-}
-
-fn apply_fanout_limits_with_utilization<'a>(
-    query: &GraphExpansionQuery,
-    root: MemoryObjectRef,
-    incident_links: Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    pre_limit_counts: FanoutCounts,
-    root_fanout_mode: RootFanoutMode,
-) -> (
-    Vec<(&'a MemoryLink, MemoryObjectRef)>,
-    Vec<GraphExpansionFanoutUtilization>,
-) {
-    apply_fanout_limits_with_utilization_by_pair(
-        query,
-        root,
-        incident_links,
-        pre_limit_counts,
-        root_fanout_mode,
-        |(link, neighbor)| (link.relation, neighbor.object_type),
-    )
 }
 
 fn apply_fanout_limits_with_utilization_by_pair<T>(
@@ -1128,7 +1102,9 @@ pub(crate) fn bounded_incident_link_refs<T: BoundedExpansionLinkRef>(
         )
     } else {
         (
-            apply_link_ref_fanout_limits(query, object_ref, incident_links, root_fanout_mode),
+            apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link: &T| {
+                (link.relation(), link.other_endpoint(object_ref).object_type)
+            }),
             Vec::new(),
         )
     };
@@ -1280,18 +1256,6 @@ fn limit_participant_occasions<T: Copy>(
         selected_routes.insert((relation, episode))
     });
     exclusions
-}
-
-pub(crate) fn apply_link_ref_fanout_limits<T: BoundedExpansionLinkRef>(
-    query: &GraphExpansionQuery,
-    object_ref: MemoryObjectRef,
-    incident_links: Vec<T>,
-    root_fanout_mode: RootFanoutMode,
-) -> Vec<T> {
-    apply_fanout_limits_by_pair(query, incident_links, root_fanout_mode, |link_ref| {
-        let neighbor = link_ref.other_endpoint(object_ref);
-        (link_ref.relation(), neighbor.object_type)
-    })
 }
 
 #[cfg(test)]
