@@ -16,6 +16,64 @@ pub mod test_support;
 use test_support as base;
 
 #[tokio::test]
+async fn authored_observed_in_is_not_duplicated_in_either_direction_on_replay() {
+    use character_memory::{ObservationDraft, RememberPlanDefaults, Scene};
+    let mut results = Vec::new();
+    for reverse in [false, true] {
+        for backward in [false, true] {
+            let (memory, root) = setup_basic().await;
+            let id = |n| MemoryId::from_u128(if reverse { 100_000 - n } else { n });
+            let mut episode = EpisodeDraft::new("an occasion");
+            episode.id = Some(id(100));
+            episode.scene = Some(Scene::at(fixed_timestamp().fixed_offset()));
+            let mut observation = ObservationDraft::new(id(100), "a remark");
+            observation.id = Some(id(200));
+            let mut link = if backward {
+                MemoryLinkDraft::new(
+                    ObjectType::Episode,
+                    id(100),
+                    RelationType::ObservedIn,
+                    ObjectType::Observation,
+                    id(200),
+                )
+            } else {
+                MemoryLinkDraft::new(
+                    ObjectType::Observation,
+                    id(200),
+                    RelationType::ObservedIn,
+                    ObjectType::Episode,
+                    id(100),
+                )
+            };
+            link.id = Some(id(300));
+            let plan = RememberInput::new("caller structural membership")
+                .with_episode(episode)
+                .with_observation(observation)
+                .with_memory_link(link)
+                .prepare_write_plan(&RememberPlanDefaults::fixed(
+                    "caller membership",
+                    fixed_timestamp(),
+                ));
+            let first = memory
+                .commit(plan.clone(), CommitOptions::default())
+                .await
+                .unwrap();
+            let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
+            base::close_and_remove_root(memory, root).await;
+            results.push((reverse, backward, id(300), first, replay));
+        }
+    }
+    for (reverse, backward, link, first, replay) in results {
+        assert_eq!(
+            first.persisted_link_ids,
+            [link],
+            "reverse={reverse} backward={backward}"
+        );
+        assert_eq!(first, replay);
+    }
+}
+
+#[tokio::test]
 async fn an_observation_requires_its_episode_in_the_plan_or_store() {
     use character_memory::{
         CandidateProvenance, EpisodeCandidate, ObservationCandidate, ObservationDraft, Scene,

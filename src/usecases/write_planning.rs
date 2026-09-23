@@ -1322,11 +1322,14 @@ impl WritePlanCommitValues {
                 MemoryObject::DerivedMemory(memory) => links.extend(derived_memory_links(memory)),
                 MemoryObject::Observation(observation) => {
                     if !links.iter().any(|link| {
-                        link.from_type == ObjectType::Observation
-                            && link.from_id == observation.id
-                            && link.to_type == ObjectType::Episode
-                            && link.to_id == observation.episode_id
-                            && link.relation == RelationType::ObservedIn
+                        let from = MemoryObjectRef::new(link.from_type, link.from_id);
+                        let to = MemoryObjectRef::new(link.to_type, link.to_id);
+                        let observation_ref = object.object_ref();
+                        let episode_ref =
+                            MemoryObjectRef::new(ObjectType::Episode, observation.episode_id);
+                        link.relation == RelationType::ObservedIn
+                            && ((from == observation_ref && to == episode_ref)
+                                || (to == observation_ref && from == episode_ref))
                     }) {
                         links.push(MemoryLink {
                             id: deterministic_uuid(&[
