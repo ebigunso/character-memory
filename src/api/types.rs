@@ -32,7 +32,7 @@ pub use retrieval::{
     StaleCandidateReason, TimeRange, VectorCandidateTrace, VectorRecallCompleteness,
 };
 pub use write_plan::{
-    CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     DerivedMemoryCandidate, DiagnosticSeverity, EntityCandidate, EpisodeCandidate, MemoryCandidate,
     MemoryLinkCandidate, MemoryThreadCandidate, ObservationCandidate, PrepareOptions,
     RememberDiagnostic, RememberDiagnosticCode, RememberDiagnostics, RememberInput,

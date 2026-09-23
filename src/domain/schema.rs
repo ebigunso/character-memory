@@ -1,17 +1,17 @@
-use super::CURRENT_SCHEMA_VERSION;
+use super::DEFAULT_SCHEMA_VERSION;
 use crate::errors::CustomError;
 
 pub(crate) fn require_current_schema_version(
     schema_version: &str,
     context: &'static str,
 ) -> Result<(), CustomError> {
-    if schema_version == CURRENT_SCHEMA_VERSION {
+    if schema_version == DEFAULT_SCHEMA_VERSION {
         return Ok(());
     }
 
     Err(CustomError::UnsupportedSchemaVersion {
         context,
-        expected: CURRENT_SCHEMA_VERSION,
+        expected: DEFAULT_SCHEMA_VERSION,
         actual: schema_version.to_owned(),
     })
 }
@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn current_schema_version_is_accepted() {
         assert!(
-            require_current_schema_version(CURRENT_SCHEMA_VERSION, "test storage boundary").is_ok()
+            require_current_schema_version(DEFAULT_SCHEMA_VERSION, "test storage boundary").is_ok()
         );
     }
 
@@ -36,7 +36,7 @@ mod tests {
             error,
             CustomError::UnsupportedSchemaVersion {
                 context: "test storage boundary",
-                expected: CURRENT_SCHEMA_VERSION,
+                expected: DEFAULT_SCHEMA_VERSION,
                 actual
             } if actual == "future_schema"
         ));

@@ -476,19 +476,6 @@ pub struct VectorMaintenanceFailure {
     pub failures: Vec<VectorMaintenanceFailureItem>,
 }
 
-impl VectorMaintenanceFailure {
-    pub fn unmaintained_objects(&self) -> Vec<MemoryObjectRef> {
-        let mut objects = self
-            .failures
-            .iter()
-            .flat_map(|failure| failure.objects.iter().copied())
-            .collect::<Vec<_>>();
-        objects.sort_by_key(|object| (object.id, object.object_type.stable_rank()));
-        objects.dedup();
-        objects
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorMaintenanceFailureItem {
     pub operation: VectorMaintenanceOperation,
