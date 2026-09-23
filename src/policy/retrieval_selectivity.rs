@@ -215,7 +215,7 @@ pub(crate) async fn selectivity_plan_for_entity(
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
-        if matches!(spec.relation, RelationType::About | RelationType::Mentions) {
+        if !is_counted_relation(spec.relation) {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
             if !plan
                 .fanout_overrides
