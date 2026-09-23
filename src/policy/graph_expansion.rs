@@ -484,9 +484,8 @@ fn bounded_expansion_plan<'a>(
                     .is_none_or(|ids| ids.contains(&link.id))
             })
             .filter(|link| relation_allowed(query, link.relation))
-            .filter(|link| link_touches_ref(link, object_ref))
             .filter_map(|link| {
-                let neighbor = other_endpoint(link, object_ref);
+                let neighbor = other_endpoint(link, object_ref)?;
                 if object_refs.contains(&neighbor)
                     && !future_memories.contains(&neighbor)
                     && query.allows_incident_link(object_ref, link.relation, neighbor)
@@ -1014,16 +1013,15 @@ fn relation_allowed(query: &GraphExpansionQuery, relation: RelationType) -> bool
     query.allowed_relation_types.is_empty() || query.allowed_relation_types.contains(&relation)
 }
 
-fn link_touches_ref(link: &MemoryLink, object_ref: MemoryObjectRef) -> bool {
-    (link.from_id == object_ref.id && link.from_type == object_ref.object_type)
-        || (link.to_id == object_ref.id && link.to_type == object_ref.object_type)
-}
-
-fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> MemoryObjectRef {
-    if link.from_id == object_ref.id && link.from_type == object_ref.object_type {
-        MemoryObjectRef::from_id_type(link.to_id, link.to_type)
+fn other_endpoint(link: &MemoryLink, object_ref: MemoryObjectRef) -> Option<MemoryObjectRef> {
+    let from = MemoryObjectRef::from_id_type(link.from_id, link.from_type);
+    let to = MemoryObjectRef::from_id_type(link.to_id, link.to_type);
+    if from == object_ref {
+        Some(to)
+    } else if to == object_ref {
+        Some(from)
     } else {
-        MemoryObjectRef::from_id_type(link.from_id, link.from_type)
+        None
     }
 }
 
