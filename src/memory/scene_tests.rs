@@ -163,7 +163,8 @@ async fn scene_words_round_trip_through_remember_and_authored_plan_without_infer
                 .await
                 .is_empty()
         );
-        assert!(outcome.persisted_link_ids.is_empty());
+        // Ruling 69: only the remember path includes an observation needing ObservedIn.
+        assert_eq!(outcome.persisted_link_ids.len(), usize::from(!direct));
         assert_eq!(
             outcome.vector_indexed_object_ids.len(),
             if direct { 1 } else { 2 }
@@ -547,10 +548,12 @@ async fn scene_override_preserves_participants_involvement_threads_interval_and_
         .query_links_by_ids(&outcome.persisted_link_ids)
         .await
         .unwrap();
+    // Ruling 69: keyed presence is Involves; ObservedIn carries the observation's occasion.
     for (from, relation, to) in [
         (episode_id, RelationType::Involves, involved),
-        (observation_id, RelationType::Mentions, present),
-        (observation_id, RelationType::Mentions, existing),
+        (episode_id, RelationType::Involves, present),
+        (episode_id, RelationType::Involves, existing),
+        (observation_id, RelationType::ObservedIn, episode_id),
         (observation_id, RelationType::PartOfThread, thread_ids[0]),
         (observation_id, RelationType::PartOfThread, thread_ids[1]),
     ] {

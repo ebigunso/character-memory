@@ -186,6 +186,7 @@ pub enum CandidateSourceSpanIssue {
 #[serde(rename_all = "snake_case")]
 pub enum CandidateReferenceRole {
     SceneParticipant,
+    ObservationEpisode,
     DerivedSourceEpisode,
     BeliefSubject,
     DerivedSourceObservation,

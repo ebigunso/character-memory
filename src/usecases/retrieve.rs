@@ -1691,6 +1691,8 @@ fn graph_query_for_candidate(
         && candidate.source() == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
     query.participant_reference_time = context.scene.time.to_utc();
+    query.allow_future_root = candidate.object.object_type == ObjectType::Episode
+        && candidate.roads.contains_key(&RecallRoad::Range);
     query
 }
 

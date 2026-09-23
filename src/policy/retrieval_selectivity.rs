@@ -74,6 +74,12 @@ impl RetrievalSelectivityPolicy {
     }
 
     fn fanout_budget(&self, relation: RelationType, object_type: ObjectType) -> FanoutSpec {
+        let (relation, object_type) = match (relation, object_type) {
+            (RelationType::Mentions, ObjectType::Observation) => {
+                (RelationType::About, ObjectType::DerivedMemory)
+            }
+            pair => pair,
+        };
         self.fanout_budgets
             .iter()
             .copied()
@@ -209,13 +215,21 @@ pub(crate) async fn selectivity_plan_for_entity(
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
     for spec in &stats_context.specs {
-        if current_subject_state && spec.relation == RelationType::About {
+        if current_subject_state
+            && matches!(spec.relation, RelationType::About | RelationType::Mentions)
+        {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
-            plan.fanout_overrides.push(GraphExpansionFanoutOverride {
-                relation: spec.relation,
-                object_type: spec.object_type,
-                max_fanout,
-            });
+            if !plan
+                .fanout_overrides
+                .iter()
+                .any(|entry| entry.relation == RelationType::About)
+            {
+                plan.fanout_overrides.push(GraphExpansionFanoutOverride {
+                    relation: RelationType::About,
+                    object_type: ObjectType::DerivedMemory,
+                    max_fanout,
+                });
+            }
             continue;
         }
         let (count_relation, count_object_type) = spec.count_bucket();
@@ -459,17 +473,12 @@ struct FanoutSpec {
 
 impl FanoutSpec {
     fn count_bucket(self) -> (RelationType, ObjectType) {
-        match (self.relation, self.object_type) {
-            (RelationType::Mentions, ObjectType::Observation) => {
-                (RelationType::Involves, ObjectType::Episode)
-            }
-            bucket => bucket,
-        }
+        (self.relation, self.object_type)
     }
 }
 
 fn fanout_routes() -> [FanoutSpec; 4] {
-    // Both participant routes count episodes and share the Involves budget.
+    // Mentions counts observations independently, with the aboutness budget.
     let [about, participant, thread] = DEFAULT_FANOUT_SPECS;
     [
         about,
@@ -478,7 +487,7 @@ fn fanout_routes() -> [FanoutSpec; 4] {
         FanoutSpec {
             relation: RelationType::Mentions,
             object_type: ObjectType::Observation,
-            ..participant
+            ..about
         },
     ]
 }
@@ -690,6 +699,47 @@ mod tests {
             part_of_thread.max_fanout, 15,
             "pairs without an override keep their default budget"
         );
+    }
+
+    #[tokio::test]
+    async fn subject_aboutness_has_one_configured_budget_even_for_mentions_only_scope() {
+        let stats = InMemoryRetrievalStatsStore::new();
+        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+            1.0,
+            1.0,
+            [(RelationType::About, ObjectType::DerivedMemory, 2, 2)],
+        )
+        .unwrap();
+        for relations in [
+            vec![RelationType::Mentions],
+            vec![RelationType::About, RelationType::Mentions],
+        ] {
+            let stats_context = SelectivityStatsContext::load_with_scope(&stats, &[], &relations)
+                .await
+                .unwrap();
+            let plan = selectivity_plan_for_entity(
+                crate::domain::MemoryId::from_u128(1),
+                1.0,
+                16,
+                &stats,
+                policy,
+                &stats_context,
+                RetrievalLifecyclePolicy::default(),
+                TraceMode::Enabled,
+                true,
+            )
+            .await
+            .unwrap();
+            assert!(plan.traces.is_empty());
+            assert_eq!(
+                plan.fanout_overrides,
+                [GraphExpansionFanoutOverride {
+                    relation: RelationType::About,
+                    object_type: ObjectType::DerivedMemory,
+                    max_fanout: 2,
+                }]
+            );
+        }
     }
 
     #[tokio::test]

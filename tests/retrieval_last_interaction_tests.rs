@@ -332,14 +332,28 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
         )
         .await;
         let result = memory.retrieve(request(vec![keyed(100)])).await.unwrap();
-        assert_eq!(last(&result), Some(&fact(401, recent)));
+        // Talking about someone does not establish an interaction with them.
+        assert_eq!(last(&result), (!mentions).then_some(&fact(401, recent)));
         assert!(occasions(&result).contains(&id(401)));
         assert!(!occasions(&result).contains(&id(499)));
+        let mut ranged = request(vec![keyed(100)]);
+        ranged.time_range = Some(character_memory::api::types::TimeRange {
+            start: old,
+            end: recent,
+        });
+        let ranged = memory.retrieve(ranged).await.unwrap();
+        assert!(
+            !occasions(&ranged).contains(&id(499)),
+            "a range does not exempt ordinary expansion"
+        );
         let mut tight = request(vec![keyed(100)]);
         tight.section_limits.relevant_episodes = 1;
         tight.section_limits.salient_observations = 1;
         let tight_result = memory.retrieve(tight).await.unwrap();
-        assert_eq!(last(&tight_result), Some(&fact(401, recent)));
+        assert_eq!(
+            last(&tight_result),
+            (!mentions).then_some(&fact(401, recent))
+        );
         tight_occasions.push(occasions(&tight_result));
         let target = if mentions {
             LifecycleTargetRef::observation(id(1401))
@@ -360,7 +374,7 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
             } else {
                 fact(400, old)
             };
-            assert_eq!(last(&result), Some(&expected));
+            assert_eq!(last(&result), (!mentions).then_some(&expected));
             assert!(occasions(&result).contains(&expected.episode_id));
         }
         if mentions {
@@ -382,7 +396,7 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
                 } else {
                     fact(400, old)
                 };
-                assert_eq!(last(&result), Some(&expected));
+                assert_eq!(last(&result), (!mentions).then_some(&expected));
                 assert!(occasions(&result).contains(&expected.episode_id));
             }
         }
@@ -394,10 +408,12 @@ async fn links_and_suppression_determine_last_interaction_in_both_orientations()
     assert_eq!(
         tight_occasions,
         vec![
-            BTreeSet::from([id(401)]),
-            BTreeSet::from([id(401)]),
+            // Rulings 46 and 69: recency brings the notion-creation observation.
             BTreeSet::from([id(401), notion_episode]),
             BTreeSet::from([id(401), notion_episode]),
+            // Bounded aboutness now brings the remark and its occasion before recency.
+            BTreeSet::from([id(401)]),
+            BTreeSet::from([id(401)]),
         ]
     );
 }

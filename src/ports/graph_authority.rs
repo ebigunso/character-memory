@@ -162,6 +162,8 @@ pub(crate) struct GraphExpansionQuery {
     pub(crate) current_subject_state: bool,
     pub(crate) reminder_only: bool,
     pub(crate) participant_reference_time: DateTime<Utc>,
+    // Only an occasion directly contributed by the caller's range can be future.
+    pub(crate) allow_future_root: bool,
     pub(crate) current_thread_state: bool,
     // Hydrated lifecycle evidence may lie outside the adapter's selected traversal.
     pub(crate) traversal_link_ids: Option<std::collections::HashSet<MemoryId>>,
@@ -197,6 +199,7 @@ impl GraphExpansionQuery {
             current_subject_state: false,
             reminder_only: false,
             participant_reference_time: DateTime::<Utc>::MAX_UTC,
+            allow_future_root: false,
             current_thread_state: false,
             traversal_link_ids: None,
             trace_mode: TraceMode::Disabled,
@@ -221,6 +224,19 @@ impl GraphExpansionQuery {
             && (!self.reminder_only
                 || object.object_type != ObjectType::Episode
                 || object.id == self.root_id)
+    }
+
+    pub(crate) fn allows_incident_link(
+        &self,
+        from: MemoryObjectRef,
+        relation: RelationType,
+        to: MemoryObjectRef,
+    ) -> bool {
+        self.allows_object(to)
+            && (!self.reminder_only
+                || to.object_type != ObjectType::Observation
+                || (relation == RelationType::ObservedIn
+                    && from == MemoryObjectRef::new(ObjectType::Episode, self.root_id)))
     }
 
     pub(crate) fn with_allowed_object_types(mut self, object_types: Vec<ObjectType>) -> Self {

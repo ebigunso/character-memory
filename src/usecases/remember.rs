@@ -512,9 +512,11 @@ mod tests {
             .expect("remember draft should persist");
 
         assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
+        // Ruling 69: the structural ObservedIn follows the authored links.
+        assert_eq!(outcome.persisted_link_ids.len(), 3);
         assert_eq!(
-            outcome.persisted_link_ids,
-            vec![ids.inline_link, ids.extra_link]
+            outcome.persisted_link_ids[..2],
+            [ids.inline_link, ids.extra_link]
         );
         assert_eq!(outcome.vector_indexed_object_ids, expected_vector_ids(&ids));
         assert_eq!(outcome.vector_indexing_failure, None);
@@ -676,9 +678,11 @@ mod tests {
             .expect("graph success with vector failure should return partial outcome");
 
         assert_eq!(outcome.persisted_object_ids, expected_object_ids(&ids));
+        // Ruling 69: the structural ObservedIn follows the authored links.
+        assert_eq!(outcome.persisted_link_ids.len(), 3);
         assert_eq!(
-            outcome.persisted_link_ids,
-            vec![ids.inline_link, ids.extra_link]
+            outcome.persisted_link_ids[..2],
+            [ids.inline_link, ids.extra_link]
         );
         assert!(outcome.vector_indexed_object_ids.is_empty());
         let failure = outcome
@@ -801,7 +805,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(outcome.persisted_link_ids, vec![ids.extra_link]);
+        // Ruling 69: ObservedIn accompanies the caller's association.
+        assert_eq!(outcome.persisted_link_ids.len(), 2);
+        assert_eq!(outcome.persisted_link_ids[0], ids.extra_link);
         let stored = graph.query_links_by_ids(&[ids.extra_link]).await.unwrap();
         assert!(matches!(stored.as_slice(), [link]
             if link.id == ids.extra_link && link.relation == RelationType::AssociatedWith));

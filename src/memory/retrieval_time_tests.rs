@@ -356,7 +356,16 @@ async fn recency_scene_only_room_and_floor_witnesses() {
             .unique_graph_root_candidate_count,
         16
     );
-    assert!(default.pack.salient_observations.is_empty());
+    // Rulings 46 and 69: an occasion brings its own observation through ObservedIn.
+    assert_eq!(
+        default
+            .pack
+            .salient_observations
+            .iter()
+            .map(|o| o.id)
+            .collect::<Vec<_>>(),
+        [id(400)]
+    );
     let mut single = query(false, false);
     single.section_limits = room(1);
     let first = record(
@@ -1746,7 +1755,8 @@ async fn anniversary_sources_reserve_only_shared_occasions() {
                         .iter()
                         .filter(|a| a.object.id == id(900) && a.cue_kind == CueKind::DateMatch)
                         .count(),
-                    2
+                    // Participant aboutness already brings the occasion into the section.
+                    1
                 );
             }
             "next-day" => assert!(ann_dates(&result).is_empty()),
@@ -2050,7 +2060,7 @@ async fn anniversary_reservation_needs_a_resolved_notion() {
 }
 
 #[tokio::test]
-async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
+async fn anniversary_sharing_requires_presence_in_either_direction() {
     for (mentions, reverse) in [(false, false), (false, true), (true, false), (true, true)] {
         let (memory, temp) = open().await;
         // No participant literal on either occasion: sharing comes from the links.
@@ -2082,14 +2092,14 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
         let shared = memory.retrieve(context.clone()).await.unwrap();
         assert_eq!(
             roots(&shared),
-            [900],
+            [if mentions { 2000 } else { 900 }],
             "mentions={mentions} reverse={reverse}"
         );
         if mentions {
             memory
                 .forget(ForgetMemoryDraft::suppress(
                     LifecycleTargetRef::Observation(id(400)),
-                    "Sharing requires an eligible observation",
+                    "Forget the remark, which is not presence",
                 ))
                 .await
                 .unwrap();
@@ -2098,7 +2108,8 @@ async fn anniversary_sharing_uses_eligible_links_in_either_direction() {
                 [2000]
             );
             context.lifecycle_policy.include_suppressed = true;
-            assert_eq!(roots(&memory.retrieve(context).await.unwrap()), [900]);
+            // Restoring a mention does not turn it into a shared occasion.
+            assert_eq!(roots(&memory.retrieve(context).await.unwrap()), [2000]);
         }
         memory.close().await.unwrap();
         temp.close().unwrap();

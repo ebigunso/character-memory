@@ -247,6 +247,22 @@ fn selected_cues(result: &RetrieveOutcome, object: MemoryObjectRef) -> &BTreeSet
         .cue_kinds
 }
 
+fn participant_observations(result: &RetrieveOutcome) -> Vec<MemoryId> {
+    result
+        .pack
+        .salient_observations
+        .iter()
+        .filter(|observation| {
+            selected_cues(
+                result,
+                MemoryObjectRef::new(ObjectType::Observation, observation.id),
+            )
+            .contains(&CueKind::Participant)
+        })
+        .map(|observation| observation.id)
+        .collect()
+}
+
 #[tokio::test]
 async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget() {
     let (memory, _) = scene_memory().await;
@@ -280,7 +296,8 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
     let combined = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(
         selected_cues(&combined, object),
-        &BTreeSet::from([CueKind::Topic, CueKind::Participant]),
+        // Rulings 46 and 69: recency also brings the occasion's observation.
+        &BTreeSet::from([CueKind::Topic, CueKind::Participant, CueKind::Recency]),
         "{:#?}",
         combined.trace
     );
@@ -300,8 +317,27 @@ async fn cue_union_survives_winning_scores_but_excludes_a_root_cut_by_the_budget
     memory.close().await.unwrap();
 }
 
+async fn mention_counts(memory: &CharacterMemory, participant: MemoryId) -> (u64, u64) {
+    let stats = &memory.memory_composition.stats_store;
+    let entity = stats
+        .counter(&crate::ports::retrieval_stats::RetrievalStatsCounterKey {
+            entity_id: participant,
+            relation_kind: RelationType::Mentions,
+            object_type: ObjectType::Observation,
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let global = stats
+        .global_counter(RelationType::Mentions, ObjectType::Observation)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    (entity.current_count, global.current_count)
+}
+
 #[tokio::test]
-async fn observation_forget_recounts_notion_presence_without_removing_scene_participants() {
+async fn observation_forget_recounts_mentions_without_removing_presence() {
     for sqlite in [false, true] {
         for (in_scene, direct_link) in [(false, false), (true, false), (false, true)] {
             let directory = tempfile::tempdir().unwrap();
@@ -361,11 +397,7 @@ async fn observation_forget_recounts_notion_presence_without_removing_scene_part
             }
             let mut context = RetrievalContext::default().with_trace();
             context.scene.participants.push(keyed(100));
-            for (forgotten, expected) in [
-                (None, 1),
-                (Some(30_001), 1),
-                (Some(30_002), u64::from(in_scene || direct_link)),
-            ] {
+            for (forgotten, expected) in [(None, 2), (Some(30_001), 1), (Some(30_002), 0)] {
                 if let Some(id) = forgotten {
                     memory
                         .forget(ForgetMemoryDraft::suppress(
@@ -376,20 +408,21 @@ async fn observation_forget_recounts_notion_presence_without_removing_scene_part
                         .unwrap();
                 }
                 let result = memory.retrieve(context.clone()).await.unwrap();
-                let decision = result
-                    .trace
-                    .unwrap()
-                    .selectivity_decisions
-                    .into_iter()
-                    .find(|row| {
-                        row.root.id == MemoryId::from_u128(100)
-                            && row.relation == RelationType::Mentions
-                    })
+                let decisions = result.trace.unwrap().selectivity_decisions;
+                // Present-subject aboutness bypasses selectivity; counters still follow retention.
+                assert!(decisions
+                    .iter()
+                    .all(|row| row.relation != RelationType::Mentions));
+                assert_eq!(mention_counts(&memory, MemoryId::from_u128(100)).await, (expected, expected),
+                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}");
+                // Mentions tracks remarks; presence is independent of their retention.
+                let presence = decisions
+                    .iter()
+                    .find(|row| row.relation == RelationType::Involves)
                     .unwrap();
                 assert_eq!(
-                    (decision.entity_count, decision.global_count),
-                    (Some(expected), Some(2)),
-                    "sqlite={sqlite}, in_scene={in_scene}, direct_link={direct_link}, forgotten={forgotten:?}"
+                    presence.entity_count,
+                    (in_scene || direct_link).then_some(1)
                 );
             }
             memory.close().await.unwrap();
@@ -398,7 +431,7 @@ async fn observation_forget_recounts_notion_presence_without_removing_scene_part
 }
 
 #[tokio::test]
-async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
+async fn mentions_count_observations_independently_of_parent_lifecycle() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
     let participant = MemoryId::from_u128(100);
@@ -447,22 +480,17 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
         key: Some(participant),
         ..Default::default()
     }];
-    let counts = |result: &RetrieveOutcome| {
-        let decision = result
-            .trace
-            .as_ref()
-            .unwrap()
-            .selectivity_decisions
-            .iter()
-            .find(|decision| {
-                decision.root.id == participant && decision.relation == RelationType::Mentions
-            })
-            .unwrap();
-        (decision.entity_count, decision.global_count)
-    };
     let result = memory.retrieve(context.clone()).await.unwrap();
-    assert_eq!(counts(&result), (Some(1), Some(2)));
-    assert_eq!(result.pack.salient_observations.len(), 1);
+    assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+    // One subject aboutness budget admits both remarks despite their ubiquity.
+    assert_eq!(participant_observations(&result).len(), 2);
+    assert!(result
+        .trace
+        .as_ref()
+        .unwrap()
+        .selectivity_decisions
+        .iter()
+        .all(|row| row.relation != RelationType::Mentions));
     memory
         .forget(ForgetMemoryDraft::suppress(
             LifecycleTargetRef::episode(episode),
@@ -470,20 +498,17 @@ async fn mentions_count_the_parent_episode_once_and_follow_its_lifecycle() {
         ))
         .await
         .unwrap();
-    assert_eq!(
-        counts(&memory.retrieve(context.clone()).await.unwrap()),
-        (Some(0), Some(1))
-    );
-    context.lifecycle_policy.include_suppressed = true;
-    assert_eq!(
-        counts(&memory.retrieve(context).await.unwrap()),
-        (Some(1), Some(2))
-    );
+    for include_suppressed in [false, true] {
+        context.lifecycle_policy.include_suppressed = include_suppressed;
+        let result = memory.retrieve(context.clone()).await.unwrap();
+        assert_eq!(mention_counts(&memory, participant).await, (2, 2));
+        assert_eq!(participant_observations(&result).len(), 2);
+    }
     memory.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_topic() {
+async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_aboutness() {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
     let episode = write_episode(&memory, 50_100, scene()).await;
@@ -512,24 +537,20 @@ async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_t
         context.scene.participants.push(keyed(100));
         context.graph_limits.max_depth = 1;
         let result = memory.retrieve(context).await.unwrap();
+        assert_eq!(result.pack.salient_observations.len(), 1);
+        assert_eq!(result.pack.salient_observations[0].id, observation);
         assert_eq!(
-            result.pack.salient_observations.len(),
-            usize::from(has_topic)
+            result.pack.salient_observations[0].retention_state,
+            RetentionState::Active
         );
-        if has_topic {
-            assert_eq!(result.pack.salient_observations[0].id, observation);
-            assert_eq!(
-                result.pack.salient_observations[0].retention_state,
-                RetentionState::Active
-            );
-        }
         let trace = result.trace.unwrap();
         let omissions = trace
             .lifecycle_filter_decisions
             .iter()
             .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
             .collect::<Vec<_>>();
-        assert!(!omissions.is_empty());
+        // Only the topic traversal encounters the suppressed parent; Mentions is not presence.
+        assert_eq!(!omissions.is_empty(), has_topic);
         assert!(omissions.iter().all(|decision| {
             decision.object == MemoryObjectRef::new(ObjectType::Episode, episode)
         }));
@@ -542,73 +563,74 @@ async fn suppressed_parent_evidence_keeps_its_active_observation_admissible_by_t
                     && row.object_type == ObjectType::Observation
             })
             .unwrap();
-        assert_eq!(utilization.retained_count, 0);
+        // The remark enters the subject aboutness prefix on its own retention.
+        assert_eq!(utilization.retained_count, 1);
         assert_eq!(utilization.omitted_by_fanout_count, 0);
     }
     memory.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn suppressed_latest_observation_recalls_the_previous_participant_occasion() {
-    assert_participant_recall_after_suppression(false).await;
+async fn suppressed_mention_leaves_other_aboutness_eligible() {
+    assert_mentions_after_suppression(false).await;
 }
 
 #[tokio::test]
-async fn suppressed_latest_observation_leaves_its_active_sibling_eligible() {
-    assert_participant_recall_after_suppression(true).await;
+async fn suppressed_mention_leaves_its_active_sibling_eligible() {
+    assert_mentions_after_suppression(true).await;
 }
 
-async fn assert_participant_recall_after_suppression(active_sibling: bool) {
+async fn assert_mentions_after_suppression(active_sibling: bool) {
     let (memory, _) = scene_memory().await;
     create_notion(&memory, 100, None).await;
-    for index in 0..10 {
-        let mut occasion = scene();
-        occasion.time += chrono::Duration::hours(index as i64);
-        let id = 50_000 + index * 10;
-        write_episode(&memory, id, occasion).await;
+    create_notion(&memory, 101, None).await;
+    for (n, participant) in [(50_000, 100), (50_010, 100)]
+        .into_iter()
+        .chain((60_000..60_010).map(|n| (n * 10, 101)))
+    {
+        let episode = write_episode(&memory, n, scene()).await;
         memory
             .link(MemoryLinkDraft::new(
                 ObjectType::Observation,
-                MemoryId::from_u128(id + 1),
+                MemoryId::from_u128(n + 1),
                 RelationType::Mentions,
                 ObjectType::Entity,
-                MemoryId::from_u128(100),
+                MemoryId::from_u128(participant),
             ))
             .await
             .unwrap();
-    }
-    let latest_episode = MemoryId::from_u128(50_090);
-    let latest_observation = MemoryId::from_u128(50_091);
-    let sibling = MemoryId::from_u128(50_092);
-    if active_sibling {
-        let mut observation = ObservationDraft::new(latest_episode, "Another active remark.");
-        observation.id = Some(sibling);
-        observation.created_at = Some(scene().time.to_utc());
-        observation.observed_at = Some(scene().time.to_utc());
-        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-        memory
-            .commit(
-                RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
-                    ObservationCandidate::new(observation, CandidateProvenance::caller("remark")),
-                )),
-                CommitOptions::default(),
-            )
-            .await
-            .unwrap();
-        memory
-            .link(MemoryLinkDraft::new(
-                ObjectType::Entity,
-                MemoryId::from_u128(100),
-                RelationType::Mentions,
-                ObjectType::Observation,
-                sibling,
-            ))
-            .await
-            .unwrap();
+        if active_sibling && n == 50_010 {
+            let mut observation = ObservationDraft::new(episode, "Another active remark.");
+            observation.id = Some(MemoryId::from_u128(50_012));
+            observation.created_at = Some(scene().time.to_utc());
+            observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
+            memory
+                .commit(
+                    RememberWritePlan::new().with_candidate(MemoryCandidate::Observation(
+                        ObservationCandidate::new(
+                            observation,
+                            CandidateProvenance::caller("remark"),
+                        ),
+                    )),
+                    CommitOptions::default(),
+                )
+                .await
+                .unwrap();
+            memory
+                .link(MemoryLinkDraft::new(
+                    ObjectType::Entity,
+                    MemoryId::from_u128(100),
+                    RelationType::Mentions,
+                    ObjectType::Observation,
+                    MemoryId::from_u128(50_012),
+                ))
+                .await
+                .unwrap();
+        }
     }
     memory
         .forget(ForgetMemoryDraft::suppress(
-            LifecycleTargetRef::observation(latest_observation),
+            LifecycleTargetRef::observation(MemoryId::from_u128(50_011)),
             "Forget the latest remark",
         ))
         .await
@@ -616,184 +638,56 @@ async fn assert_participant_recall_after_suppression(active_sibling: bool) {
     let mut context = RetrievalContext::default().with_trace();
     context.scene.participants.push(keyed(100));
     context.graph_limits.max_depth = 1;
-    let first = memory.retrieve(context.clone()).await.unwrap();
-    let assert_lifecycle_evidence = |result: &RetrieveOutcome| {
-        assert_eq!(result.rationale.lifecycle_omission_count, 1);
-        let trace = result.trace.as_ref().unwrap();
-        assert_eq!(
-            trace
-                .lifecycle_filter_decisions
-                .iter()
-                .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
-                .map(|decision| decision.object.id)
-                .collect::<Vec<_>>(),
-            vec![latest_observation]
-        );
-        let utilization = trace
-            .fanout_utilization
-            .iter()
-            .find(|row| {
-                row.root.id == MemoryId::from_u128(100) && row.relation == RelationType::Mentions
-            })
-            .unwrap();
-        assert_eq!(utilization.retained_count, 1);
-        // One extra eligible occasion is fetched to retain the omission indication.
-        assert_eq!(utilization.omitted_by_fanout_count, 1);
+    context.candidate_limits.max_graph_roots = 1;
+    context.cue_floors.participant = 1;
+    let ids = |result: &RetrieveOutcome| {
+        participant_observations(result)
+            .into_iter()
+            .collect::<BTreeSet<_>>()
     };
-    assert_lifecycle_evidence(&first);
-    // Suppression after the occasion budget fills must not inflate lifecycle evidence.
-    memory
-        .forget(ForgetMemoryDraft::suppress(
-            LifecycleTargetRef::observation(MemoryId::from_u128(50_001)),
-            "Forget an old remark",
-        ))
-        .await
-        .unwrap();
-    let after_older = memory.retrieve(context.clone()).await.unwrap();
-    assert_lifecycle_evidence(&after_older);
-    assert_eq!(first.pack, after_older.pack);
+    let expected = [
+        Some(MemoryId::from_u128(50_001)),
+        active_sibling.then_some(MemoryId::from_u128(50_012)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<BTreeSet<_>>();
+    let result = memory.retrieve(context.clone()).await.unwrap();
+    assert_eq!(ids(&result), expected);
+    // Observation suppression still hides the remark, but not its active sibling.
+    assert!(result
+        .trace
+        .as_ref()
+        .unwrap()
+        .lifecycle_filter_decisions
+        .iter()
+        .any(|row| row.object.id == MemoryId::from_u128(50_011)
+            && row.reason == LifecycleFilterReason::SuppressedOmitted));
     let mut untraced = context.clone();
     untraced.include_trace = false;
-    let untraced = memory.retrieve(untraced).await.unwrap();
-    assert_eq!(untraced.pack, first.pack);
-    assert_eq!(untraced.rationale.lifecycle_omission_count, 1);
-    let observation_ids = |result: RetrieveOutcome| {
-        result
-            .pack
-            .salient_observations
-            .into_iter()
-            .map(|observation| observation.id)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
-        vec![if active_sibling {
-            sibling
-        } else {
-            MemoryId::from_u128(50_081)
-        }]
-    );
-    context.lifecycle_policy.include_suppressed = true;
-    let included = memory.retrieve(context.clone()).await.unwrap();
-    assert_eq!(included.rationale.lifecycle_omission_count, 0);
-    assert_eq!(observation_ids(included), vec![latest_observation]);
-    if active_sibling {
-        memory.close().await.unwrap();
-        return;
-    }
-
-    // Parent retention also controls occasion eligibility.
+    assert_eq!(memory.retrieve(untraced).await.unwrap().pack, result.pack);
     memory
         .forget(ForgetMemoryDraft::suppress(
-            LifecycleTargetRef::episode(latest_episode),
-            "Forget the latest occasion",
+            LifecycleTargetRef::episode(MemoryId::from_u128(50_010)),
+            "Forget the parent occasion",
         ))
         .await
         .unwrap();
-    context.lifecycle_policy.include_suppressed = false;
+    // Aboutness follows the observation's own lifecycle, not its parent's.
     assert_eq!(
-        observation_ids(memory.retrieve(context.clone()).await.unwrap()),
-        vec![MemoryId::from_u128(50_081)]
+        ids(&memory.retrieve(context.clone()).await.unwrap()),
+        expected
     );
     context.lifecycle_policy.include_suppressed = true;
-    assert_eq!(
-        observation_ids(memory.retrieve(context).await.unwrap()),
-        vec![latest_observation]
-    );
-    // Direct and observation routes must also agree on the same eligible occasion.
-    for index in 0..10 {
-        memory
-            .link(MemoryLinkDraft::new(
-                ObjectType::Episode,
-                MemoryId::from_u128(50_000 + index * 10),
-                RelationType::Involves,
-                ObjectType::Entity,
-                MemoryId::from_u128(100),
-            ))
-            .await
-            .unwrap();
-    }
-    for include_suppressed in [false, true] {
-        let mut context = RetrievalContext::default();
-        context.scene.participants.push(keyed(100));
-        context.graph_limits.max_depth = 1;
-        context.lifecycle_policy.include_suppressed = include_suppressed;
-        let result = memory.retrieve(context).await.unwrap();
-        assert_eq!(
-            result
-                .pack
-                .relevant_episodes
-                .iter()
-                .map(|episode| episode.id)
-                .collect::<Vec<_>>(),
-            (0..8)
-                .map(|index| MemoryId::from_u128(
-                    (if include_suppressed {
-                        latest_episode.as_u128()
-                    } else {
-                        50_080
-                    }) - index * 10
-                ))
-                .collect::<Vec<_>>()
-        );
-    }
-    // Even when many excluded occasions precede the survivor (or none survives),
-    // evidence stays within each route's existing participant budget.
-    for index in 1..9 {
-        memory
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::episode(MemoryId::from_u128(50_000 + index * 10)),
-                "Forget another occasion",
-            ))
-            .await
-            .unwrap();
-    }
-    for forget_last in [false, true] {
-        if forget_last {
-            memory
-                .forget(ForgetMemoryDraft::suppress(
-                    LifecycleTargetRef::episode(MemoryId::from_u128(50_000)),
-                    "Forget the last occasion",
-                ))
-                .await
-                .unwrap();
-        }
-        let mut context = RetrievalContext::default().with_trace();
-        context.scene.participants.push(keyed(100));
-        context.graph_limits.max_depth = 1;
-        let result = memory.retrieve(context).await.unwrap();
-        assert_eq!(
-            result.pack.relevant_episodes.len(),
-            usize::from(!forget_last)
-        );
-        assert!(result.pack.salient_observations.is_empty());
-        assert_eq!(result.rationale.lifecycle_omission_count, 2);
-        let trace = result.trace.unwrap();
-        assert_eq!(
-            trace
-                .lifecycle_filter_decisions
-                .iter()
-                .filter(|decision| decision.reason == LifecycleFilterReason::SuppressedOmitted)
-                .map(|decision| decision.object.id)
-                .collect::<BTreeSet<_>>(),
-            BTreeSet::from([latest_episode, latest_observation])
-        );
-        for row in trace.fanout_utilization {
-            if row.root.id != MemoryId::from_u128(100) {
-                continue;
-            }
-            assert_eq!(row.selected_cap, 1);
-            // The fetched prefix contains lifecycle exclusions and no omitted eligible route.
-            assert_eq!(row.omitted_by_fanout_count, 0);
-        }
-    }
+    let mut all = expected;
+    all.insert(MemoryId::from_u128(50_011));
+    assert_eq!(ids(&memory.retrieve(context).await.unwrap()), all);
     memory.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and_paths() {
+async fn ubiquitous_presence_keeps_the_latest_occasion_across_store_sizes_and_directions() {
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
-
     for route in 0..3 {
         for reverse_ids in [false, true] {
             let (mut memory, _) = scene_memory().await;
@@ -805,61 +699,45 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
             for count in 1..=10 {
                 let id = 40_000 + if reverse_ids { 11 - count } else { count } * 10;
                 let episode_id = MemoryId::from_u128(id);
-                let direct = route == 0 || (route == 2 && count % 3 != 1);
-                let mentions = route == 1 || (route == 2 && count % 3 != 0);
                 let mut occasion = scene();
                 occasion.time += chrono::Duration::hours(count as i64);
-                if direct {
+                if route == 0 {
                     occasion.participants.push(keyed(100));
                 }
                 let mut episode = EpisodeDraft::new("The participant visited.");
                 episode.id = Some(episode_id);
-                // Authorship order deliberately disagrees with scene recency.
                 episode.created_at =
                     Some(scene().time.to_utc() - chrono::Duration::hours(count as i64));
                 episode.scene = Some(occasion);
                 episode.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-                let mut plan = RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
-                    EpisodeCandidate::new(episode, CandidateProvenance::caller("occasion")),
-                ));
-                if mentions {
-                    for offset in 1..=3 {
-                        let mut observation = ObservationDraft::new(episode_id, "A remark.");
-                        observation.id = Some(MemoryId::from_u128(id + offset));
-                        observation.created_at = Some(scene().time.to_utc());
-                        observation.observed_at = Some(scene().time.to_utc());
-                        observation.schema_version = Some(DEFAULT_SCHEMA_VERSION.to_owned());
-                        plan = plan.with_candidate(MemoryCandidate::Observation(
-                            ObservationCandidate::new(
-                                observation,
-                                CandidateProvenance::caller("remark"),
-                            ),
-                        ));
-                    }
-                }
-                memory.commit(plan, CommitOptions::default()).await.unwrap();
-                if mentions {
-                    for offset in 1..=3 {
-                        let observation = MemoryId::from_u128(id + offset);
-                        let link = if offset % 2 == 0 {
-                            MemoryLinkDraft::new(
-                                ObjectType::Entity,
-                                participant,
-                                RelationType::Mentions,
-                                ObjectType::Observation,
-                                observation,
-                            )
-                        } else {
-                            MemoryLinkDraft::new(
-                                ObjectType::Observation,
-                                observation,
-                                RelationType::Mentions,
-                                ObjectType::Entity,
-                                participant,
-                            )
-                        };
-                        memory.link(link).await.unwrap();
-                    }
+                memory
+                    .commit(
+                        RememberWritePlan::new().with_candidate(MemoryCandidate::Episode(
+                            EpisodeCandidate::new(episode, CandidateProvenance::caller("occasion")),
+                        )),
+                        CommitOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                if route != 0 {
+                    let link = if route == 1 {
+                        MemoryLinkDraft::new(
+                            ObjectType::Episode,
+                            episode_id,
+                            RelationType::Involves,
+                            ObjectType::Entity,
+                            participant,
+                        )
+                    } else {
+                        MemoryLinkDraft::new(
+                            ObjectType::Entity,
+                            participant,
+                            RelationType::Involves,
+                            ObjectType::Episode,
+                            episode_id,
+                        )
+                    };
+                    memory.link(link).await.unwrap();
                 }
                 let healthy = memory.retrieve(context.clone()).await.unwrap();
                 let healthy_stats = std::mem::replace(
@@ -868,7 +746,7 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                 );
                 let missing = memory.retrieve(context.clone()).await.unwrap();
                 memory.memory_composition.stats_store = healthy_stats;
-                for result in [&healthy, &missing] {
+                for (result, fallback) in [(&healthy, false), (&missing, true)] {
                     let occasions = result
                         .pack
                         .relevant_episodes
@@ -881,13 +759,6 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                             .contains(&CueKind::Participant)
                         })
                         .map(|episode| episode.id)
-                        .chain(
-                            result
-                                .pack
-                                .salient_observations
-                                .iter()
-                                .map(|observation| observation.episode_id),
-                        )
                         .collect::<BTreeSet<_>>();
                     assert_eq!(
                         occasions,
@@ -895,32 +766,54 @@ async fn ubiquitous_participant_keeps_the_latest_occasion_across_store_sizes_and
                         "route={route}, reverse_ids={reverse_ids}, N={count}"
                     );
                     assert_eq!(result.pack.relevant_episodes.len(), count.min(8) as usize);
-                    assert_eq!(
-                        result.pack.salient_observations.len(),
-                        usize::from(mentions)
-                    );
-                }
-                for relation in [RelationType::Involves, RelationType::Mentions] {
-                    let decision = |result: &RetrieveOutcome| {
-                        let row = result
-                            .trace
-                            .as_ref()
-                            .unwrap()
-                            .selectivity_decisions
-                            .iter()
-                            .find(|row| row.root.id == participant && row.relation == relation)
-                            .unwrap();
-                        (row.chosen_fanout, row.fallback)
-                    };
-                    assert_eq!(decision(&healthy), (1, false));
-                    assert_eq!(decision(&missing), (1, true));
+                    let row = result
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .selectivity_decisions
+                        .iter()
+                        .find(|row| {
+                            row.root.id == participant && row.relation == RelationType::Involves
+                        })
+                        .unwrap();
+                    assert_eq!((row.chosen_fanout, row.fallback), (1, fallback));
                 }
             }
+            // Excluded occasions cannot consume the one remaining presence slot.
+            let episodes = memory
+                .retrieve(context.clone())
+                .await
+                .unwrap()
+                .pack
+                .relevant_episodes;
+            for episode in episodes {
+                memory
+                    .forget(ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::episode(episode.id),
+                        "Forget recent occasions",
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let result = memory.retrieve(context.clone()).await.unwrap();
+            assert_eq!(result.pack.relevant_episodes.len(), 2);
+            assert!(result.rationale.lifecycle_omission_count <= 1);
+            for episode in result.pack.relevant_episodes {
+                memory
+                    .forget(ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::episode(episode.id),
+                        "Forget the remaining occasions",
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let empty = memory.retrieve(context).await.unwrap();
+            assert!(empty.pack.relevant_episodes.is_empty());
+            assert!(empty.rationale.lifecycle_omission_count <= 1);
             memory.close().await.unwrap();
         }
     }
 }
-
 #[tokio::test]
 async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
     let mut observed = Vec::new();
@@ -983,11 +876,20 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 .await
                 .unwrap();
             let trace = result.trace.as_ref().unwrap();
-            let relation = if caller_built {
-                RelationType::Involves
-            } else {
-                RelationType::Mentions
-            };
+            // Ruling 69: both write paths record presence on episodes; assert the recalled beliefs.
+            let relation = RelationType::Involves;
+            assert_eq!(
+                result
+                    .pack
+                    .derived_memories
+                    .iter()
+                    .map(|entry| entry.memory.id)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    MemoryId::from_u128(ubiquitous + 1000),
+                    MemoryId::from_u128(rare + 1000)
+                ]),
+            );
             let retained = |id, relation| {
                 trace
                     .fanout_utilization
@@ -1008,8 +910,6 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
                 ubiquitous,
                 retained(ubiquitous, relation),
                 retained(rare, relation),
-                retained(ubiquitous, RelationType::About),
-                result.pack.relevant_episodes.len() + result.pack.salient_observations.len(),
                 counts,
             ));
             assert!(queries.lock().unwrap().is_empty());
@@ -1019,17 +919,9 @@ async fn ubiquitous_participants_limit_occasions_without_losing_beliefs() {
     let expected = [false, true]
         .into_iter()
         .flat_map(|caller_built| {
-            [100, 101].into_iter().map(move |ubiquitous| {
-                (
-                    caller_built,
-                    ubiquitous,
-                    1,
-                    3,
-                    1,
-                    if caller_built { 8 } else { 12 },
-                    Some((24, 24)),
-                )
-            })
+            [100, 101]
+                .into_iter()
+                .map(move |ubiquitous| (caller_built, ubiquitous, 1, 3, Some((24, 24))))
         })
         .collect::<Vec<_>>();
     assert_eq!(observed, expected);
@@ -1082,7 +974,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
         })
     );
     assert_eq!(unknown.pack.relevant_episodes.len(), 1);
-    assert_eq!(unknown.memory_scenes.len(), 1);
+    // Rulings 46 and 69: recency reports both the episode and its observation's scene.
+    assert_eq!(unknown.memory_scenes.len(), 2);
     assert_eq!(
         found.activity,
         Some(ActivityResult {
@@ -1100,7 +993,13 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     );
     assert!(found.pack.active_threads.is_empty());
     assert!(
-        found.trace.as_ref().unwrap().graph_relations.is_empty(),
+        found
+            .trace
+            .as_ref()
+            .unwrap()
+            .graph_relations
+            .iter()
+            .all(|link| link.relation == RelationType::ObservedIn),
         "native affiliation requires no link"
     );
     assert!(queries.lock().unwrap().is_empty());
@@ -1150,7 +1049,8 @@ async fn thread_activity_reads_native_members_and_reports_found_after_filtering(
     let empty = memory.retrieve(untraced.clone()).await.unwrap();
     assert_eq!(empty.activity, found.activity);
     assert_eq!(empty.pack.relevant_episodes.len(), 1);
-    assert_eq!(empty.memory_scenes.len(), 1);
+    // Rulings 46 and 69: the observation's scene remains after the beliefs are suppressed.
+    assert_eq!(empty.memory_scenes.len(), 2);
     assert!(empty.trace.is_none());
     untraced.lifecycle_policy.include_suppressed = true;
     assert_eq!(
@@ -1228,7 +1128,11 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     ] {
         assert_eq!(
             selected_cues(&found, object),
-            &if object.object_type == ObjectType::Episode {
+            // Rulings 46 and 69: recency also reaches the observation on this occasion.
+            &if matches!(
+                object.object_type,
+                ObjectType::Episode | ObjectType::Observation
+            ) {
                 BTreeSet::from([CueKind::Activity, CueKind::Recency])
             } else {
                 BTreeSet::from([CueKind::Activity])
@@ -1282,7 +1186,8 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
             })
         );
         assert_eq!(unknown.pack.relevant_episodes.len(), 3);
-        assert_eq!(unknown.memory_scenes.len(), 3);
+        // Rulings 46 and 69: each recency occasion also brings its observation's scene.
+        assert_eq!(unknown.memory_scenes.len(), 6);
         let expansions = unknown.trace.unwrap().graph_expansions;
         assert_eq!(expansions.len(), 3);
         assert!(expansions
@@ -1321,7 +1226,8 @@ async fn open_loop_activity_reads_sources_and_threads_and_respects_its_own_lifec
     let superseded = memory.retrieve(context.clone()).await.unwrap();
     assert_eq!(superseded.activity, found.activity);
     assert_eq!(superseded.pack.relevant_episodes[0].id, episode_id);
-    assert_eq!(superseded.memory_scenes.len(), 4);
+    // Rulings 46 and 69: the four recency occasions also bring their observations.
+    assert_eq!(superseded.memory_scenes.len(), 8);
     assert_eq!(
         selected_cues(
             &superseded,
@@ -1531,7 +1437,8 @@ async fn participant_references_resolve_and_expand_without_a_topic_under_root_bu
         .await
         .unwrap();
     assert_eq!(empty.pack.relevant_episodes.len(), 2);
-    assert_eq!(empty.memory_scenes.len(), 2);
+    // Rulings 46 and 69: the two occasions also bring their observations.
+    assert_eq!(empty.memory_scenes.len(), 4);
     assert!(empty.trace.is_none());
     let references = &empty.scene_references;
     assert_eq!(references[0].resolution, SceneReferenceResolution::Unknown);
