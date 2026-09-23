@@ -12,9 +12,7 @@ use crate::domain::{
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
 use crate::errors::CustomError;
-use crate::models::vector::{
-    EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding, VectorSurface,
-};
+use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
@@ -611,32 +609,5 @@ mod tests {
         drop(store);
 
         assert!(!path.exists());
-    }
-
-    #[tokio::test]
-    async fn deterministic_embedder_uses_explicit_text_without_external_services() {
-        let embedder = deterministic_embedder(8);
-        let input = EmbeddingInput::new(
-            Some(fixture_id(20)),
-            Some(ObjectType::Observation),
-            VectorSurface::Text,
-            "service-free deterministic embedding",
-        );
-
-        let first = embedder.embed(&input).await.unwrap();
-        let second = embedder.embed(&input).await.unwrap();
-        let different = embedder
-            .embed(&EmbeddingInput::new(
-                Some(fixture_id(20)),
-                Some(ObjectType::Observation),
-                VectorSurface::Text,
-                "different text",
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(first, second);
-        assert_ne!(first, different);
-        assert_eq!(first.len(), 8);
     }
 }

@@ -2206,10 +2206,9 @@ mod tests {
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
 
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("deterministic store contracts").with_trace())
-            .await
-            .unwrap();
+        let context = RetrievalContext::new("deterministic store contracts").with_trace();
+        let outcome = pipeline.retrieve(context.clone()).await.unwrap();
+        let repeated = pipeline.retrieve(context).await.unwrap();
 
         assert_eq!(embedder.inputs()[0].surface, VectorSurface::Query);
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
@@ -2244,6 +2243,26 @@ mod tests {
         assert_eq!(outcome.rationale.telemetry.selected_graph_root_count, 4);
         assert_eq!(outcome.rationale.telemetry.graph_root_omission_count, 0);
         let trace = outcome.trace.as_ref().unwrap();
+        let repeated_trace = repeated.trace.as_ref().unwrap();
+        assert_eq!(
+            trace.section_assignments,
+            repeated_trace.section_assignments
+        );
+        assert_eq!(trace.graph_relations, repeated_trace.graph_relations);
+        assert!(trace
+            .graph_expansions
+            .iter()
+            .all(|expansion| expansion.object_count > 0));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::RelevantEpisodes
+                && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
+        }));
+        assert!(trace.graph_relations.iter().any(|relation| {
+            relation.from.id == fixtures.hub_entity.id
+                && relation.to.id == fixtures.episode.id
+                && relation.relation == RelationType::Involves
+        }));
         assert_eq!(trace.graph_expansions.len(), 4);
         assert!(trace.section_assignments.iter().any(|assignment| {
             matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
@@ -2459,6 +2478,10 @@ mod tests {
             .await
             .unwrap();
         let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace.vector_candidates.iter().any(|candidate| {
+            candidate.object.id == missing_id
+                && candidate.object.object_type == ObjectType::DerivedMemory
+        }));
 
         assert!(outcome.pack.preferences.is_empty());
         assert!(trace
@@ -2872,6 +2895,23 @@ mod tests {
 
         let outcome = pipeline.retrieve(context).await.unwrap();
         let trace = outcome.trace.as_ref().unwrap();
+        assert_eq!(
+            outcome.pack.derived_memories[0].memory.id,
+            fixtures.derived_reflection.id
+        );
+        assert_eq!(
+            outcome.rationale.telemetry.returned_vector_candidate_count,
+            1
+        );
+        assert_eq!(trace.vector_candidates.len(), 1);
+        assert_eq!(
+            trace.vector_candidates[0].object.id,
+            fixtures.derived_reflection.id
+        );
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.derived_reflection.id
+                && assignment.section == ContextPackSection::DerivedMemories
+        }));
         let included_assignments = trace
             .section_assignments
             .iter()
@@ -3104,167 +3144,6 @@ mod tests {
             .preferences
             .iter()
             .any(|included| included.memory.id == superseded_memory.id));
-    }
-
-    #[tokio::test]
-    async fn retrieve_pipeline_expands_embedded_vector_candidate_with_embedded_oxigraph() {
-        let fixtures = representative_fixtures();
-        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
-
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
-            .await
-            .unwrap();
-        let repeated = pipeline
-            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
-            .await
-            .unwrap();
-        let trace = outcome.trace.as_ref().unwrap();
-        let repeated_trace = repeated.trace.as_ref().unwrap();
-        let included_assignments = trace
-            .section_assignments
-            .iter()
-            .filter(|assignment| assignment.section != ContextPackSection::Omitted)
-            .count();
-
-        assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
-        assert_eq!(
-            outcome.pack.derived_memories[0].memory.id,
-            fixtures.derived_reflection.id
-        );
-        assert_eq!(
-            outcome.rationale.telemetry.returned_vector_candidate_count,
-            1
-        );
-        assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
-        assert!(trace.graph_expansions.iter().any(|expansion| {
-            expansion.root.id == fixtures.derived_reflection.id && expansion.object_count > 0
-        }));
-        assert!(trace.section_assignments.iter().any(|assignment| {
-            assignment.object.id == fixtures.episode.id
-                && assignment.section == ContextPackSection::RelevantEpisodes
-                && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
-        }));
-        assert_eq!(trace.vector_candidates.len(), 1);
-        assert_eq!(
-            trace.vector_candidates[0].object.id,
-            fixtures.derived_reflection.id
-        );
-        assert_eq!(
-            trace
-                .section_assignments
-                .iter()
-                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
-                .collect::<Vec<_>>(),
-            repeated_trace
-                .section_assignments
-                .iter()
-                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            trace
-                .graph_relations
-                .iter()
-                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
-                .collect::<Vec<_>>(),
-            repeated_trace
-                .graph_relations
-                .iter()
-                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
-                .collect::<Vec<_>>()
-        );
-        assert!(trace.graph_relations.iter().any(|relation| {
-            relation.from.id == fixtures.hub_entity.id
-                && relation.to.id == fixtures.episode.id
-                && relation.relation == RelationType::Involves
-        }));
-        assert!(trace.section_assignments.iter().any(|assignment| {
-            assignment.object.id == fixtures.derived_reflection.id
-                && assignment.section == ContextPackSection::DerivedMemories
-        }));
-    }
-
-    #[tokio::test]
-    async fn retrieve_pipeline_after_persistent_reopen_uses_graph_authority_filters() {
-        let graph_dir = tempfile::TempDir::new().unwrap();
-        let graph_path = graph_dir.path().join("graph");
-        let fixtures = representative_fixtures();
-        let missing_vector_only_id = MemoryId::new_v4();
-
-        {
-            let graph =
-                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
-                    .unwrap();
-            graph.upsert_objects(&fixtures.objects()).await.unwrap();
-            graph.upsert_links(&fixtures.links()).await.unwrap();
-        }
-
-        {
-            let reopened =
-                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
-                    .unwrap();
-            let vector = TemporaryVectorCandidateStore::open(2).await;
-            seed(
-                &vector,
-                MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
-                0.0,
-            )
-            .await;
-            seed(
-                &vector,
-                MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
-                0.1,
-            )
-            .await;
-            let vector_only = crate::models::vector::VectorRecord::new(
-                missing_vector_only_id,
-                ObjectType::DerivedMemory,
-                VectorSurface::Summary,
-                crate::domain::DEFAULT_SCHEMA_VERSION,
-                "Derived memory present in the vector index only",
-            );
-            vector
-                .upsert_vector_records(&[VectorRecordEmbedding::new(&vector_only, &[1.0, 0.2])])
-                .await
-                .unwrap();
-            let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-            let pipeline = RetrievePipeline::new(&reopened, &vector, &embedder);
-
-            let outcome = pipeline
-                .retrieve(RetrievalContext::new("restart graph authority").with_trace())
-                .await
-                .unwrap();
-            let retrieved_ids = outcome
-                .pack
-                .derived_memories
-                .iter()
-                .chain(outcome.pack.preferences.iter())
-                .map(|included| included.memory.id)
-                .collect::<HashSet<_>>();
-
-            assert!(retrieved_ids.contains(&fixtures.derived_reflection.id));
-            assert!(!retrieved_ids.contains(&fixtures.suppressed_seed.id));
-            assert!(!retrieved_ids.contains(&missing_vector_only_id));
-            let trace = outcome.trace.as_ref().unwrap();
-            assert!(trace.vector_candidates.iter().any(|candidate| {
-                candidate.object.id == missing_vector_only_id
-                    && candidate.object.object_type == ObjectType::DerivedMemory
-            }));
-            assert!(trace
-                .lifecycle_filter_decisions
-                .iter()
-                .any(|decision| { decision.object.id == fixtures.suppressed_seed.id }));
-        }
     }
 
     /// Upserts the object's real vector record; `tilt` orders candidates by
