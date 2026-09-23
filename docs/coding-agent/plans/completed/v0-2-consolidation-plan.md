@@ -598,6 +598,22 @@ The tasks run in sequence, one worker at a time, because they share one crate an
 - 2026-09-23 Task_7 done (PR 157, tip `f6926ef`), approved by Tier D and Tier A after one fix round. Test helpers live once on each side of the crate boundary (`src/test_support.rs`, `tests/support`); oversized test files are split by behavior; the review-evidence dumps are gone with their assertions kept; every time-ordered fixture opposes identifiers to time or runs both directions. The review round replaced three vector doubles' own search logic with the real in-memory adapter (only recording and failure hooks remain) and made a shared scene cohort run both id directions. The slice's code is complete at `f6926ef`; the slice-end measurement runs there.
 - 2026-09-23 Task_8 records done (PR 158, tip `ef8dbfb`), approved by Tier D and Tier A after one fix round: ADR-I-0036 (proposed) labels the activity floor provisional, allows a provisional default only when labelled as one, adds an activity-pressure calibration to Revisit When, and drops the unused content-hit entity-root rule; ADR-D-0039 (proposed) says a setting key or custom value recalls what was formed there, as a reminder, citing rulings 26 and 59 by title and date. The docs truth sweep brought the README and the database design documents in line with rulings 69 to 74 and replaced source line anchors with named-function links. Both records await the decider; ADR-D-0039 also settles the earlier question of what a custom value is (rulings log item 28, answered by 59). Remaining: the slice-end measurement.
 
+- 2026-09-24 Plan complete. Every Definition of Done item is met: Tasks 1 to 8 are approved (PRs 150 to 158, plus the trace follow-up on the records branch), and the slice-end readings, with a character paragraph and a verdict for behavior and for timing, are in the Decision Log.
+  - Completion value audit (orchestrator):
+    - EARNS ITS PLACE:
+      - The road table and the five principles fixed the keyed-setting skew, the repeated home belief and the out-of-range recency.
+      - Places as reminders hold one reserved slot.
+      - ObservedIn brings what was observed at an occasion with it.
+      - `admitted_by` is the renderer plan's input.
+      - Offset fidelity is correctness.
+      - The shared test support removed repetition.
+    - OVERSIZED: none left open. The as-of cut's diagnostics were capped (rulings log 71 addendum).
+    - DELETE: none in this plan's scope. The value audit the decider asked for on 2026-09-24 runs as its own plan.
+  - Carried forward:
+    - to the value-audit cleanup plan: Task_14, Task_3's read cost and the whole-store link hydration; and Task_13, the hub limit on non-root people;
+    - residuals, which are the unlived-topic relevance floor, the second person under activity pressure, and the busy-occasion order dependence;
+    - decider items: acceptance of the revised ADR-I-0036 and of the new reminder-reach design record.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-23 Decision: an observation is reached through its occasion by the ObservedIn relation, written at commit (Task_3, rulings log 69).
