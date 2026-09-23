@@ -52,7 +52,19 @@ Retrieval is graph-authoritative and hybrid:
 
 `RetrievalContext` carries a `Scene` and an optional topic; its time defaults to now. The topic recalls what happened or was learned, while descriptions recall occasions with similar surroundings or people. A setting key or custom value brings what was formed there as a reminder, newest first. It reserves the place floor, then competes for unclaimed room at a cue score of zero, without opening history or taking turns from the people present. Beliefs with several sources can return in any of their recorded places or named contexts. The result returns the present scene, its reference resolutions, and each admitted memory's recorded source scenes even without a trace. Forgotten sources are explicit; forgotten scenes follow `include_suppressed`. Scene differences never exclude a memory or determine who may hear it.
 
-`memory_scenes[].admitted_by` reports which cue kinds brought each admitted memory to mind, with tracing on or off. A consumer can phrase a date match from a supplied range as "asked about", participant as "connected to someone present", topic as "matched the topic", place as "reminded by the place", recency as "from lately", and activity as "connected to ongoing work". A participant connection includes both shared occasions and what is held about someone present. When several kinds reach an admitted memory, it reports all of them. The words belong to the consumer; the library reports the kinds without changing selection, order or scores.
+`memory_scenes[].admitted_by` reports the `AdmissionRoad` values that brought each admitted memory to mind, with tracing on or off. When several roads reach an admitted memory, it reports all of them. The consumer chooses the words used to present this information. Reporting does not change selection, order or scores.
+
+| Admission road | What reached the memory |
+| --- | --- |
+| `Participant` | Someone present, supplied by key or name, reached occasions they were at or what is held about them. |
+| `Place` | A setting key or custom value reached a memory formed there. |
+| `Activity` | A supplied thread or open loop reached its members, sources or linked memories. |
+| `Topic` | Content matched the supplied topic, even faintly, and could bring connected memories. |
+| `PersonDescription` | A resemblance to how someone present was described reached an occasion and memories resting on it; the person may be a stranger. |
+| `SettingWords` | A resemblance to the described surroundings reached an occasion and memories resting on it. |
+| `Range` | A caller-supplied span reached an occasion within it and memories resting on that occasion. |
+| `Anniversary` | A recorded occasion's local month and day recurred in a later year, reaching that occasion and memories resting on it. |
+| `Recency` | With no supplied range, a recent occasion at or before the scene time reached that occasion and memories resting on it. |
 
 For an admitted interpreted memory, `memory_scenes[].seconds_since_support` reports whole seconds since its latest supporting experience at or before the reference scene time, even with tracing off. An observation uses its own observed time, falling back to its parent scene time. Suppressed sources count only when `include_suppressed` is enabled; an active observation still counts after its parent episode is forgotten. No eligible support, including application-given beliefs without experiences and future-only support, reports `None` (`null` in JSON). A correction uses its replacement's own sources. This age never changes selection, order or scores.
 
@@ -60,22 +72,22 @@ An episode has a content search surface for its summary and up to two separate s
 
 For each recognized participant, `last_interactions` says when the character last met them and how much time has passed. If a name could mean several participants, each has its own answer. No eligible encounter at or before the scene time means never met. These facts remain available even when no memories fit the requested amount. Forgotten encounters count only when `include_suppressed` is enabled.
 
-Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Give an ongoing project as the activity; custom values describe the context in which memories were formed. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
+Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Give an ongoing project as the activity; custom values describe the context in which memories were formed. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values used for floors: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
 
 Each way of reaching a memory is a **road**. One memory can be reached by several roads. The same table controls what each road reports, whether it opens history, its reservation, and how many roots it contributes:
 
-| Road | Reported kind | Opens history | Reserves room | Contributes |
-| --- | --- | --- | --- | --- |
-| Participant key or name | Participant | Yes | Yes | The recognized notion, expanded |
-| Setting key or custom value | Place | No | Yes | Up to the root cap, newest first by memory time |
-| Activity | Activity | Yes | Yes | The thread's members |
-| Topic | Topic | Yes | Yes | Up to the candidate cap |
-| Participant description | Participant | No | Yes | The larger of one and the participant floor |
-| Setting words | Place | No | Yes | The larger of one and the place floor |
-| Supplied range | DateMatch | No | Yes | Up to the room, plus one read to report whether more exists |
-| Anniversary shared with someone resolved in the scene | DateMatch | No | Yes | Up to the room |
-| Unshared anniversary | DateMatch | No | No | Up to the room |
-| Recency, when no range is supplied | Recency | No | Caller floor, default zero | Up to the room |
+| Road | Floor kind | Admitted by | Opens history | Reserves room | Contributes |
+| --- | --- | --- | --- | --- | --- |
+| Participant key or name | Participant | Participant | Yes | Yes | The recognized notion, expanded |
+| Setting key or custom value | Place | Place | No | Yes | Up to the root cap, newest first by memory time |
+| Activity | Activity | Activity | Yes | Yes | The thread's members |
+| Topic | Topic | Topic | Yes | Yes | Up to the candidate cap |
+| Participant description | Participant | PersonDescription | No | Yes | The larger of one and the participant floor |
+| Setting words | Place | SettingWords | No | Yes | The larger of one and the place floor |
+| Supplied range | DateMatch | Range | No | Yes | Up to the room, plus one read to report whether more exists |
+| Anniversary shared with someone resolved in the scene | DateMatch | Anniversary | No | Yes | Up to the room |
+| Unshared anniversary | DateMatch | Anniversary | No | No | Up to the room |
+| Recency, when no range is supplied | Recency | Recency | No | Caller floor, default zero | Up to the room |
 
 The room is the largest requested section cap. Five principles govern these roads:
 
