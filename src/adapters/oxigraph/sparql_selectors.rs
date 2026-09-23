@@ -543,14 +543,13 @@ impl<'a> SparqlGraphSelectors<'a> {
                 {nodes}
                 GRAPH ?link {{
                     ?link a <{link_class}> ; <{object_id}> ?id .
-                    {{ ?link <{from}> ?node . }} UNION {{ ?link <{to}> ?node . }}
+                    {touching_node}
                 }}
             }} ORDER BY ?id"#,
             nodes = sparql_node_iri_values("node", object_refs),
             link_class = vocab::CLASS_MEMORY_LINK,
             object_id = vocab::OBJECT_ID,
-            from = vocab::FROM,
-            to = vocab::TO,
+            touching_node = link_touching_node_pattern(),
         );
         self.query_solutions(&query)?
             .iter()
@@ -578,11 +577,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                       <{from}> ?from ;
                       <{to}> ?to ;
                       <{relation}> ?relation .
-                {{
-                  ?link <{from}> ?node .
-                }} UNION {{
-                  ?link <{to}> ?node .
-                }}
+                {touching_node}
               }}
               GRAPH ?fromGraph {{
                 ?from <{object_id}> ?fromId ;
@@ -594,6 +589,7 @@ impl<'a> SparqlGraphSelectors<'a> {
               }}
             }}
             "#,
+            touching_node = link_touching_node_pattern(),
             link_class = vocab::CLASS_MEMORY_LINK,
             object_id = vocab::OBJECT_ID,
             object_type = vocab::OBJECT_TYPE,
@@ -1069,6 +1065,14 @@ impl<'a> SparqlGraphSelectors<'a> {
 thread_local! {
     pub(super) static MAX_SELECT_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(super) static SELECT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn link_touching_node_pattern() -> String {
+    format!(
+        "{{ ?link <{}> ?node . }} UNION {{ ?link <{}> ?node . }}",
+        vocab::FROM,
+        vocab::TO
+    )
 }
 
 fn scene_time_binding(solution: &QuerySolution) -> Result<DateTime<Utc>, CustomError> {
