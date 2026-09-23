@@ -191,9 +191,7 @@ mod tests {
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{ObjectType, RelationType};
-    use crate::models::vector::{
-        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
-    };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
         deterministic_embedder, in_memory_graph_store, representative_fixtures,
@@ -655,7 +653,9 @@ mod tests {
     async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
         let memory = CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
-            Box::new(FailingVectorCandidateStore),
+            Box::new(FailingVectorCandidateStore(
+                TemporaryVectorCandidateStore::open(8).await,
+            )),
             Box::new(deterministic_embedder(8)),
         );
         let plan = memory
@@ -1738,10 +1738,14 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct FailingVectorCandidateStore;
+    struct FailingVectorCandidateStore(TemporaryVectorCandidateStore);
 
     #[async_trait]
     impl VectorCandidateStore for FailingVectorCandidateStore {
+        async fn close(&self) -> Result<(), CustomError> {
+            self.0.close().await
+        }
+
         async fn upsert_vector_records(
             &self,
             _records: &[VectorRecordEmbedding<'_>],
@@ -1758,21 +1762,11 @@ mod tests {
             &self,
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
-            Ok(VectorCandidateRecall {
-                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
-                candidates: CanonicalCandidates::new([]),
-                completeness: if query.limit == 0 || query.object_types.is_empty() {
-                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
-                } else {
-                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
-                        scanned: 0,
-                    }
-                },
-            })
+            self.0.search_candidates(query).await
         }
 
-        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            Ok(())
+        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+            self.0.delete_candidates(objects).await
         }
     }
 

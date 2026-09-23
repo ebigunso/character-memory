@@ -1195,9 +1195,7 @@ mod tests {
         RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
         VectorDatabaseErrorKind,
     };
-    use crate::models::vector::{
-        CanonicalCandidates, EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding,
-    };
+    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery};
     use crate::ports::retrieval_stats::{
         RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
@@ -1465,7 +1463,7 @@ mod tests {
     async fn correction_rejects_absent_target_before_any_write() {
         let ids = fixed_ids();
         let graph = RecordingGraphStore::new(Vec::new()).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = RecordingStatsStore::default();
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -1505,7 +1503,7 @@ mod tests {
             RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
         let vector = RecordingVectorStore {
             calls: graph.calls.clone(),
-            ..RecordingVectorStore::default()
+            ..RecordingVectorStore::new().await
         };
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
@@ -1687,7 +1685,7 @@ mod tests {
             .upsert_objects(&[MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
             .unwrap();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = RecordingStatsStore::default();
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -1829,7 +1827,7 @@ mod tests {
             MemoryObject::Entity(notion),
         ])
         .await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = OneShotEdgeFailingStatsStore::new();
         let pipeline = CorrectionForgetPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -1980,7 +1978,7 @@ mod tests {
             MemoryObject::DerivedMemory(divergent),
         ])
         .await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
 
         let error = CorrectionForgetPipeline::new(&graph, &vector, &embedder)
@@ -2006,7 +2004,7 @@ mod tests {
     where
         G: GraphAuthorityStore + ?Sized,
     {
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let mut draft = correction_draft(ids);
         let mut duplicate = draft.replacement_derived_memories[0].clone();
@@ -2114,7 +2112,7 @@ mod tests {
         };
         let vector = RecordingVectorStore {
             calls: calls.clone(),
-            fail_delete: false,
+            ..RecordingVectorStore::new().await
         };
         let embedder = RecordingEmbedder {
             calls: calls.clone(),
@@ -2165,7 +2163,7 @@ mod tests {
         };
         let vector = RecordingVectorStore {
             calls: calls.clone(),
-            fail_delete: false,
+            ..RecordingVectorStore::new().await
         };
         let embedder = RecordingEmbedder {
             calls: calls.clone(),
@@ -2221,7 +2219,7 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let stats = RecordingStatsStore {
             fail_edges: true,
@@ -2268,7 +2266,7 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = correction_draft(&ids);
@@ -2295,7 +2293,7 @@ mod tests {
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
             .fail_objects();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2314,7 +2312,7 @@ mod tests {
         let graph = RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))])
             .await
             .fail_links();
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2343,7 +2341,7 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::DerivedMemory(old_memory(&ids))]).await;
-        let vector = RecordingVectorStore::default().fail_delete();
+        let vector = RecordingVectorStore::new().await.fail_delete();
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
 
@@ -2561,7 +2559,7 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = CorrectMemoryDraft::new(
@@ -2592,7 +2590,7 @@ mod tests {
         let ids = fixed_ids();
         let graph =
             RecordingGraphStore::new(vec![MemoryObject::Episode(source_episode(&ids))]).await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = CorrectMemoryDraft::new(
@@ -2628,7 +2626,7 @@ mod tests {
             MemoryObject::Observation(source_observation(&ids)),
         ])
         .await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = CorrectMemoryDraft::new(
@@ -3076,7 +3074,7 @@ mod tests {
             MemoryObject::DerivedMemory(current_replacement),
         ])
         .await;
-        let vector = RecordingVectorStore::default();
+        let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
         let pipeline = CorrectionForgetPipeline::new(&graph, &vector, &embedder);
         let mut draft = ForgetMemoryDraft::suppress(
@@ -3579,13 +3577,22 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct RecordingVectorStore {
+        inner: TemporaryVectorCandidateStore,
         calls: Arc<Mutex<Vec<StoreCall>>>,
         fail_delete: bool,
     }
 
     impl RecordingVectorStore {
+        async fn new() -> Self {
+            Self {
+                inner: TemporaryVectorCandidateStore::open(4).await,
+                calls: Arc::default(),
+                fail_delete: false,
+            }
+        }
+
         fn fail_delete(mut self) -> Self {
             self.fail_delete = true;
             self
@@ -3598,6 +3605,10 @@ mod tests {
 
     #[async_trait]
     impl VectorCandidateStore for RecordingVectorStore {
+        async fn close(&self) -> Result<(), CustomError> {
+            self.inner.close().await
+        }
+
         async fn upsert_vector_records(
             &self,
             records: &[VectorRecordEmbedding<'_>],
@@ -3608,24 +3619,14 @@ mod tests {
                     .map(|record| record.record.object_id)
                     .collect(),
             ));
-            Ok(())
+            self.inner.upsert_vector_records(records).await
         }
 
         async fn search_candidates(
             &self,
             query: &VectorCandidateSearch,
         ) -> Result<VectorCandidateRecall, CustomError> {
-            Ok(VectorCandidateRecall {
-                scene_pool: crate::models::vector::CanonicalCandidates::new([]),
-                candidates: CanonicalCandidates::new([]),
-                completeness: if query.limit == 0 || query.object_types.is_empty() {
-                    crate::api::types::retrieval::VectorRecallCompleteness::NotRequested
-                } else {
-                    crate::api::types::retrieval::VectorRecallCompleteness::Exhaustive {
-                        scanned: 0,
-                    }
-                },
-            })
+            self.inner.search_candidates(query).await
         }
 
         async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
@@ -3638,7 +3639,7 @@ mod tests {
                     "vector delete failed",
                 )));
             }
-            Ok(())
+            self.inner.delete_candidates(objects).await
         }
     }
 

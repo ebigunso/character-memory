@@ -1169,7 +1169,15 @@ mod scene_cohorts {
     use crate::test_support::TestEmbedder;
     use crate::CharacterMemory;
 
-    fn cohort_embedding(input: &EmbeddingInput) -> Vec<f32> {
+    fn cohort_id(day: u128, ascending_ids: bool) -> u128 {
+        if ascending_ids {
+            1000 + day
+        } else {
+            1047 - day
+        }
+    }
+
+    fn cohort_embedding(input: &EmbeddingInput, overlap_id: u128) -> Vec<f32> {
         let (topic, scene, unknown): (f32, f32, f32) = if input.surface == VectorSurface::Query {
             match input.text.as_str() {
                 "orchids" => (1.0, 0.0, 0.0),
@@ -1178,7 +1186,7 @@ mod scene_cohorts {
                 text if text.starts_with("botanist") => (0.0, 1.0, 0.0),
                 text => panic!("unexpected query {text}"),
             }
-        } else if input.object_id == Some(MemoryId::from_u128(900)) {
+        } else if input.object_id == Some(MemoryId::from_u128(overlap_id)) {
             (0.8, 0.6, 0.0)
         } else if matches!(
             input.surface,
@@ -1238,9 +1246,14 @@ mod scene_cohorts {
         ]
     }
 
-    async fn cohort_memory() -> CharacterMemory {
-        let memory =
-            crate::test_support::memory_with_embedder(4, TestEmbedder(cohort_embedding)).await;
+    async fn cohort_memory(ascending_ids: bool) -> CharacterMemory {
+        let memory = crate::test_support::memory_with_embedder(
+            4,
+            TestEmbedder(move |input: &EmbeddingInput| {
+                cohort_embedding(input, cohort_id(49, ascending_ids))
+            }),
+        )
+        .await;
         let mut person = EntityDraft::new();
         person.id = Some(MemoryId::from_u128(7));
         person.created_at = Some(context().scene.time.to_utc());
@@ -1259,7 +1272,11 @@ mod scene_cohorts {
             let mut scene = context().scene;
             scene.time += chrono::Duration::days(index as i64);
             scene.participants[0].key = Some(MemoryId::from_u128(7));
-            for candidate in episode(1047 - index, "Another ordinary day.".to_owned(), scene) {
+            for candidate in episode(
+                cohort_id(index, ascending_ids),
+                "Another ordinary day.".to_owned(),
+                scene,
+            ) {
                 plan = plan.with_candidate(candidate);
             }
         }
@@ -1283,217 +1300,244 @@ mod scene_cohorts {
 
     #[tokio::test]
     async fn shared_scene_cohort_keeps_the_latest_occasion_and_score_fills_the_pack() {
-        let memory = cohort_memory().await;
-        for descriptions in [1, 5] {
+        for ascending_ids in [false, true] {
+            let memory = cohort_memory(ascending_ids).await;
+            for descriptions in [1, 5] {
+                let mut query = context();
+                query.scene.time += chrono::Duration::days(48);
+                query.scene.participants = (0..descriptions)
+                    .map(|index| SceneParticipant {
+                        description: Some(format!("botanist {index}")),
+                        ..Default::default()
+                    })
+                    .collect();
+                let result = memory.retrieve(query).await.unwrap();
+                let trace = result.trace.as_ref().unwrap();
+                let counts = (
+                    topic_count(trace.vector_candidates.iter().map(|row| row.object.id)),
+                    topic_count(
+                        trace
+                            .graph_expansions
+                            .iter()
+                            .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
+                            .map(|row| row.root.id),
+                    ),
+                    topic_count(
+                        result
+                            .pack
+                            .relevant_episodes
+                            .iter()
+                            .map(|episode| episode.id),
+                    ),
+                );
+                assert_eq!(counts, (8, 8, 7), "descriptions={descriptions}");
+                // Admission changes, but output still follows the original final scores.
+                assert_eq!(
+                    result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .map(|episode| episode.id.as_u128())
+                        .collect::<Vec<_>>(),
+                    [
+                        cohort_id(47, ascending_ids),
+                        2000,
+                        2001,
+                        2002,
+                        2003,
+                        2004,
+                        2005,
+                        2006
+                    ]
+                );
+                assert!(trace.floor_admissions.is_empty());
+                assert_eq!(
+                    trace
+                        .scene_cue_searches
+                        .iter()
+                        .map(|search| (search.cue_kind, search.omitted_count))
+                        .collect::<Vec<_>>(),
+                    [(CueKind::Place, 47), (CueKind::Participant, 47)]
+                );
+            }
+            memory.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics() {
+        for ascending_ids in [false, true] {
+            let mut memory = cohort_memory(ascending_ids).await;
+            for topic in ["orchids", "unlived"] {
+                let mut query = context();
+                query.scene.time += chrono::Duration::days(48);
+                query.topic = Some(topic.to_owned());
+                query.scene.participants[0].key = Some(MemoryId::from_u128(7));
+                query.graph_limits.max_depth = 1;
+                let result = memory.retrieve(query).await.unwrap();
+                let trace = result.trace.unwrap();
+                assert!(trace
+                    .graph_expansions
+                    .iter()
+                    .any(|row| row.root.id == MemoryId::from_u128(7)
+                        && row.outcome == GraphExpansionOutcome::Expanded));
+                assert_eq!(result.pack.relevant_episodes.len(), 8);
+                if topic == "unlived" {
+                    assert!(result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .all(|episode| (1000..1048).contains(&episode.id.as_u128())));
+                }
+                assert!(
+                    result
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .any(|episode| episode.id
+                            == MemoryId::from_u128(cohort_id(47, ascending_ids))),
+                    "latest participant occasion must reach the pack: {:?}",
+                    trace
+                        .section_assignments
+                        .iter()
+                        .find(|row| row.object.id
+                            == MemoryId::from_u128(cohort_id(47, ascending_ids)))
+                );
+            }
+            // More than one explicit occasion must retain selector order, not ID order.
+            memory.memory_composition.selectivity_policy =
+                crate::policy::RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+                    1.0,
+                    1.0,
+                    [(RelationType::Involves, ObjectType::Episode, 2, 2)],
+                )
+                .unwrap();
             let mut query = context();
             query.scene.time += chrono::Duration::days(48);
-            query.scene.participants = (0..descriptions)
-                .map(|index| SceneParticipant {
-                    description: Some(format!("botanist {index}")),
-                    ..Default::default()
-                })
-                .collect();
+            query.scene.participants[0].key = Some(MemoryId::from_u128(7));
+            query.graph_limits.max_depth = 1;
+            query.section_limits.relevant_episodes = 1;
             let result = memory.retrieve(query).await.unwrap();
-            let trace = result.trace.as_ref().unwrap();
-            let counts = (
-                topic_count(trace.vector_candidates.iter().map(|row| row.object.id)),
-                topic_count(
-                    trace
-                        .graph_expansions
-                        .iter()
-                        .filter(|row| row.outcome == GraphExpansionOutcome::Expanded)
-                        .map(|row| row.root.id),
-                ),
+            assert_eq!(
+                result.pack.relevant_episodes[0].id,
+                MemoryId::from_u128(cohort_id(47, ascending_ids))
+            );
+            assert!(result
+                .trace
+                .unwrap()
+                .section_assignments
+                .iter()
+                .any(|row| row.object.id == MemoryId::from_u128(cohort_id(46, ascending_ids))));
+            memory.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_scene_topic_only_keeps_original_bytes() {
+        for ascending_ids in [false, true] {
+            let memory = cohort_memory(ascending_ids).await;
+            let mut query = context();
+            query.scene.participants.clear();
+            query.scene.setting.words = None;
+            let result = memory.retrieve(query.clone()).await.unwrap();
+            query.cue_floors = RetrievalCueFloors {
+                date_match: 1,
+                participant: 0,
+                place: 0,
+                activity: 0,
+                topic: 0,
+                recency: 0,
+            };
+            let zero_floors = memory.retrieve(query).await.unwrap();
+            assert_eq!(
+                serde_json::to_vec(&result).unwrap(),
+                serde_json::to_vec(&zero_floors).unwrap()
+            );
+            assert_eq!(
                 topic_count(
                     result
                         .pack
                         .relevant_episodes
                         .iter()
-                        .map(|episode| episode.id),
+                        .map(|episode| episode.id)
                 ),
+                8
             );
-            assert_eq!(counts, (8, 8, 7), "descriptions={descriptions}");
-            // Admission changes, but output still follows the original final scores.
-            assert_eq!(
-                result
-                    .pack
-                    .relevant_episodes
-                    .iter()
-                    .map(|episode| episode.id.as_u128())
-                    .collect::<Vec<_>>(),
-                [1000, 2000, 2001, 2002, 2003, 2004, 2005, 2006]
-            );
-            assert!(trace.floor_admissions.is_empty());
-            assert_eq!(
-                trace
-                    .scene_cue_searches
-                    .iter()
-                    .map(|search| (search.cue_kind, search.omitted_count))
-                    .collect::<Vec<_>>(),
-                [(CueKind::Place, 47), (CueKind::Participant, 47)]
-            );
+            assert!(result.trace.unwrap().floor_admissions.is_empty());
+            memory.close().await.unwrap();
         }
-        memory.close().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn shared_scene_keeps_latest_keyed_occasion_with_lived_and_unlived_topics() {
-        let mut memory = cohort_memory().await;
-        for topic in ["orchids", "unlived"] {
-            let mut query = context();
-            query.scene.time += chrono::Duration::days(48);
-            query.topic = Some(topic.to_owned());
-            query.scene.participants[0].key = Some(MemoryId::from_u128(7));
-            query.graph_limits.max_depth = 1;
-            let result = memory.retrieve(query).await.unwrap();
-            let trace = result.trace.unwrap();
-            assert!(trace
-                .graph_expansions
-                .iter()
-                .any(|row| row.root.id == MemoryId::from_u128(7)
-                    && row.outcome == GraphExpansionOutcome::Expanded));
-            assert_eq!(result.pack.relevant_episodes.len(), 8);
-            if topic == "unlived" {
-                assert!(result
-                    .pack
-                    .relevant_episodes
-                    .iter()
-                    .all(|episode| (1000..1048).contains(&episode.id.as_u128())));
-            }
-            assert!(
-                result
-                    .pack
-                    .relevant_episodes
-                    .iter()
-                    .any(|episode| episode.id == MemoryId::from_u128(1000)),
-                "latest participant occasion must reach the pack: {:?}",
-                trace
-                    .section_assignments
-                    .iter()
-                    .find(|row| row.object.id == MemoryId::from_u128(1000))
-            );
-        }
-        // More than one explicit occasion must retain selector order, not ID order.
-        memory.memory_composition.selectivity_policy =
-            crate::policy::RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-                1.0,
-                1.0,
-                [(RelationType::Involves, ObjectType::Episode, 2, 2)],
-            )
-            .unwrap();
-        let mut query = context();
-        query.scene.time += chrono::Duration::days(48);
-        query.scene.participants[0].key = Some(MemoryId::from_u128(7));
-        query.graph_limits.max_depth = 1;
-        query.section_limits.relevant_episodes = 1;
-        let result = memory.retrieve(query).await.unwrap();
-        assert_eq!(
-            result.pack.relevant_episodes[0].id,
-            MemoryId::from_u128(1000)
-        );
-        assert!(result
-            .trace
-            .unwrap()
-            .section_assignments
-            .iter()
-            .any(|row| row.object.id == MemoryId::from_u128(1001)));
-        memory.close().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn shared_scene_topic_only_keeps_original_bytes() {
-        let memory = cohort_memory().await;
-        let mut query = context();
-        query.scene.participants.clear();
-        query.scene.setting.words = None;
-        let result = memory.retrieve(query.clone()).await.unwrap();
-        query.cue_floors = RetrievalCueFloors {
-            date_match: 1,
-            participant: 0,
-            place: 0,
-            activity: 0,
-            topic: 0,
-            recency: 0,
-        };
-        let zero_floors = memory.retrieve(query).await.unwrap();
-        assert_eq!(
-            serde_json::to_vec(&result).unwrap(),
-            serde_json::to_vec(&zero_floors).unwrap()
-        );
-        assert_eq!(
-            topic_count(
-                result
-                    .pack
-                    .relevant_episodes
-                    .iter()
-                    .map(|episode| episode.id)
-            ),
-            8
-        );
-        assert!(result.trace.unwrap().floor_admissions.is_empty());
-        memory.close().await.unwrap();
     }
 
     #[tokio::test]
     async fn shared_scene_overlap_uses_one_slot_and_uncapped_turns_emit_no_admissions() {
-        let memory = cohort_memory().await;
-        let mut plan = RememberWritePlan::new();
-        let mut latest = context().scene;
-        latest.time += chrono::Duration::days(49);
-        for candidate in episode(900, "Orchid shared".to_owned(), latest.clone()) {
-            plan = plan.with_candidate(candidate);
-        }
-        memory.commit(plan, CommitOptions::default()).await.unwrap();
-        let mut query = context();
-        query.scene.time = latest.time;
-        query.candidate_limits.max_vector_candidates = 64;
-        let capped = memory.retrieve(query.clone()).await.unwrap();
-        let trace = capped.trace.unwrap();
-        assert_eq!(
+        for ascending_ids in [false, true] {
+            let memory = cohort_memory(ascending_ids).await;
+            let mut plan = RememberWritePlan::new();
+            let mut latest = context().scene;
+            latest.time += chrono::Duration::days(49);
+            for candidate in episode(
+                cohort_id(49, ascending_ids),
+                "Orchid shared".to_owned(),
+                latest.clone(),
+            ) {
+                plan = plan.with_candidate(candidate);
+            }
+            memory.commit(plan, CommitOptions::default()).await.unwrap();
+            let mut query = context();
+            query.scene.time = latest.time;
+            query.candidate_limits.max_vector_candidates = 64;
+            let capped = memory.retrieve(query.clone()).await.unwrap();
+            let trace = capped.trace.unwrap();
+            assert_eq!(
             trace
                 .vector_candidates
                 .iter()
-                .filter(|row| row.object.id == MemoryId::from_u128(900))
+                .filter(|row| row.object.id == MemoryId::from_u128(cohort_id(49, ascending_ids)))
                 .count(),
             1
         );
-        assert_eq!(
-            trace
-                .graph_expansions
+            assert_eq!(
+                trace
+                    .graph_expansions
+                    .iter()
+                    .filter(
+                        |row| row.root.id == MemoryId::from_u128(cohort_id(49, ascending_ids))
+                            && row.outcome == GraphExpansionOutcome::Expanded
+                    )
+                    .count(),
+                1
+            );
+            assert_eq!(
+                capped
+                    .pack
+                    .relevant_episodes
+                    .iter()
+                    .filter(
+                        |episode| episode.id == MemoryId::from_u128(cohort_id(49, ascending_ids))
+                    )
+                    .count(),
+                1
+            );
+            let shared = trace
+                .section_assignments
                 .iter()
-                .filter(|row| row.root.id == MemoryId::from_u128(900)
-                    && row.outcome == GraphExpansionOutcome::Expanded)
-                .count(),
-            1
-        );
-        assert_eq!(
-            capped
-                .pack
-                .relevant_episodes
-                .iter()
-                .filter(|episode| episode.id == MemoryId::from_u128(900))
-                .count(),
-            1
-        );
-        let shared = trace
-            .section_assignments
-            .iter()
-            .find(|row| row.object.id == MemoryId::from_u128(900))
-            .unwrap();
-        assert_eq!(
-            shared.cue_kinds,
-            BTreeSet::from([
-                CueKind::Participant,
-                CueKind::Place,
-                CueKind::Topic,
-                CueKind::Recency
-            ])
-        );
-        query.candidate_limits.max_graph_roots = 64;
-        query.section_limits.relevant_episodes = 64;
-        let uncapped = memory.retrieve(query).await.unwrap();
-        assert_eq!(uncapped.pack.relevant_episodes.len(), 57);
-        assert!(uncapped.trace.unwrap().floor_admissions.is_empty());
-        memory.close().await.unwrap();
+                .find(|row| row.object.id == MemoryId::from_u128(cohort_id(49, ascending_ids)))
+                .unwrap();
+            assert_eq!(
+                shared.cue_kinds,
+                BTreeSet::from([
+                    CueKind::Participant,
+                    CueKind::Place,
+                    CueKind::Topic,
+                    CueKind::Recency
+                ])
+            );
+            query.candidate_limits.max_graph_roots = 64;
+            query.section_limits.relevant_episodes = 64;
+            let uncapped = memory.retrieve(query).await.unwrap();
+            assert_eq!(uncapped.pack.relevant_episodes.len(), 57);
+            assert!(uncapped.trace.unwrap().floor_admissions.is_empty());
+            memory.close().await.unwrap();
+        }
     }
 }
