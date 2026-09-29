@@ -144,27 +144,6 @@ async fn an_observation_requires_its_episode_in_the_plan_or_store() {
 }
 
 #[tokio::test]
-async fn core_commit_flow_works_in_in_memory_graph_mode() {
-    let (memory, root) = setup_basic().await;
-
-    let plan = memory
-        .prepare(core_input("in-memory-core"), PrepareOptions::default())
-        .await
-        .expect("prepare should produce a core plan");
-    memory
-        .validate_plan(&plan)
-        .await
-        .expect("core plan should validate");
-    let outcome = memory
-        .commit(plan, graph_only_commit_options())
-        .await
-        .expect("core plan should commit");
-
-    ensure_graph_only_outcome(&outcome);
-    base::close_and_remove_root(memory, root).await;
-}
-
-#[tokio::test]
 async fn core_commit_flow_works_in_persistent_graph_mode() {
     let root = TempDir::new().expect("store root should be created");
     let collection = base::unique_collection_name();
@@ -411,6 +390,7 @@ async fn approval_flow_can_filter_candidates_before_commit() {
         .commit(plan, graph_only_commit_options())
         .await
         .expect("reduced approved plan should commit");
+    ensure_graph_only_outcome(&outcome);
     let approved_id = id("550e8400-e29b-41d4-a716-446655613201");
     let dropped_id = id("550e8400-e29b-41d4-a716-446655613202");
     assert!(outcome.persisted_object_ids.contains(&approved_id));
@@ -472,7 +452,7 @@ async fn setup_basic() -> (CharacterMemory, TempDir) {
 }
 
 async fn setup_persistent(collection_name: &str, root: &TempDir) -> CharacterMemory {
-    base::try_setup_persistent_character_memory(collection_name.to_owned(), root.path(), None)
+    base::try_setup_persistent_character_memory(collection_name.to_owned(), root.path())
         .await
         .expect("persistent setup should succeed")
 }

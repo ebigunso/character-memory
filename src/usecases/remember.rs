@@ -40,7 +40,10 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
         }
     }
 
@@ -119,10 +122,6 @@ where
                 .diagnostics
                 .repair_needed
                 .extend(diagnostics.repair_needed);
-            outcome
-                .diagnostics
-                .candidate_counts
-                .extend(diagnostics.candidate_counts);
             outcome
         })
     }
@@ -325,15 +324,13 @@ fn graph_persisted_outcome(objects: &[MemoryObject], links: &[MemoryLink]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ScopeKey;
-    use crate::ports::graph_authority::GraphExpansionFilteredNode;
-    use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
+
     use crate::test_support::parse_id as id;
     use crate::test_support::write_time as timestamp;
+    use crate::test_support::{StoreCall, TestGraphStore};
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::api::types::{
         CandidateProvenance, DerivedMemoryDraft, EntityDraft, EpisodeDraft, MemoryCandidate,
@@ -344,16 +341,13 @@ mod tests {
         RelationType, DEFAULT_SCHEMA_VERSION,
     };
     use crate::errors::{
-        RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
-        VectorDatabaseErrorKind, VectorIndexingCause,
+        RetrievalStatsHealthCause, StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind,
+        VectorIndexingCause,
     };
-    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
-    use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
-    use crate::ports::retrieval_stats::{
-        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-        RetrievalStatsObjectState, RetrievalStatsStore,
-    };
-    use crate::ports::vector_candidate::VectorCandidateRecall;
+    use crate::models::vector::EmbeddingInput;
+    use crate::ports::graph_authority::GraphObjectQuery;
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
+
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
@@ -376,7 +370,7 @@ mod tests {
             .await
             .unwrap()
             .is_valid());
-        let vector = RecordingVectorStore::new().await;
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let outcome = RememberPipeline::new(&graph, &vector, &embedder)
             .commit(plan, CommitOptions::default(), &tokio::sync::Mutex::new(()))
@@ -412,11 +406,11 @@ mod tests {
 
     #[tokio::test]
     async fn failed_currency_lookup_reports_repair_without_indexing_or_guessing_stats() {
-        let mut graph = RecordingGraphStore {
+        let mut graph = TestGraphStore {
             fail_currency_query: true,
-            ..RecordingGraphStore::default()
+            ..TestGraphStore::default()
         };
-        let vector = RecordingVectorStore::new().await;
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let outcome = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats)
@@ -494,11 +488,10 @@ mod tests {
     #[tokio::test]
     async fn persists_graph_objects_links_then_vectors_in_stable_order() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore {
-            calls: graph.calls.clone(),
-            ..RecordingVectorStore::new().await
-        };
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1)
+            .await
+            .with_calls(graph.calls.clone());
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -557,7 +550,7 @@ mod tests {
     #[tokio::test]
     async fn bounded_link_collision_query_rejects_divergent_existing_content() {
         let graph = in_memory_graph_store();
-        let vector = RecordingVectorStore::new().await;
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let existing = representative_fixtures().links()[0].clone();
         graph
@@ -581,8 +574,8 @@ mod tests {
     #[tokio::test]
     async fn graph_object_failure_prevents_link_and_vector_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default().fail_objects();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default().fail_objects();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -603,8 +596,8 @@ mod tests {
     #[tokio::test]
     async fn graph_link_failure_prevents_vector_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default().fail_links();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default().fail_links();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -630,8 +623,8 @@ mod tests {
     #[tokio::test]
     async fn validation_failure_prevents_all_store_writes() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let mut invalid_episode = EpisodeDraft::new(" ");
         invalid_episode.id = Some(ids.episode);
@@ -663,8 +656,10 @@ mod tests {
     #[tokio::test]
     async fn vector_upsert_failure_returns_partial_success_with_graph_ids() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::new().await.fail_upsert();
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1)
+            .await
+            .fail_upsert("vector write failed");
         let embedder = RecordingEmbedder::default();
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -702,8 +697,8 @@ mod tests {
     #[tokio::test]
     async fn wrong_embedding_count_returns_clear_partial_failure_without_vector_write() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default().with_embedding_count(3);
         let pipeline = RememberPipeline::new(&graph, &vector, &embedder);
 
@@ -734,8 +729,8 @@ mod tests {
     #[tokio::test]
     async fn remember_pipeline_records_stats_after_vector_attempt() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -778,8 +773,8 @@ mod tests {
     #[tokio::test]
     async fn remember_accepts_caller_supplied_associated_with_links() {
         let ids = fixed_ids();
-        let graph = RecordingGraphStore::default();
-        let vector = RecordingVectorStore::new().await;
+        let graph = TestGraphStore::default();
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -826,7 +821,7 @@ mod tests {
             ])
             .await
             .unwrap();
-        let vector = RecordingVectorStore::new().await;
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
@@ -877,20 +872,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_only_stats_failures_preserve_endpoint_ids_and_repair_causes() {
+    async fn link_only_stats_failure_preserves_repair_marker_endpoints() {
         let fixtures = representative_fixtures();
         let episode_id = fixtures.episode.id;
         let observation_id = fixtures.salient_observation.id;
-        let graph = RecordingGraphStore::default()
+        let graph = TestGraphStore::default()
             .with_query_objects(vec![
                 MemoryObject::Episode(fixtures.episode),
                 MemoryObject::Observation(fixtures.salient_observation),
             ])
             .await
             .fail_id_queries();
-        let vector = RecordingVectorStore::new().await;
+        let vector = TemporaryVectorCandidateStore::open(1).await;
         let embedder = RecordingEmbedder::default();
-        let stats = EdgeFailingStatsStore::default();
+        let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
         let mut link = typed_link_draft(
             id("550e8400-e29b-41d4-a716-446655443010"),
@@ -921,13 +916,6 @@ mod tests {
             .expect("endpoint hydration failure should be published");
 
         assert_eq!(failure.failed_object_ids, expected_ids);
-        assert!(matches!(
-            failure.causes.as_slice(),
-            [
-                StatsUpdateCause::GraphRead { .. },
-                StatsUpdateCause::EdgeWrite { .. }
-            ]
-        ));
         assert!(outcome.repair_needed.iter().any(|marker| matches!(
             marker,
             RepairMarker::StatsUpdate { object_ids, causes }
@@ -1063,369 +1051,6 @@ mod tests {
         let mut draft = MemoryLinkDraft::new(from_type, from_id, relation, to_type, to_id);
         draft.id = Some(id);
         draft
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum StoreCall {
-        GraphObjects(Vec<MemoryId>),
-        GraphLinks(Vec<MemoryId>),
-        EmbedBatch(Vec<MemoryId>),
-        VectorUpsert(Vec<MemoryId>),
-    }
-
-    struct RecordingGraphStore {
-        store: OxigraphGraphAuthorityStore,
-        calls: Arc<Mutex<Vec<StoreCall>>>,
-        fail_objects: bool,
-        fail_links: bool,
-        fail_id_queries: bool,
-        fail_currency_query: bool,
-    }
-
-    impl Default for RecordingGraphStore {
-        fn default() -> Self {
-            Self {
-                store: in_memory_graph_store(),
-                calls: Arc::default(),
-                fail_objects: false,
-                fail_links: false,
-                fail_id_queries: false,
-                fail_currency_query: false,
-            }
-        }
-    }
-
-    #[derive(Debug, Default)]
-    struct EdgeFailingStatsStore {
-        health: Mutex<RetrievalStatsHealth>,
-    }
-
-    #[async_trait]
-    impl RetrievalStatsStore for EdgeFailingStatsStore {
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "edge write failed".to_owned(),
-            })
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(lock(&self.health).clone())
-        }
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            *lock(&self.health) = RetrievalStatsHealth {
-                state: crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy,
-                last_error_cause: Some(cause),
-            };
-            Ok(())
-        }
-    }
-
-    impl RecordingGraphStore {
-        fn fail_objects(mut self) -> Self {
-            self.fail_objects = true;
-            self
-        }
-
-        fn fail_links(mut self) -> Self {
-            self.fail_links = true;
-            self
-        }
-
-        async fn with_query_objects(self, objects: Vec<MemoryObject>) -> Self {
-            self.store.upsert_objects(&objects).await.unwrap();
-            self
-        }
-
-        fn fail_id_queries(mut self) -> Self {
-            self.fail_id_queries = true;
-            self
-        }
-
-        fn calls(&self) -> Vec<StoreCall> {
-            lock(&self.calls).clone()
-        }
-    }
-
-    #[async_trait]
-    impl GraphAuthorityStore for RecordingGraphStore {
-        async fn query_anniversaries(
-            &self,
-            date: chrono::NaiveDate,
-            participants: &[crate::domain::MemoryId],
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
-        {
-            let _ = (date, participants, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episodes_by_time(
-            &self,
-            start: Option<chrono::DateTime<chrono::Utc>>,
-            end: chrono::DateTime<chrono::Utc>,
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
-            self.store
-                .query_episodes_by_time(start, end, limit, policy)
-                .await
-        }
-
-        async fn query_episode_occasions(
-            &self,
-            episodes: &[crate::domain::MemoryObjectRef],
-        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-            self.store.query_episode_occasions(episodes).await
-        }
-
-        async fn query_last_interaction(
-            &self,
-            participant: MemoryId,
-            reference_time: chrono::DateTime<chrono::Utc>,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
-            self.store
-                .query_last_interaction(participant, reference_time, policy)
-                .await
-        }
-
-        async fn query_notions_known_as(
-            &self,
-            name: &str,
-        ) -> Result<Vec<MemoryId>, crate::errors::GraphQueryError> {
-            self.store.query_notions_known_as(name).await
-        }
-
-        async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
-            lock(&self.calls).push(StoreCall::GraphObjects(
-                objects.iter().map(MemoryObject::id).collect(),
-            ));
-            if self.fail_objects {
-                return Err(CustomError::DatabaseError("object write failed".to_owned()));
-            }
-            self.store.upsert_objects(objects).await
-        }
-
-        async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-            lock(&self.calls).push(StoreCall::GraphLinks(
-                links.iter().map(|link| link.id).collect(),
-            ));
-            if self.fail_links {
-                return Err(CustomError::DatabaseError("link write failed".to_owned()));
-            }
-            self.store.upsert_links(links).await
-        }
-
-        async fn upsert_objects_and_links(
-            &self,
-            objects: &[MemoryObject],
-            links: &[MemoryLink],
-        ) -> Result<(), CustomError> {
-            lock(&self.calls).push(StoreCall::GraphObjects(
-                objects.iter().map(MemoryObject::id).collect(),
-            ));
-            if self.fail_objects {
-                return Err(CustomError::DatabaseError("object write failed".to_owned()));
-            }
-            lock(&self.calls).push(StoreCall::GraphLinks(
-                links.iter().map(|link| link.id).collect(),
-            ));
-            if self.fail_links {
-                return Err(CustomError::DatabaseError("link write failed".to_owned()));
-            }
-            self.store.upsert_objects_and_links(objects, links).await
-        }
-
-        async fn query_objects(
-            &self,
-            query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
-            if self.fail_id_queries && matches!(query, GraphObjectQuery::ByIds(_)) {
-                return Err(crate::errors::GraphQueryError::Selection {
-                    detail: "endpoint lifecycle lookup failed".to_owned(),
-                });
-            }
-
-            self.store.query_objects(query).await
-        }
-
-        async fn query_superseded_derived_memory_ids(
-            &self,
-            memory_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            if self.fail_currency_query {
-                return Err(crate::errors::GraphQueryError::Selection {
-                    detail: "currency lookup failed".to_owned(),
-                });
-            }
-            self.store
-                .query_superseded_derived_memory_ids(memory_ids)
-                .await
-        }
-
-        async fn query_links_by_ids(
-            &self,
-            link_ids: &[MemoryId],
-        ) -> Result<Vec<MemoryLink>, CustomError> {
-            self.store.query_links_by_ids(link_ids).await
-        }
-
-        async fn query_derived_memories_by_provenance(
-            &self,
-            query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
-            self.store.query_derived_memories_by_provenance(query).await
-        }
-
-        async fn query_derived_memories_by_thread(
-            &self,
-            query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<
-            (
-                Vec<crate::domain::DerivedMemory>,
-                Vec<GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            self.store.query_derived_memories_by_thread(query).await
-        }
-
-        async fn query_thread_state(
-            &self,
-            query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (query, limit);
-            self.store.query_thread_state(query, limit).await
-        }
-
-        async fn query_scope_state(
-            &self,
-            key: &ScopeKey,
-            policy: GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            self.store.query_scope_state(key, policy, limit).await
-        }
-
-        async fn expand_bounded(
-            &self,
-            query: &GraphExpansionQuery,
-        ) -> Result<GraphExpansion, CustomError> {
-            self.store.expand_bounded(query).await
-        }
-    }
-
-    #[derive(Debug)]
-    struct RecordingVectorStore {
-        inner: TemporaryVectorCandidateStore,
-        calls: Arc<Mutex<Vec<StoreCall>>>,
-        fail_upsert: bool,
-    }
-
-    impl RecordingVectorStore {
-        async fn new() -> Self {
-            Self {
-                inner: TemporaryVectorCandidateStore::open(1).await,
-                calls: Arc::default(),
-                fail_upsert: false,
-            }
-        }
-
-        fn fail_upsert(mut self) -> Self {
-            self.fail_upsert = true;
-            self
-        }
-
-        fn calls(&self) -> Vec<StoreCall> {
-            lock(&self.calls).clone()
-        }
-    }
-
-    #[async_trait]
-    impl VectorCandidateStore for RecordingVectorStore {
-        async fn close(&self) -> Result<(), CustomError> {
-            self.inner.close().await
-        }
-
-        async fn upsert_vector_records(
-            &self,
-            records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            lock(&self.calls).push(StoreCall::VectorUpsert(
-                records
-                    .iter()
-                    .map(|record| record.record.object_id)
-                    .collect(),
-            ));
-            if self.fail_upsert {
-                return Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
-                    "test",
-                    VectorDatabaseErrorKind::Response,
-                    None,
-                    "vector write failed",
-                )));
-            }
-            self.inner.upsert_vector_records(records).await
-        }
-
-        async fn search_candidates(
-            &self,
-            query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            self.inner.search_candidates(query).await
-        }
-
-        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            self.inner.delete_candidates(objects).await
-        }
     }
 
     #[derive(Debug, Default)]

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 
 use crate::domain::{MemoryId, MemoryLink, MemoryObject, ObjectType, RelationType, RetentionState};
 use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
@@ -50,8 +49,6 @@ pub(crate) struct RetrievalStatsEdge {
     pub(crate) object_type: ObjectType,
     pub(crate) retention_state: RetentionState,
     pub(crate) is_current: bool,
-    pub(crate) first_seen_at: DateTime<Utc>,
-    pub(crate) last_seen_at: DateTime<Utc>,
 }
 
 impl RetrievalStatsEdge {
@@ -66,7 +63,6 @@ pub(crate) struct RetrievalStatsObjectState {
     pub(crate) object_type: ObjectType,
     pub(crate) retention_state: RetentionState,
     pub(crate) is_current: bool,
-    pub(crate) observed_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -204,7 +200,6 @@ fn append_intrinsic_edges(edges: &mut HashMap<String, RetrievalStatsEdge>, objec
                     ObjectType::Episode,
                     episode.retention_state,
                     true,
-                    episode.created_at,
                 ),
             );
         }
@@ -227,7 +222,6 @@ fn append_link_edges(
                 link.to_type,
                 retention_state,
                 is_current,
-                link.created_at,
             ),
         );
     }
@@ -243,7 +237,6 @@ fn append_link_edges(
                 link.from_type,
                 retention_state,
                 is_current,
-                link.created_at,
             ),
         );
     }
@@ -271,8 +264,6 @@ pub(crate) fn insert_edge(
 }
 
 fn merge_edge(existing: &mut RetrievalStatsEdge, incoming: &RetrievalStatsEdge) {
-    existing.first_seen_at = existing.first_seen_at.min(incoming.first_seen_at);
-    existing.last_seen_at = existing.last_seen_at.max(incoming.last_seen_at);
     existing.retention_state =
         more_restrictive_retention(existing.retention_state, incoming.retention_state);
     existing.is_current = existing.is_current && incoming.is_current;
@@ -293,7 +284,6 @@ fn edge(
     object_type: ObjectType,
     retention_state: RetentionState,
     is_current: bool,
-    observed_at: DateTime<Utc>,
 ) -> RetrievalStatsEdge {
     RetrievalStatsEdge {
         edge_key: format!(
@@ -309,8 +299,6 @@ fn edge(
         object_type,
         retention_state,
         is_current,
-        first_seen_at: observed_at,
-        last_seen_at: observed_at,
     }
 }
 
@@ -324,14 +312,12 @@ fn object_state(
             object_type: ObjectType::Episode,
             retention_state: object.retention_state,
             is_current: true,
-            observed_at: object.created_at,
         }),
         MemoryObject::Observation(object) => Some(RetrievalStatsObjectState {
             object_id: object.id,
             object_type: ObjectType::Observation,
             retention_state: object.retention_state,
             is_current: true,
-            observed_at: object.created_at,
         }),
         MemoryObject::DerivedMemory(object) => Some(RetrievalStatsObjectState {
             object_id: object.id,
@@ -339,7 +325,6 @@ fn object_state(
             retention_state: object.retention_state,
             is_current: object.retention_state == RetentionState::Active
                 && !superseded.contains(&object.id),
-            observed_at: object.updated_at,
         }),
         MemoryObject::Entity(_) | MemoryObject::MemoryThread(_) | MemoryObject::MemoryLink(_) => {
             None
@@ -404,6 +389,7 @@ mod tests {
     use super::*;
     use crate::adapters::stats::{InMemoryRetrievalStatsStore, SqliteRetrievalStatsStore};
     use crate::domain::{DerivedMemory, DerivedType, Episode, Modality, DEFAULT_SCHEMA_VERSION};
+    use chrono::{DateTime, Utc};
     use std::collections::HashSet;
 
     struct StoreFixture {
@@ -490,7 +476,6 @@ mod tests {
                     object_type,
                     RetentionState::Active,
                     true,
-                    timestamp(),
                 )])
                 .await
                 .unwrap();
@@ -500,7 +485,6 @@ mod tests {
                     object_type,
                     retention_state: RetentionState::Suppressed,
                     is_current: false,
-                    observed_at: timestamp(),
                 }])
                 .await
                 .unwrap();
@@ -530,7 +514,6 @@ mod tests {
                 object_type: ObjectType::Episode,
                 retention_state,
                 is_current: true,
-                observed_at: timestamp(),
             })
             .collect::<Vec<_>>();
         for _ in 0..2 {
@@ -566,7 +549,6 @@ mod tests {
             ObjectType::Episode,
             RetentionState::Active,
             true,
-            timestamp(),
         );
 
         store
@@ -607,7 +589,6 @@ mod tests {
                     ObjectType::DerivedMemory,
                     RetentionState::Active,
                     true,
-                    timestamp(),
                 ),
                 edge(
                     second_entity_id,
@@ -616,7 +597,6 @@ mod tests {
                     ObjectType::DerivedMemory,
                     RetentionState::Suppressed,
                     false,
-                    timestamp(),
                 ),
             ])
             .await
@@ -642,7 +622,6 @@ mod tests {
             ObjectType::Episode,
             RetentionState::Suppressed,
             false,
-            timestamp(),
         );
         let active_edge = edge(
             entity_id,
@@ -651,7 +630,6 @@ mod tests {
             ObjectType::Episode,
             RetentionState::Active,
             true,
-            timestamp(),
         );
 
         store.record_edges(&[suppressed_edge]).await.unwrap();
@@ -682,7 +660,6 @@ mod tests {
                 ObjectType::DerivedMemory,
                 RetentionState::Active,
                 true,
-                timestamp(),
             )])
             .await
             .unwrap();
@@ -692,7 +669,6 @@ mod tests {
                 object_type: ObjectType::DerivedMemory,
                 retention_state: RetentionState::Suppressed,
                 is_current: true,
-                observed_at: timestamp(),
             }])
             .await
             .unwrap();
@@ -726,7 +702,6 @@ mod tests {
                 ObjectType::Episode,
                 RetentionState::Active,
                 true,
-                timestamp(),
             )])
             .await
             .unwrap();
@@ -933,7 +908,6 @@ mod tests {
                 ObjectType::Episode,
                 RetentionState::Active,
                 true,
-                timestamp(),
             )])
             .await
             .unwrap();

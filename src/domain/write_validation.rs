@@ -49,11 +49,6 @@ impl CandidateValidation {
             warnings: Vec::new(),
         }
     }
-
-    pub fn with_warning(mut self, warning: CandidateValidationIssue) -> Self {
-        self.warnings.push(warning);
-        self
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Error)]
@@ -95,8 +90,6 @@ pub enum CandidateValidationIssue {
     SelfLink { referenced: MemoryObjectRef },
     #[error("materialized memory object schema_version must be present")]
     MissingObjectSchemaVersion,
-    #[error("memory link was rejected by the link admission policy")]
-    MemoryLinkRejectedByAdmissionPolicy,
     #[error("Supersedes links must be derived from a memory supersedes list")]
     AuthoredSupersedesLink,
     #[error("About links between interpreted memories and entities must be derived from the memory subject list")]

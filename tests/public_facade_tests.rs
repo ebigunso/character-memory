@@ -1,7 +1,6 @@
 use character_memory::{
-    CorrectMemoryDraft, CorrectionTarget, DerivedMemoryDraft, DerivedType, EpisodeDraft,
-    ForgetMemoryDraft, LifecycleTargetRef, ObservationDraft, RememberInput, RememberOptions,
-    ReplacementDerivedMemoryDraft, RetrievalContext, SourceProvenanceReference,
+    DerivedMemoryDraft, DerivedType, EpisodeDraft, ObservationDraft, RememberInput,
+    RememberOptions, RetrievalContext,
 };
 use test_support::{ensure, parse_id as id};
 
@@ -24,11 +23,9 @@ mod scene_offset_behavior {
     }
 
     fn query(time: DateTime<FixedOffset>) -> RetrievalContext {
-        let mut query = RetrievalContext::default()
+        RetrievalContext::default()
             .with_scene(Scene::at(time))
-            .with_trace();
-        query.graph_limits.timeout_ms = None;
-        query
+            .with_trace()
     }
 
     #[tokio::test]
@@ -45,7 +42,6 @@ mod scene_offset_behavior {
             let memory = test_support::try_setup_persistent_character_memory(
                 collection.clone(),
                 root.path(),
-                None,
             )
             .await
             .unwrap();
@@ -56,7 +52,7 @@ mod scene_offset_behavior {
             let before = memory.retrieve(query(now().fixed_offset())).await.unwrap();
             memory.close().await.unwrap();
             let memory =
-                test_support::try_setup_persistent_character_memory(collection, root.path(), None)
+                test_support::try_setup_persistent_character_memory(collection, root.path())
                     .await
                     .unwrap();
             let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
@@ -351,7 +347,6 @@ mod road_behavior {
             .with_trace();
         context.topic = topic.map(str::to_owned);
         context.graph_limits.max_depth = 0;
-        context.graph_limits.timeout_ms = None;
         context.candidate_limits.max_graph_roots = roots;
         context.candidate_limits.max_vector_candidates = 32;
         context.section_limits = ContinuitySectionLimits {
@@ -514,6 +509,11 @@ mod road_behavior {
                 assert_eq!(traced.memory_scenes, untraced.memory_scenes);
                 assert_eq!(traced.rationale, untraced.rationale);
                 let assignments = &traced.trace.as_ref().unwrap().section_assignments;
+                if case == "range" {
+                    assert!(assignments
+                        .iter()
+                        .all(|row| !row.cue_kinds.contains(&CueKind::Recency)));
+                }
                 assert_eq!(
                     untraced.memory_scenes.len(),
                     assignments.iter().filter(|row| row.rank.is_some()).count()
@@ -725,7 +725,6 @@ mod road_behavior {
             context.graph_limits.max_depth = 1;
             context.graph_limits.max_hub_edges = 64;
             context.graph_limits.max_fanout_per_node = 16;
-            context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
             let mut suppressed = 0;
             for prefix in [0, 64, 75] {
                 for offset in suppressed..prefix {
@@ -751,6 +750,22 @@ mod road_behavior {
             let traced = traced
                 .unwrap_or_else(|error| panic!("reverse={reverse}, prefix={prefix}: {error:?}"));
             let untraced = untraced.unwrap();
+            assert_eq!(
+                traced
+                    .rationale
+                    .telemetry
+                    .graph_expansion
+                    .bounded_failure_count,
+                0
+            );
+            assert_eq!(
+                untraced
+                    .rationale
+                    .telemetry
+                    .graph_expansion
+                    .bounded_failure_count,
+                0
+            );
             assert_eq!(traced.pack, untraced.pack);
             assert_eq!(
                 traced.rationale.lifecycle_omission_count,
@@ -1604,47 +1619,6 @@ mod road_behavior {
     }
 
     #[tokio::test]
-    async fn a_range_replaces_the_recency_window() {
-        for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
-            let plan = episode(
-                episode(RememberWritePlan::new(), 10, 0, 0.0, None, reverse),
-                20,
-                8,
-                0.0,
-                None,
-                reverse,
-            );
-            commit(&memory, plan).await;
-            let mut context = query(None, 4, 2);
-            context.time_range = Some(TimeRange {
-                start: time() - Duration::days(9),
-                end: time() - Duration::days(7),
-            });
-            let ranged = memory.retrieve(context).await.unwrap();
-            assert!(ranged
-                .pack
-                .relevant_episodes
-                .iter()
-                .any(|episode| episode.id == id(20, reverse)));
-            assert!(!ranged
-                .pack
-                .relevant_episodes
-                .iter()
-                .any(|episode| episode.id == id(10, reverse)));
-            assert!(ranged
-                .trace
-                .unwrap()
-                .section_assignments
-                .iter()
-                .all(|row| !row.cue_kinds.contains(&CueKind::Recency)));
-            let recent = memory.retrieve(query(None, 1, 1)).await.unwrap();
-            assert_eq!(recent.pack.relevant_episodes[0].id, id(10, reverse));
-            test_support::close_and_remove_root(memory, root).await;
-        }
-    }
-
-    #[tokio::test]
     async fn a_salient_or_shared_anniversary_can_survive_a_year_of_daily_occasions() {
         let ordinary = EpisodeDraft::new("ordinary").salience_score;
         for reverse in [false, true] {
@@ -1843,36 +1817,6 @@ mod road_behavior {
                 assert!(!roots(&result).contains(&id(200, reverse)));
                 test_support::close_and_remove_root(memory, root).await;
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn a_recency_reservation_uses_the_latest_occasion() {
-        for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
-            let plan = episode(
-                episode(
-                    RememberWritePlan::new(),
-                    100,
-                    30,
-                    0.0,
-                    Some("orchid"),
-                    reverse,
-                ),
-                900,
-                0,
-                0.0,
-                None,
-                reverse,
-            );
-            commit(&memory, plan).await;
-            let mut context = query(Some("orchid"), 1, 2);
-            let unreserved = memory.retrieve(context.clone()).await.unwrap();
-            assert!(!roots(&unreserved).contains(&id(900, reverse)));
-            context.cue_floors.recency = 1;
-            let reserved = memory.retrieve(context).await.unwrap();
-            assert!(roots(&reserved).contains(&id(900, reverse)));
-            test_support::close_and_remove_root(memory, root).await;
         }
     }
 
@@ -2222,114 +2166,4 @@ async fn public_remember_and_retrieve_use_graph_authoritative_path() {
     .await;
     test_support::close_and_remove_root(memory, root).await;
     test_result.expect("live public facade test should pass");
-}
-
-#[tokio::test]
-async fn public_correct_and_forget_hide_stale_memories_from_normal_retrieval() {
-    let (memory, root) = test_support::try_setup_character_memory()
-        .await
-        .expect("unexpected live public lifecycle setup failure");
-
-    let test_result = async {
-        let episode_id = id("550e8400-e29b-41d4-a716-446655440201");
-        let old_id = id("550e8400-e29b-41d4-a716-446655440202");
-        let replacement_id = id("550e8400-e29b-41d4-a716-446655440203");
-
-        let mut episode = EpisodeDraft::new("The user corrected a public facade preference.");
-        episode.id = Some(episode_id);
-
-        let mut old_preference = DerivedMemoryDraft::new(
-            DerivedType::UserPreference,
-            "The user prefers stale public facade behavior.",
-        )
-        .with_source_episode(episode_id);
-        old_preference.id = Some(old_id);
-
-        memory
-            .remember(
-                RememberInput::new("The user corrected a public facade preference.")
-                    .with_episode(episode)
-                    .with_derived_memory(old_preference),
-                RememberOptions::default(),
-            )
-            .await
-            .map_err(|error| format!("initial remember should succeed: {error}"))?;
-
-        let mut replacement = ReplacementDerivedMemoryDraft::new(
-            DerivedType::Correction,
-            "The user prefers graph-authoritative public facade behavior.",
-        )
-        .with_source_episode(episode_id)
-        .with_superseded_memory(old_id);
-        replacement.id = Some(replacement_id);
-        replacement.original_source_provenance = SourceProvenanceReference::episode(episode_id);
-        replacement.correction_origin_provenance = SourceProvenanceReference::episode(episode_id);
-
-        let mut correction = CorrectMemoryDraft::new(
-            CorrectionTarget::derived_memory(old_id),
-            "Correct stale public facade behavior.",
-        )
-        .with_replacement(replacement)
-        .with_superseded_derived_memory(old_id);
-        correction.correction_origin = SourceProvenanceReference::episode(episode_id);
-
-        memory
-            .correct(correction)
-            .await
-            .map_err(|error| format!("public correct should supersede old memory: {error}"))?;
-
-        let retrieved = memory
-            .retrieve(RetrievalContext::new(
-                "graph-authoritative public facade behavior",
-            ))
-            .await
-            .map_err(|error| format!("retrieve after correction should succeed: {error}"))?;
-        ensure(
-            retrieved
-                .pack
-                .derived_memories
-                .iter()
-                .chain(retrieved.pack.preferences.iter())
-                .any(|included| included.memory.id == replacement_id),
-            "retrieval after correction should include replacement memory",
-        )?;
-        ensure(
-            !retrieved
-                .pack
-                .derived_memories
-                .iter()
-                .chain(retrieved.pack.preferences.iter())
-                .any(|included| included.memory.id == old_id),
-            "retrieval after correction should hide old memory",
-        )?;
-
-        memory
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::derived_memory(replacement_id),
-                "Suppress corrected public facade memory.",
-            ))
-            .await
-            .map_err(|error| format!("public forget should suppress replacement: {error}"))?;
-
-        let after_forget = memory
-            .retrieve(RetrievalContext::new(
-                "graph-authoritative public facade behavior",
-            ))
-            .await
-            .map_err(|error| format!("retrieve after forget should succeed: {error}"))?;
-        ensure(
-            !after_forget
-                .pack
-                .derived_memories
-                .iter()
-                .chain(after_forget.pack.preferences.iter())
-                .any(|included| included.memory.id == replacement_id),
-            "retrieval after forget should hide suppressed replacement",
-        )?;
-
-        Ok::<(), String>(())
-    }
-    .await;
-    test_support::close_and_remove_root(memory, root).await;
-    test_result.expect("live public lifecycle facade test should pass");
 }

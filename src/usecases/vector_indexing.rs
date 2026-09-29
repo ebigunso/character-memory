@@ -197,48 +197,23 @@ fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIn
 mod tests {
     use super::*;
     use crate::ports::embedder::MemoryEmbedder;
-    use async_trait::async_trait;
 
-    use crate::models::vector::{zero_norm_record_fixture, VectorCandidateSearch};
-    use crate::ports::vector_candidate::VectorCandidateRecall;
-
-    struct AdapterMustNotRun;
-
-    #[async_trait]
-    impl VectorCandidateStore for AdapterMustNotRun {
-        async fn upsert_vector_records(
-            &self,
-            _records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            panic!("zero-norm embeddings must be rejected before the adapter")
-        }
-
-        async fn search_candidates(
-            &self,
-            _query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            unreachable!("search is not part of this test")
-        }
-
-        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            unreachable!("deletion is not part of this test")
-        }
-    }
+    use crate::domain::{MemoryId, VectorSurface, DEFAULT_SCHEMA_VERSION};
 
     #[tokio::test]
     async fn zero_norm_record_embedding_is_typed_failure_before_adapter() {
-        let (object, surface, schema_version, embedding_text, embedding) =
-            zero_norm_record_fixture();
+        let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
         let record = VectorRecord::new(
             object.id,
             object.object_type,
-            surface,
-            schema_version,
-            embedding_text,
+            VectorSurface::Summary,
+            DEFAULT_SCHEMA_VERSION,
+            "Episode summary",
         );
-        let store = AdapterMustNotRun;
-        let embedder =
-            crate::test_support::TestEmbedder(move |_: &EmbeddingInput| embedding.clone());
+        let mut store = crate::test_support::TemporaryVectorCandidateStore::open(2).await;
+        store.upsert_hook =
+            Some(|| panic!("zero-norm embeddings must be rejected before the adapter"));
+        let embedder = crate::test_support::TestEmbedder(|_: &EmbeddingInput| vec![0.0, 0.0]);
         let service = VectorIndexingService::new(&store);
         let inputs = [record.embedding_input()];
         let embeddings = embedder.embed_batch(&inputs).await;

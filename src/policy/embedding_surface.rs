@@ -162,15 +162,15 @@ fn clean_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::domain::{
-        DerivedType, Entity, MemoryLink, Modality, RelationType, RetentionState, ThreadStatus,
-        DEFAULT_SCHEMA_VERSION,
+        DerivedType, Entity, MemoryLink, Modality, RelationType, RetentionState, SceneParticipant,
+        ThreadStatus, DEFAULT_SCHEMA_VERSION,
     };
     use chrono::{TimeZone, Utc};
     use uuid::Uuid;
 
     #[test]
     fn episode_builder_uses_summary_surface() {
-        let episode = episode_fixture();
+        let mut episode = episode_fixture();
         let record = episode_vector_record(&episode);
 
         assert_eq!(record.object_id, episode.id);
@@ -179,6 +179,49 @@ mod tests {
         assert_eq!(record.embedding_text, "Episode summary: Short summary.");
         assert_eq!(record.schema_version, DEFAULT_SCHEMA_VERSION);
         assert_embedding_text_excludes_metadata(&record);
+
+        episode.scene.setting.words = Some("  窓のそば\nquiet café  ".to_owned());
+        let alice = SceneParticipant {
+            name: Some("  Alice  ".to_owned()),
+            description: Some(" \t ".to_owned()),
+            ..Default::default()
+        };
+        episode.scene.participants = vec![
+            SceneParticipant::default(),
+            alice.clone(),
+            SceneParticipant {
+                name: Some(String::new()),
+                description: Some("a visitor in blue".to_owned()),
+                ..Default::default()
+            },
+            alice,
+            SceneParticipant {
+                name: Some(" \n ".to_owned()),
+                description: Some("\t".to_owned()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(
+            scene_surface_texts(&episode.scene),
+            [
+                (
+                    VectorSurface::SceneSetting,
+                    "窓のそば quiet café".to_owned()
+                ),
+                (
+                    VectorSurface::SceneParticipants,
+                    "Alice\na visitor in blue\nAlice".to_owned()
+                ),
+            ]
+        );
+        episode.scene.participants.push(SceneParticipant {
+            name: Some("Mira".to_owned()),
+            description: Some("the host".to_owned()),
+            ..Default::default()
+        });
+        assert!(scene_surface_texts(&episode.scene)[1]
+            .1
+            .ends_with("\nMira, the host"));
     }
 
     #[test]

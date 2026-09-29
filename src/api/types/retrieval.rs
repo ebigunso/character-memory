@@ -4,9 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, GraphExpansionBoundedReason,
-    GraphFailureMode, MemoryId, MemoryObjectRef, MemoryThread, ObjectType, Observation,
-    RelationType, RetentionState, Scene, ThreadStatus, VectorSurface,
+    DerivedMemory, Episode, GraphExpansionBoundedFailureTrace, MemoryId, MemoryObjectRef,
+    MemoryThread, ObjectType, Observation, RelationType, RetentionState, Scene, ThreadStatus,
+    VectorSurface,
 };
 use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 
@@ -155,8 +155,6 @@ pub struct RetrievalGraphLimits {
     pub max_nodes: usize,
     pub max_fanout_per_node: usize,
     pub max_hub_edges: usize,
-    pub timeout_ms: Option<u64>,
-    pub failure_mode: GraphFailureMode,
     pub allowed_relation_types: Vec<RelationType>,
     /// Types allowed during graph traversal; independent of vector candidate scope.
     /// An empty list imposes no object-type restriction.
@@ -170,8 +168,6 @@ impl Default for RetrievalGraphLimits {
             max_nodes: 96,
             max_fanout_per_node: 16,
             max_hub_edges: 64,
-            timeout_ms: Some(250),
-            failure_mode: GraphFailureMode::AllowPartialResults,
             allowed_relation_types: Vec::new(),
             allowed_object_types: vec![
                 ObjectType::Episode,
@@ -437,7 +433,6 @@ impl From<DerivedMemory> for IncludedDerivedMemory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RetrievalRationale {
     pub summary: String,
-    pub vector_candidate_count: usize,
     pub graph_verified_count: usize,
     pub stale_candidate_omission_count: usize,
     pub stale_candidate_omission_reasons: Vec<StaleCandidateOmissionSummary>,
@@ -450,7 +445,6 @@ impl RetrievalRationale {
     pub fn new(summary: impl Into<String>) -> Self {
         Self {
             summary: summary.into(),
-            vector_candidate_count: 0,
             graph_verified_count: 0,
             stale_candidate_omission_count: 0,
             stale_candidate_omission_reasons: Vec::new(),
@@ -470,13 +464,6 @@ impl Default for RetrievalRationale {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RetrievalTelemetry {
-    pub configured_candidate_limits: RetrievalCandidateLimits,
-    pub configured_graph_limits: RetrievalGraphLimits,
-    pub configured_section_limits: ContinuitySectionLimits,
-    pub configured_object_types: Vec<ObjectType>,
-    pub configured_lifecycle_policy: RetrievalLifecyclePolicy,
-    /// The store-compatible dimension of content queries, or zero if none was embedded.
-    pub query_embedding_dimension: usize,
     /// Unique objects after merging content searches at their best score and applying the candidate limit.
     pub returned_vector_candidate_count: usize,
     /// Weakest contributing search verdict, with that search's own counters.
@@ -486,8 +473,6 @@ pub struct RetrievalTelemetry {
     pub selected_graph_root_count: usize,
     pub graph_root_omission_count: usize,
     pub graph_expansion: GraphExpansionTelemetry,
-    pub selectivity: SelectivityTelemetry,
-    pub section_pressure: Vec<SectionPressureSummary>,
 }
 
 /// Completeness of vector search. A retrieval with several distinct content queries
@@ -531,38 +516,8 @@ pub enum VectorRecallCompleteness {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SelectivityTelemetry {
-    pub decision_count: usize,
-    pub high_selectivity_count: usize,
-    pub low_selectivity_supported_count: usize,
-    pub low_selectivity_rejected_count: usize,
-    pub fallback_count: usize,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphExpansionTelemetry {
-    pub attempted_root_count: usize,
-    pub expanded_root_count: usize,
-    pub missing_root_count: usize,
-    pub expanded_object_count: usize,
-    pub expanded_relation_count: usize,
-    pub filtered_node_count: usize,
     pub bounded_failure_count: usize,
-    pub bounded_failure_reasons: Vec<GraphExpansionBoundedFailureSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GraphExpansionBoundedFailureSummary {
-    pub reason: GraphExpansionBoundedReason,
-    pub count: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SectionPressureSummary {
-    pub section: ContextPackSection,
-    pub limit: usize,
-    pub included_count: usize,
-    pub omitted_by_limit_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

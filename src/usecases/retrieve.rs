@@ -10,30 +10,26 @@ use crate::api::types::{
     GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterDecision,
     LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace,
+    SectionAssignmentReason, SectionScoreComponents, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
-    MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
+    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+    ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
-use crate::policy::graph_expansion::{fail_if_closed, graph_expansion_bounded_failure_trace};
+use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
     selectivity_plan_for_entity, RetrievalSelectivityPolicy, SelectivityPlan,
     SelectivityStatsContext,
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailureReason,
-    GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-    GraphExpansionQuery, TraceMode,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionFilteredReason,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
-#[cfg(test)]
-use crate::ports::vector_candidate::VectorCandidateRecall;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
@@ -57,12 +53,24 @@ where
 {
     #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
+        let settings = crate::config::Settings::new(Default::default()).unwrap();
         Self {
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
-            selectivity_policy: RetrievalSelectivityPolicy::default(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
+            selectivity_policy: RetrievalSelectivityPolicy::with_fanout_budgets(
+                settings.get_selectivity_smoothing_alpha(),
+                settings.get_selectivity_gamma(),
+                settings
+                    .get_retrieval_fanout_budgets()
+                    .map(|(relation, object_type, budget)| {
+                        (relation, object_type, budget.min(), budget.max())
+                    }),
+            ),
         }
     }
 
@@ -90,7 +98,6 @@ where
         context.validate()?;
         let cues = self.recall_cues(&context).await?;
         let vector_candidates = cues.candidates;
-        let query_embedding_dimension = cues.dimension;
         let vector_recall_completeness = cues.completeness;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
         let mut explicit_roots = cues
@@ -254,7 +261,6 @@ where
             }
         }
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
-        let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
         let mut fanout_utilization_traces = trace_mode.is_enabled().then(Vec::new);
         let mut selectivity_traces = trace_mode.is_enabled().then(Vec::new);
@@ -293,7 +299,6 @@ where
             } else {
                 SelectivityPlan::default()
             };
-            absorb_selectivity_telemetry(&mut selectivity_telemetry, &selectivity_plan.telemetry);
             if let Some(traces) = &mut selectivity_traces {
                 traces.extend(selectivity_plan.traces);
             }
@@ -306,19 +311,16 @@ where
                 // Filter traversal itself: the bounded audit cannot list every resolved member.
                 query.current_thread_state = true;
             }
-            graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
-                    graph_expansion_telemetry.expanded_root_count += 1;
-                    record_expansion_telemetry(&mut graph_expansion_telemetry, &expansion);
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(graph_expansion_trace(candidate, &expansion));
                     }
                     if let Some(traces) = &mut fanout_utilization_traces {
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
-                    if let Some(failure) = expansion.bounded_failure {
-                        fail_if_closed(context.graph_limits.failure_mode, failure)?;
+                    if expansion.bounded_failure.is_some() {
+                        graph_expansion_telemetry.bounded_failure_count += 1;
                     }
                     if candidate.source() == GraphRootSource::Participant {
                         let scope = cues
@@ -349,7 +351,6 @@ where
                     assembly.absorb_expansion(candidate, &query, expansion)?;
                 }
                 Err(CustomError::GraphExpansionRootNotFound { .. }) => {
-                    graph_expansion_telemetry.missing_root_count += 1;
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
@@ -412,7 +413,6 @@ where
             .floor_admissions
             .extend(root_selection.floor_admissions);
 
-        let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
             (&state_scopes, &scope_kinds),
@@ -420,7 +420,6 @@ where
             context.section_limits,
             context.cue_floors,
             &mut details,
-            &mut section_pressure,
         );
         let graph_verified_count = included_section_assignment_count(&details.section_assignments);
         let stale_candidate_omission_reasons =
@@ -441,27 +440,18 @@ where
             stale_candidate_omission_count,
             lifecycle_omission_count,
         ));
-        rationale.vector_candidate_count = vector_candidates.len();
         rationale.graph_verified_count = graph_verified_count;
         rationale.stale_candidate_omission_count = stale_candidate_omission_count;
         rationale.stale_candidate_omission_reasons = stale_candidate_omission_reasons;
         rationale.lifecycle_omission_count = lifecycle_omission_count;
         rationale.lifecycle_omission_reasons = lifecycle_omission_reasons;
         rationale.telemetry = RetrievalTelemetry {
-            configured_candidate_limits: context.candidate_limits,
-            configured_graph_limits: context.graph_limits.clone(),
-            configured_section_limits: context.section_limits,
-            configured_object_types: context.object_type_defaults.clone(),
-            configured_lifecycle_policy: context.lifecycle_policy,
-            query_embedding_dimension,
             returned_vector_candidate_count: vector_candidates.len(),
             vector_recall_completeness,
             unique_graph_root_candidate_count: root_selection.unique_count,
             selected_graph_root_count: candidate_roots.len(),
             graph_root_omission_count: root_selection.omitted.len(),
             graph_expansion: graph_expansion_telemetry,
-            selectivity: selectivity_telemetry,
-            section_pressure,
         };
         let memory_scenes = self
             .memory_scenes(
@@ -955,7 +945,6 @@ fn build_pack(
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
-    section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
     let mut selected = HashSet::new();
@@ -1025,6 +1014,10 @@ fn build_pack(
         entry.reason != LifecycleFilterReason::ResolvedOmitted || !selected.contains(&entry.object)
     });
 
+    let mut section_counts = prompt_ready_sections()
+        .into_iter()
+        .map(|section| (section, 0))
+        .collect::<Vec<_>>();
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked) else {
             details.section_assignments.push(SectionAssignment {
@@ -1037,9 +1030,7 @@ fn build_pack(
             continue;
         };
 
-        let pressure = section_pressure_for(section_pressure, section);
         if !selected.contains(&ranked.object.object_ref()) {
-            pressure.omitted_by_limit_count += 1;
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
@@ -1060,8 +1051,12 @@ fn build_pack(
             continue;
         }
 
-        pressure.included_count += 1;
-        let rank = pressure.included_count;
+        let (_, count) = section_counts
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == section)
+            .expect("every pack section has a count");
+        *count += 1;
+        let rank = *count;
         details.admitted_by.insert(
             ranked.object.object_ref(),
             ranked
@@ -1101,20 +1096,6 @@ fn included_section_assignment_count(section_assignments: &[SectionAssignment]) 
         .count()
 }
 
-fn initial_section_pressure(
-    limits: crate::api::types::ContinuitySectionLimits,
-) -> Vec<SectionPressureSummary> {
-    prompt_ready_sections()
-        .into_iter()
-        .map(|section| SectionPressureSummary {
-            section,
-            limit: section_limit(section, limits),
-            included_count: 0,
-            omitted_by_limit_count: 0,
-        })
-        .collect()
-}
-
 fn prompt_ready_sections() -> Vec<ContextPackSection> {
     vec![
         ContextPackSection::ActiveThreads,
@@ -1127,16 +1108,6 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
         ContextPackSection::Commitments,
         ContextPackSection::CharacterSignals,
     ]
-}
-
-fn section_pressure_for(
-    section_pressure: &mut [SectionPressureSummary],
-    section: ContextPackSection,
-) -> &mut SectionPressureSummary {
-    section_pressure
-        .iter_mut()
-        .find(|summary| summary.section == section)
-        .expect("every pack section has a pressure summary")
 }
 
 fn count_reasons<R: Copy + Eq>(
@@ -1620,11 +1591,7 @@ fn graph_query_for_candidate(
     .with_max_hub_edges(context.graph_limits.max_hub_edges)
     .with_lifecycle_policy(GraphExpansionLifecyclePolicy::from(
         context.lifecycle_policy,
-    ))
-    .with_failure_policy(GraphExpansionFailurePolicy {
-        timeout_ms: context.graph_limits.timeout_ms,
-        mode: context.graph_limits.failure_mode,
-    });
+    ));
     query.current_subject_state = candidate.object.object_type == ObjectType::Entity
         && candidate.source() == GraphRootSource::Participant;
     query.reminder_only = candidate.reminder_only();
@@ -1632,39 +1599,6 @@ fn graph_query_for_candidate(
     query.allow_future_root = candidate.object.object_type == ObjectType::Episode
         && candidate.roads.contains_key(&RecallRoad::Range);
     query
-}
-
-fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &SelectivityTelemetry) {
-    total.decision_count += next.decision_count;
-    total.high_selectivity_count += next.high_selectivity_count;
-    total.low_selectivity_supported_count += next.low_selectivity_supported_count;
-    total.low_selectivity_rejected_count += next.low_selectivity_rejected_count;
-    total.fallback_count += next.fallback_count;
-}
-
-fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
-    telemetry.expanded_object_count += expansion.objects.len();
-    telemetry.expanded_relation_count += expansion.relations.len();
-    telemetry.filtered_node_count += expansion.filtered_nodes.len();
-    if let Some(failure) = expansion.bounded_failure {
-        telemetry.bounded_failure_count += 1;
-        increment_bounded_failure_reason(&mut telemetry.bounded_failure_reasons, failure.reason);
-    }
-}
-
-fn increment_bounded_failure_reason(
-    summaries: &mut Vec<crate::api::types::GraphExpansionBoundedFailureSummary>,
-    reason: GraphExpansionBoundedFailureReason,
-) {
-    let reason = public_bounded_failure_reason(reason);
-    if let Some(summary) = summaries
-        .iter_mut()
-        .find(|summary| summary.reason == reason)
-    {
-        summary.count += 1;
-    } else {
-        summaries.push(crate::api::types::GraphExpansionBoundedFailureSummary { reason, count: 1 });
-    }
 }
 
 fn graph_expansion_trace(
@@ -1715,16 +1649,6 @@ fn missing_root_expansion_trace(candidate: &CandidateRoot) -> GraphExpansionTrac
         filtered_node_count: 0,
         bounded_failure: None,
         outcome: GraphExpansionOutcome::MissingRoot,
-    }
-}
-
-fn public_bounded_failure_reason(
-    reason: GraphExpansionBoundedFailureReason,
-) -> GraphExpansionBoundedReason {
-    match reason {
-        GraphExpansionBoundedFailureReason::NodeLimit => GraphExpansionBoundedReason::NodeLimit,
-        GraphExpansionBoundedFailureReason::Timeout => GraphExpansionBoundedReason::Timeout,
-        GraphExpansionBoundedFailureReason::HubLimit => GraphExpansionBoundedReason::HubLimit,
     }
 }
 
@@ -1874,9 +1798,9 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::GraphFailureMode;
-    use crate::domain::ScopeKey;
-    use crate::ports::graph_authority::GraphExpansionFilteredNode;
+    use crate::domain::GraphExpansionBoundedReason;
+
+    use crate::test_support::TestGraphStore;
 
     use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -1886,7 +1810,7 @@ mod tests {
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::ContinuitySectionLimits;
     use crate::domain::RetentionState;
-    use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
+    use crate::models::vector::VectorRecordEmbedding;
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
@@ -1898,11 +1822,9 @@ mod tests {
         for score in [-0.0_f32, 0.0, -0.5, 0.75] {
             let expected = if score > 0.0 { score } else { 0.0 };
             let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
-            let vector = VectorRecallOverride {
-                inner: TemporaryVectorCandidateStore::open(2).await,
-                completeness: None,
-                candidate: Some(vector_candidate(object.id, object.object_type, score)),
-            };
+            let mut vector = TemporaryVectorCandidateStore::open(2).await;
+            vector.completeness = None;
+            vector.candidate = Some(vector_candidate(object.id, object.object_type, score));
             let cues = RetrievePipeline::new(&graph, &vector, &embedder)
                 .recall_cues(&RetrievalContext::new("score boundary"))
                 .await
@@ -2283,10 +2205,9 @@ mod tests {
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
 
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("deterministic store contracts").with_trace())
-            .await
-            .unwrap();
+        let context = RetrievalContext::new("deterministic store contracts").with_trace();
+        let outcome = pipeline.retrieve(context.clone()).await.unwrap();
+        let repeated = pipeline.retrieve(context).await.unwrap();
 
         assert_eq!(embedder.inputs()[0].surface, VectorSurface::Query);
         assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
@@ -2307,8 +2228,6 @@ mod tests {
             outcome.pack.relevant_episodes[0].raw_ref,
             fixtures.episode.raw_ref
         );
-        assert_eq!(outcome.rationale.vector_candidate_count, 4);
-        assert_eq!(outcome.rationale.telemetry.query_embedding_dimension, 2);
         assert_eq!(
             outcome.rationale.telemetry.returned_vector_candidate_count,
             4
@@ -2322,15 +2241,28 @@ mod tests {
         );
         assert_eq!(outcome.rationale.telemetry.selected_graph_root_count, 4);
         assert_eq!(outcome.rationale.telemetry.graph_root_omission_count, 0);
-        assert_eq!(
-            outcome
-                .rationale
-                .telemetry
-                .graph_expansion
-                .attempted_root_count,
-            4
-        );
         let trace = outcome.trace.as_ref().unwrap();
+        let repeated_trace = repeated.trace.as_ref().unwrap();
+        assert_eq!(
+            trace.section_assignments,
+            repeated_trace.section_assignments
+        );
+        assert_eq!(trace.graph_relations, repeated_trace.graph_relations);
+        assert!(trace
+            .graph_expansions
+            .iter()
+            .all(|expansion| expansion.object_count > 0));
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.episode.id
+                && assignment.section == ContextPackSection::RelevantEpisodes
+                && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
+        }));
+        assert!(trace.graph_relations.iter().any(|relation| {
+            relation.from.id == fixtures.hub_entity.id
+                && relation.to.id == fixtures.episode.id
+                && relation.relation == RelationType::Involves
+        }));
+        assert_eq!(trace.graph_expansions.len(), 4);
         assert!(trace.section_assignments.iter().any(|assignment| {
             matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
         }));
@@ -2495,11 +2427,9 @@ mod tests {
 
         for completeness in cases {
             let graph = in_memory_graph_store();
-            let vector = VectorRecallOverride {
-                inner: TemporaryVectorCandidateStore::open(2).await,
-                completeness: Some(completeness),
-                candidate: None,
-            };
+            let mut vector = TemporaryVectorCandidateStore::open(2).await;
+            vector.completeness = Some(completeness);
+            vector.candidate = None;
             let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
             let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
                 .retrieve(RetrievalContext::new("completeness telemetry"))
@@ -2545,6 +2475,10 @@ mod tests {
             .await
             .unwrap();
         let trace = outcome.trace.as_ref().unwrap();
+        assert!(trace.vector_candidates.iter().any(|candidate| {
+            candidate.object.id == missing_id
+                && candidate.object.object_type == ObjectType::DerivedMemory
+        }));
 
         assert!(outcome.pack.preferences.is_empty());
         assert!(trace
@@ -2638,36 +2572,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bounded_expansion_failure_errors_when_degraded_results_are_disabled() {
-        let fixtures = representative_fixtures();
-        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::DerivedMemory(fixtures.user_preference.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
-        let mut context = RetrievalContext::new("fail closed");
-        context.graph_limits.timeout_ms = Some(0);
-        context.graph_limits.failure_mode = GraphFailureMode::FailClosed;
-
-        let error = pipeline.retrieve(context).await.unwrap_err();
-
-        assert!(matches!(
-            error,
-            CustomError::GraphExpansionBounded(trace)
-                if trace.reason == GraphExpansionBoundedReason::Timeout
-                    && trace.at == Some(MemoryObjectRef::new(
-                        ObjectType::DerivedMemory,
-                        fixtures.user_preference.id,
-                    ))
-        ));
-    }
-
-    #[tokio::test]
     async fn bounded_empty_expansion_omits_without_reporting_graph_missing() {
         let fixtures = representative_fixtures();
         let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
@@ -2682,7 +2586,6 @@ mod tests {
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("bounded graph limits");
         context.graph_limits.max_nodes = 0;
-        context.graph_limits.failure_mode = GraphFailureMode::AllowPartialResults;
         context.include_trace = true;
 
         let outcome = pipeline.retrieve(context).await.unwrap();
@@ -2717,11 +2620,10 @@ mod tests {
             2
         );
         assert_eq!(
-            outcome
-                .rationale
-                .telemetry
-                .graph_expansion
-                .bounded_failure_reasons[0]
+            trace.graph_expansions[0]
+                .bounded_failure
+                .as_ref()
+                .unwrap()
                 .reason,
             GraphExpansionBoundedReason::NodeLimit
         );
@@ -2734,12 +2636,15 @@ mod tests {
     #[tokio::test]
     async fn non_missing_graph_expansion_errors_are_propagated() {
         let object_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0050);
-        let graph = ErrorGraphStore;
-        let vector = VectorRecallOverride {
-            inner: TemporaryVectorCandidateStore::open(2).await,
-            completeness: None,
-            candidate: Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99)),
+        let graph = TestGraphStore {
+            expansion_error: Some(crate::errors::GraphQueryError::Selection {
+                detail: "injected graph selection failure".to_owned(),
+            }),
+            ..TestGraphStore::default()
         };
+        let mut vector = TemporaryVectorCandidateStore::open(2).await;
+        vector.completeness = None;
+        vector.candidate = Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99));
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("propagate graph errors");
@@ -2810,7 +2715,6 @@ mod tests {
         assert_eq!(telemetry.unique_graph_root_candidate_count, 2);
         assert_eq!(telemetry.selected_graph_root_count, 1);
         assert_eq!(telemetry.graph_root_omission_count, 1);
-        assert_eq!(telemetry.graph_expansion.attempted_root_count, 1);
         assert!(outcome.trace.is_none());
     }
 
@@ -2903,16 +2807,28 @@ mod tests {
                     }
                 )
                 && assignment.cue_kinds == BTreeSet::from([CueKind::Topic])));
-        let preference_pressure = first
-            .rationale
-            .telemetry
-            .section_pressure
-            .iter()
-            .find(|summary| summary.section == ContextPackSection::Preferences)
-            .unwrap();
-        assert_eq!(preference_pressure.limit, 1);
-        assert_eq!(preference_pressure.included_count, 1);
-        assert_eq!(preference_pressure.omitted_by_limit_count, 1);
+        assert_eq!(
+            trace
+                .section_assignments
+                .iter()
+                .filter(|assignment| assignment.section == ContextPackSection::Preferences)
+                .count(),
+            1
+        );
+        assert_eq!(
+            trace
+                .section_assignments
+                .iter()
+                .filter(|assignment| matches!(
+                    assignment.reason,
+                    SectionAssignmentReason::OmittedByLimit {
+                        intended_section: ContextPackSection::Preferences,
+                        ..
+                    }
+                ))
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -2979,6 +2895,23 @@ mod tests {
 
         let outcome = pipeline.retrieve(context).await.unwrap();
         let trace = outcome.trace.as_ref().unwrap();
+        assert_eq!(
+            outcome.pack.derived_memories[0].memory.id,
+            fixtures.derived_reflection.id
+        );
+        assert_eq!(
+            outcome.rationale.telemetry.returned_vector_candidate_count,
+            1
+        );
+        assert_eq!(trace.vector_candidates.len(), 1);
+        assert_eq!(
+            trace.vector_candidates[0].object.id,
+            fixtures.derived_reflection.id
+        );
+        assert!(trace.section_assignments.iter().any(|assignment| {
+            assignment.object.id == fixtures.derived_reflection.id
+                && assignment.section == ContextPackSection::DerivedMemories
+        }));
         let included_assignments = trace
             .section_assignments
             .iter()
@@ -3213,164 +3146,6 @@ mod tests {
             .any(|included| included.memory.id == superseded_memory.id));
     }
 
-    #[tokio::test]
-    async fn retrieve_pipeline_expands_embedded_vector_candidate_with_embedded_oxigraph() {
-        let fixtures = representative_fixtures();
-        let graph = graph_with(&fixtures.objects(), &fixtures.links()).await;
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        seed(
-            &vector,
-            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
-            0.0,
-        )
-        .await;
-        let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
-
-        let outcome = pipeline
-            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
-            .await
-            .unwrap();
-        let repeated = pipeline
-            .retrieve(RetrievalContext::new("store contract continuity").with_trace())
-            .await
-            .unwrap();
-        let trace = outcome.trace.as_ref().unwrap();
-        let repeated_trace = repeated.trace.as_ref().unwrap();
-        let included_assignments = trace
-            .section_assignments
-            .iter()
-            .filter(|assignment| assignment.section != ContextPackSection::Omitted)
-            .count();
-
-        assert_eq!(outcome.pack.relevant_episodes[0].id, fixtures.episode.id);
-        assert_eq!(
-            outcome.pack.derived_memories[0].memory.id,
-            fixtures.derived_reflection.id
-        );
-        assert_eq!(outcome.rationale.vector_candidate_count, 1);
-        assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
-        assert!(trace.graph_expansions.iter().any(|expansion| {
-            expansion.root.id == fixtures.derived_reflection.id && expansion.object_count > 0
-        }));
-        assert!(trace.section_assignments.iter().any(|assignment| {
-            assignment.object.id == fixtures.episode.id
-                && assignment.section == ContextPackSection::RelevantEpisodes
-                && matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
-        }));
-        assert_eq!(trace.vector_candidates.len(), 1);
-        assert_eq!(
-            trace.vector_candidates[0].object.id,
-            fixtures.derived_reflection.id
-        );
-        assert_eq!(
-            trace
-                .section_assignments
-                .iter()
-                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
-                .collect::<Vec<_>>(),
-            repeated_trace
-                .section_assignments
-                .iter()
-                .map(|assignment| (assignment.object.id, assignment.section, assignment.rank))
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            trace
-                .graph_relations
-                .iter()
-                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
-                .collect::<Vec<_>>(),
-            repeated_trace
-                .graph_relations
-                .iter()
-                .map(|relation| (relation.from.id, relation.to.id, relation.relation))
-                .collect::<Vec<_>>()
-        );
-        assert!(trace.graph_relations.iter().any(|relation| {
-            relation.from.id == fixtures.hub_entity.id
-                && relation.to.id == fixtures.episode.id
-                && relation.relation == RelationType::Involves
-        }));
-        assert!(trace.section_assignments.iter().any(|assignment| {
-            assignment.object.id == fixtures.derived_reflection.id
-                && assignment.section == ContextPackSection::DerivedMemories
-        }));
-    }
-
-    #[tokio::test]
-    async fn retrieve_pipeline_after_persistent_reopen_uses_graph_authority_filters() {
-        let graph_dir = tempfile::TempDir::new().unwrap();
-        let graph_path = graph_dir.path().join("graph");
-        let fixtures = representative_fixtures();
-        let missing_vector_only_id = MemoryId::new_v4();
-
-        {
-            let graph =
-                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
-                    .unwrap();
-            graph.upsert_objects(&fixtures.objects()).await.unwrap();
-            graph.upsert_links(&fixtures.links()).await.unwrap();
-        }
-
-        {
-            let reopened =
-                crate::adapters::oxigraph::OxigraphGraphAuthorityStore::new_persistent(&graph_path)
-                    .unwrap();
-            let vector = TemporaryVectorCandidateStore::open(2).await;
-            seed(
-                &vector,
-                MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
-                0.0,
-            )
-            .await;
-            seed(
-                &vector,
-                MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
-                0.1,
-            )
-            .await;
-            let vector_only = crate::models::vector::VectorRecord::new(
-                missing_vector_only_id,
-                ObjectType::DerivedMemory,
-                VectorSurface::Summary,
-                crate::domain::DEFAULT_SCHEMA_VERSION,
-                "Derived memory present in the vector index only",
-            );
-            vector
-                .upsert_vector_records(&[VectorRecordEmbedding::new(&vector_only, &[1.0, 0.2])])
-                .await
-                .unwrap();
-            let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-            let pipeline = RetrievePipeline::new(&reopened, &vector, &embedder);
-
-            let outcome = pipeline
-                .retrieve(RetrievalContext::new("restart graph authority").with_trace())
-                .await
-                .unwrap();
-            let retrieved_ids = outcome
-                .pack
-                .derived_memories
-                .iter()
-                .chain(outcome.pack.preferences.iter())
-                .map(|included| included.memory.id)
-                .collect::<HashSet<_>>();
-
-            assert!(retrieved_ids.contains(&fixtures.derived_reflection.id));
-            assert!(!retrieved_ids.contains(&fixtures.suppressed_seed.id));
-            assert!(!retrieved_ids.contains(&missing_vector_only_id));
-            let trace = outcome.trace.as_ref().unwrap();
-            assert!(trace.vector_candidates.iter().any(|candidate| {
-                candidate.object.id == missing_vector_only_id
-                    && candidate.object.object_type == ObjectType::DerivedMemory
-            }));
-            assert!(trace
-                .lifecycle_filter_decisions
-                .iter()
-                .any(|decision| { decision.object.id == fixtures.suppressed_seed.id }));
-        }
-    }
-
     /// Upserts the object's real vector record; `tilt` orders candidates by
     /// cosine distance from the `[1.0, 0.0]` query (0.0 ranks first).
     async fn seed(vector: &TemporaryVectorCandidateStore, object: MemoryObject, tilt: f32) {
@@ -3431,200 +3206,6 @@ mod tests {
         ) -> Result<Vec<Vec<f32>>, CustomError> {
             lock(&self.inputs)?.extend(inputs.iter().cloned());
             Ok(vec![self.embedding.clone(); inputs.len()])
-        }
-    }
-
-    #[derive(Debug)]
-    struct VectorRecallOverride {
-        inner: TemporaryVectorCandidateStore,
-        completeness: Option<VectorRecallCompleteness>,
-        candidate: Option<VectorCandidateMatch>,
-    }
-
-    #[async_trait]
-    impl VectorCandidateStore for VectorRecallOverride {
-        async fn close(&self) -> Result<(), CustomError> {
-            self.inner.close().await
-        }
-
-        async fn upsert_vector_records(
-            &self,
-            records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            self.inner.upsert_vector_records(records).await
-        }
-
-        async fn search_candidates(
-            &self,
-            query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            let mut recall = self.inner.search_candidates(query).await?;
-            if let Some(completeness) = self.completeness {
-                recall.completeness = completeness;
-            }
-            if let Some(candidate) = &self.candidate {
-                recall.candidates = CanonicalCandidates::new([candidate.clone()]);
-            }
-            Ok(recall)
-        }
-
-        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            self.inner.delete_candidates(objects).await
-        }
-    }
-
-    #[derive(Debug)]
-    struct ErrorGraphStore;
-
-    #[async_trait]
-    impl GraphAuthorityStore for ErrorGraphStore {
-        async fn query_anniversaries(
-            &self,
-            date: chrono::NaiveDate,
-            participants: &[crate::domain::MemoryId],
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
-        {
-            let _ = (date, participants, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episodes_by_time(
-            &self,
-            start: Option<chrono::DateTime<chrono::Utc>>,
-            end: chrono::DateTime<chrono::Utc>,
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
-            let _ = (start, end, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episode_occasions(
-            &self,
-            episodes: &[crate::domain::MemoryObjectRef],
-        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-            let _ = episodes;
-            unreachable!("this fixture never queries episode occasions")
-        }
-
-        async fn query_last_interaction(
-            &self,
-            participant: MemoryId,
-            reference_time: chrono::DateTime<chrono::Utc>,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
-            let _ = (participant, reference_time, policy);
-            unreachable!("this fixture never queries participant interactions")
-        }
-
-        async fn query_notions_known_as(
-            &self,
-            _name: &str,
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            unreachable!("this test never queries names")
-        }
-
-        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn upsert_links(
-            &self,
-            _links: &[crate::domain::MemoryLink],
-        ) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn upsert_objects_and_links(
-            &self,
-            _objects: &[MemoryObject],
-            _links: &[crate::domain::MemoryLink],
-        ) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn query_objects(
-            &self,
-            _query: &crate::ports::graph_authority::GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_superseded_derived_memory_ids(
-            &self,
-            _memory_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_links_by_ids(
-            &self,
-            _link_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_provenance(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_thread(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<
-            (
-                Vec<crate::domain::DerivedMemory>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            Ok((Vec::new(), Vec::new()))
-        }
-
-        async fn query_thread_state(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-            _limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            Ok((Vec::new(), Vec::new()))
-        }
-
-        async fn query_scope_state(
-            &self,
-            key: &ScopeKey,
-            policy: GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (key, policy, limit);
-            unreachable!("scope selector is not used by this failure fixture")
-        }
-
-        async fn expand_bounded(
-            &self,
-            _query: &GraphExpansionQuery,
-        ) -> Result<GraphExpansion, CustomError> {
-            Err(CustomError::GraphQuery(
-                crate::errors::GraphQueryError::Selection {
-                    detail: "injected graph selection failure".to_owned(),
-                },
-            ))
         }
     }
 

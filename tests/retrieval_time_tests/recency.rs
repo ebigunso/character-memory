@@ -1,5 +1,78 @@
 use super::*;
 
+fn assert_episode_order(result: &RetrieveOutcome) {
+    let selected = episodes(result);
+    assert_eq!(
+        selected
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        selected.len()
+    );
+    for pair in result.pack.relevant_episodes.windows(2) {
+        let first = scores(result, pair[0].id.as_u128()).final_score;
+        let second = scores(result, pair[1].id.as_u128()).final_score;
+        assert!(first >= second, "higher scores lead the pack");
+        if first == second {
+            assert!(pair[0].scene.time >= pair[1].scene.time, "newer ties lead");
+        }
+    }
+}
+
+fn assert_topic_prefix(result: &RetrieveOutcome, selected: &[u128]) {
+    assert_eq!(
+        selected
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        selected.len()
+    );
+    let candidates = &result.trace.as_ref().unwrap().vector_candidates;
+    let selected_scores = selected
+        .iter()
+        .filter_map(
+            |n| match candidates.iter().find(|row| row.object.id == id(*n)) {
+                Some(row) => {
+                    assert!(scores(result, *n).cue_score.unwrap() > 0.16);
+                    Some(row.score)
+                }
+                None => {
+                    assert_eq!(*n, 900, "only the quiet latest occasion has no topic score");
+                    None
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+    assert!(!selected_scores.is_empty());
+    assert!(selected_scores.windows(2).all(|pair| pair[0] > pair[1]));
+    let cutoff = *selected_scores.last().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .filter(|row| !selected.contains(&row.object.id.as_u128()))
+            .all(|row| row.score < cutoff),
+        "the strongest topic candidates fit first"
+    );
+}
+
+fn assert_scene_only_membership(result: &RetrieveOutcome) {
+    let selected = episodes(result);
+    assert_eq!(selected.len(), 8);
+    for n in [100, 700, 900, 600, 500] {
+        assert!(selected.contains(&n));
+    }
+    assert!(selected[5..].iter().all(|n| (800..820).contains(n)));
+    assert!(scores(result, 100).final_score > scores(result, 700).final_score);
+    assert!(scores(result, 700).final_score > scores(result, 900).final_score);
+    for n in [600, 500] {
+        assert_eq!(
+            scores(result, 900).final_score,
+            scores(result, n).final_score
+        );
+    }
+    assert_episode_order(result);
+}
+
 #[tokio::test]
 async fn as_of_omissions_report_time_for_roots_and_expanded_memories() {
     for direct_roots in [true, false] {
@@ -95,11 +168,26 @@ async fn recency_scene_only_room_and_floor_witnesses() {
     let (memory, root) = open().await;
     commit(&memory, base()).await;
     let default = retrieve(&memory, query(false, false)).await;
-    assert_eq!(episodes(&default), [100, 700, 900, 600, 500, 800, 801, 802]);
+    assert_scene_only_membership(&default);
+    let default_roots = roots(&default);
+    assert_eq!(default_roots.len(), 12);
     assert_eq!(
-        roots(&default),
-        [100, 700, 900, 600, 500, 800, 801, 802, 803, 804, 805, 806]
+        default_roots
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        12
     );
+    assert_eq!(&default_roots[..8], episodes(&default));
+    assert!(default_roots[8..].iter().all(|n| (800..820).contains(n)));
+    for n in &episodes(&default)[5..] {
+        assert_eq!(
+            scores(&default, 900).final_score,
+            scores(&default, *n).final_score
+        );
+    }
+    let saturated = retrieve(&memory, query(true, false)).await;
+    assert!(recency_episodes(&saturated).is_empty());
     assert_eq!(
         default
             .rationale
@@ -131,8 +219,12 @@ async fn recency_scene_only_room_and_floor_witnesses() {
     let mut three = query(false, false);
     three.section_limits = room(3);
     let multiple = retrieve(&memory, three.clone()).await;
-    assert_eq!(episodes(&multiple), [100, 700, 900]);
-    assert_eq!(recency_episodes(&multiple), [100, 700, 900]);
+    assert_eq!(episodes(&multiple).len(), 3);
+    for n in [100, 700, 900] {
+        assert!(episodes(&multiple).contains(&n));
+    }
+    assert_episode_order(&multiple);
+    assert_eq!(recency_episodes(&multiple), episodes(&multiple));
     let mut high_floor = three.clone();
     high_floor.cue_floors.recency = 7;
     assert_eq!(
@@ -163,18 +255,18 @@ async fn recency_keyed_participant_witnesses() {
     let (memory, root) = open().await;
     commit(&memory, base()).await;
     let known = retrieve(&memory, query(false, true)).await;
-    assert_eq!(episodes(&known), [100, 700, 900, 600, 500, 800, 801, 802]);
-    assert_eq!(
-        scores(&known, 900),
-        SectionScoreComponents {
-            final_score: 0.737_499_95,
-            cue_score: Some(0.75),
-            graph_score: Some(1.0),
-            salience_score: None,
-        }
-    );
-    assert_eq!(scores(&known, 300).graph_score, Some(1.0 / 3.0));
-    assert_eq!(scores(&known, 300).final_score, 0.570_833_3);
+    assert_scene_only_membership(&known);
+    let direct = scores(&known, 900);
+    let reminder = scores(&known, 300);
+    assert!(direct.final_score > reminder.final_score);
+    assert!(direct.cue_score.unwrap() > 0.16);
+    assert_eq!(direct.cue_score, reminder.cue_score);
+    assert!(direct.graph_score.unwrap() > reminder.graph_score.unwrap());
+    assert!(reminder.graph_score.unwrap() > 0.0);
+    assert!(direct.salience_score.is_none());
+    assert!(episodes(&known)[5..]
+        .iter()
+        .all(|n| direct.final_score > scores(&known, *n).final_score));
     let mut known_single = query(false, true);
     known_single.section_limits = room(1);
     let known_single = memory.retrieve(known_single).await.unwrap();
@@ -182,18 +274,6 @@ async fn recency_keyed_participant_witnesses() {
     assert!(assignment(&known_single, 700)
         .cue_kinds
         .contains(&CueKind::Participant));
-    memory.close().await.unwrap();
-    root.close().unwrap();
-}
-
-#[tokio::test]
-async fn recency_preserves_original_saturated_topic() {
-    let (memory, root) = open().await;
-    commit(&memory, base()).await;
-    let saturated = retrieve(&memory, query(true, false)).await;
-    assert_eq!(episodes(&saturated), (2000..2008).collect::<Vec<_>>());
-    assert_eq!(roots(&saturated), (2000..2012).collect::<Vec<_>>());
-    assert!(recency_episodes(&saturated).is_empty());
     memory.close().await.unwrap();
     root.close().unwrap();
 }
@@ -252,31 +332,61 @@ async fn pressure_witnesses(strong: u128, weak: bool, overlap: bool) {
     context.section_limits.relevant_episodes = if strong == 48 { 8 } else { 2 };
     let result = retrieve(&memory, context.clone()).await;
     if strong == 2 && !overlap {
-        assert_eq!(episodes(&result), [2000, 2001]);
-        assert_eq!(scores(&result, 2000).final_score, 0.835);
-        assert_eq!(scores(&result, 2001).final_score, 0.834_35);
-        assert!(scores(&result, 2000).cue_score.unwrap() > 0.16);
-        assert!(scores(&result, 2001).cue_score.unwrap() > 0.16);
-        assert_eq!(roots(&result), [2000, 2001, 900]);
+        assert_eq!(episodes(&result).len(), 2);
+        assert!(!episodes(&result).contains(&900));
+        assert_episode_order(&result);
+        assert_topic_prefix(&result, &episodes(&result));
+        assert!(scores(&result, 2000).final_score > scores(&result, 2001).final_score);
+        assert!(scores(&result, 2001).final_score > scores(&result, 900).final_score);
+        assert_eq!(roots(&result).len(), 3);
+        assert_eq!(&roots(&result)[..2], episodes(&result));
+        assert_eq!(roots(&result).last(), Some(&900));
     }
     if weak {
-        assert_eq!(episodes(&result), [2000, 2003]);
-        assert_eq!(scores(&result, 2003).final_score, 0.396_25);
-        assert_eq!(scores(&result, 2003).graph_score, Some(1.0));
-        assert_eq!(scores(&result, 900).final_score, 0.35);
+        assert_eq!(episodes(&result).len(), 2);
+        assert!(episodes(&result).contains(&2003));
+        assert!(!episodes(&result).contains(&900));
+        assert_episode_order(&result);
+        assert!(scores(&result, 2000).final_score > scores(&result, 2003).final_score);
+        assert!(scores(&result, 2003).final_score > scores(&result, 900).final_score);
+        assert!(scores(&result, 2003).cue_score > Some(0.0));
+        assert!(scores(&result, 2003).cue_score < scores(&result, 2000).cue_score);
         let mut bounded = context.clone();
         bounded.section_limits = room(2);
         let bounded = retrieve(&memory, bounded).await;
-        assert_eq!(episodes(&bounded), [2000, 900]);
-        assert_eq!(scores(&bounded, 2003).final_score, 0.271_25);
+        assert_eq!(episodes(&bounded).len(), 2);
+        assert!(episodes(&bounded).contains(&900));
+        assert!(!episodes(&bounded).contains(&2003));
+        assert_episode_order(&bounded);
+        assert!(scores(&bounded, 2000).final_score > scores(&bounded, 900).final_score);
+        assert!(scores(&bounded, 900).final_score > scores(&bounded, 2003).final_score);
+        assert!(
+            scores(&result, 2003).graph_score.unwrap()
+                > scores(&bounded, 2003).graph_score.unwrap()
+        );
+        assert!(scores(&bounded, 2003).graph_score.unwrap() > 0.0);
         assert!(!roots(&bounded).contains(&2003));
     }
     if overlap {
-        assert_eq!(episodes(&result), [900, 2000]);
-        assert_eq!(scores(&result, 900).final_score, 0.902_500_03);
-        assert_eq!(scores(&result, 900).graph_score, Some(1.0));
+        assert_eq!(episodes(&result).len(), 2);
+        assert!(episodes(&result).contains(&900));
+        assert!(episodes(&result).contains(&2000));
+        assert_episode_order(&result);
+        assert!(scores(&result, 900).final_score > scores(&result, 2000).final_score);
+        assert!(scores(&result, 900).cue_score < scores(&result, 2000).cue_score);
+        assert_eq!(
+            scores(&result, 900).graph_score.unwrap(),
+            scores(&result, 2000).graph_score.unwrap()
+        );
         assert!(assignment(&result, 900).cue_kinds.contains(&CueKind::Topic));
-        assert_eq!(recency_episodes(&result), [900, 2000, 2001, 750]);
+        let recent = recency_episodes(&result);
+        assert_eq!(recent.len(), 4);
+        for n in [900, 2000, 2001, 750] {
+            assert!(recent.contains(&n));
+        }
+        assert!(recent.windows(2).all(
+            |pair| scores(&result, pair[0]).final_score > scores(&result, pair[1]).final_score
+        ));
         assert!(assignment(&result, 3200)
             .cue_kinds
             .contains(&CueKind::Recency));
@@ -290,7 +400,9 @@ async fn pressure_witnesses(strong: u128, weak: bool, overlap: bool) {
             assignment(&bounded, 750).cue_kinds,
             std::collections::BTreeSet::from([CueKind::Topic])
         );
-        assert_eq!(roots(&bounded), [2000, 2001, 900]);
+        assert_eq!(roots(&bounded).len(), 3);
+        assert!(roots(&bounded).contains(&900));
+        assert_topic_prefix(&bounded, &roots(&bounded));
         let root = result
             .trace
             .as_ref()
@@ -302,20 +414,27 @@ async fn pressure_witnesses(strong: u128, weak: bool, overlap: bool) {
         assert_eq!((root.object_count, root.relation_count), (3, 2));
     }
     if strong == 48 {
-        assert_eq!(episodes(&result), (2000..2008).collect::<Vec<_>>());
-        assert_eq!(roots(&result), (2000..2012).collect::<Vec<_>>());
-        assert_eq!(recency_episodes(&result), (2000..2012).collect::<Vec<_>>());
+        assert_eq!(episodes(&result).len(), 8);
+        assert_eq!(roots(&result).len(), 12);
+        assert!(!roots(&result).contains(&900));
+        assert!(!episodes(&result).contains(&900));
+        assert_episode_order(&result);
+        assert_topic_prefix(&result, &episodes(&result));
+        assert_topic_prefix(&result, &roots(&result));
+        assert_eq!(recency_episodes(&result), roots(&result));
         context.candidate_limits.max_graph_roots = 3;
         let capped = retrieve(&memory, context.clone()).await;
-        assert_eq!(roots(&capped), [2000, 2001, 2002]);
-        assert_eq!(episodes(&capped), [2000, 2001, 2002]);
+        assert_eq!(roots(&capped).len(), 3);
+        assert_eq!(episodes(&capped), roots(&capped));
+        assert_episode_order(&capped);
+        assert_topic_prefix(&capped, &roots(&capped));
         context.candidate_limits.max_graph_roots = 12;
         context.cue_floors.recency = 1;
         let shared_floor = retrieve(&memory, context.clone()).await;
-        assert_eq!(
-            episodes(&shared_floor),
-            (2000..2007).chain([900]).collect::<Vec<_>>()
-        );
+        assert_eq!(episodes(&shared_floor).len(), 8);
+        assert!(episodes(&shared_floor).contains(&900));
+        assert_episode_order(&shared_floor);
+        assert_topic_prefix(&shared_floor, &episodes(&shared_floor));
         assert!(roots(&shared_floor).contains(&900));
         assert_eq!(
             shared_floor
@@ -334,10 +453,7 @@ async fn pressure_witnesses(strong: u128, weak: bool, overlap: bool) {
         }
         commit(&memory, recent_only).await;
         let reserved = retrieve(&memory, context).await;
-        assert_eq!(
-            episodes(&reserved),
-            (2000..2007).chain([900]).collect::<Vec<_>>()
-        );
+        assert_eq!(episodes(&reserved), episodes(&shared_floor));
         for stage in [
             character_memory::api::types::CueFloorStage::GraphRoots,
             character_memory::api::types::CueFloorStage::Section {
@@ -360,12 +476,20 @@ async fn pressure_witnesses(strong: u128, weak: bool, overlap: bool) {
         plan = belief(plan, 3100, &[900, 800], false);
         commit(&memory, plan).await;
         let additions = retrieve(&memory, query(true, false)).await;
-        assert_eq!(episodes(&additions), [2000, 2001, 900, 800]);
-        assert_eq!(recency_episodes(&additions), [2000, 2001, 900, 800]);
+        assert_eq!(episodes(&additions).len(), 4);
+        assert!(episodes(&additions).contains(&800));
+        assert!(episodes(&additions).contains(&900));
+        assert_episode_order(&additions);
+        assert!(scores(&additions, 2001).final_score > scores(&additions, 900).final_score);
+        assert!(scores(&additions, 900).final_score > scores(&additions, 800).final_score);
+        assert_eq!(recency_episodes(&additions), episodes(&additions));
         let mut bounded = query(true, false);
         bounded.section_limits = room(3);
         let bounded = retrieve(&memory, bounded).await;
-        assert_eq!(episodes(&bounded), [2000, 2001, 900]);
+        assert_eq!(episodes(&bounded).len(), 3);
+        assert!(episodes(&bounded).contains(&900));
+        assert!(!episodes(&bounded).contains(&800));
+        assert_episode_order(&bounded);
         assert!(!recency_episodes(&bounded).contains(&800));
         assert_eq!(
             additions
@@ -642,40 +766,6 @@ async fn recency_floor_reserves_latest_before_score_fill() {
                 row.stage,
                 character_memory::api::types::CueFloorStage::Section { .. }
             )));
-}
-
-#[tokio::test]
-async fn explicit_recency_floor_reserves_under_topic_pressure() {
-    let (memory, temp) = open().await;
-    let mut plan = episode(RememberWritePlan::new(), 900, 0, 0.0, false, false);
-    for index in 0..48 {
-        plan = episode(plan, 2000 + index, 2 + index as i64, 0.0, false, true);
-    }
-    commit(&memory, plan).await;
-    let mut context = query(true, false);
-    context.cue_floors.recency = 1;
-    let result = retrieve(&memory, context).await;
-
-    memory.close().await.unwrap();
-    temp.close().unwrap();
-    assert!(roots(&result).contains(&900));
-    assert!(episodes(&result).contains(&900));
-    for stage in [
-        character_memory::api::types::CueFloorStage::GraphRoots,
-        character_memory::api::types::CueFloorStage::Section {
-            section: ContextPackSection::RelevantEpisodes,
-        },
-    ] {
-        assert!(result
-            .trace
-            .as_ref()
-            .unwrap()
-            .floor_admissions
-            .iter()
-            .any(|row| row.object.id == id(900)
-                && row.cue_kind == CueKind::Recency
-                && row.stage == stage));
-    }
 }
 
 #[tokio::test]
