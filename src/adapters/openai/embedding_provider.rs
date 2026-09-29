@@ -3,8 +3,8 @@ use reqwest::{Client, StatusCode};
 use serde_json::json;
 use std::sync::Arc;
 
-use crate::config::EmbeddingProviderSettings;
-use crate::errors::{CustomError, EmbeddingError, EmbeddingTransportErrorKind};
+use crate::errors::{EmbeddingError, EmbeddingTransportErrorKind};
+use crate::models::vector::EmbeddingModel;
 use crate::EmbeddingProvider;
 
 const OPENAI_EMBEDDING_ENDPOINT: &str = "https://api.openai.com/v1/embeddings";
@@ -29,32 +29,16 @@ pub(crate) struct OpenAIEmbeddingProvider {
 }
 
 impl OpenAIEmbeddingProvider {
-    /// Creates a new OpenAIEmbeddingProvider instance.
-    ///
-    /// # Parameters
-    ///
-    /// - `settings`: Configuration settings containing the OpenAI API key
-    ///
-    /// # Returns
-    ///
-    /// - `Ok`: A new `OpenAIEmbeddingProvider` instance
-    /// - `Err`: A `CustomError` if initialization fails (e.g., missing API key)
-    pub fn new(settings: EmbeddingProviderSettings) -> Result<Self, CustomError> {
-        if settings.api_key.trim().is_empty() {
-            return Err(EmbeddingError::MissingApiKey.into());
-        }
-        println!(
-            "OpenAI Embedding Provider: Initialized with {} model.",
-            settings.model.as_str()
-        );
-        Ok(OpenAIEmbeddingProvider {
-            api_key: settings.api_key,
-            model: settings.model.as_str().to_string(),
-            vector_size: settings.model.vector_size() as usize,
+    /// Creates a provider from settings admitted by composition preflight.
+    pub fn new(api_key: String, model: EmbeddingModel) -> Self {
+        Self {
+            api_key,
+            model: model.as_str().to_owned(),
+            vector_size: model.vector_size() as usize,
             transport: Arc::new(ReqwestOpenAIEmbeddingTransport {
                 client: Client::new(),
             }),
-        })
+        }
     }
 }
 
@@ -263,12 +247,7 @@ fn embedding_transport_error(error: reqwest::Error) -> EmbeddingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::vector::EmbeddingModel;
     use std::sync::Mutex;
-
-    fn create_test_settings(api_key: &str) -> EmbeddingProviderSettings {
-        EmbeddingProviderSettings::new(api_key.to_string(), EmbeddingModel::TextEmbedding3Large)
-    }
 
     fn create_test_provider(
         transport: Arc<dyn OpenAIEmbeddingTransport>,
@@ -281,24 +260,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_new_with_empty_api() {
-        let settings = create_test_settings("");
-        let error = match OpenAIEmbeddingProvider::new(settings) {
-            Ok(_) => panic!("empty API key should be rejected"),
-            Err(error) => error,
-        };
-
-        assert!(matches!(
-            error,
-            CustomError::Embedding(EmbeddingError::MissingApiKey)
-        ));
-    }
-
     #[tokio::test]
     async fn test_generate_embedding_with_empty_text() {
-        let settings = create_test_settings("valid_key");
-        let provider = OpenAIEmbeddingProvider::new(settings).unwrap();
+        let provider = OpenAIEmbeddingProvider::new(
+            "valid_key".to_owned(),
+            EmbeddingModel::TextEmbedding3Large,
+        );
         let error = provider.generate_embedding("  ").await.unwrap_err();
 
         assert_eq!(error, EmbeddingError::BlankInput { index: None });

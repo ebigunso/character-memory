@@ -3,9 +3,9 @@ use test_support::id;
 
 use async_trait::async_trait;
 use character_memory::{
-    zero_norm_record_fixture, CharacterMemory, CollectionCompatibilityError, CollectionMismatch,
-    ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError, EmbeddingProvider,
-    EpisodeDraft, ForgetMemoryDraft, LifecycleTargetRef, MemoryId, ObjectType, ObservationDraft,
+    CharacterMemory, CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
+    ConfigValidationReason, CustomError, EmbeddingError, EmbeddingProvider, EpisodeDraft,
+    ForgetMemoryDraft, LifecycleTargetRef, MemoryId, MemoryObjectRef, ObjectType, ObservationDraft,
     RememberInput, RememberOptions, RetrievalCandidateLimits, RetrievalContext, Settings,
     VectorCandidateTrace, VectorIndexingCause, VectorRecallCompleteness,
 };
@@ -455,18 +455,16 @@ async fn open_for_zero_norm(
 ) -> Result<CharacterMemory, CustomError> {
     let settings = Settings::new(builder.build().unwrap())?;
     let vector_size = settings.get_embedding_vector_size()?;
-    let (_, _, _, record_text, mut fixture_embedding) = zero_norm_record_fixture();
-    fixture_embedding.resize(vector_size, 0.0);
     CharacterMemory::new_with_embedding_provider(
         settings,
         collection.to_owned(),
         Box::new(ZeroNormFixtureEmbeddingProvider {
             vector_size,
             zero_texts: [
-                format!("Episode summary: {record_text}"),
+                "Episode summary: Episode summary".to_owned(),
                 ZERO_NORM_QUERY.to_owned(),
             ],
-            fixture_embedding,
+            fixture_embedding: vec![0.0; vector_size],
         }),
     )
     .await
@@ -514,8 +512,8 @@ async fn remember_fixture(memory: &CharacterMemory) {
 const ZERO_NORM_QUERY: &str = "zero norm query";
 
 async fn assert_zero_norm_contract(memory: &CharacterMemory) {
-    let (object, _, _, record_text, _) = zero_norm_record_fixture();
-    let mut rejected = EpisodeDraft::new(record_text);
+    let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
+    let mut rejected = EpisodeDraft::new("Episode summary");
     rejected.id = Some(object.id);
     let outcome = memory
         .remember(
