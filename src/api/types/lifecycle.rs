@@ -3,6 +3,7 @@ use crate::domain::{
     ObjectType,
 };
 use crate::errors::VectorIndexingCause;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::write_plan::StatsUpdateStatus;
@@ -206,6 +207,8 @@ pub struct ReplacementDerivedMemoryDraft {
     pub entity_ids: Vec<MemoryId>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
+    /// The replacement's own due instant; never inherited from its predecessor.
+    pub due_at: Option<DateTime<Utc>>,
     /// Source-free grounding given by the application; requires at least one notion subject.
     pub given_by_application: bool,
     pub salience_score: f32,
@@ -225,6 +228,7 @@ impl ReplacementDerivedMemoryDraft {
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             salience_score: 0.5,
             supersedes: Vec::new(),
@@ -269,6 +273,7 @@ impl ReplacementDerivedMemoryDraft {
             has_sources,
             self.given_by_application,
             &self.assertions,
+            self.due_at.is_some(),
         )?;
         if !has_sources && !self.given_by_application {
             return Err(LifecycleDtoValidationError::MissingReplacementSource);

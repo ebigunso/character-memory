@@ -355,6 +355,25 @@ impl<'a> SparqlGraphSelectors<'a> {
             .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
     }
 
+    pub(crate) fn select_due_obligations(
+        &self,
+        before: DateTime<Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        let predicate = format!(
+            r#"?memory a <{class}> ; <{kind}> ?kind ; <{due_at}> ?dueAt .
+            VALUES ?kind {{ "open_loop" "commitment" }}
+            FILTER(xsd:dateTime(?dueAt) < {before}^^xsd:dateTime)"#,
+            class = vocab::CLASS_DERIVED_MEMORY,
+            kind = vocab::DERIVED_TYPE,
+            due_at = vocab::DUE_AT,
+            before = sparql_string_literal(&before.to_rfc3339()),
+        );
+        self.select_state(&predicate, policy, limit, false, true, None)
+            .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
+    }
+
     pub(crate) fn select_thread_state(
         &self,
         query: &GraphDerivedMemoryThreadQuery,

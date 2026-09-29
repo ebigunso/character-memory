@@ -384,6 +384,7 @@ pub(super) fn memory_object_from_rdf(
             object_type,
             derived_type: enum_literal(subject, values, super::vocabulary::DERIVED_TYPE)?,
             assertions: belief_assertions_from_rdf(values, subjects)?,
+            due_at: optional_timestamp_literal(values, super::vocabulary::DUE_AT)?,
             given_by_application: values
                 .literal(subject, super::vocabulary::GIVEN_BY_APPLICATION)?
                 .parse::<bool>()

@@ -45,6 +45,7 @@ pub(crate) fn validate_belief(
     has_sources: bool,
     given_by_application: bool,
     assertions: &[BeliefAssertion],
+    has_due_instant: bool,
 ) -> Result<(), BeliefValidationError> {
     if given_by_application {
         if has_sources {
@@ -53,6 +54,13 @@ pub(crate) fn validate_belief(
         if subjects.is_empty() {
             return Err(BeliefValidationError::GivenWithoutSubject);
         }
+    }
+    let is_obligation = matches!(
+        derived_type,
+        DerivedType::OpenLoop | DerivedType::Commitment
+    );
+    if has_due_instant && !is_obligation {
+        return Err(BeliefValidationError::ObligationFieldOnOtherKind { derived_type });
     }
     let mut roles = std::collections::HashMap::new();
     for assertion in assertions {
@@ -69,10 +77,7 @@ pub(crate) fn validate_belief(
             }
             BeliefPredicate::KnownAs { .. } => {}
             BeliefPredicate::Actor | BeliefPredicate::Counterpart => {
-                if !matches!(
-                    derived_type,
-                    DerivedType::OpenLoop | DerivedType::Commitment
-                ) {
+                if !is_obligation {
                     return Err(BeliefValidationError::ObligationFieldOnOtherKind { derived_type });
                 }
                 if roles

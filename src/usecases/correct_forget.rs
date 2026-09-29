@@ -914,6 +914,7 @@ fn replacement_memory(
         entity_ids: draft.entity_ids,
         scope_keys: Vec::new(),
         assertions: draft.assertions,
+        due_at: draft.due_at,
         given_by_application: draft.given_by_application,
         salience_score: draft.salience_score,
         supersedes: draft.supersedes,
@@ -3268,6 +3269,7 @@ mod tests {
         DerivedMemory {
             scope_keys: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             id: ids.old,
             object_type: ObjectType::DerivedMemory,

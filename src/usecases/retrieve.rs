@@ -4,6 +4,8 @@ mod state;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use chrono::{DateTime, FixedOffset};
+
 use crate::api::types::{
     AdmissionRoad, ContextPackSection, ContinuityContextPack, CueFloorAdmission, CueFloorStage,
     CueKind, FanoutUtilizationTrace, GraphExpansionOutcome, GraphExpansionTelemetry,
@@ -17,7 +19,7 @@ use crate::domain::{
     DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
     ThreadStatus, VectorSurface,
 };
-use crate::errors::CustomError;
+use crate::errors::{ConfigValidationError, ConfigValidationReason, CustomError};
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
 use crate::policy::graph_expansion::graph_expansion_bounded_failure_trace;
 use crate::policy::{
@@ -205,6 +207,45 @@ where
                     explicit_roots.push(root);
                 }
             }
+            let due_before = context
+                .scene
+                .time
+                .date_naive()
+                .succ_opt()
+                .and_then(|day| day.and_hms_opt(0, 0, 0))
+                .and_then(|midnight| {
+                    midnight
+                        .and_local_timezone(*context.scene.time.offset())
+                        .single()
+                })
+                .ok_or_else(|| ConfigValidationError {
+                    keys: vec!["scene.time"],
+                    reason: ConfigValidationReason::OutOfDomain {
+                        expected: "a representable next local day",
+                        actual: context.scene.time.to_rfc3339(),
+                    },
+                })?
+                .to_utc();
+            let (rows, filtered) = self
+                .graph_store
+                .query_due_obligations(
+                    due_before,
+                    GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
+                    RecallRoad::Due.contribution(&context),
+                )
+                .await?;
+            assembly
+                .lifecycle_decisions
+                .extend(filtered.into_iter().map(|entry| {
+                    filtered_lifecycle_decision(
+                        entry.object_ref,
+                        entry.reason,
+                        &entry.superseded_by,
+                    )
+                }));
+            explicit_roots.extend(rows.into_iter().enumerate().map(|(rank, row)| {
+                CandidateRoot::from_rank(row, ObjectType::DerivedMemory, RecallRoad::Due, 0.0, rank)
+            }));
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
         assembly
@@ -469,8 +510,7 @@ where
             ranked_objects,
             (&state_scopes, &scope_roads),
             &section_orders,
-            context.section_limits,
-            context.cue_floors,
+            &context,
             &mut details,
             self.character_id,
         );
@@ -958,6 +998,7 @@ fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
         CueKind::Place,
         CueKind::Activity,
         CueKind::Trigger,
+        CueKind::Due,
         CueKind::DateMatch,
         CueKind::Topic,
         CueKind::Recency,
@@ -1031,11 +1072,12 @@ fn build_pack(
     mut ranked_objects: Vec<RankedObject>,
     (state_scopes, scope_roads): (&state::StateScopes, &[RecallRoad]),
     orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
-    limits: crate::api::types::ContinuitySectionLimits,
-    floors: RetrievalCueFloors,
+    context: &RetrievalContext,
     details: &mut RetrievalDetails,
     character_id: MemoryId,
 ) -> ContinuityContextPack {
+    let limits = context.section_limits;
+    let floors = context.cue_floors;
     let mut pack = ContinuityContextPack::empty();
     let mut selected = HashSet::new();
     for section in prompt_ready_sections() {
@@ -1170,9 +1212,14 @@ fn build_pack(
             MemoryObject::Episode(object) => pack.relevant_episodes.push(object),
             MemoryObject::Observation(object) => pack.salient_observations.push(object),
             MemoryObject::MemoryThread(object) => pack.active_threads.push(object),
-            MemoryObject::DerivedMemory(object) => {
-                push_derived(&mut pack, section, object, ranked.resolved_by, character_id)
-            }
+            MemoryObject::DerivedMemory(object) => push_derived(
+                &mut pack,
+                section,
+                object,
+                ranked.resolved_by,
+                character_id,
+                context.scene.time,
+            ),
             MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {}
         }
     }
@@ -1245,6 +1292,7 @@ fn push_derived(
     object: DerivedMemory,
     resolved_by: Vec<MemoryId>,
     character_id: MemoryId,
+    scene_time: DateTime<FixedOffset>,
 ) {
     let mut included = IncludedDerivedMemory::from(object);
     included.resolved_by = resolved_by;
@@ -1252,6 +1300,18 @@ fn push_derived(
         included.memory.derived_type,
         DerivedType::OpenLoop | DerivedType::Commitment
     ) {
+        included.due_state = included.memory.due_at.map(|due_at| {
+            use crate::api::types::DueState;
+            match due_at
+                .with_timezone(scene_time.offset())
+                .date_naive()
+                .cmp(&scene_time.date_naive())
+            {
+                std::cmp::Ordering::Less => DueState::Overdue,
+                std::cmp::Ordering::Equal => DueState::DueToday,
+                std::cmp::Ordering::Greater => DueState::NotYetDue,
+            }
+        });
         included.direction = included.memory.assertions.iter().find_map(|assertion| {
             if assertion.subject != character_id {
                 return None;
@@ -1285,6 +1345,7 @@ enum RecallRoad {
     Place,
     Activity,
     Trigger,
+    Due,
     Topic,
     ParticipantDescription,
     SettingWords,
@@ -1358,6 +1419,15 @@ impl RecallRoad {
                 OneHop,
                 true,
                 RootCap,
+                true,
+            ),
+            Self::Due => (
+                CueKind::Due,
+                AdmissionRoad::Due,
+                GraphRootSource::Due,
+                OneHop,
+                true,
+                Room,
                 true,
             ),
             Self::Topic => (
@@ -1458,6 +1528,7 @@ fn cue_floor(floors: RetrievalCueFloors, kind: CueKind) -> usize {
         CueKind::Place => floors.place,
         CueKind::Activity => floors.activity,
         CueKind::Trigger => floors.trigger,
+        CueKind::Due => floors.due,
         CueKind::Topic => floors.topic,
         CueKind::DateMatch => floors.date_match,
         CueKind::Recency => floors.recency,

@@ -402,6 +402,8 @@ pub struct DerivedMemory {
     pub(crate) scope_keys: Vec<ScopeKey>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
+    /// An application-supplied due instant for an open loop or commitment.
+    pub due_at: Option<DateTime<Utc>>,
     /// Source-free grounding given by the application; requires at least one notion subject.
     pub given_by_application: bool,
     pub salience_score: f32,
@@ -427,6 +429,7 @@ impl DerivedMemory {
             has_sources,
             self.given_by_application,
             &self.assertions,
+            self.due_at.is_some(),
         )?;
         if !has_sources && !self.given_by_application {
             return Err(DomainValidationError::MissingDerivedSource);

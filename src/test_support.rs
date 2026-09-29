@@ -486,6 +486,23 @@ impl GraphAuthorityStore for TestGraphStore {
             .await
     }
 
+    async fn query_due_obligations(
+        &self,
+        before: DateTime<Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        self.store
+            .query_due_obligations(before, policy, limit)
+            .await
+    }
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,
@@ -1014,6 +1031,7 @@ fn derived_memory(
     DerivedMemory {
         scope_keys: Vec::new(),
         assertions: Vec::new(),
+        due_at: None,
         given_by_application: false,
         id,
         object_type: ObjectType::DerivedMemory,

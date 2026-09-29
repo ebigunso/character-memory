@@ -575,6 +575,7 @@ async fn configured_root_floors_are_reserved_before_spare_slots_are_shared() {
                 place: 0,
                 activity: 5,
                 trigger: 0,
+                due: 0,
                 topic: 1,
                 recency: 0,
             };
@@ -911,6 +912,7 @@ async fn single_kind_keeps_section_ids_and_order() {
                 place: 0,
                 activity: 0,
                 trigger: 0,
+                due: 0,
                 topic: 0,
                 recency: 0,
             };
@@ -926,7 +928,7 @@ async fn single_kind_keeps_section_ids_and_order() {
                 CueKind::Participant => 2000,
                 CueKind::Place => 3000,
                 CueKind::Activity => 4000,
-                CueKind::Recency | CueKind::DateMatch | CueKind::Trigger => {
+                CueKind::Recency | CueKind::DateMatch | CueKind::Trigger | CueKind::Due => {
                     unreachable!("fixture uses only given cues")
                 }
             };
@@ -1007,6 +1009,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             place: floor,
             activity: floor,
             trigger: 0,
+            due: 0,
             topic: floor,
             recency: 0,
         };
@@ -1035,6 +1038,7 @@ async fn short_caps_serve_successive_rounds_in_scene_order() {
             place: floor,
             activity: floor,
             trigger: 0,
+            due: 0,
             topic: floor,
             recency: 0,
         };
@@ -1131,7 +1135,7 @@ async fn each_zero_floor_removes_only_its_reservation() {
             CueKind::Place => floors.place = 0,
             CueKind::Activity => floors.activity = 0,
             CueKind::Topic => floors.topic = 0,
-            CueKind::Recency | CueKind::DateMatch | CueKind::Trigger => {
+            CueKind::Recency | CueKind::DateMatch | CueKind::Trigger | CueKind::Due => {
                 unreachable!("fixture uses only given cues")
             }
         }
@@ -1464,6 +1468,7 @@ mod scene_cohorts {
                 place: 0,
                 activity: 0,
                 trigger: 0,
+                due: 0,
                 topic: 0,
                 recency: 0,
             };
