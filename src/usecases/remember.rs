@@ -120,10 +120,6 @@ where
                 .repair_needed
                 .extend(diagnostics.repair_needed);
             outcome
-                .diagnostics
-                .candidate_counts
-                .extend(diagnostics.candidate_counts);
-            outcome
         })
     }
 

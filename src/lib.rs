@@ -20,7 +20,7 @@ pub use crate::models::vector::zero_norm_record_fixture;
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
     default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult, AdmissionRoad,
-    CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     ContextPackSection, ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft,
     CorrectionCascadePolicy, CorrectionTarget, CueKind, DerivedMemoryCandidate, DerivedMemoryDraft,
     DiagnosticSeverity, DraftDefaults, EntityCandidate, EntityDraft, EpisodeCandidate,
@@ -57,8 +57,7 @@ pub use crate::domain::{
     GraphExpansionBoundedReason, LifecycleDtoValidationError, MemoryCandidateKind, MemoryId,
     MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef, MemoryThread, Modality,
     ObjectType, Observation, RelationType, RetentionState, Scene, SceneParticipant, SceneSetting,
-    SourceReferenceKind, ThreadStatus, VectorSurface, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    SourceReferenceKind, ThreadStatus, VectorSurface, DEFAULT_SCHEMA_VERSION,
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,

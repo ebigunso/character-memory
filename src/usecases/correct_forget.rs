@@ -2367,11 +2367,11 @@ mod tests {
         let failure = outcome
             .vector_maintenance_failure
             .expect("delete failure should be explicit");
+        assert_eq!(failure.failures.len(), 1);
         assert_eq!(
-            failure.unmaintained_objects(),
+            failure.failures[0].objects,
             vec![MemoryObjectRef::new(ObjectType::DerivedMemory, ids.old)]
         );
-        assert_eq!(failure.failures.len(), 1);
         assert_eq!(
             failure.failures[0].operation,
             VectorMaintenanceOperation::Delete
