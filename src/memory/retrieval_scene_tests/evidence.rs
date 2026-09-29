@@ -162,7 +162,6 @@ async fn support_age_reports_experience_without_changing_recall() {
                 context.candidate_limits.max_graph_roots = 1;
                 context.graph_limits.max_depth = 1;
                 context.graph_limits.max_fanout_per_node = 32;
-                context.graph_limits.timeout_ms = None;
                 context.graph_limits.allowed_relation_types = vec![RelationType::About];
                 context.graph_limits.allowed_object_types =
                     vec![ObjectType::Entity, ObjectType::DerivedMemory];

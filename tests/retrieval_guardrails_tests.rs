@@ -1,9 +1,9 @@
 use character_memory::{
     BeliefAssertion, BeliefPredicate, CorrectMemoryDraft, CorrectionTarget, CustomError,
     DerivedMemoryDraft, DerivedType, EntityDraft, EpisodeDraft, ForgetMemoryDraft,
-    GraphFailureMode, LifecycleTargetRef, MemoryId, MemoryLinkDraft, ObjectType, RelationType,
-    RememberInput, RememberOptions, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits,
-    RetrievalContext, RetrievalGraphLimits, SourceProvenanceReference,
+    LifecycleTargetRef, MemoryId, MemoryLinkDraft, ObjectType, RelationType, RememberInput,
+    RememberOptions, ReplacementDerivedMemoryDraft, RetrievalCandidateLimits, RetrievalContext,
+    RetrievalGraphLimits, SourceProvenanceReference,
 };
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
@@ -346,8 +346,6 @@ fn belief_root_context(query: &str) -> RetrievalContext {
         max_nodes: 64,
         max_fanout_per_node: 32,
         max_hub_edges: 64,
-        timeout_ms: Some(500),
-        failure_mode: GraphFailureMode::AllowPartialResults,
         allowed_relation_types: Vec::new(),
         ..RetrievalGraphLimits::default()
     };

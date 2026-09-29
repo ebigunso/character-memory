@@ -54,11 +54,11 @@ pub use crate::domain::{
     CandidateReferenceRole, CandidateScoreField, CandidateSourceSpanIssue, CandidateTimestampField,
     CandidateValidation, CandidateValidationIssue, CandidateValidationStatus, DerivedMemory,
     DerivedType, DomainValidationError, Entity, Episode, GraphExpansionBoundedFailureTrace,
-    GraphExpansionBoundedReason, GraphFailureMode, LifecycleDtoValidationError,
-    MemoryCandidateKind, MemoryId, MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef,
-    MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState, Scene,
-    SceneParticipant, SceneSetting, SourceReferenceKind, ThreadStatus, VectorSurface,
-    CURRENT_SCHEMA_VERSION, DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    GraphExpansionBoundedReason, LifecycleDtoValidationError, MemoryCandidateKind, MemoryId,
+    MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef, MemoryThread, Modality,
+    ObjectType, Observation, RelationType, RetentionState, Scene, SceneParticipant, SceneSetting,
+    SourceReferenceKind, ThreadStatus, VectorSurface, CURRENT_SCHEMA_VERSION,
+    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,

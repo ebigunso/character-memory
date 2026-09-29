@@ -12,7 +12,7 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, fail_if_closed, is_participant_pair, order_current_subject_links,
+    bounded_incident_link_refs, is_participant_pair, order_current_subject_links,
     BoundedExpansionLinkRef, ParticipantOccasions, SUBJECT_ABOUTNESS_ROUTES,
 };
 use crate::ports::graph_authority::{
@@ -66,22 +66,20 @@ pub(super) fn insert_visible_ref(
     next_frontier: &mut Vec<MemoryObjectRef>,
     object_ref: MemoryObjectRef,
     bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
-) -> Result<(), CustomError> {
+) {
     if graph_refs.contains(&object_ref) {
-        return Ok(());
+        return;
     }
     if graph_refs.len() >= query.max_nodes {
         let failure = GraphExpansionBoundedFailure {
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
-        return Ok(());
+        return;
     }
     graph_refs.insert(object_ref);
     next_frontier.push(object_ref);
-    Ok(())
 }
 
 pub(super) fn quads_for_triples(
@@ -791,7 +789,7 @@ pub(super) fn bounded_graph_visible_refs(
                 incident_link_refs,
                 &participant_occasions,
                 &mut bounded_failure,
-            )?;
+            );
             fanout_utilization.extend(selection.utilization);
             filtered_nodes.extend(selection.filtered_nodes);
             for link_ref in selection.links {
@@ -802,7 +800,7 @@ pub(super) fn bounded_graph_visible_refs(
                     &mut next_frontier,
                     neighbor,
                     &mut bounded_failure,
-                )?;
+                );
                 if graph_refs.contains(&neighbor) {
                     graph_link_ids.insert(link_ref.link_id());
                 }
