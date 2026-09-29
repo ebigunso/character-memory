@@ -834,6 +834,13 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
+- 2026-09-29 Task_14 timing read: direction confirmed; the consolidation's timing claim is settled.
+  Trigger / new insight: the consolidation parent 67d6735 and the Task_14 tip b95acbba were interleaved on the same frozen 50 queries used for the step attribution (harness 1b8f02a, three warm samples each, both pins under the same load). The paired median ratio (Task_14 tip over parent) is 0.397 (interquartile 0.376 to 0.592, range 0.335 to 0.728): keyless 0.380 and time 0.600. Every ratio is below 1.1, so no residual needed attributing. Task_14 against its exact parent c9f0ad1d: packs are equal, 50 of 50.
+  - What it means for the character: the same memories come to mind about two and a half times faster than before the consolidation, and the cost no longer grows with unrelated history in the store.
+  - Verdict: direction confirmed. The consolidation plan's timing question (Task_3's read path) is closed by this reading.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
 ## Notes
 - Risks:
   - At a full cap, Task_1's added occasion can displace another memory in participant-heavy families. The falsifier counts only gains, so the reading reports displacements, and the verdict judges them for the character.
