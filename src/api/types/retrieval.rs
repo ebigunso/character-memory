@@ -578,6 +578,7 @@ pub struct RetrievalTrace {
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
     pub selectivity_decisions: Vec<SelectivityTrace>,
     /// Omission evidence is bounded, so future occasions cut by the participant prefilter may have no entry.
+    /// Settled obligations prefiltered by the Due query also have no entry from that road.
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
     pub section_assignments: Vec<SectionAssignment>,

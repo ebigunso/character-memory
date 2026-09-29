@@ -366,6 +366,7 @@ mod obligation_roads {
         ] {
             let mut promise = due(20, DerivedType::Commitment, 0.5, instant);
             promise.assertions.clear();
+            // Interpreted memories carry write time, so the as-of cut does not apply.
             promise.created_at = Some(now() + chrono::Duration::days(1));
             promise.updated_at = promise.created_at;
             let (memory, root) = fixture(vec![promise]).await;
@@ -478,6 +479,46 @@ mod obligation_roads {
     }
 
     #[tokio::test]
+    async fn todays_promise_takes_the_due_floor_and_spare_room_keeps_score_order() {
+        let mut drafts = vec![
+            due(20, DerivedType::Commitment, 0.8, "2026-06-21T12:00:00Z"),
+            due(21, DerivedType::Commitment, 0.6, "2026-09-21T17:00:00Z"),
+        ];
+        drafts.extend((200..208).map(|n| belief(n, DerivedType::Claim, &[4], 1.0, "loud topic")));
+        let (memory, root) = fixture(drafts).await;
+        for (roots, commitments) in [(1, 1), (16, 1), (16, 16)] {
+            let mut query = request(vec![], Some("loud"), roots);
+            query.section_limits.commitments = commitments;
+            let result = memory.retrieve(query).await.unwrap();
+            assert_eq!(
+                result
+                    .pack
+                    .commitments
+                    .iter()
+                    .map(|item| item.memory.id)
+                    .collect::<Vec<_>>(),
+                if commitments == 1 {
+                    vec![id(21)]
+                } else {
+                    vec![id(20), id(21)]
+                },
+                "root cap {roots}, commitment cap {commitments}"
+            );
+            assert_eq!(included(&result, 21).due_state, Some(DueState::DueToday));
+            if roots == 1 {
+                assert!(result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .floor_admissions
+                    .iter()
+                    .any(|entry| entry.object.id == id(21) && entry.cue_kind == CueKind::Due));
+            }
+        }
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
     async fn due_current_first_applies_to_floors_and_score_orders_admitted_promises() {
         let (memory, root) = fixture(vec![due(
             20,
@@ -493,7 +534,6 @@ mod obligation_roads {
             for superseded in [false, true] {
                 let mut query = request(vec![], None, cap);
                 query.lifecycle_policy.include_superseded = superseded;
-                query.section_limits.open_loops = 2;
                 let result = memory.retrieve(query).await.unwrap();
                 assert_eq!(
                     result
@@ -508,15 +548,6 @@ mod obligation_roads {
                         vec![id(21)]
                     }
                 );
-                if cap == 1 && superseded {
-                    assert!(result
-                        .trace
-                        .as_ref()
-                        .unwrap()
-                        .floor_admissions
-                        .iter()
-                        .any(|entry| entry.object.id == id(21) && entry.cue_kind == CueKind::Due));
-                }
             }
         }
         test_support::close_and_remove_root(memory, root).await;
@@ -545,14 +576,13 @@ mod obligation_roads {
             let result = memory.retrieve(request(vec![], None, 8)).await.unwrap();
             for n in [20, 21] {
                 assert!(admitted(&result, n).is_none());
-                assert!(result
+                assert!(!result
                     .trace
                     .as_ref()
                     .unwrap()
                     .lifecycle_filter_decisions
                     .iter()
-                    .any(|entry| entry.object.id == id(n)
-                        && entry.reason == LifecycleFilterReason::ResolvedOmitted));
+                    .any(|entry| entry.object.id == id(n)));
             }
             let result = memory
                 .retrieve(request(vec![], Some("open"), 8))

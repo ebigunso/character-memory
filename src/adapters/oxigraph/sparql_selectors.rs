@@ -29,6 +29,14 @@ struct State {
     created: Option<DateTime<Utc>>,
     superseded_by: Vec<MemoryId>,
     resolved: bool,
+    due_today: bool,
+}
+
+#[derive(Clone, Copy)]
+enum StateOrder {
+    Newest,
+    Salience,
+    DueDay { start: DateTime<Utc> },
 }
 
 impl State {
@@ -156,7 +164,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             subject = vocab::ASSERTION_SUBJECT,
             entity_class = vocab::CLASS_ENTITY,
             object_id = vocab::OBJECT_ID,
-            supersedes = derived_successor_pattern("?belief", "\"supersedes\""),
+            supersedes = derived_successor_pattern("?belief", "\"supersedes\"", "?link"),
         );
         self.select_memory_ids(&query, None)
     }
@@ -305,7 +313,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             query.lifecycle_policy,
             limit,
             read_more,
-            true,
+            StateOrder::Salience,
             Some(query.participant_reference_time),
         )
         .map(|(rows, filtered)| {
@@ -329,7 +337,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             vocab::SCOPE_KEY,
             oxigraph::model::Literal::new_simple_literal(value)
         );
-        self.select_state(&predicate, policy, limit, false, false, None)
+        self.select_state(&predicate, policy, limit, false, StateOrder::Newest, None)
             .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
     }
 
@@ -351,7 +359,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             party = graph_uri(ObjectType::Entity, party),
             predicate = vocab::ASSERTION_PREDICATE,
         );
-        self.select_state(&predicate, policy, limit, false, true, None)
+        self.select_state(&predicate, policy, limit, false, StateOrder::Salience, None)
             .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
     }
 
@@ -364,14 +372,30 @@ impl<'a> SparqlGraphSelectors<'a> {
         let predicate = format!(
             r#"?memory a <{class}> ; <{kind}> ?kind ; <{due_at}> ?dueAt .
             VALUES ?kind {{ "open_loop" "commitment" }}
-            FILTER(xsd:dateTime(?dueAt) < {before}^^xsd:dateTime)"#,
+            FILTER(xsd:dateTime(?dueAt) < {before}^^xsd:dateTime)
+            MINUS {{ GRAPH ?settlementGraph {{
+                {settlement}
+                VALUES ?settles {{ "resolves" "fulfills_commitment" }}
+            }} }}"#,
             class = vocab::CLASS_DERIVED_MEMORY,
             kind = vocab::DERIVED_TYPE,
             due_at = vocab::DUE_AT,
             before = sparql_string_literal(&before.to_rfc3339()),
+            settlement = derived_successor_pattern("?memory", "?settles", "?settlement"),
         );
-        self.select_state(&predicate, policy, limit, false, true, None)
-            .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
+        // The caller's fixed-offset local day ends at before and lasts 24 hours.
+        let start = before
+            .checked_sub_signed(chrono::Duration::days(1))
+            .unwrap_or(DateTime::<Utc>::MIN_UTC);
+        self.select_state(
+            &predicate,
+            policy,
+            limit,
+            false,
+            StateOrder::DueDay { start },
+            None,
+        )
+        .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
     }
 
     pub(crate) fn select_thread_state(
@@ -400,7 +424,7 @@ impl<'a> SparqlGraphSelectors<'a> {
             query.lifecycle_policy,
             limit,
             false,
-            false,
+            StateOrder::Newest,
             None,
         )
         .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
@@ -412,7 +436,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         policy: GraphExpansionLifecyclePolicy,
         limit: usize,
         read_more: bool,
-        salience_first: bool,
+        order: StateOrder,
         as_of: Option<DateTime<Utc>>,
     ) -> Result<(Vec<State>, Vec<GraphExpansionFilteredNode>), CustomError> {
         let eligible_limit = limit.saturating_add(usize::from(read_more));
@@ -423,7 +447,7 @@ impl<'a> SparqlGraphSelectors<'a> {
         // grows costly. Full RDF hydration stays behind the eligible/evidence caps.
         let query = format!(
             r#"PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-            SELECT ?id ?objectType ?retention ?salience ?time ?relation ?source WHERE {{
+            SELECT ?id ?objectType ?retention ?salience ?time ?relation ?source {due_column} WHERE {{
                 GRAPH ?g {{
                     ?memory <{object_type}> ?objectType ; <{object_id}> ?id ;
                         <{salience}> ?salience ; <{created}> ?created ;
@@ -438,7 +462,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                 OPTIONAL {{ GRAPH ?linkGraph {{
                     {successor}
                     ?link <{from}> ?source .
-                    VALUES ?relation {{ "supersedes" "resolves" "fulfills_commitment" }}
+                    VALUES ?relation {{ {relations} }}
                 }} }}
             }}"#,
             memory_time = memory_time_expression(ObjectType::DerivedMemory),
@@ -451,8 +475,10 @@ impl<'a> SparqlGraphSelectors<'a> {
             salience = vocab::SALIENCE_SCORE,
             created = vocab::CREATED_AT,
             retention = vocab::RETENTION_STATE,
-            successor = derived_successor_pattern("?memory", "?relation"),
+            successor = derived_successor_pattern("?memory", "?relation", "?link"),
             from = vocab::FROM,
+            due_column = if matches!(order, StateOrder::DueDay { .. }) { "?dueAt" } else { "" },
+            relations = if matches!(order, StateOrder::DueDay { .. }) { "\"supersedes\"" } else { "\"supersedes\" \"resolves\" \"fulfills_commitment\"" },
         );
         // Collect every lifecycle row before applying policy or the budget.
         let mut states = HashMap::<MemoryObjectRef, State>::new();
@@ -479,6 +505,15 @@ impl<'a> SparqlGraphSelectors<'a> {
                     },
                     superseded_by: Vec::new(),
                     resolved: false,
+                    due_today: match order {
+                        StateOrder::DueDay { start } => {
+                            literal_binding(&row, "dueAt")?
+                                .parse::<DateTime<Utc>>()
+                                .map_err(oxigraph_sparql_error)?
+                                >= start
+                        }
+                        _ => false,
+                    },
                 });
             }
             let state = states.get_mut(&object_ref).unwrap();
@@ -528,22 +563,26 @@ impl<'a> SparqlGraphSelectors<'a> {
             }
         }
         eligible.sort_by(|a, b| {
-            (if salience_first {
-                b.superseded_by
-                    .is_empty()
-                    .cmp(&a.superseded_by.is_empty())
-                    .then_with(|| b.salience.total_cmp(&a.salience))
-            } else {
-                std::cmp::Ordering::Equal
-            })
-            .then_with(|| b.created.cmp(&a.created))
-            .then_with(|| a.object_ref.id.cmp(&b.object_ref.id))
-            .then_with(|| {
-                a.object_ref
-                    .object_type
-                    .stable_rank()
-                    .cmp(&b.object_ref.object_type.stable_rank())
-            })
+            b.due_today
+                .cmp(&a.due_today)
+                .then_with(|| {
+                    if !matches!(order, StateOrder::Newest) {
+                        b.superseded_by
+                            .is_empty()
+                            .cmp(&a.superseded_by.is_empty())
+                            .then_with(|| b.salience.total_cmp(&a.salience))
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
+                .then_with(|| b.created.cmp(&a.created))
+                .then_with(|| a.object_ref.id.cmp(&b.object_ref.id))
+                .then_with(|| {
+                    a.object_ref
+                        .object_type
+                        .stable_rank()
+                        .cmp(&b.object_ref.object_type.stable_rank())
+                })
         });
         excluded.sort_by_key(|(created, entry)| {
             (
@@ -667,7 +706,7 @@ impl<'a> SparqlGraphSelectors<'a> {
                         }}
                     }}"#,
                     members = sparql_node_iri_values("member", &members),
-                    resolution = derived_successor_pattern("?member", "?kind"),
+                    resolution = derived_successor_pattern("?member", "?kind", "?link"),
                 );
                 let resolved = self
                     .query_solutions(&query)?
@@ -1100,9 +1139,9 @@ fn link_touching_node_pattern() -> String {
     )
 }
 
-fn derived_successor_pattern(target: &str, relation: &str) -> String {
+fn derived_successor_pattern(target: &str, relation: &str, link: &str) -> String {
     format!(
-        "?link a <{}> ; <{}> \"derived_memory\" ; <{}> \"derived_memory\" ; <{}> {relation} ; <{}> {target} .",
+        "{link} a <{}> ; <{}> \"derived_memory\" ; <{}> \"derived_memory\" ; <{}> {relation} ; <{}> {target} .",
         vocab::CLASS_MEMORY_LINK,
         vocab::FROM_TYPE,
         vocab::TO_TYPE,
