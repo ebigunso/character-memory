@@ -21,7 +21,7 @@ async fn name_belief_and_derived_about_link_survive_facade_reopen() {
     let episode_id = id("550e8400-e29b-41d4-a716-446655461002");
     let memory_id = id("550e8400-e29b-41d4-a716-446655461003");
 
-    let memory = setup(&collection_name, &root, None)
+    let memory = setup(&collection_name, &root)
         .await
         .expect("unexpected stats persistence setup failure");
 
@@ -65,11 +65,9 @@ async fn name_belief_and_derived_about_link_survive_facade_reopen() {
             .await
             .map_err(|error| format!("facade should close before reopen: {error}"))?;
 
-        let reopened = setup(&collection_name, &root, None)
-            .await
-            .map_err(|error| {
-                format!("reopened facade should use same persistent stores: {error}")
-            })?;
+        let reopened = setup(&collection_name, &root).await.map_err(|error| {
+            format!("reopened facade should use same persistent stores: {error}")
+        })?;
         let retrieved = reopened
             .retrieve(belief_root_context("Aster Archive"))
             .await
@@ -136,7 +134,7 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
     let suppressed_id = id("550e8400-e29b-41d4-a716-446655462004");
     let replacement_id = id("550e8400-e29b-41d4-a716-446655462005");
 
-    let memory = setup(&collection_name, &root, None)
+    let memory = setup(&collection_name, &root)
         .await
         .expect("unexpected restart-safe setup failure");
 
@@ -209,11 +207,9 @@ async fn restart_safe_retrieval_excludes_suppressed_and_superseded_memories() {
             .await
             .map_err(|error| format!("facade should close before reopen: {error}"))?;
 
-        let reopened = setup(&collection_name, &root, None)
-            .await
-            .map_err(|error| {
-                format!("reopened lifecycle facade should use same stores: {error}")
-            })?;
+        let reopened = setup(&collection_name, &root).await.map_err(|error| {
+            format!("reopened lifecycle facade should use same stores: {error}")
+        })?;
         let retrieved = reopened
             .retrieve(RetrievalContext::new(
                 "Ledger Meridian corrected restart-safe statement",
@@ -248,7 +244,7 @@ async fn belief_content_reaches_notion_and_static_caps_bound_expansion() {
     let root = TempDir::new().unwrap();
     let collection_name = test_support::unique_collection_name();
     let ids = HighDegreeIds::new();
-    let memory = setup(&collection_name, &root, None).await.unwrap();
+    let memory = setup(&collection_name, &root).await.unwrap();
     let written = memory
         .remember(high_degree_fixture(&ids), RememberOptions::default())
         .await
@@ -325,14 +321,9 @@ async fn belief_content_reaches_notion_and_static_caps_bound_expansion() {
 async fn setup(
     collection_name: &str,
     root: &TempDir,
-    fanout: Option<(usize, usize)>,
 ) -> Result<character_memory::CharacterMemory, CustomError> {
-    test_support::try_setup_persistent_character_memory(
-        collection_name.to_owned(),
-        root.path(),
-        fanout,
-    )
-    .await
+    test_support::try_setup_persistent_character_memory(collection_name.to_owned(), root.path())
+        .await
 }
 
 fn belief_root_context(query: &str) -> RetrievalContext {

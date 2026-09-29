@@ -62,7 +62,7 @@ async fn source_union_namespaces_and_restart_determine_scope() {
     let root = tempfile::tempdir().unwrap();
     let collection = test_support::unique_collection_name();
     let memory =
-        test_support::try_setup_persistent_character_memory(collection.clone(), root.path(), None)
+        test_support::try_setup_persistent_character_memory(collection.clone(), root.path())
             .await
             .unwrap();
     let common = "quote \" slash \\ newline\n";
@@ -109,7 +109,7 @@ async fn source_union_namespaces_and_restart_determine_scope() {
         .await
         .unwrap();
     memory.close().await.unwrap();
-    let memory = test_support::try_setup_persistent_character_memory(collection, root.path(), None)
+    let memory = test_support::try_setup_persistent_character_memory(collection, root.path())
         .await
         .unwrap();
     // Rehydrated internal keys must preserve equality for exact plan replay.
