@@ -768,6 +768,21 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
 
 - None yet.
 
+- 2026-09-29 Plan complete. Tasks 1 to 14 are approved and stacked (PRs 160 to 173); every Definition of Done item is met.
+  - Measurements:
+    - Task_1: direction confirmed.
+    - Task_14 timing: 0.40 times the consolidation parent.
+    - Final proof: passed.
+  - Completion value audit (orchestrator):
+    - EARNS ITS PLACE: the fanout fix (a companion's scene comes to mind) and the hub fix (knowing someone well no longer reads as degraded), both correctness; the read fix (speed that no longer grows with the store). The deletions are the point of the plan: about 4,000 lines of code nothing called or read, and tests that repeated each other.
+    - OVERSIZED: none.
+    - DELETE: none left in scope.
+  - Carried forward:
+    - the paired evals test migration (evals cleanup Task_12);
+    - the unhealthy-stats marker that never clears (logged under ruling 77);
+    - the unlived-topic relevance floor (consolidation residual);
+    - the ADR-I-0007 line that names the retired schema constants, for the decider's record batch.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-24 Decision: the library cleanup follows ruling 77 (value-audit cleanup, 2026-09-24).
@@ -839,6 +854,16 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
   - What it means for the character: the same memories come to mind about two and a half times faster than before the consolidation, and the cost no longer grows with unrelated history in the store.
   - Verdict: direction confirmed. The consolidation plan's timing question (Task_3's read path) is closed by this reading.
   - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-29 Final behavior-free proof: passed.
+  Trigger / new insight: the integrated tip fa90d57f (all fourteen tasks), harness 26a43960, full default capture run twice. Both runs are byte-identical (SHA-256 `292cc25e…`). Compared with Task_1's AFTER (`9351e9c4…`):
+  - All 955 observations have the same ids, sections, order, scores, trace rank and fanout utilization.
+  - The only differences are the 14,387 authorized field deletions (the telemetry trim, and `timeout_ms` and `failure_mode` in the graph limits, including 30 copies inside the obligations controls, each equal to the default) and the library provenance.
+  - Bounded failures are 0 before and 0 after, and no memory was recovered: the reference had no false hub bound to remove.
+  - The integration gates at fa90d57f pass: 507 tests, clippy, fmt and pre-commit, and the evals calibrator builds and links.
+  - What it means for the character: the cleanup changed nothing that comes to mind beyond Task_1's measured change. It removed about 4,000 lines, and Task_14 made recall faster than before the consolidation.
+  - Verdict: the final proof passes, and the plan is complete.
   - Record proposed: none.
 
 ## Notes
