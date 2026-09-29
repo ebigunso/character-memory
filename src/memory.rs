@@ -183,10 +183,10 @@ impl CharacterMemory {
 mod tests {
     use super::*;
     use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
-    use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
+    use crate::ports::vector_candidate::VectorCandidateStore;
     use crate::test_support::{pack_contains_derived_memory, parse_id as id};
     use crate::*;
-    use async_trait::async_trait;
+
     use uuid::Uuid;
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
@@ -631,9 +631,11 @@ mod tests {
     async fn retry_after_vector_failure_does_not_duplicate_graph_writes() {
         let memory = CharacterMemory::from_parts(
             Box::new(in_memory_graph_store()),
-            Box::new(FailingVectorCandidateStore(
-                TemporaryVectorCandidateStore::open(8).await,
-            )),
+            Box::new(
+                TemporaryVectorCandidateStore::open(8)
+                    .await
+                    .fail_upsert("vector store unavailable"),
+            ),
             Box::new(deterministic_embedder(8)),
         );
         let plan = memory
@@ -1545,39 +1547,6 @@ mod tests {
                     "raw://correction/source-object",
                 ));
         replacement
-    }
-
-    #[derive(Debug)]
-    struct FailingVectorCandidateStore(TemporaryVectorCandidateStore);
-
-    #[async_trait]
-    impl VectorCandidateStore for FailingVectorCandidateStore {
-        async fn close(&self) -> Result<(), CustomError> {
-            self.0.close().await
-        }
-
-        async fn upsert_vector_records(
-            &self,
-            _records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            Err(CustomError::VectorDatabaseError(VectorDatabaseError::new(
-                "test",
-                VectorDatabaseErrorKind::Response,
-                None,
-                "vector store unavailable",
-            )))
-        }
-
-        async fn search_candidates(
-            &self,
-            query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            self.0.search_candidates(query).await
-        }
-
-        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            self.0.delete_candidates(objects).await
-        }
     }
 
     fn assert_validation_rejection_has_unknown_ref(

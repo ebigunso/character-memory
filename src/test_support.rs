@@ -2,24 +2,61 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, MutexGuard,
+};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
 use crate::adapters::qdrant_edge::QdrantEdgeVectorCandidateStore;
+use crate::adapters::stats::InMemoryRetrievalStatsStore;
+use crate::api::types::VectorRecallCompleteness;
+use crate::domain::ScopeKey;
 use crate::domain::{
     DerivedMemory, DerivedType, Entity, Episode, MemoryId, MemoryLink, MemoryObject,
     MemoryObjectRef, MemoryThread, Modality, ObjectType, Observation, RelationType, RetentionState,
     ThreadStatus, DEFAULT_SCHEMA_VERSION,
 };
-use crate::errors::CustomError;
-use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
+use crate::errors::{
+    CustomError, GraphQueryError, RetrievalStatsHealthCause, RetrievalStatsStoreError,
+    VectorDatabaseError, VectorDatabaseErrorKind,
+};
+use crate::models::vector::{
+    CanonicalCandidates, EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch,
+    VectorRecordEmbedding,
+};
 use crate::ports::embedder::MemoryEmbedder;
+use crate::ports::graph_authority::*;
+use crate::ports::retrieval_stats::*;
 use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StoreCall {
+    GraphQuery(Vec<MemoryId>),
+    GraphThreadQuery(Vec<MemoryId>),
+    GraphObjects(Vec<MemoryId>),
+    GraphLinks(Vec<MemoryLink>),
+    EmbedBatch(Vec<MemoryId>),
+    VectorUpsert(Vec<MemoryId>),
+    VectorDelete(Vec<MemoryObjectRef>),
+    StatsEdges(usize),
+    StatsObjectStates(usize),
+    StatsUnhealthy,
+}
+
 pub(crate) struct TemporaryVectorCandidateStore {
     store: Option<QdrantEdgeVectorCandidateStore>,
     directory: tempfile::TempDir,
+    pub(crate) calls: Arc<Mutex<Vec<StoreCall>>>,
+    pub(crate) upsert_error: Option<&'static str>,
+    pub(crate) delete_error: Option<&'static str>,
+    pub(crate) delete_error_once: Option<AtomicBool>,
+    pub(crate) upsert_hook: Option<fn()>,
+    pub(crate) gate: Option<Arc<Gate>>,
+    pub(crate) completeness: Option<VectorRecallCompleteness>,
+    pub(crate) candidate: Option<VectorCandidateMatch>,
 }
 
 impl TemporaryVectorCandidateStore {
@@ -35,11 +72,43 @@ impl TemporaryVectorCandidateStore {
         Self {
             store: Some(store),
             directory,
+            calls: Arc::default(),
+            upsert_error: None,
+            delete_error: None,
+            delete_error_once: None,
+            upsert_hook: None,
+            gate: None,
+            completeness: None,
+            candidate: None,
         }
     }
 
-    fn store(&self) -> &QdrantEdgeVectorCandidateStore {
+    pub(crate) fn store(&self) -> &QdrantEdgeVectorCandidateStore {
         self.store.as_ref().expect("temporary vector store is open")
+    }
+    pub(crate) fn with_calls(mut self, calls: Arc<Mutex<Vec<StoreCall>>>) -> Self {
+        self.calls = calls;
+        self
+    }
+
+    pub(crate) fn fail_upsert(mut self, message: &'static str) -> Self {
+        self.upsert_error = Some(message);
+        self
+    }
+
+    pub(crate) fn fail_delete(mut self, message: &'static str) -> Self {
+        self.delete_error = Some(message);
+        self
+    }
+
+    pub(crate) fn fail_delete_once(mut self) -> Self {
+        self.delete_error = Some("one-shot vector delete failed");
+        self.delete_error_once = Some(AtomicBool::new(true));
+        self
+    }
+
+    pub(crate) fn calls(&self) -> Vec<StoreCall> {
+        lock(&self.calls).clone()
     }
 }
 
@@ -86,6 +155,21 @@ impl VectorCandidateStore for TemporaryVectorCandidateStore {
         &self,
         records: &[VectorRecordEmbedding<'_>],
     ) -> Result<(), CustomError> {
+        if let Some(gate) = &self.gate {
+            gate.stop_once().await;
+        }
+        if let Some(hook) = self.upsert_hook {
+            hook();
+        }
+        lock(&self.calls).push(StoreCall::VectorUpsert(
+            records
+                .iter()
+                .map(|record| record.record.object_id)
+                .collect(),
+        ));
+        if let Some(message) = self.upsert_error {
+            return Err(vector_error(message));
+        }
         self.store().upsert_vector_records(records).await
     }
 
@@ -93,12 +177,421 @@ impl VectorCandidateStore for TemporaryVectorCandidateStore {
         &self,
         query: &VectorCandidateSearch,
     ) -> Result<VectorCandidateRecall, CustomError> {
-        self.store().search_candidates(query).await
+        let mut recall = self.store().search_candidates(query).await?;
+        if let Some(completeness) = self.completeness {
+            recall.completeness = completeness;
+        }
+        if let Some(candidate) = &self.candidate {
+            recall.candidates = CanonicalCandidates::new([candidate.clone()]);
+        }
+        Ok(recall)
     }
 
     async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
+        lock(&self.calls).push(StoreCall::VectorDelete(objects.to_vec()));
+        if let Some(message) = self.delete_error {
+            if self
+                .delete_error_once
+                .as_ref()
+                .is_none_or(|once| once.swap(false, Ordering::SeqCst))
+            {
+                return Err(vector_error(message));
+            }
+        }
         self.store().delete_candidates(objects).await
     }
+}
+
+#[derive(Default)]
+pub(crate) struct Gate {
+    armed: AtomicBool,
+    pub(crate) entered: Notify,
+    pub(crate) release: Notify,
+}
+
+impl Gate {
+    pub(crate) fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) async fn stop_once(&self) {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+    }
+}
+
+pub(crate) struct TestGraphStore {
+    pub(crate) store: OxigraphGraphAuthorityStore,
+    pub(crate) calls: Arc<Mutex<Vec<StoreCall>>>,
+    pub(crate) fail_objects: bool,
+    pub(crate) fail_links: bool,
+    pub(crate) fail_id_queries: bool,
+    pub(crate) fail_currency_query: bool,
+    pub(crate) query_error: Option<GraphQueryError>,
+    pub(crate) expansion_error: Option<GraphQueryError>,
+    pub(crate) record_queries: bool,
+    pub(crate) gate: Option<Arc<Gate>>,
+}
+
+impl Default for TestGraphStore {
+    fn default() -> Self {
+        Self {
+            store: in_memory_graph_store(),
+            calls: Arc::default(),
+            fail_objects: false,
+            fail_links: false,
+            fail_id_queries: false,
+            fail_currency_query: false,
+            query_error: None,
+            expansion_error: None,
+            record_queries: false,
+            gate: None,
+        }
+    }
+}
+
+impl TestGraphStore {
+    pub(crate) fn fail_objects(mut self) -> Self {
+        self.fail_objects = true;
+        self
+    }
+
+    pub(crate) fn fail_links(mut self) -> Self {
+        self.fail_links = true;
+        self
+    }
+
+    pub(crate) async fn with_query_objects(self, objects: Vec<MemoryObject>) -> Self {
+        self.store.upsert_objects(&objects).await.unwrap();
+        self
+    }
+
+    pub(crate) fn fail_id_queries(mut self) -> Self {
+        self.fail_id_queries = true;
+        self
+    }
+
+    pub(crate) fn calls(&self) -> Vec<StoreCall> {
+        lock(&self.calls).clone()
+    }
+}
+
+#[async_trait]
+impl GraphAuthorityStore for TestGraphStore {
+    async fn query_anniversaries(
+        &self,
+        date: chrono::NaiveDate,
+        participants: &[crate::domain::MemoryId],
+        limit: usize,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError> {
+        self.store
+            .query_anniversaries(date, participants, limit, policy)
+            .await
+    }
+
+    async fn query_episodes_by_time(
+        &self,
+        start: Option<chrono::DateTime<chrono::Utc>>,
+        end: chrono::DateTime<chrono::Utc>,
+        limit: usize,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+    ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
+        self.store
+            .query_episodes_by_time(start, end, limit, policy)
+            .await
+    }
+
+    async fn query_episode_occasions(
+        &self,
+        episodes: &[crate::domain::MemoryObjectRef],
+    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
+        self.store.query_episode_occasions(episodes).await
+    }
+
+    async fn query_last_interaction(
+        &self,
+        participant: MemoryId,
+        reference_time: chrono::DateTime<chrono::Utc>,
+        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
+    ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
+        self.store
+            .query_last_interaction(participant, reference_time, policy)
+            .await
+    }
+
+    async fn query_notions_known_as(
+        &self,
+        name: &str,
+    ) -> Result<Vec<MemoryId>, crate::errors::GraphQueryError> {
+        self.store.query_notions_known_as(name).await
+    }
+
+    async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
+        lock(&self.calls).push(StoreCall::GraphObjects(
+            objects.iter().map(MemoryObject::id).collect(),
+        ));
+        if self.fail_objects {
+            return Err(CustomError::DatabaseError("object write failed".to_owned()));
+        }
+        self.store.upsert_objects(objects).await
+    }
+
+    async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
+        lock(&self.calls).push(StoreCall::GraphLinks(links.to_vec()));
+        if self.fail_links {
+            return Err(CustomError::DatabaseError("link write failed".to_owned()));
+        }
+        self.store.upsert_links(links).await
+    }
+
+    async fn upsert_objects_and_links(
+        &self,
+        objects: &[MemoryObject],
+        links: &[MemoryLink],
+    ) -> Result<(), CustomError> {
+        if let Some(gate) = &self.gate {
+            gate.stop_once().await;
+        }
+        lock(&self.calls).push(StoreCall::GraphObjects(
+            objects.iter().map(MemoryObject::id).collect(),
+        ));
+        if self.fail_objects {
+            return Err(CustomError::DatabaseError("object write failed".to_owned()));
+        }
+        lock(&self.calls).push(StoreCall::GraphLinks(links.to_vec()));
+        if self.fail_links {
+            return Err(CustomError::DatabaseError("link write failed".to_owned()));
+        }
+        self.store.upsert_objects_and_links(objects, links).await
+    }
+
+    async fn query_objects(
+        &self,
+        query: &GraphObjectQuery,
+    ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
+        if self.record_queries {
+            let ids = match query {
+                GraphObjectQuery::ByRefs(refs) => refs.iter().map(|object| object.id).collect(),
+                GraphObjectQuery::ByIds(ids) => ids.clone(),
+                GraphObjectQuery::ByTypes { .. } => Vec::new(),
+            };
+            lock(&self.calls).push(StoreCall::GraphQuery(ids));
+        }
+        if let Some(error) = &self.query_error {
+            return Err(error.clone());
+        }
+        if self.fail_id_queries && matches!(query, GraphObjectQuery::ByIds(_)) {
+            return Err(crate::errors::GraphQueryError::Selection {
+                detail: "endpoint lifecycle lookup failed".to_owned(),
+            });
+        }
+
+        self.store.query_objects(query).await
+    }
+
+    async fn query_superseded_derived_memory_ids(
+        &self,
+        memory_ids: &[crate::domain::MemoryId],
+    ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
+        if self.fail_currency_query {
+            return Err(crate::errors::GraphQueryError::Selection {
+                detail: "currency lookup failed".to_owned(),
+            });
+        }
+        self.store
+            .query_superseded_derived_memory_ids(memory_ids)
+            .await
+    }
+
+    async fn query_links_by_ids(
+        &self,
+        link_ids: &[MemoryId],
+    ) -> Result<Vec<MemoryLink>, CustomError> {
+        self.store.query_links_by_ids(link_ids).await
+    }
+
+    async fn query_derived_memories_by_provenance(
+        &self,
+        query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
+    ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
+        self.store.query_derived_memories_by_provenance(query).await
+    }
+
+    async fn query_derived_memories_by_thread(
+        &self,
+        query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+    ) -> Result<
+        (
+            Vec<crate::domain::DerivedMemory>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        if self.record_queries {
+            lock(&self.calls).push(StoreCall::GraphThreadQuery(query.thread_ids.clone()));
+        }
+        self.store.query_derived_memories_by_thread(query).await
+    }
+
+    async fn query_thread_state(
+        &self,
+        query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        self.store.query_thread_state(query, limit).await
+    }
+
+    async fn query_scope_state(
+        &self,
+        key: &ScopeKey,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        self.store.query_scope_state(key, policy, limit).await
+    }
+
+    async fn expand_bounded(
+        &self,
+        query: &GraphExpansionQuery,
+    ) -> Result<GraphExpansion, CustomError> {
+        if let Some(error) = &self.expansion_error {
+            return Err(error.clone().into());
+        }
+        self.store.expand_bounded(query).await
+    }
+}
+
+pub(crate) enum StatsRead<'a> {
+    Counter(&'a RetrievalStatsCounterKey),
+    GlobalCounter(RelationType),
+    GlobalEpisodes,
+    Health,
+}
+
+type StatsReadHook =
+    Box<dyn for<'a> Fn(StatsRead<'a>) -> Result<(), RetrievalStatsStoreError> + Send + Sync>;
+
+#[derive(Default)]
+pub(crate) struct TestStatsStore {
+    pub(crate) store: InMemoryRetrievalStatsStore,
+    pub(crate) calls: Arc<Mutex<Vec<StoreCall>>>,
+    pub(crate) edge_error: Option<RetrievalStatsStoreError>,
+    pub(crate) edge_error_once: Option<AtomicBool>,
+    pub(crate) object_state_error: Option<RetrievalStatsStoreError>,
+    pub(crate) health_error: Option<RetrievalStatsStoreError>,
+    pub(crate) before_read: Option<StatsReadHook>,
+    pub(crate) marked_causes: Mutex<Vec<RetrievalStatsHealthCause>>,
+    pub(crate) gate: Option<Arc<Gate>>,
+    pub(crate) projected: Arc<Mutex<Vec<RetrievalStatsObjectState>>>,
+}
+
+impl TestStatsStore {
+    fn check_read(&self, call: StatsRead<'_>) -> Result<(), RetrievalStatsStoreError> {
+        if let Some(hook) = &self.before_read {
+            hook(call)?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl RetrievalStatsStore for TestStatsStore {
+    async fn record_edges(
+        &self,
+        edges: &[RetrievalStatsEdge],
+    ) -> Result<(), RetrievalStatsStoreError> {
+        lock(&self.calls).push(StoreCall::StatsEdges(edges.len()));
+        if let Some(error) = &self.edge_error {
+            if self
+                .edge_error_once
+                .as_ref()
+                .is_none_or(|once| once.swap(false, Ordering::SeqCst))
+            {
+                return Err(error.clone());
+            }
+        }
+        self.store.record_edges(edges).await
+    }
+    async fn record_object_states(
+        &self,
+        states: &[RetrievalStatsObjectState],
+    ) -> Result<(), RetrievalStatsStoreError> {
+        if let Some(gate) = &self.gate {
+            gate.stop_once().await;
+        }
+        lock(&self.calls).push(StoreCall::StatsObjectStates(states.len()));
+        if let Some(error) = &self.object_state_error {
+            return Err(error.clone());
+        }
+        self.store.record_object_states(states).await?;
+        lock(&self.projected).extend_from_slice(states);
+        Ok(())
+    }
+    async fn counter(
+        &self,
+        key: &RetrievalStatsCounterKey,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        self.check_read(StatsRead::Counter(key))?;
+        self.store.counter(key).await
+    }
+    async fn global_counter(
+        &self,
+        relation: RelationType,
+        object_type: ObjectType,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        let _ = object_type;
+        self.check_read(StatsRead::GlobalCounter(relation))?;
+        self.store.global_counter(relation, object_type).await
+    }
+    async fn global_episode_counter(
+        &self,
+    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
+        self.check_read(StatsRead::GlobalEpisodes)?;
+        self.store.global_episode_counter().await
+    }
+    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
+        self.check_read(StatsRead::Health)?;
+        if let Some(error) = &self.health_error {
+            return Err(error.clone());
+        }
+        self.store.health().await
+    }
+    async fn mark_unhealthy(
+        &self,
+        cause: RetrievalStatsHealthCause,
+    ) -> Result<(), RetrievalStatsStoreError> {
+        lock(&self.calls).push(StoreCall::StatsUnhealthy);
+        lock(&self.marked_causes).push(cause.clone());
+        self.store.mark_unhealthy(cause).await
+    }
+}
+
+fn vector_error(message: &str) -> CustomError {
+    CustomError::VectorDatabaseError(VectorDatabaseError::new(
+        "test",
+        VectorDatabaseErrorKind::Response,
+        None,
+        message,
+    ))
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().expect("test mutex should not be poisoned")
 }
 
 pub(crate) fn in_memory_graph_store() -> OxigraphGraphAuthorityStore {
