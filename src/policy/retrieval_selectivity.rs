@@ -7,9 +7,7 @@ use crate::api::types::{
 use crate::domain::{MemoryObjectRef, ObjectType, RelationType};
 #[cfg(test)]
 use crate::errors::RetrievalStatsStoreError;
-use crate::errors::{
-    ConfigValidationError, ConfigValidationReason, CustomError, RetrievalStatsHealthCause,
-};
+use crate::errors::{CustomError, RetrievalStatsHealthCause};
 use crate::ports::graph_authority::GraphExpansionFanoutOverride;
 use crate::ports::graph_authority::TraceMode;
 use crate::ports::retrieval_stats::{
@@ -25,47 +23,23 @@ pub(crate) struct RetrievalSelectivityPolicy {
 }
 
 impl RetrievalSelectivityPolicy {
-    pub(crate) fn new(smoothing_alpha: f64, gamma: f64) -> Self {
-        Self::try_new(smoothing_alpha, gamma)
-            .expect("selectivity smoothing_alpha and gamma must be finite positive numbers")
-    }
-
-    pub(crate) fn try_new(smoothing_alpha: f64, gamma: f64) -> Result<Self, CustomError> {
-        Self::try_new_with_fanout_budgets(smoothing_alpha, gamma, [])
-    }
-
-    pub(crate) fn try_new_with_fanout_budgets(
+    pub(crate) fn with_fanout_budgets(
         smoothing_alpha: f64,
         gamma: f64,
-        fanout_budgets: impl IntoIterator<Item = (RelationType, ObjectType, usize, usize)>,
-    ) -> Result<Self, CustomError> {
-        validate_positive_f64("selectivity_smoothing_alpha", smoothing_alpha)?;
-        validate_positive_f64("selectivity_gamma", gamma)?;
-        let mut configured_budgets = DEFAULT_FANOUT_SPECS;
-        for (relation, object_type, min_fanout, max_fanout) in fanout_budgets {
-            validate_fanout_budget(relation, object_type, min_fanout, max_fanout)?;
-            if let Some(spec) = configured_budgets
-                .iter_mut()
-                .find(|spec| spec.relation == relation && spec.object_type == object_type)
-            {
-                spec.min_fanout = min_fanout;
-                spec.max_fanout = max_fanout;
-            } else {
-                return Err(ConfigValidationError {
-                    keys: vec!["retrieval.fanout"],
-                    reason: ConfigValidationReason::OutOfDomain {
-                        expected: "an implemented retrieval fanout target",
-                        actual: format!("{relation:?}->{object_type:?}"),
-                    },
-                }
-                .into());
-            }
-        }
-        Ok(Self {
+        fanout_budgets: [(RelationType, ObjectType, usize, usize); 3],
+    ) -> Self {
+        Self {
             smoothing_alpha,
             gamma,
-            fanout_budgets: configured_budgets,
-        })
+            fanout_budgets: fanout_budgets.map(
+                |(relation, object_type, min_fanout, max_fanout)| FanoutSpec {
+                    relation,
+                    object_type,
+                    min_fanout,
+                    max_fanout,
+                },
+            ),
+        }
     }
 
     pub(crate) fn state_scope_limit(&self) -> usize {
@@ -82,12 +56,6 @@ impl RetrievalSelectivityPolicy {
     }
 }
 
-impl Default for RetrievalSelectivityPolicy {
-    fn default() -> Self {
-        Self::new(1.0, 1.0)
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SelectivityPlan {
     pub(crate) fanout_overrides: Vec<GraphExpansionFanoutOverride>,
@@ -98,7 +66,7 @@ pub(crate) struct SelectivityPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct SelectivityStatsContext {
     health: RetrievalStatsHealth,
-    specs: Vec<FanoutSpec>,
+    specs: Vec<(RelationType, ObjectType)>,
     global_counters: HashMap<(RelationType, ObjectType), Option<RetrievalStatsCounter>>,
 }
 
@@ -133,11 +101,10 @@ impl SelectivityStatsContext {
         };
         let mut global_counters = HashMap::new();
         if health.state == RetrievalStatsHealthState::Healthy {
-            for spec in specs
+            for &bucket in specs
                 .iter()
-                .filter(|spec| is_counted_relation(spec.relation))
+                .filter(|(relation, _)| is_counted_relation(*relation))
             {
-                let bucket = spec.count_bucket();
                 if global_counters.contains_key(&bucket) {
                     continue;
                 }
@@ -169,7 +136,7 @@ impl SelectivityStatsContext {
 
     async fn failed(
         stats_store: &dyn RetrievalStatsStore,
-        specs: Vec<FanoutSpec>,
+        specs: Vec<(RelationType, ObjectType)>,
         cause: RetrievalStatsHealthCause,
     ) -> Self {
         let _ = stats_store.mark_unhealthy(cause.clone()).await;
@@ -214,8 +181,8 @@ pub(crate) async fn selectivity_plan_for_entity(
     let count_scope = SelectivityCountScope::from(lifecycle_policy);
     let mut stats_reads_failed = stats_context.health.state != RetrievalStatsHealthState::Healthy;
     let support_factor = semantic_support_factor(cue_score);
-    for spec in &stats_context.specs {
-        if !is_counted_relation(spec.relation) {
+    for &(relation, object_type) in &stats_context.specs {
+        if !is_counted_relation(relation) {
             let max_fanout = policy.state_scope_limit().min(static_max_fanout);
             if !plan
                 .fanout_overrides
@@ -230,12 +197,11 @@ pub(crate) async fn selectivity_plan_for_entity(
             }
             continue;
         }
-        let (count_relation, count_object_type) = spec.count_bucket();
         let (score, entity_count, global_count, fallback) = if !stats_reads_failed {
             let key = RetrievalStatsCounterKey {
                 entity_id,
-                relation_kind: count_relation,
-                object_type: count_object_type,
+                relation_kind: relation,
+                object_type,
             };
             let entity = match stats_store.counter(&key).await {
                 Ok(counter) => counter,
@@ -247,7 +213,7 @@ pub(crate) async fn selectivity_plan_for_entity(
                     None
                 }
             };
-            let global = stats_context.global_counter(count_relation, count_object_type);
+            let global = stats_context.global_counter(relation, object_type);
             match (entity, global) {
                 (Some(entity), Some(global)) => {
                     let entity_count = count_scope.count(entity);
@@ -273,7 +239,7 @@ pub(crate) async fn selectivity_plan_for_entity(
             (None, None, None, true)
         };
 
-        let budget_spec = policy.fanout_budget(count_relation, count_object_type);
+        let budget_spec = policy.fanout_budget(relation, object_type);
         let max_fanout = budget_spec.max_fanout.min(static_max_fanout);
         let min_fanout = budget_spec.min_fanout.min(max_fanout);
         let chosen_fanout = match score {
@@ -285,15 +251,15 @@ pub(crate) async fn selectivity_plan_for_entity(
         let decision = selectivity_decision(score, support_factor, chosen_fanout, fallback);
         increment_telemetry(&mut plan.telemetry, decision);
         plan.fanout_overrides.push(GraphExpansionFanoutOverride {
-            relation: spec.relation,
-            object_type: spec.object_type,
+            relation,
+            object_type,
             max_fanout: chosen_fanout,
         });
         if trace_mode.is_enabled() {
             plan.traces.push(SelectivityTrace {
                 root: MemoryObjectRef::new(ObjectType::Entity, entity_id),
-                relation: spec.relation,
-                object_type: spec.object_type,
+                relation,
+                object_type,
                 count_scope,
                 score,
                 entity_count,
@@ -308,54 +274,6 @@ pub(crate) async fn selectivity_plan_for_entity(
     }
 
     Ok(plan)
-}
-
-fn validate_positive_f64(name: &'static str, value: f64) -> Result<(), CustomError> {
-    if !value.is_finite() || value <= 0.0 {
-        return Err(ConfigValidationError {
-            keys: vec![name],
-            reason: ConfigValidationReason::OutOfDomain {
-                expected: "a finite positive number",
-                actual: value.to_string(),
-            },
-        }
-        .into());
-    }
-    Ok(())
-}
-
-fn validate_fanout_budget(
-    relation: RelationType,
-    object_type: ObjectType,
-    min_fanout: usize,
-    max_fanout: usize,
-) -> Result<(), CustomError> {
-    if min_fanout > max_fanout {
-        return Err(ConfigValidationError {
-            keys: vec![fanout_config_key(relation, object_type)],
-            reason: ConfigValidationReason::OutOfDomain {
-                expected: "min <= max",
-                actual: format!("min={min_fanout} max={max_fanout}"),
-            },
-        }
-        .into());
-    }
-    Ok(())
-}
-
-fn fanout_config_key(relation: RelationType, object_type: ObjectType) -> &'static str {
-    match (relation, object_type) {
-        (RelationType::About, ObjectType::DerivedMemory) => {
-            "retrieval.fanout.about_entity.derived_memory"
-        }
-        (RelationType::Involves, ObjectType::Episode) => {
-            "retrieval.fanout.participant_entity.episode"
-        }
-        (RelationType::PartOfThread, ObjectType::DerivedMemory) => {
-            "retrieval.fanout.part_of_thread.derived_memory"
-        }
-        _ => "retrieval.fanout",
-    }
 }
 
 pub(crate) fn selectivity_score(entity_count: u64, global_count: u64, alpha: f64) -> f64 {
@@ -392,12 +310,12 @@ fn conservative_fallback_fanout(min_fanout: usize, max_fanout: usize) -> usize {
 }
 
 fn spec_allowed_by_graph_scope(
-    spec: &FanoutSpec,
+    &(relation, object_type): &(RelationType, ObjectType),
     allowed_object_types: &[ObjectType],
     allowed_relation_types: &[RelationType],
 ) -> bool {
-    (allowed_object_types.is_empty() || allowed_object_types.contains(&spec.object_type))
-        && (allowed_relation_types.is_empty() || allowed_relation_types.contains(&spec.relation))
+    (allowed_object_types.is_empty() || allowed_object_types.contains(&object_type))
+        && (allowed_relation_types.is_empty() || allowed_relation_types.contains(&relation))
 }
 
 fn selectivity_decision(
@@ -469,47 +387,15 @@ struct FanoutSpec {
     max_fanout: usize,
 }
 
-impl FanoutSpec {
-    fn count_bucket(self) -> (RelationType, ObjectType) {
-        (self.relation, self.object_type)
-    }
-}
-
-fn fanout_routes() -> [FanoutSpec; 4] {
+fn fanout_routes() -> [(RelationType, ObjectType); 4] {
     // About and Mentions share the subject's state budget without counting edges.
-    let [about, participant, thread] = DEFAULT_FANOUT_SPECS;
     [
-        about,
-        participant,
-        thread,
-        FanoutSpec {
-            relation: RelationType::Mentions,
-            object_type: ObjectType::Observation,
-            ..about
-        },
+        (RelationType::About, ObjectType::DerivedMemory),
+        (RelationType::Involves, ObjectType::Episode),
+        (RelationType::PartOfThread, ObjectType::DerivedMemory),
+        (RelationType::Mentions, ObjectType::Observation),
     ]
 }
-
-const DEFAULT_FANOUT_SPECS: [FanoutSpec; 3] = [
-    FanoutSpec {
-        relation: RelationType::About,
-        object_type: ObjectType::DerivedMemory,
-        min_fanout: 0,
-        max_fanout: 20,
-    },
-    FanoutSpec {
-        relation: RelationType::Involves,
-        object_type: ObjectType::Episode,
-        min_fanout: 1,
-        max_fanout: 5,
-    },
-    FanoutSpec {
-        relation: RelationType::PartOfThread,
-        object_type: ObjectType::DerivedMemory,
-        min_fanout: 0,
-        max_fanout: 15,
-    },
-];
 
 #[cfg(test)]
 mod tests {
@@ -518,6 +404,19 @@ mod tests {
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
     use async_trait::async_trait;
     use std::sync::Mutex;
+
+    fn default_policy() -> RetrievalSelectivityPolicy {
+        let settings = crate::config::Settings::new(Default::default()).unwrap();
+        RetrievalSelectivityPolicy::with_fanout_budgets(
+            settings.get_selectivity_smoothing_alpha(),
+            settings.get_selectivity_gamma(),
+            settings
+                .get_retrieval_fanout_budgets()
+                .map(|(relation, object_type, budget)| {
+                    (relation, object_type, budget.min(), budget.max())
+                }),
+        )
+    }
 
     #[test]
     fn selectivity_decreases_as_entity_count_increases() {
@@ -566,7 +465,7 @@ mod tests {
             candidate.1,
             10,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Disabled,
@@ -578,7 +477,7 @@ mod tests {
             candidate.1,
             10,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -605,7 +504,7 @@ mod tests {
             candidate.1,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -674,7 +573,7 @@ mod tests {
                 0.75,
                 20,
                 &stats,
-                RetrievalSelectivityPolicy::default(),
+                default_policy(),
                 &stats_context,
                 RetrievalLifecyclePolicy {
                     include_suppressed,
@@ -699,12 +598,13 @@ mod tests {
     #[tokio::test]
     async fn subject_aboutness_has_one_configured_budget_even_for_mentions_only_scope() {
         let stats = InMemoryRetrievalStatsStore::new();
-        let policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
-            1.0,
-            1.0,
-            [(RelationType::About, ObjectType::DerivedMemory, 2, 2)],
-        )
-        .unwrap();
+        let mut policy = default_policy();
+        for spec in &mut policy.fanout_budgets {
+            if spec.relation == RelationType::About {
+                spec.min_fanout = 2;
+                spec.max_fanout = 2;
+            }
+        }
         for relations in [
             vec![RelationType::Mentions],
             vec![RelationType::About, RelationType::Mentions],
@@ -748,7 +648,7 @@ mod tests {
             1.0,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -775,7 +675,7 @@ mod tests {
             candidate.1,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -805,7 +705,7 @@ mod tests {
             candidate.1,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -841,7 +741,7 @@ mod tests {
             candidate.1,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,
@@ -878,7 +778,7 @@ mod tests {
             candidate.1,
             20,
             &stats,
-            RetrievalSelectivityPolicy::default(),
+            default_policy(),
             &stats_context,
             RetrievalLifecyclePolicy::default(),
             TraceMode::Enabled,

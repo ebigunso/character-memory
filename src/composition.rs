@@ -67,13 +67,22 @@ impl CharacterMemory {
         vector_store: Box<dyn VectorCandidateStore>,
         embedder: Box<dyn MemoryEmbedder>,
     ) -> Self {
+        let settings = Settings::new(Default::default()).unwrap();
         Self {
             memory_composition: MemoryComposition {
                 graph_store,
                 vector_store,
                 embedder,
                 stats_store: Box::new(crate::adapters::stats::InMemoryRetrievalStatsStore::new()),
-                selectivity_policy: RetrievalSelectivityPolicy::default(),
+                selectivity_policy: RetrievalSelectivityPolicy::with_fanout_budgets(
+                    settings.get_selectivity_smoothing_alpha(),
+                    settings.get_selectivity_gamma(),
+                    settings.get_retrieval_fanout_budgets().map(
+                        |(relation, object_type, budget)| {
+                            (relation, object_type, budget.min(), budget.max())
+                        },
+                    ),
+                ),
             },
             write_turn: tokio::sync::Mutex::new(()),
         }
@@ -173,14 +182,17 @@ impl CharacterMemory {
             None => Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
         };
         let stats_store = retrieval_stats_store(&settings)?;
-        let fanout_budgets = settings.get_retrieval_fanout_budgets().into_iter().map(
-            |(relation, object_type, budget)| (relation, object_type, budget.min(), budget.max()),
-        );
-        let selectivity_policy = RetrievalSelectivityPolicy::try_new_with_fanout_budgets(
+        let fanout_budgets =
+            settings
+                .get_retrieval_fanout_budgets()
+                .map(|(relation, object_type, budget)| {
+                    (relation, object_type, budget.min(), budget.max())
+                });
+        let selectivity_policy = RetrievalSelectivityPolicy::with_fanout_budgets(
             settings.get_selectivity_smoothing_alpha(),
             settings.get_selectivity_gamma(),
             fanout_budgets,
-        )?;
+        );
 
         Ok(Self::from_parts_with_stats(
             graph_store,

@@ -57,12 +57,21 @@ where
 {
     #[cfg(test)]
     pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
+        let settings = crate::config::Settings::new(Default::default()).unwrap();
         Self {
             graph_store,
             vector_store,
             embedder,
             stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
-            selectivity_policy: RetrievalSelectivityPolicy::default(),
+            selectivity_policy: RetrievalSelectivityPolicy::with_fanout_budgets(
+                settings.get_selectivity_smoothing_alpha(),
+                settings.get_selectivity_gamma(),
+                settings
+                    .get_retrieval_fanout_budgets()
+                    .map(|(relation, object_type, budget)| {
+                        (relation, object_type, budget.min(), budget.max())
+                    }),
+            ),
         }
     }
 
