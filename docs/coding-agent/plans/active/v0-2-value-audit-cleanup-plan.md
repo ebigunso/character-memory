@@ -823,6 +823,17 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
+- 2026-09-29 Task_1 measurement read: direction confirmed.
+  Trigger / new insight: AFTER at library 52dc5353, harness 26a43960, run twice (timed A, untimed B), byte-identical (SHA-256 `9351e9c4…`). BEFORE is the consolidation slice-end AFTER for the old families (`b4150b36…`) and the accepted obligations BEFORE for the new family (`e8835d8a…`); the harness reproduces the old families exactly. Readings:
+  - 955 saved observations, 57 keyed and 898 keyless. Exactly 8 changed, and all 8 are the observations registered in advance as having a present participant at a native budget of zero: familiar person and familiar person with salient remarks, in both identifier orders. No keyless observation changed, no other keyed one, and not the obligations family. There were no bounded failures.
+  - In 6 of the 8 the budget rose from 0 to 1 and the pack did not change: Iris's latest occasion was already there by another road.
+  - In the 2 full-store salient-remarks cases, one of Iris's remark episodes enters and the oldest ordinary occasion with her leaves (remark-31 for occasion-000 in the original order, remark-24 for occasion-006 in the opposed). Each added episode already had its observation selected, so the distinct occasions represented fall from 19 to 18.
+  - The falsifier did not fire: at most one episode was gained per participant, and nothing outside the pre-registered cases moved.
+  - What it means for the character: with Iris present, the scene of a time with her comes to mind whole, not only what was observed in it, and it takes the place of the oldest time with her. The small cost is that one occasion is now represented twice (the episode and its observation), and one fewer distinct time with her is recalled. That is the right trade for a person who is present.
+  - Verdict: direction confirmed. The AFTER is the reference for the final-tip proof and the prospective slice's BEFORE, for the old families and the obligations family alike.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
 ## Notes
 - Risks:
   - At a full cap, Task_1's added occasion can displace another memory in participant-heavy families. The falsifier counts only gains, so the reading reports displacements, and the verdict judges them for the character.
