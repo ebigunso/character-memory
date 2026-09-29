@@ -267,93 +267,16 @@ fn object_type_has_stats_state(object_type: ObjectType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use crate::test_support::TestStatsStore;
 
     use super::*;
-    use async_trait::async_trait;
+
     use chrono::{TimeZone, Utc};
 
     use crate::domain::{RelationType, DEFAULT_SCHEMA_VERSION};
     use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError};
-    use crate::ports::retrieval_stats::{
-        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-        RetrievalStatsObjectState,
-    };
+
     use crate::test_support::{in_memory_graph_store, simple_episode};
-
-    #[derive(Debug)]
-    struct RecordingStatsStore {
-        edge_error: Option<RetrievalStatsStoreError>,
-        object_state_error: Option<RetrievalStatsStoreError>,
-        health_result: Result<RetrievalStatsHealth, RetrievalStatsStoreError>,
-        marked_causes: Mutex<Vec<RetrievalStatsHealthCause>>,
-    }
-
-    impl Default for RecordingStatsStore {
-        fn default() -> Self {
-            Self {
-                edge_error: None,
-                object_state_error: None,
-                health_result: Ok(RetrievalStatsHealth::default()),
-                marked_causes: Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl RetrievalStatsStore for RecordingStatsStore {
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            match &self.edge_error {
-                Some(error) => Err(error.clone()),
-                None => Ok(()),
-            }
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            match &self.object_state_error {
-                Some(error) => Err(error.clone()),
-                None => Ok(()),
-            }
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            self.health_result.clone()
-        }
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            self.marked_causes.lock().unwrap().push(cause);
-            Ok(())
-        }
-    }
 
     fn health_check_error() -> RetrievalStatsStoreError {
         RetrievalStatsStoreError::Sqlite {
@@ -376,9 +299,9 @@ mod tests {
     #[tokio::test]
     async fn successful_writes_then_health_failure_marks_store_with_retained_cause() {
         let graph_store = in_memory_graph_store();
-        let stats_store = RecordingStatsStore {
-            health_result: Err(health_check_error()),
-            ..RecordingStatsStore::default()
+        let stats_store = TestStatsStore {
+            health_error: Some(health_check_error()),
+            ..TestStatsStore::default()
         };
 
         let outcome = StatsProjectionService::new(&graph_store, &stats_store)
@@ -402,10 +325,10 @@ mod tests {
     #[tokio::test]
     async fn edge_and_object_state_failures_are_both_retained() {
         let graph_store = in_memory_graph_store();
-        let stats_store = RecordingStatsStore {
+        let stats_store = TestStatsStore {
             edge_error: Some(edge_write_error()),
             object_state_error: Some(object_state_write_error()),
-            ..RecordingStatsStore::default()
+            ..TestStatsStore::default()
         };
 
         let outcome = StatsProjectionService::new(&graph_store, &stats_store)
@@ -431,13 +354,12 @@ mod tests {
         let stored_health_cause = RetrievalStatsHealthCause::CounterRead {
             error: health_check_error(),
         };
-        let stats_store = RecordingStatsStore {
+        let stats_store = TestStatsStore {
             edge_error: Some(edge_write_error()),
-            health_result: Ok(RetrievalStatsHealth {
-                state: RetrievalStatsHealthState::Unhealthy,
-                last_error_cause: Some(stored_health_cause.clone()),
-            }),
-            ..RecordingStatsStore::default()
+            store: crate::adapters::stats::InMemoryRetrievalStatsStore::unhealthy(
+                stored_health_cause.clone(),
+            ),
+            ..TestStatsStore::default()
         };
 
         let outcome = StatsProjectionService::new(&graph_store, &stats_store)
@@ -481,7 +403,7 @@ mod tests {
                 schema_version: DEFAULT_SCHEMA_VERSION.to_owned(),
             })
             .collect::<Vec<_>>();
-        let stats = RecordingStatsStore::default();
+        let stats = TestStatsStore::default();
 
         let outcome = StatsProjectionService::new(&graph, &stats)
             .project(&[], &links)
@@ -517,7 +439,7 @@ mod tests {
             stats_link(MemoryId::from_u128(5), present_episode.id),
             stats_link(MemoryId::from_u128(6), missing_episode_id),
         ];
-        let stats_store = RecordingStatsStore::default();
+        let stats_store = TestStatsStore::default();
         let status = StatsProjectionService::new(&graph_store, &stats_store)
             .project(&[], &links)
             .await

@@ -13,7 +13,7 @@ use crate::api::types::{
     ObservationDraft,
 };
 use crate::domain::MemoryObjectRef;
-use crate::domain::{graph_uri, MemoryId, ObjectType, RelationType, Scene, DEFAULT_SCHEMA_VERSION};
+use crate::domain::{MemoryId, ObjectType, RelationType, Scene, DEFAULT_SCHEMA_VERSION};
 
 /// Stable UUIDv5 namespace for write-plan IDs. IDs remain stable across releases as long as this
 /// namespace and `deterministic_uuid` label framing stay fixed.
@@ -43,21 +43,12 @@ impl RememberPlanDefaults {
         }
     }
 
-    pub fn with_schema_version(mut self, schema_version: impl Into<String>) -> Self {
-        self.schema_version = schema_version.into();
-        self
-    }
-
     pub fn stable_id(&self, label: impl AsRef<str>) -> MemoryId {
         deterministic_uuid(&[
             "character_memory.remember_plan".as_bytes(),
             self.operation_seed.as_bytes(),
             label.as_ref().as_bytes(),
         ])
-    }
-
-    pub fn graph_iri(&self, object_type: ObjectType, id: MemoryId) -> String {
-        graph_uri(object_type, id)
     }
 }
 
@@ -630,7 +621,6 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
-use crate::usecases::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WritePlanValidationVerdict {
@@ -1559,11 +1549,6 @@ fn validate_link(link: &MemoryLink) -> Vec<CandidateValidationIssue> {
     }
     if link.schema_version.trim().is_empty() {
         errors.push(CandidateValidationIssue::MissingObjectSchemaVersion);
-    }
-    if admit_link(link, LinkAdmissionEvidence::ExplicitCallerIntent)
-        == LinkAdmissionDecision::RejectedLowInformationCoOccurrence
-    {
-        errors.push(CandidateValidationIssue::MemoryLinkRejectedByAdmissionPolicy);
     }
     errors
 }

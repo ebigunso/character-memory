@@ -12,7 +12,7 @@ use crate::domain::{
 };
 use crate::errors::CustomError;
 use crate::policy::graph_expansion::{
-    bounded_incident_link_refs, fail_if_closed, is_participant_pair, order_current_subject_links,
+    bounded_incident_link_refs, is_participant_pair, order_current_subject_links,
     BoundedExpansionLinkRef, ParticipantOccasions, SUBJECT_ABOUTNESS_ROUTES,
 };
 use crate::ports::graph_authority::{
@@ -66,22 +66,20 @@ pub(super) fn insert_visible_ref(
     next_frontier: &mut Vec<MemoryObjectRef>,
     object_ref: MemoryObjectRef,
     bounded_failure: &mut Option<GraphExpansionBoundedFailure>,
-) -> Result<(), CustomError> {
+) {
     if graph_refs.contains(&object_ref) {
-        return Ok(());
+        return;
     }
     if graph_refs.len() >= query.max_nodes {
         let failure = GraphExpansionBoundedFailure {
             reason: GraphExpansionBoundedFailureReason::NodeLimit,
             at: Some(object_ref),
         };
-        fail_if_closed(query.failure_policy.mode, failure)?;
         bounded_failure.get_or_insert(failure);
-        return Ok(());
+        return;
     }
     graph_refs.insert(object_ref);
     next_frontier.push(object_ref);
-    Ok(())
 }
 
 pub(super) fn quads_for_triples(
@@ -174,24 +172,6 @@ pub(super) fn hydrate_objects_by_refs_from_store(
     Ok(objects)
 }
 
-pub(super) fn hydrate_all_links_from_store(store: &Store) -> Result<Vec<MemoryLink>, CustomError> {
-    let subjects = rdf_subject_values(store)?;
-    let mut links = subjects
-        .iter()
-        .filter_map(|(subject, values)| {
-            let object_type = values
-                .optional_literal(super::vocabulary::OBJECT_TYPE)
-                .and_then(|value| enum_value_from_literal::<ObjectType>(&value).ok());
-            match object_type {
-                Some(ObjectType::MemoryLink) => Some(memory_link_from_rdf(subject, values)),
-                _ => None,
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    links.sort_by_key(|link| link.id);
-    Ok(links)
-}
-
 pub(super) fn hydrate_links_by_ids_from_store(
     store: &Store,
     link_ids: &[MemoryId],
@@ -216,10 +196,13 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
     lifecycle_link_ids: &HashSet<MemoryId>,
     graph_ref_set: &HashSet<MemoryObjectRef>,
 ) -> Result<Vec<MemoryLink>, CustomError> {
-    let links = hydrate_all_links_from_store(store)?;
+    let ids = graph_link_ids
+        .union(lifecycle_link_ids)
+        .copied()
+        .collect::<Vec<_>>();
+    let links = hydrate_links_by_ids_from_store(store, &ids)?;
     Ok(links
         .into_iter()
-        .filter(|link| graph_link_ids.contains(&link.id) || lifecycle_link_ids.contains(&link.id))
         .filter(|link| {
             let endpoints_in_graph = graph_ref_set
                 .contains(&MemoryObjectRef::from_id_type(link.from_id, link.from_type))
@@ -228,12 +211,6 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
                 || lifecycle_link_ids.contains(&link.id)
         })
         .collect())
-}
-
-pub(super) fn rdf_subject_values(
-    store: &Store,
-) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
-    rdf_subject_values_from_quads(store.iter())
 }
 
 fn rdf_subject_values_from_quads(
@@ -701,13 +678,13 @@ pub(super) fn bounded_graph_visible_refs(
                     matches!(
                         object.object_type,
                         ObjectType::Episode | ObjectType::Observation
-                    )
+                    ) && !participant_occasions.contains_key(object)
                 })
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .collect::<Vec<_>>();
-            let occasions = selectors.select_participant_occasions(&memories)?;
-            let future = occasions
+            participant_occasions.extend(selectors.select_participant_occasions(&memories)?);
+            let future = participant_occasions
                 .iter()
                 .filter(|(object, occasion)| {
                     occasion.memory_time(object.object_type) > query.participant_reference_time
@@ -715,7 +692,6 @@ pub(super) fn bounded_graph_visible_refs(
                 })
                 .map(|(object, _)| *object)
                 .collect::<HashSet<_>>();
-            participant_occasions.extend(occasions);
             for link in &link_refs {
                 if !query.allowed_relation_types.is_empty()
                     && !query.allowed_relation_types.contains(&link.relation)
@@ -791,7 +767,7 @@ pub(super) fn bounded_graph_visible_refs(
                 incident_link_refs,
                 &participant_occasions,
                 &mut bounded_failure,
-            )?;
+            );
             fanout_utilization.extend(selection.utilization);
             filtered_nodes.extend(selection.filtered_nodes);
             for link_ref in selection.links {
@@ -802,7 +778,7 @@ pub(super) fn bounded_graph_visible_refs(
                     &mut next_frontier,
                     neighbor,
                     &mut bounded_failure,
-                )?;
+                );
                 if graph_refs.contains(&neighbor) {
                     graph_link_ids.insert(link_ref.link_id());
                 }
@@ -875,5 +851,112 @@ pub(super) fn oxigraph_error(error: impl std::fmt::Display) -> CustomError {
 impl From<oxigraph::model::IriParseError> for CustomError {
     fn from(error: oxigraph::model::IriParseError) -> Self {
         CustomError::DatabaseError(format!("Invalid RDF IRI: {error}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::oxigraph::OxigraphGraphAuthorityStore;
+    use crate::policy::graph_expansion::bounded_expansion;
+    use crate::ports::graph_authority::{GraphAuthorityStore, TraceMode};
+    use crate::test_support::representative_fixtures;
+
+    async fn expand_nonroot_person(history: usize, fanout: usize) -> Vec<GraphExpansion> {
+        let fixtures = representative_fixtures();
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let person = MemoryObjectRef::new(ObjectType::Entity, fixtures.hub_entity.id);
+        let mut objects = vec![MemoryObject::Entity(fixtures.hub_entity)];
+        let mut links = Vec::new();
+        for index in 0..history {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(20_000 + index as u128);
+            let mut link = crate::MemoryLinkDraft::new(
+                ObjectType::Episode,
+                episode.id,
+                RelationType::Involves,
+                person.object_type,
+                person.id,
+            )
+            .into_domain()
+            .unwrap();
+            link.id = MemoryId::from_u128(30_000 + index as u128);
+            link.created_at = episode.scene.time.to_utc();
+            links.push(link);
+            objects.push(MemoryObject::Episode(episode));
+        }
+        store.upsert_objects(&objects).await.unwrap();
+        store.upsert_links(&links).await.unwrap();
+        let mut outcomes = Vec::new();
+        for trace in [TraceMode::Disabled, TraceMode::Enabled] {
+            let mut query =
+                GraphExpansionQuery::new(MemoryId::from_u128(20_000), ObjectType::Episode, 2, 96)
+                    .with_max_fanout_per_node(fanout)
+                    .with_max_hub_edges(64)
+                    .with_fanout_utilization_recording(trace);
+            query.participant_reference_time =
+                fixtures.episode.scene.time.to_utc() + chrono::Duration::days(1);
+            let mut adapter = store.expand_bounded(&query).await.unwrap();
+            let materialized = bounded_expansion(
+                &query,
+                objects.clone(),
+                links.clone(),
+                &ParticipantOccasions::new(),
+            )
+            .unwrap();
+            let utilization = std::mem::take(&mut adapter.fanout_utilization);
+            if trace.is_enabled() {
+                assert_eq!(utilization.len(), 2);
+                assert_eq!(
+                    utilization.iter().find(|entry| entry.root == person),
+                    Some(&GraphExpansionFanoutUtilization {
+                        root: person,
+                        relation: RelationType::Involves,
+                        object_type: ObjectType::Episode,
+                        configured_cap: fanout,
+                        selected_cap: fanout,
+                        retained_count: history.min(fanout).min(64),
+                        omitted_by_fanout_count: history - history.min(fanout).min(64),
+                    })
+                );
+            } else {
+                assert!(utilization.is_empty());
+            }
+            assert_eq!(adapter, materialized);
+            outcomes.push(adapter);
+        }
+        assert_eq!(outcomes[0], outcomes[1]);
+        outcomes
+    }
+
+    #[tokio::test]
+    async fn nonroot_person_history_above_hub_limit_keeps_the_selected_graph() {
+        let short = expand_nonroot_person(16, 16).await;
+        let long = expand_nonroot_person(71, 16).await;
+        for (short, long) in short.iter().zip(&long) {
+            assert_eq!(short.objects.len(), 17);
+            assert_eq!(short.links.len(), 16);
+            assert_eq!(short.objects, long.objects);
+            assert_eq!(short.links, long.links);
+            assert!(long.bounded_failure.is_none());
+            assert_eq!(short, long);
+        }
+    }
+
+    #[tokio::test]
+    async fn nonroot_person_selected_prefix_above_hub_limit_stays_bounded() {
+        let person =
+            MemoryObjectRef::new(ObjectType::Entity, representative_fixtures().hub_entity.id);
+        for expansion in expand_nonroot_person(71, 65).await {
+            assert_eq!(expansion.objects.len(), 65);
+            assert_eq!(expansion.links.len(), 64);
+            assert_eq!(
+                expansion.bounded_failure,
+                Some(GraphExpansionBoundedFailure {
+                    reason: GraphExpansionBoundedFailureReason::HubLimit,
+                    at: Some(person),
+                })
+            );
+        }
     }
 }

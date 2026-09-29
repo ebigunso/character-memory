@@ -605,9 +605,16 @@ async fn named_state_trace_does_not_change_recall_at_the_hub_limit() {
         context.candidate_limits.max_graph_roots = 1;
         context.graph_limits.max_fanout_per_node = 1;
         context.graph_limits.max_hub_edges = 1;
-        context.graph_limits.failure_mode = character_memory::GraphFailureMode::FailClosed;
         context.graph_limits.allowed_relation_types = vec![RelationType::About];
         packs.push(memory.retrieve(context).await.map(|outcome| {
+            assert_eq!(
+                outcome
+                    .rationale
+                    .telemetry
+                    .graph_expansion
+                    .bounded_failure_count,
+                0
+            );
             if trace {
                 assert!(outcome
                     .trace
