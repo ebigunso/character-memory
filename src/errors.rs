@@ -15,105 +15,13 @@ pub enum VectorDatabaseErrorKind {
     Conversion,
     InvalidUri,
     NoSnapshotFound,
-    Io { io_kind: IoErrorKind },
+    Io { io_kind: String },
     HttpTimeout,
     HttpConnect,
     HttpStatus,
     Http,
     JsonToPayload,
     PayloadDeserialization,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum IoErrorKind {
-    NotFound,
-    PermissionDenied,
-    ConnectionRefused,
-    ConnectionReset,
-    HostUnreachable,
-    NetworkUnreachable,
-    ConnectionAborted,
-    NotConnected,
-    AddrInUse,
-    AddrNotAvailable,
-    NetworkDown,
-    BrokenPipe,
-    AlreadyExists,
-    WouldBlock,
-    NotADirectory,
-    IsADirectory,
-    DirectoryNotEmpty,
-    ReadOnlyFilesystem,
-    StaleNetworkFileHandle,
-    InvalidInput,
-    InvalidData,
-    TimedOut,
-    WriteZero,
-    StorageFull,
-    NotSeekable,
-    QuotaExceeded,
-    FileTooLarge,
-    ResourceBusy,
-    ExecutableFileBusy,
-    Deadlock,
-    CrossesDevices,
-    TooManyLinks,
-    InvalidFilename,
-    ArgumentListTooLong,
-    Interrupted,
-    Unsupported,
-    UnexpectedEof,
-    OutOfMemory,
-    Other,
-    Unrecognized,
-}
-
-impl From<std::io::ErrorKind> for IoErrorKind {
-    fn from(kind: std::io::ErrorKind) -> Self {
-        match kind {
-            std::io::ErrorKind::NotFound => Self::NotFound,
-            std::io::ErrorKind::PermissionDenied => Self::PermissionDenied,
-            std::io::ErrorKind::ConnectionRefused => Self::ConnectionRefused,
-            std::io::ErrorKind::ConnectionReset => Self::ConnectionReset,
-            std::io::ErrorKind::HostUnreachable => Self::HostUnreachable,
-            std::io::ErrorKind::NetworkUnreachable => Self::NetworkUnreachable,
-            std::io::ErrorKind::ConnectionAborted => Self::ConnectionAborted,
-            std::io::ErrorKind::NotConnected => Self::NotConnected,
-            std::io::ErrorKind::AddrInUse => Self::AddrInUse,
-            std::io::ErrorKind::AddrNotAvailable => Self::AddrNotAvailable,
-            std::io::ErrorKind::NetworkDown => Self::NetworkDown,
-            std::io::ErrorKind::BrokenPipe => Self::BrokenPipe,
-            std::io::ErrorKind::AlreadyExists => Self::AlreadyExists,
-            std::io::ErrorKind::WouldBlock => Self::WouldBlock,
-            std::io::ErrorKind::NotADirectory => Self::NotADirectory,
-            std::io::ErrorKind::IsADirectory => Self::IsADirectory,
-            std::io::ErrorKind::DirectoryNotEmpty => Self::DirectoryNotEmpty,
-            std::io::ErrorKind::ReadOnlyFilesystem => Self::ReadOnlyFilesystem,
-            std::io::ErrorKind::StaleNetworkFileHandle => Self::StaleNetworkFileHandle,
-            std::io::ErrorKind::InvalidInput => Self::InvalidInput,
-            std::io::ErrorKind::InvalidData => Self::InvalidData,
-            std::io::ErrorKind::TimedOut => Self::TimedOut,
-            std::io::ErrorKind::WriteZero => Self::WriteZero,
-            std::io::ErrorKind::StorageFull => Self::StorageFull,
-            std::io::ErrorKind::NotSeekable => Self::NotSeekable,
-            std::io::ErrorKind::QuotaExceeded => Self::QuotaExceeded,
-            std::io::ErrorKind::FileTooLarge => Self::FileTooLarge,
-            std::io::ErrorKind::ResourceBusy => Self::ResourceBusy,
-            std::io::ErrorKind::ExecutableFileBusy => Self::ExecutableFileBusy,
-            std::io::ErrorKind::Deadlock => Self::Deadlock,
-            std::io::ErrorKind::CrossesDevices => Self::CrossesDevices,
-            std::io::ErrorKind::TooManyLinks => Self::TooManyLinks,
-            std::io::ErrorKind::InvalidFilename => Self::InvalidFilename,
-            std::io::ErrorKind::ArgumentListTooLong => Self::ArgumentListTooLong,
-            std::io::ErrorKind::Interrupted => Self::Interrupted,
-            std::io::ErrorKind::Unsupported => Self::Unsupported,
-            std::io::ErrorKind::UnexpectedEof => Self::UnexpectedEof,
-            std::io::ErrorKind::OutOfMemory => Self::OutOfMemory,
-            std::io::ErrorKind::Other => Self::Other,
-            _ => Self::Unrecognized,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -256,11 +164,8 @@ pub enum RetrievalStatsStoreError {
     NegativeCounter { value: i64 },
     #[error("retrieval stats sqlite operation failed: {detail}")]
     Sqlite { detail: String },
-    #[error("retrieval stats filesystem operation failed ({io_kind:?}): {detail}")]
-    Filesystem {
-        io_kind: IoErrorKind,
-        detail: String,
-    },
+    #[error("retrieval stats filesystem operation failed ({io_kind}): {detail}")]
+    Filesystem { io_kind: String, detail: String },
     #[error("retrieval stats store lock is poisoned")]
     LockPoisoned,
     #[error("retrieval stats health serialization failed: {detail}")]
@@ -380,11 +285,6 @@ pub enum ConfigValidationReason {
         expected: &'static str,
         actual: String,
     },
-    #[error("keys {first} and {second} must be provided together")]
-    PairedKeyViolation {
-        first: &'static str,
-        second: &'static str,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -405,12 +305,6 @@ pub enum ReplacementIdentityConflict {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum CustomError {
-    #[error("Environment file not found: {0}")]
-    EnvFileNotFound(String),
-
-    #[error("Failed to load environment file: {0}")]
-    EnvLoadError(String),
-
     #[error("Configuration parse error: {0}")]
     ConfigParseError(String),
 
@@ -446,15 +340,6 @@ pub enum CustomError {
     WritePlanValidationRejected {
         validations: Vec<CandidateValidation>,
     },
-
-    #[error("Missing required field for episodic memory: {0}")]
-    MissingEpisodicField(&'static str),
-
-    #[error("Invalid semantic memory: semantic memories should not include episodic fields")]
-    InvalidSemanticMemory,
-
-    #[error("Unsupported operation: {0}")]
-    UnsupportedOperation(String),
 
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
@@ -522,23 +407,5 @@ mod tests {
 
         assert_eq!(serialized["kind"], "unrecognized");
         assert_eq!(serialized["detail"], detail);
-    }
-
-    #[test]
-    fn io_error_kind_preserves_transport_classification() {
-        let kind = IoErrorKind::from(std::io::ErrorKind::ConnectionRefused);
-
-        assert_eq!(kind, IoErrorKind::ConnectionRefused);
-    }
-
-    #[test]
-    fn unrecognized_io_error_kind_is_an_opaque_marker() {
-        let serialized = serde_json::to_value(IoErrorKind::Unrecognized).unwrap();
-
-        assert_eq!(serialized, serde_json::json!({ "kind": "unrecognized" }));
-        assert!(
-            serialized.get("value").is_none(),
-            "the fallback must not expose a Debug-derived carrier"
-        );
     }
 }

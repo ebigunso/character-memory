@@ -14,7 +14,7 @@ use qdrant_client::{config::QdrantConfig, Qdrant, QdrantError};
 
 use crate::domain::MemoryObjectRef;
 use crate::errors::{
-    CollectionCompatibilityError, CollectionMismatch, CustomError, IoErrorKind, TransportStatus,
+    CollectionCompatibilityError, CollectionMismatch, CustomError, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use crate::models::vector::{VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding};
@@ -393,7 +393,7 @@ fn qdrant_error(error: QdrantError) -> CustomError {
         QdrantError::Io(error) => VectorDatabaseError::new(
             "qdrant",
             VectorDatabaseErrorKind::Io {
-                io_kind: IoErrorKind::from(error.kind()),
+                io_kind: error.kind().to_string(),
             },
             None,
             error.to_string(),
@@ -459,11 +459,11 @@ fn http_transport_status(status: u16) -> TransportStatus {
     }
 }
 
-fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<IoErrorKind> {
+fn find_io_error_kind(error: &(dyn std::error::Error + 'static)) -> Option<String> {
     let mut current = Some(error);
     while let Some(source) = current {
         if let Some(io_error) = source.downcast_ref::<std::io::Error>() {
-            return Some(IoErrorKind::from(io_error.kind()));
+            return Some(io_error.kind().to_string());
         }
         current = source.source();
     }
@@ -864,8 +864,9 @@ mod tests {
 
     #[test]
     fn qdrant_response_error_promotes_nested_io_classification() {
-        let status = tonic::Status::from_error(Box::new(std::io::Error::from(
+        let status = tonic::Status::from_error(Box::new(std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
+            "socket context",
         )));
         let error = qdrant_error(QdrantError::ResponseError { status });
 
@@ -873,10 +874,10 @@ mod tests {
             error,
             CustomError::VectorDatabaseError(VectorDatabaseError {
                 kind: VectorDatabaseErrorKind::Io {
-                    io_kind: IoErrorKind::ConnectionRefused,
+                    io_kind,
                 },
                 ..
-            })
+            }) if io_kind == std::io::ErrorKind::ConnectionRefused.to_string()
         ));
     }
 
