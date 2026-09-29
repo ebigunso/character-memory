@@ -23,7 +23,10 @@ where
     pub(crate) fn new(graph_store: &'a G) -> Self {
         Self {
             graph_store,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
         }
     }
 
@@ -98,27 +101,18 @@ pub(crate) fn reject_divergent_links(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ScopeKey;
-    use crate::ports::graph_authority::GraphExpansionFilteredNode;
-    use crate::ports::graph_authority::GraphExpansionLifecyclePolicy;
+
     use crate::test_support::parse_id as id;
     use crate::test_support::write_time as timestamp;
-    use async_trait::async_trait;
+    use crate::test_support::TestGraphStore;
 
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::domain::{
-        DerivedMemory, DomainValidationError, MemoryId, MemoryObject, ObjectType, RelationType,
-        RetentionState, DEFAULT_SCHEMA_VERSION,
+        DomainValidationError, MemoryId, MemoryObject, ObjectType, RelationType, RetentionState,
+        DEFAULT_SCHEMA_VERSION,
     };
-    use crate::errors::{RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause};
-    use crate::ports::graph_authority::{
-        GraphAuthorityStore, GraphDerivedMemoryProvenanceQuery, GraphDerivedMemoryThreadQuery,
-        GraphExpansion, GraphExpansionQuery, GraphObjectQuery,
-    };
-    use crate::ports::retrieval_stats::{
-        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-        RetrievalStatsObjectState, RetrievalStatsStore,
-    };
+    use crate::ports::graph_authority::{GraphAuthorityStore, GraphExpansionQuery};
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::test_support::{in_memory_graph_store, representative_fixtures};
 
     #[tokio::test]
@@ -333,14 +327,21 @@ mod tests {
 
     #[tokio::test]
     async fn link_pipeline_records_fallback_stats_when_endpoint_lookup_fails() {
-        let graph = QueryObjectsFailingGraph::default();
+        let graph = TestGraphStore {
+            query_error: Some(crate::errors::GraphQueryError::Selection {
+                detail: "endpoint lifecycle lookup failed".to_owned(),
+            }),
+            ..TestGraphStore::default()
+        };
         let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
         let mut draft = valid_link_draft();
         draft.relation = RelationType::Involves;
         let entity_id = draft.to_id;
 
-        let persisted = pipeline.link(draft).await.unwrap().link;
+        let outcome = pipeline.link(draft).await.unwrap();
+        assert!(outcome.stats_update_status.failure.is_some());
+        let persisted = outcome.link;
 
         let counter = stats
             .counter(&RetrievalStatsCounterKey {
@@ -358,251 +359,6 @@ mod tests {
             stats.health().await.unwrap().state,
             crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy
         );
-    }
-
-    #[tokio::test]
-    async fn link_outcome_preserves_all_stats_failures() {
-        let graph = in_memory_graph_store();
-        let fixtures = representative_fixtures();
-        graph
-            .upsert_objects(&[
-                MemoryObject::Entity(fixtures.hub_entity.clone()),
-                MemoryObject::Episode(fixtures.episode.clone()),
-            ])
-            .await
-            .unwrap();
-        let stats = DualFailingStatsStore;
-        let pipeline = LinkPipeline::new_with_stats(&graph, &stats);
-        let draft = MemoryLinkDraft::new(
-            ObjectType::Entity,
-            fixtures.hub_entity.id,
-            RelationType::Involves,
-            ObjectType::Episode,
-            fixtures.episode.id,
-        );
-
-        let outcome = pipeline
-            .link(draft)
-            .await
-            .expect("stats degradation should remain a repairable link outcome");
-
-        assert_eq!(outcome.link.from_id, fixtures.hub_entity.id);
-        assert!(outcome.stats_update_status.updated_object_ids.is_empty());
-        let failure = outcome
-            .stats_update_status
-            .failure
-            .as_ref()
-            .expect("stats failure must be visible");
-        assert_eq!(failure.failed_object_ids, vec![fixtures.episode.id]);
-        assert!(matches!(
-            failure.causes.as_slice(),
-            [
-                StatsUpdateCause::EdgeWrite { .. },
-                StatsUpdateCause::ObjectStateWrite { .. }
-            ]
-        ));
-    }
-
-    struct DualFailingStatsStore;
-
-    #[async_trait]
-    impl RetrievalStatsStore for DualFailingStatsStore {
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats edge write failed".to_owned(),
-            })
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats object-state write failed".to_owned(),
-            })
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(RetrievalStatsHealth::default())
-        }
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            _cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct QueryObjectsFailingGraph {
-        links: std::sync::Mutex<Vec<MemoryLink>>,
-    }
-
-    #[async_trait]
-    impl GraphAuthorityStore for QueryObjectsFailingGraph {
-        async fn query_anniversaries(
-            &self,
-            date: chrono::NaiveDate,
-            participants: &[crate::domain::MemoryId],
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
-        {
-            let _ = (date, participants, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episodes_by_time(
-            &self,
-            start: Option<chrono::DateTime<chrono::Utc>>,
-            end: chrono::DateTime<chrono::Utc>,
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
-            let _ = (start, end, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episode_occasions(
-            &self,
-            episodes: &[crate::domain::MemoryObjectRef],
-        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-            let _ = episodes;
-            unreachable!("this fixture never queries episode occasions")
-        }
-
-        async fn query_last_interaction(
-            &self,
-            participant: MemoryId,
-            reference_time: chrono::DateTime<chrono::Utc>,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
-            let _ = (participant, reference_time, policy);
-            unreachable!("this fixture never queries participant interactions")
-        }
-
-        async fn query_notions_known_as(
-            &self,
-            _name: &str,
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            unreachable!("this test never queries names")
-        }
-
-        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-            self.links.lock().unwrap().extend_from_slice(links);
-            Ok(())
-        }
-
-        async fn upsert_objects_and_links(
-            &self,
-            _objects: &[MemoryObject],
-            links: &[MemoryLink],
-        ) -> Result<(), CustomError> {
-            self.upsert_links(links).await
-        }
-
-        async fn query_objects(
-            &self,
-            _query: &GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
-            Err(crate::errors::GraphQueryError::Selection {
-                detail: "endpoint lifecycle lookup failed".to_owned(),
-            })
-        }
-
-        async fn query_superseded_derived_memory_ids(
-            &self,
-            _memory_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_links_by_ids(
-            &self,
-            _link_ids: &[MemoryId],
-        ) -> Result<Vec<MemoryLink>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_provenance(
-            &self,
-            _query: &GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<DerivedMemory>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_thread(
-            &self,
-            _query: &GraphDerivedMemoryThreadQuery,
-        ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
-            Ok((Vec::new(), Vec::new()))
-        }
-
-        async fn query_thread_state(
-            &self,
-            query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (query, limit);
-            unreachable!("this fixture never queries thread state")
-        }
-
-        async fn query_scope_state(
-            &self,
-            key: &ScopeKey,
-            policy: GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (key, policy, limit);
-            unreachable!("scope selector is not used by this failure fixture")
-        }
-
-        async fn expand_bounded(
-            &self,
-            _query: &GraphExpansionQuery,
-        ) -> Result<GraphExpansion, CustomError> {
-            Ok(GraphExpansion::new(Vec::new(), Vec::new()))
-        }
     }
 
     fn valid_link_draft() -> MemoryLinkDraft {

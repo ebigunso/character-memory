@@ -18,7 +18,6 @@ pub struct Settings {
     graph_store_mode: GraphStoreMode,
     retrieval_stats_store_mode: RetrievalStatsStoreMode,
     retrieval_stats_path: PathBuf,
-    retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode,
     selectivity_smoothing_alpha: f64,
     selectivity_gamma: f64,
     retrieval: RetrievalSettings,
@@ -44,8 +43,6 @@ struct RawSettings {
     retrieval_stats_store_mode: String,
     #[serde(default = "default_retrieval_stats_path")]
     retrieval_stats_path: PathBuf,
-    #[serde(default = "default_retrieval_stats_health_fail_mode")]
-    retrieval_stats_health_fail_mode: String,
     #[serde(default = "default_selectivity_smoothing_alpha")]
     selectivity_smoothing_alpha: f64,
     #[serde(default = "default_selectivity_gamma")]
@@ -168,28 +165,6 @@ impl RetrievalStatsStoreMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RetrievalStatsHealthFailMode {
-    #[default]
-    Conservative,
-}
-
-impl RetrievalStatsHealthFailMode {
-    fn parse(value: &str) -> Result<Self, CustomError> {
-        match value {
-            "conservative" => Ok(Self::Conservative),
-            other => Err(ConfigValidationError {
-                keys: vec!["RETRIEVAL_STATS_HEALTH_FAIL_MODE"],
-                reason: ConfigValidationReason::OutOfDomain {
-                    expected: "conservative",
-                    actual: other.to_owned(),
-                },
-            }
-            .into()),
-        }
-    }
-}
-
 impl TryFrom<RawSettings> for Settings {
     type Error = CustomError;
 
@@ -208,9 +183,6 @@ impl TryFrom<RawSettings> for Settings {
                 &raw.retrieval_stats_store_mode,
             )?,
             retrieval_stats_path: raw.retrieval_stats_path,
-            retrieval_stats_health_fail_mode: RetrievalStatsHealthFailMode::parse(
-                &raw.retrieval_stats_health_fail_mode,
-            )?,
             selectivity_smoothing_alpha: raw.selectivity_smoothing_alpha,
             selectivity_gamma: raw.selectivity_gamma,
             retrieval: raw.retrieval,
@@ -255,7 +227,7 @@ impl Settings {
         raw.try_into()
     }
 
-    pub fn get_qdrant_connection(&self) -> &str {
+    pub(crate) fn get_qdrant_connection(&self) -> &str {
         self.qdrant_connection_string.expose_secret()
     }
 
@@ -263,7 +235,7 @@ impl Settings {
         self.vector_store_mode
     }
 
-    pub fn get_vector_store_path(&self) -> Result<&Path, CustomError> {
+    pub(crate) fn get_vector_store_path(&self) -> Result<&Path, CustomError> {
         let Some(path) = self.vector_store_path.as_deref() else {
             return Err(ConfigValidationError {
                 keys: vec!["VECTOR_STORE_PATH"],
@@ -296,20 +268,16 @@ impl Settings {
         Ok(connection)
     }
 
-    pub fn get_graph_store_mode(&self) -> GraphStoreMode {
+    pub(crate) fn get_graph_store_mode(&self) -> GraphStoreMode {
         self.graph_store_mode
     }
 
-    pub fn get_retrieval_stats_store_mode(&self) -> RetrievalStatsStoreMode {
+    pub(crate) fn get_retrieval_stats_store_mode(&self) -> RetrievalStatsStoreMode {
         self.retrieval_stats_store_mode
     }
 
-    pub fn get_retrieval_stats_path(&self) -> &Path {
+    pub(crate) fn get_retrieval_stats_path(&self) -> &Path {
         &self.retrieval_stats_path
-    }
-
-    pub fn get_retrieval_stats_health_fail_mode(&self) -> RetrievalStatsHealthFailMode {
-        self.retrieval_stats_health_fail_mode
     }
 
     pub fn get_selectivity_smoothing_alpha(&self) -> f64 {
@@ -326,7 +294,7 @@ impl Settings {
         self.retrieval.fanout.budgets()
     }
 
-    pub fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
+    pub(crate) fn get_oxigraph_path(&self) -> Result<PathBuf, CustomError> {
         let path = self
             .oxigraph_path
             .as_deref()
@@ -362,7 +330,7 @@ impl Settings {
     }
 
     /// Returns the configured OpenAI key, or an empty string when absent.
-    pub fn get_openai_api_key(&self) -> &str {
+    pub(crate) fn get_openai_api_key(&self) -> &str {
         self.openai_api_key
             .as_ref()
             .map_or("", |key| key.expose_secret())
@@ -493,10 +461,6 @@ fn default_vector_store_mode() -> String {
 
 fn default_retrieval_stats_store_mode() -> String {
     "sqlite".to_owned()
-}
-
-fn default_retrieval_stats_health_fail_mode() -> String {
-    "conservative".to_owned()
 }
 
 fn default_retrieval_stats_path() -> PathBuf {
@@ -632,10 +596,6 @@ mod tests {
         assert_eq!(
             settings.get_retrieval_stats_path(),
             Path::new("./data/retrieval-stats.sqlite3")
-        );
-        assert_eq!(
-            settings.get_retrieval_stats_health_fail_mode(),
-            RetrievalStatsHealthFailMode::Conservative
         );
         assert_eq!(settings.get_selectivity_smoothing_alpha(), 1.0);
         assert_eq!(settings.get_selectivity_gamma(), 1.0);
@@ -792,48 +752,35 @@ mod tests {
     }
 
     #[test]
-    fn test_settings_new_rejects_unknown_retrieval_stats_modes_structurally() {
-        for (config_key, validation_key, expected) in [
-            (
-                "retrieval_stats_store_mode",
-                "RETRIEVAL_STATS_STORE_MODE",
-                "sqlite or in_memory",
-            ),
-            (
-                "retrieval_stats_health_fail_mode",
-                "RETRIEVAL_STATS_HEALTH_FAIL_MODE",
-                "conservative",
-            ),
-        ] {
-            let external_config = Config::builder()
-                .set_override("qdrant_connection_string", "external_qdrant")
-                .unwrap()
-                .set_override("oxigraph_path", "external_oxigraph")
-                .unwrap()
-                .set_override("openai_api_key", "external_openai")
-                .unwrap()
-                .set_override("embedding_model", "TextEmbedding3Small")
-                .unwrap()
-                .set_override(config_key, "unsupported")
-                .unwrap()
-                .build()
-                .unwrap();
+    fn test_settings_new_rejects_unknown_retrieval_stats_mode_structurally() {
+        let external_config = Config::builder()
+            .set_override("qdrant_connection_string", "external_qdrant")
+            .unwrap()
+            .set_override("oxigraph_path", "external_oxigraph")
+            .unwrap()
+            .set_override("openai_api_key", "external_openai")
+            .unwrap()
+            .set_override("embedding_model", "TextEmbedding3Small")
+            .unwrap()
+            .set_override("retrieval_stats_store_mode", "unsupported")
+            .unwrap()
+            .build()
+            .unwrap();
 
-            let error = Settings::new(external_config).unwrap_err();
-            let CustomError::ConfigValidation(error) = error else {
-                panic!("expected configuration validation error for {config_key}");
-            };
-            assert_eq!(
-                error,
-                ConfigValidationError {
-                    keys: vec![validation_key],
-                    reason: ConfigValidationReason::OutOfDomain {
-                        expected,
-                        actual: "unsupported".to_owned(),
-                    },
-                }
-            );
-        }
+        let error = Settings::new(external_config).unwrap_err();
+        let CustomError::ConfigValidation(error) = error else {
+            panic!("expected configuration validation error for retrieval_stats_store_mode");
+        };
+        assert_eq!(
+            error,
+            ConfigValidationError {
+                keys: vec!["RETRIEVAL_STATS_STORE_MODE"],
+                reason: ConfigValidationReason::OutOfDomain {
+                    expected: "sqlite or in_memory",
+                    actual: "unsupported".to_owned(),
+                },
+            }
+        );
     }
 
     #[test]

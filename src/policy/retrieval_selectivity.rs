@@ -385,8 +385,40 @@ mod tests {
     use super::*;
     use crate::adapters::stats::InMemoryRetrievalStatsStore;
     use crate::ports::retrieval_stats::RetrievalStatsEdge;
-    use async_trait::async_trait;
-    use std::sync::Mutex;
+    use crate::test_support::{StatsRead, TestStatsStore};
+
+    async fn stats_with_counts(entity_id: crate::domain::MemoryId, count: u128) -> TestStatsStore {
+        let stats = TestStatsStore::default();
+        for index in 0..count {
+            let object_id = crate::domain::MemoryId::from_u128(10_000 + index);
+            let edges = [
+                (RelationType::Involves, ObjectType::Episode),
+                (RelationType::PartOfThread, ObjectType::DerivedMemory),
+            ]
+            .into_iter()
+            .map(|(relation_kind, object_type)| RetrievalStatsEdge {
+                edge_key: format!("{relation_kind:?}:{index}"),
+                entity_id,
+                relation_kind,
+                object_id,
+                object_type,
+                retention_state: crate::domain::RetentionState::Active,
+                is_current: true,
+            })
+            .collect::<Vec<_>>();
+            stats.record_edges(&edges).await.unwrap();
+            stats
+                .record_object_states(&[crate::ports::retrieval_stats::RetrievalStatsObjectState {
+                    object_id,
+                    object_type: ObjectType::Episode,
+                    retention_state: crate::domain::RetentionState::Active,
+                    is_current: true,
+                }])
+                .await
+                .unwrap();
+        }
+        stats
+    }
 
     fn default_policy() -> RetrievalSelectivityPolicy {
         let settings = crate::config::Settings::new(Default::default()).unwrap();
@@ -537,8 +569,6 @@ mod tests {
                 object_type: ObjectType::DerivedMemory,
                 retention_state,
                 is_current,
-                first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                last_seen_at: chrono::DateTime::UNIX_EPOCH,
             },
         )
         .collect::<Vec<_>>();
@@ -621,9 +651,20 @@ mod tests {
 
     #[tokio::test]
     async fn unused_aboutness_counter_failures_do_not_poison_counted_routes() {
-        let stats = FailingRetrievalStatsStore {
-            aboutness_only: true,
-        };
+        let mut stats = stats_with_counts(crate::domain::MemoryId::from_u128(1), 10).await;
+        stats.before_read = Some(Box::new(|call| {
+            let relation = match call {
+                StatsRead::Counter(key) => Some(key.relation_kind),
+                StatsRead::GlobalCounter(relation) => Some(relation),
+                _ => None,
+            };
+            if matches!(relation, Some(RelationType::About | RelationType::Mentions)) {
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "stats global counter read failed".to_owned(),
+                });
+            }
+            Ok(())
+        }));
         let context = SelectivityStatsContext::load(&stats).await.unwrap();
         assert_eq!(context.health.state, RetrievalStatsHealthState::Healthy);
         let plan = selectivity_plan_for_entity(
@@ -644,8 +685,19 @@ mod tests {
 
     #[tokio::test]
     async fn selectivity_plan_uses_conservative_fanout_when_stats_reads_fail() {
-        let stats = FailingRetrievalStatsStore {
-            aboutness_only: false,
+        let stats = TestStatsStore {
+            before_read: Some(Box::new(|call| match call {
+                StatsRead::Counter(_) => Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "stats counter read failed".to_owned(),
+                }),
+                StatsRead::GlobalCounter(_) | StatsRead::GlobalEpisodes => {
+                    Err(RetrievalStatsStoreError::Sqlite {
+                        detail: "stats global counter read failed".to_owned(),
+                    })
+                }
+                StatsRead::Health => Ok(()),
+            })),
+            ..TestStatsStore::default()
         };
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
         let candidate = (
@@ -676,7 +728,22 @@ mod tests {
 
     #[tokio::test]
     async fn selectivity_plan_uses_conservative_fanout_after_partial_stats_read_failure() {
-        let stats = PartiallyFailingRetrievalStatsStore::default();
+        let mut stats = stats_with_counts(
+            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462022").unwrap(),
+            100,
+        )
+        .await;
+        let fail_next = std::sync::atomic::AtomicBool::new(true);
+        stats.before_read = Some(Box::new(move |call| {
+            if matches!(call, StatsRead::Counter(_))
+                && fail_next.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(RetrievalStatsStoreError::Sqlite {
+                    detail: "first stats counter read failed".to_owned(),
+                });
+            }
+            Ok(())
+        }));
         let stats_context = SelectivityStatsContext::load(&stats).await.unwrap();
         let candidate = (
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655462022").unwrap(),
@@ -777,147 +844,5 @@ mod tests {
         let decision = selectivity_decision(Some(1.0), 2.0, 0, false);
 
         assert_eq!(decision, SelectivityDecision::LowSelectivityRejected);
-    }
-
-    struct FailingRetrievalStatsStore {
-        aboutness_only: bool,
-    }
-
-    #[async_trait]
-    impl RetrievalStatsStore for FailingRetrievalStatsStore {
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            self.global_counter(RelationType::Involves, ObjectType::Episode)
-                .await
-        }
-
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn counter(
-            &self,
-            key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            if self.aboutness_only {
-                return self
-                    .global_counter(key.relation_kind, key.object_type)
-                    .await;
-            }
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats counter read failed".to_owned(),
-            })
-        }
-
-        async fn global_counter(
-            &self,
-            relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            if self.aboutness_only
-                && !matches!(relation_kind, RelationType::About | RelationType::Mentions)
-            {
-                return Ok(Some(RetrievalStatsCounter {
-                    total_count: 10,
-                    active_count: 10,
-                    current_count: 10,
-                }));
-            }
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "stats global counter read failed".to_owned(),
-            })
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(RetrievalStatsHealth::default())
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            _cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct PartiallyFailingRetrievalStatsStore {
-        counter_reads: Mutex<usize>,
-    }
-
-    #[async_trait]
-    impl RetrievalStatsStore for PartiallyFailingRetrievalStatsStore {
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            self.global_counter(RelationType::Involves, ObjectType::Episode)
-                .await
-        }
-
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[crate::ports::retrieval_stats::RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            let mut reads = self.counter_reads.lock().unwrap();
-            *reads += 1;
-            if *reads == 1 {
-                return Err(RetrievalStatsStoreError::Sqlite {
-                    detail: "first stats counter read failed".to_owned(),
-                });
-            }
-            Ok(Some(RetrievalStatsCounter {
-                total_count: 100,
-                active_count: 100,
-                current_count: 100,
-            }))
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(Some(RetrievalStatsCounter {
-                total_count: 100,
-                active_count: 100,
-                current_count: 100,
-            }))
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(RetrievalStatsHealth::default())
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            _cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
     }
 }

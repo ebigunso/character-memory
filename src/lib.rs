@@ -12,15 +12,11 @@ pub(crate) mod ports;
 pub(crate) mod test_support;
 pub(crate) mod usecases;
 
-#[cfg(feature = "test-fixtures")]
-#[doc(hidden)]
-pub use crate::models::vector::zero_norm_record_fixture;
-
 // Re-export types for public use
 pub use crate::api::embedding::EmbeddingProvider;
 pub use crate::api::types::{
     default_retrieval_object_types, ActivityRef, ActivityResolution, ActivityResult, AdmissionRoad,
-    CandidateCount, CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
+    CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     ContextPackSection, ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft,
     CorrectionCascadePolicy, CorrectionTarget, CueKind, DerivedMemoryCandidate, DerivedMemoryDraft,
     DiagnosticSeverity, DraftDefaults, EntityCandidate, EntityDraft, EpisodeCandidate,
@@ -46,9 +42,7 @@ pub use crate::api::types::{
     VectorIndexCandidate, VectorIndexingFailure, VectorMaintenanceFailure,
     VectorMaintenanceFailureItem, VectorMaintenanceOperation, VectorRecallCompleteness,
 };
-pub use crate::config::{
-    GraphStoreMode, RetrievalStatsHealthFailMode, RetrievalStatsStoreMode, Settings,
-};
+pub use crate::config::{GraphStoreMode, RetrievalStatsStoreMode, Settings};
 pub use crate::domain::{
     graph_uri, BeliefAssertion, BeliefPredicate, BeliefValidationError, CandidateProvenanceIssue,
     CandidateReferenceRole, CandidateScoreField, CandidateSourceSpanIssue, CandidateTimestampField,
@@ -57,13 +51,12 @@ pub use crate::domain::{
     GraphExpansionBoundedReason, LifecycleDtoValidationError, MemoryCandidateKind, MemoryId,
     MemoryLink, MemoryLinkEndpoint, MemoryObject, MemoryObjectRef, MemoryThread, Modality,
     ObjectType, Observation, RelationType, RetentionState, Scene, SceneParticipant, SceneSetting,
-    SourceReferenceKind, ThreadStatus, VectorSurface, CURRENT_SCHEMA_VERSION,
-    DEFAULT_SCHEMA_VERSION, EPISODIC_MEMORY_SCHEMA_VERSION,
+    SourceReferenceKind, ThreadStatus, VectorSurface, DEFAULT_SCHEMA_VERSION,
 };
 pub use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
     ConfigValidationReason, CustomError, EmbeddingError, EmbeddingTransportErrorKind,
-    GraphQueryError, IoErrorKind, ReplacementIdentityConflict, ReplacementIdentityConflictError,
+    GraphQueryError, ReplacementIdentityConflict, ReplacementIdentityConflictError,
     RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, TransportStatus,
     VectorDatabaseError, VectorDatabaseErrorKind, VectorIndexingCause,
 };

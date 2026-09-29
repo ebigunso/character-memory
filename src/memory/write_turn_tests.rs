@@ -1,25 +1,17 @@
+use crate::test_support::{Gate, TestGraphStore, TestStatsStore};
 use std::future::Future;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::sync::Notify;
 
-use crate::adapters::{oxigraph::OxigraphGraphAuthorityStore, stats::InMemoryRetrievalStatsStore};
 use crate::api::types::*;
 use crate::domain::*;
-use crate::errors::{GraphQueryError, RetrievalStatsHealthCause, RetrievalStatsStoreError};
-use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
+use crate::models::vector::{EmbeddingInput, VectorCandidateSearch};
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::*;
 use crate::ports::retrieval_stats::*;
-use crate::ports::vector_candidate::{VectorCandidateRecall, VectorCandidateStore};
-use crate::test_support::{
-    deterministic_embedder, in_memory_graph_store, TemporaryVectorCandidateStore,
-};
+use crate::test_support::{deterministic_embedder, TemporaryVectorCandidateStore};
 use crate::{CharacterMemory, CustomError};
 
 const SUBJECT: MemoryId = MemoryId::from_u128(1);
@@ -29,25 +21,6 @@ const REPLACEMENT: MemoryId = MemoryId::from_u128(4);
 const NEW: MemoryId = MemoryId::from_u128(5);
 
 // The gates only inject a suspension. Every storage operation reaches a real adapter.
-#[derive(Default)]
-struct Gate {
-    armed: AtomicBool,
-    entered: Notify,
-    release: Notify,
-}
-
-impl Gate {
-    fn arm(&self) {
-        self.armed.store(true, Ordering::SeqCst);
-    }
-
-    async fn stop_once(&self) {
-        if self.armed.swap(false, Ordering::SeqCst) {
-            self.entered.notify_one();
-            self.release.notified().await;
-        }
-    }
-}
 
 async fn completes<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(10), future)
@@ -93,24 +66,23 @@ impl Fixture {
         let stats = Arc::new(Gate::default());
         let projected = Arc::new(Mutex::new(Vec::new()));
         let embed = Arc::new(Gate::default());
+        let mut vector_store = TemporaryVectorCandidateStore::open(8).await;
+        vector_store.gate = Some(vector.clone());
         let mut memory = CharacterMemory::from_parts(
-            Box::new(GatedGraph {
-                store: in_memory_graph_store(),
-                gate: graph.clone(),
+            Box::new(TestGraphStore {
+                gate: Some(graph.clone()),
+                ..TestGraphStore::default()
             }),
-            Box::new(GatedVector {
-                store: TemporaryVectorCandidateStore::open(8).await,
-                gate: vector.clone(),
-            }),
+            Box::new(vector_store),
             Box::new(GatedEmbedder {
                 inner: Box::new(deterministic_embedder(8)),
                 gate: embed.clone(),
             }),
         );
-        memory.memory_composition.stats_store = Box::new(GatedStats {
-            store: InMemoryRetrievalStatsStore::new(),
-            gate: stats.clone(),
+        memory.memory_composition.stats_store = Box::new(TestStatsStore {
+            gate: Some(stats.clone()),
             projected: projected.clone(),
+            ..TestStatsStore::default()
         });
         let mut entity = EntityDraft::new();
         entity.id = Some(SUBJECT);
@@ -541,164 +513,6 @@ impl MemoryEmbedder for FailingEmbedder {
     }
 }
 
-struct GatedGraph {
-    store: OxigraphGraphAuthorityStore,
-    gate: Arc<Gate>,
-}
-
-#[async_trait]
-impl GraphAuthorityStore for GatedGraph {
-    async fn query_anniversaries(
-        &self,
-        date: chrono::NaiveDate,
-        participants: &[crate::domain::MemoryId],
-        limit: usize,
-        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError> {
-        let _ = (date, participants, limit, policy);
-        Ok(Vec::new())
-    }
-
-    async fn query_episodes_by_time(
-        &self,
-        start: Option<chrono::DateTime<chrono::Utc>>,
-        end: chrono::DateTime<chrono::Utc>,
-        limit: usize,
-        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
-        self.store
-            .query_episodes_by_time(start, end, limit, policy)
-            .await
-    }
-
-    async fn query_episode_occasions(
-        &self,
-        episodes: &[crate::domain::MemoryObjectRef],
-    ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-        self.store.query_episode_occasions(episodes).await
-    }
-
-    async fn query_last_interaction(
-        &self,
-        participant: MemoryId,
-        reference_time: chrono::DateTime<chrono::Utc>,
-        policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
-        self.store
-            .query_last_interaction(participant, reference_time, policy)
-            .await
-    }
-
-    async fn upsert_objects(&self, objects: &[MemoryObject]) -> Result<(), CustomError> {
-        self.store.upsert_objects(objects).await
-    }
-    async fn upsert_links(&self, links: &[MemoryLink]) -> Result<(), CustomError> {
-        self.store.upsert_links(links).await
-    }
-    async fn upsert_objects_and_links(
-        &self,
-        objects: &[MemoryObject],
-        links: &[MemoryLink],
-    ) -> Result<(), CustomError> {
-        self.gate.stop_once().await;
-        self.store.upsert_objects_and_links(objects, links).await
-    }
-    async fn query_objects(
-        &self,
-        query: &GraphObjectQuery,
-    ) -> Result<Vec<MemoryObject>, GraphQueryError> {
-        self.store.query_objects(query).await
-    }
-    async fn query_notions_known_as(&self, name: &str) -> Result<Vec<MemoryId>, GraphQueryError> {
-        self.store.query_notions_known_as(name).await
-    }
-    async fn query_superseded_derived_memory_ids(
-        &self,
-        ids: &[MemoryId],
-    ) -> Result<Vec<MemoryId>, GraphQueryError> {
-        self.store.query_superseded_derived_memory_ids(ids).await
-    }
-    async fn query_links_by_ids(&self, ids: &[MemoryId]) -> Result<Vec<MemoryLink>, CustomError> {
-        self.store.query_links_by_ids(ids).await
-    }
-    async fn query_derived_memories_by_provenance(
-        &self,
-        query: &GraphDerivedMemoryProvenanceQuery,
-    ) -> Result<Vec<DerivedMemory>, CustomError> {
-        self.store.query_derived_memories_by_provenance(query).await
-    }
-    async fn query_derived_memories_by_thread(
-        &self,
-        query: &GraphDerivedMemoryThreadQuery,
-    ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
-        self.store.query_derived_memories_by_thread(query).await
-    }
-    async fn query_thread_state(
-        &self,
-        query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        limit: usize,
-    ) -> Result<
-        (
-            Vec<crate::ports::graph_authority::GraphMemoryRank>,
-            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-        ),
-        CustomError,
-    > {
-        let _ = (query, limit);
-        self.store.query_thread_state(query, limit).await
-    }
-
-    async fn query_scope_state(
-        &self,
-        key: &ScopeKey,
-        policy: GraphExpansionLifecyclePolicy,
-        limit: usize,
-    ) -> Result<
-        (
-            Vec<crate::ports::graph_authority::GraphMemoryRank>,
-            Vec<GraphExpansionFilteredNode>,
-        ),
-        CustomError,
-    > {
-        self.store.query_scope_state(key, policy, limit).await
-    }
-
-    async fn expand_bounded(
-        &self,
-        query: &GraphExpansionQuery,
-    ) -> Result<GraphExpansion, CustomError> {
-        self.store.expand_bounded(query).await
-    }
-}
-
-struct GatedVector {
-    store: TemporaryVectorCandidateStore,
-    gate: Arc<Gate>,
-}
-
-#[async_trait]
-impl VectorCandidateStore for GatedVector {
-    async fn close(&self) -> Result<(), CustomError> {
-        self.store.close().await
-    }
-    async fn upsert_vector_records(
-        &self,
-        records: &[VectorRecordEmbedding<'_>],
-    ) -> Result<(), CustomError> {
-        self.gate.stop_once().await;
-        self.store.upsert_vector_records(records).await
-    }
-    async fn search_candidates(
-        &self,
-        query: &VectorCandidateSearch,
-    ) -> Result<VectorCandidateRecall, CustomError> {
-        self.store.search_candidates(query).await
-    }
-    async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-        self.store.delete_candidates(objects).await
-    }
-}
-
 struct GatedEmbedder {
     inner: Box<dyn MemoryEmbedder>,
     gate: Arc<Gate>,
@@ -712,57 +526,5 @@ impl MemoryEmbedder for GatedEmbedder {
     async fn embed_batch(&self, inputs: &[EmbeddingInput]) -> Result<Vec<Vec<f32>>, CustomError> {
         self.gate.stop_once().await;
         self.inner.embed_batch(inputs).await
-    }
-}
-
-struct GatedStats {
-    store: InMemoryRetrievalStatsStore,
-    gate: Arc<Gate>,
-    projected: Arc<Mutex<Vec<RetrievalStatsObjectState>>>,
-}
-
-#[async_trait]
-impl RetrievalStatsStore for GatedStats {
-    async fn record_edges(
-        &self,
-        edges: &[RetrievalStatsEdge],
-    ) -> Result<(), RetrievalStatsStoreError> {
-        self.store.record_edges(edges).await
-    }
-    async fn record_object_states(
-        &self,
-        states: &[RetrievalStatsObjectState],
-    ) -> Result<(), RetrievalStatsStoreError> {
-        self.gate.stop_once().await;
-        self.store.record_object_states(states).await?;
-        self.projected.lock().unwrap().extend_from_slice(states);
-        Ok(())
-    }
-    async fn counter(
-        &self,
-        key: &RetrievalStatsCounterKey,
-    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-        self.store.counter(key).await
-    }
-    async fn global_counter(
-        &self,
-        relation: RelationType,
-        object_type: ObjectType,
-    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-        self.store.global_counter(relation, object_type).await
-    }
-    async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-        self.store.health().await
-    }
-    async fn global_episode_counter(
-        &self,
-    ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-        self.store.global_episode_counter().await
-    }
-    async fn mark_unhealthy(
-        &self,
-        cause: RetrievalStatsHealthCause,
-    ) -> Result<(), RetrievalStatsStoreError> {
-        self.store.mark_unhealthy(cause).await
     }
 }

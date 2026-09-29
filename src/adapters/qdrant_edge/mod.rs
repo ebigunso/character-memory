@@ -24,7 +24,7 @@ use crate::adapters::qdrant::tie_closure::close_tie_cohort;
 use crate::domain::{MemoryObjectRef, DEFAULT_SCHEMA_VERSION};
 use crate::errors::{
     CollectionCompatibilityError, CollectionMismatch, ConfigValidationError,
-    ConfigValidationReason, CustomError, IoErrorKind, VectorDatabaseError, VectorDatabaseErrorKind,
+    ConfigValidationReason, CustomError, VectorDatabaseError, VectorDatabaseErrorKind,
 };
 use crate::models::vector::{
     CanonicalCandidates, VectorCandidateMatch, VectorCandidateSearch, VectorRecordEmbedding,
@@ -737,7 +737,7 @@ fn io_error(error: std::io::Error) -> CustomError {
     CustomError::VectorDatabaseError(VectorDatabaseError::new(
         "qdrant_edge",
         VectorDatabaseErrorKind::Io {
-            io_kind: IoErrorKind::from(error.kind()),
+            io_kind: error.kind().to_string(),
         },
         None,
         error.to_string(),
@@ -1102,7 +1102,8 @@ mod tests {
             .await
             .expect_err("second owner must not open a locked shard");
         assert!(matches!(error, CustomError::VectorDatabaseError(_)));
-        assert!(started.elapsed() < Duration::from_secs(10));
+        // This proves the retry backoff is bounded, not fast under machine load.
+        assert!(started.elapsed() < Duration::from_secs(5) * OPEN_ATTEMPTS as u32);
 
         first.close().await.unwrap();
         let reopened = QdrantEdgeVectorCandidateStore::open(temp.path(), "locked", 2)

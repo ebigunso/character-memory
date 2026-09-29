@@ -7,9 +7,8 @@ use crate::adapters::{
 };
 use crate::api::embedding::EmbeddingProvider;
 use crate::config::{
-    EmbeddingProviderSettings, GraphStoreMode as ConfigGraphStoreMode,
-    RetrievalStatsHealthFailMode, RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode,
-    Settings, VectorStoreMode,
+    GraphStoreMode as ConfigGraphStoreMode,
+    RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode, Settings, VectorStoreMode,
 };
 use crate::errors::{
     ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
@@ -271,11 +270,9 @@ fn preflight(
     let embed_provider = match embed_provider {
         Some(provider) => provider,
         None => Box::new(OpenAIEmbeddingProvider::new(
-            EmbeddingProviderSettings::new(
-                settings.get_openai_api_key().to_owned(),
-                settings.get_embedding_model()?,
-            ),
-        )?),
+            settings.get_openai_api_key().to_owned(),
+            settings.get_embedding_model()?,
+        )),
     };
     Ok((embed_provider, vector_size))
 }
@@ -287,13 +284,9 @@ pub(crate) fn retrieval_stats_store(
         ConfigRetrievalStatsStoreMode::Sqlite => {
             match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
                 Ok(store) => Ok(Box::new(store)),
-                Err(error) => match settings.get_retrieval_stats_health_fail_mode() {
-                    RetrievalStatsHealthFailMode::Conservative => {
-                        Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(
-                            RetrievalStatsHealthCause::StoreInitialization { error },
-                        )))
-                    }
-                },
+                Err(error) => Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(
+                    RetrievalStatsHealthCause::StoreInitialization { error },
+                ))),
             }
         }
         ConfigRetrievalStatsStoreMode::InMemory => Ok(Box::new(InMemoryRetrievalStatsStore::new())),
@@ -303,7 +296,6 @@ pub(crate) fn retrieval_stats_store(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::embedding::MockEmbeddingProvider;
     use crate::ports::retrieval_stats::RetrievalStatsHealthState;
 
     #[test]
@@ -351,14 +343,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sqlite_stats_open_failure_uses_configured_conservative_fallback() {
+    async fn sqlite_stats_open_failure_uses_conservative_fallback() {
         let settings = Settings::new(
             ::config::Config::builder()
                 .set_override("retrieval_stats_store_mode", "sqlite")
                 .unwrap()
                 .set_override("retrieval_stats_path", ".")
-                .unwrap()
-                .set_override("retrieval_stats_health_fail_mode", "conservative")
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -375,10 +365,28 @@ mod tests {
         ));
     }
 
+    struct MockEmbeddingProvider(usize);
+
+    #[async_trait]
+    impl EmbeddingProvider for MockEmbeddingProvider {
+        fn vector_size(&self) -> usize {
+            self.0
+        }
+
+        async fn generate_embedding<'a>(&self, _text: &'a str) -> Result<Vec<f32>, EmbeddingError> {
+            unreachable!("preflight must not generate embeddings")
+        }
+
+        async fn bulk_generate_embeddings<'a>(
+            &self,
+            _texts: &'a [&'a str],
+        ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+            unreachable!("preflight must not generate embeddings")
+        }
+    }
+
     fn preflight_error(settings: &Settings, vector_size: usize) -> CustomError {
-        let mut provider = MockEmbeddingProvider::new();
-        provider.expect_vector_size().return_const(vector_size);
-        match preflight(settings, Some(Box::new(provider))) {
+        match preflight(settings, Some(Box::new(MockEmbeddingProvider(vector_size)))) {
             Ok(_) => panic!("preflight should reject the settings"),
             Err(error) => error,
         }

@@ -30,8 +30,6 @@ use crate::ports::graph_authority::{
     GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
-#[cfg(test)]
-use crate::ports::vector_candidate::VectorCandidateRecall;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct RetrievePipeline<'a, G, V, E>
@@ -60,7 +58,10 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
             selectivity_policy: RetrievalSelectivityPolicy::with_fanout_budgets(
                 settings.get_selectivity_smoothing_alpha(),
                 settings.get_selectivity_gamma(),
@@ -1798,8 +1799,8 @@ fn rationale_summary(
 mod tests {
     use super::*;
     use crate::domain::GraphExpansionBoundedReason;
-    use crate::domain::ScopeKey;
-    use crate::ports::graph_authority::GraphExpansionFilteredNode;
+
+    use crate::test_support::TestGraphStore;
 
     use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -1809,7 +1810,7 @@ mod tests {
     use crate::api::types::retrieval::VectorRecallCompleteness;
     use crate::api::types::ContinuitySectionLimits;
     use crate::domain::RetentionState;
-    use crate::models::vector::{CanonicalCandidates, VectorRecordEmbedding};
+    use crate::models::vector::VectorRecordEmbedding;
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
     };
@@ -1821,11 +1822,9 @@ mod tests {
         for score in [-0.0_f32, 0.0, -0.5, 0.75] {
             let expected = if score > 0.0 { score } else { 0.0 };
             let object = MemoryObjectRef::new(ObjectType::Episode, MemoryId::from_u128(1));
-            let vector = VectorRecallOverride {
-                inner: TemporaryVectorCandidateStore::open(2).await,
-                completeness: None,
-                candidate: Some(vector_candidate(object.id, object.object_type, score)),
-            };
+            let mut vector = TemporaryVectorCandidateStore::open(2).await;
+            vector.completeness = None;
+            vector.candidate = Some(vector_candidate(object.id, object.object_type, score));
             let cues = RetrievePipeline::new(&graph, &vector, &embedder)
                 .recall_cues(&RetrievalContext::new("score boundary"))
                 .await
@@ -2428,11 +2427,9 @@ mod tests {
 
         for completeness in cases {
             let graph = in_memory_graph_store();
-            let vector = VectorRecallOverride {
-                inner: TemporaryVectorCandidateStore::open(2).await,
-                completeness: Some(completeness),
-                candidate: None,
-            };
+            let mut vector = TemporaryVectorCandidateStore::open(2).await;
+            vector.completeness = Some(completeness);
+            vector.candidate = None;
             let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
             let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
                 .retrieve(RetrievalContext::new("completeness telemetry"))
@@ -2639,12 +2636,15 @@ mod tests {
     #[tokio::test]
     async fn non_missing_graph_expansion_errors_are_propagated() {
         let object_id = Uuid::from_u128(0x550e_8400_e29b_41d4_a716_4466_5544_0050);
-        let graph = ErrorGraphStore;
-        let vector = VectorRecallOverride {
-            inner: TemporaryVectorCandidateStore::open(2).await,
-            completeness: None,
-            candidate: Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99)),
+        let graph = TestGraphStore {
+            expansion_error: Some(crate::errors::GraphQueryError::Selection {
+                detail: "injected graph selection failure".to_owned(),
+            }),
+            ..TestGraphStore::default()
         };
+        let mut vector = TemporaryVectorCandidateStore::open(2).await;
+        vector.completeness = None;
+        vector.candidate = Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99));
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
         let mut context = RetrievalContext::new("propagate graph errors");
@@ -3206,200 +3206,6 @@ mod tests {
         ) -> Result<Vec<Vec<f32>>, CustomError> {
             lock(&self.inputs)?.extend(inputs.iter().cloned());
             Ok(vec![self.embedding.clone(); inputs.len()])
-        }
-    }
-
-    #[derive(Debug)]
-    struct VectorRecallOverride {
-        inner: TemporaryVectorCandidateStore,
-        completeness: Option<VectorRecallCompleteness>,
-        candidate: Option<VectorCandidateMatch>,
-    }
-
-    #[async_trait]
-    impl VectorCandidateStore for VectorRecallOverride {
-        async fn close(&self) -> Result<(), CustomError> {
-            self.inner.close().await
-        }
-
-        async fn upsert_vector_records(
-            &self,
-            records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            self.inner.upsert_vector_records(records).await
-        }
-
-        async fn search_candidates(
-            &self,
-            query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            let mut recall = self.inner.search_candidates(query).await?;
-            if let Some(completeness) = self.completeness {
-                recall.completeness = completeness;
-            }
-            if let Some(candidate) = &self.candidate {
-                recall.candidates = CanonicalCandidates::new([candidate.clone()]);
-            }
-            Ok(recall)
-        }
-
-        async fn delete_candidates(&self, objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            self.inner.delete_candidates(objects).await
-        }
-    }
-
-    #[derive(Debug)]
-    struct ErrorGraphStore;
-
-    #[async_trait]
-    impl GraphAuthorityStore for ErrorGraphStore {
-        async fn query_anniversaries(
-            &self,
-            date: chrono::NaiveDate,
-            participants: &[crate::domain::MemoryId],
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
-        {
-            let _ = (date, participants, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episodes_by_time(
-            &self,
-            start: Option<chrono::DateTime<chrono::Utc>>,
-            end: chrono::DateTime<chrono::Utc>,
-            limit: usize,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
-            let _ = (start, end, limit, policy);
-            Ok(Vec::new())
-        }
-
-        async fn query_episode_occasions(
-            &self,
-            episodes: &[crate::domain::MemoryObjectRef],
-        ) -> Result<crate::policy::graph_expansion::ParticipantOccasions, CustomError> {
-            let _ = episodes;
-            unreachable!("this fixture never queries episode occasions")
-        }
-
-        async fn query_last_interaction(
-            &self,
-            participant: MemoryId,
-            reference_time: chrono::DateTime<chrono::Utc>,
-            policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Option<(MemoryId, chrono::DateTime<chrono::Utc>)>, CustomError> {
-            let _ = (participant, reference_time, policy);
-            unreachable!("this fixture never queries participant interactions")
-        }
-
-        async fn query_notions_known_as(
-            &self,
-            _name: &str,
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            unreachable!("this test never queries names")
-        }
-
-        async fn upsert_objects(&self, _objects: &[MemoryObject]) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn upsert_links(
-            &self,
-            _links: &[crate::domain::MemoryLink],
-        ) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn upsert_objects_and_links(
-            &self,
-            _objects: &[MemoryObject],
-            _links: &[crate::domain::MemoryLink],
-        ) -> Result<(), CustomError> {
-            Ok(())
-        }
-
-        async fn query_objects(
-            &self,
-            _query: &crate::ports::graph_authority::GraphObjectQuery,
-        ) -> Result<Vec<MemoryObject>, crate::errors::GraphQueryError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_superseded_derived_memory_ids(
-            &self,
-            _memory_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryId>, crate::errors::GraphQueryError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_links_by_ids(
-            &self,
-            _link_ids: &[crate::domain::MemoryId],
-        ) -> Result<Vec<crate::domain::MemoryLink>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_provenance(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryProvenanceQuery,
-        ) -> Result<Vec<crate::domain::DerivedMemory>, CustomError> {
-            Ok(Vec::new())
-        }
-
-        async fn query_derived_memories_by_thread(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-        ) -> Result<
-            (
-                Vec<crate::domain::DerivedMemory>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            Ok((Vec::new(), Vec::new()))
-        }
-
-        async fn query_thread_state(
-            &self,
-            _query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
-            _limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            Ok((Vec::new(), Vec::new()))
-        }
-
-        async fn query_scope_state(
-            &self,
-            key: &ScopeKey,
-            policy: GraphExpansionLifecyclePolicy,
-            limit: usize,
-        ) -> Result<
-            (
-                Vec<crate::ports::graph_authority::GraphMemoryRank>,
-                Vec<GraphExpansionFilteredNode>,
-            ),
-            CustomError,
-        > {
-            let _ = (key, policy, limit);
-            unreachable!("scope selector is not used by this failure fixture")
-        }
-
-        async fn expand_bounded(
-            &self,
-            _query: &GraphExpansionQuery,
-        ) -> Result<GraphExpansion, CustomError> {
-            Err(CustomError::GraphQuery(
-                crate::errors::GraphQueryError::Selection {
-                    detail: "injected graph selection failure".to_owned(),
-                },
-            ))
         }
     }
 

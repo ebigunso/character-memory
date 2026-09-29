@@ -570,25 +570,12 @@ fn validate_range<T: Ord>(
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RememberDiagnostics {
-    pub candidate_counts: Vec<CandidateCount>,
     pub validations: Vec<CandidateValidation>,
     pub messages: Vec<RememberDiagnostic>,
     pub repair_needed: Vec<RepairMarker>,
 }
 
 impl RememberDiagnostics {
-    pub fn with_candidate_count(
-        mut self,
-        candidate_kind: MemoryCandidateKind,
-        count: usize,
-    ) -> Self {
-        self.candidate_counts.push(CandidateCount {
-            candidate_kind,
-            count,
-        });
-        self
-    }
-
     pub fn with_validation(mut self, validation: CandidateValidation) -> Self {
         self.validations.push(validation);
         self.refresh_validation_warning_messages();
@@ -606,11 +593,6 @@ impl RememberDiagnostics {
 
     pub fn with_message(mut self, message: RememberDiagnostic) -> Self {
         self.messages.push(message);
-        self
-    }
-
-    pub fn with_repair_needed(mut self, repair_needed: RepairMarker) -> Self {
-        self.repair_needed.push(repair_needed);
         self
     }
 
@@ -634,12 +616,6 @@ impl RememberDiagnostics {
             .retain(|message| message.code != VALIDATION_WARNING_CODE);
         self.messages.extend(warning_messages);
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CandidateCount {
-    pub candidate_kind: MemoryCandidateKind,
-    pub count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -851,13 +827,13 @@ mod tests {
     #[test]
     fn remember_diagnostics_preserves_structured_validation_and_projects_warnings() {
         let matching_episode_id = memory_id("550e8400-e29b-41d4-a716-446655442009");
-        let validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation)
-            .with_warning(
-                crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
-                    echo_surface: "the same episode text".to_owned(),
-                    matching_episode_ids: vec![matching_episode_id],
-                },
-            );
+        let mut validation = CandidateValidation::valid(1, MemoryCandidateKind::Observation);
+        validation.warnings.push(
+            crate::domain::CandidateValidationIssue::DuplicateObservationEcho {
+                echo_surface: "the same episode text".to_owned(),
+                matching_episode_ids: vec![matching_episode_id],
+            },
+        );
         let diagnostics = RememberDiagnostics::default().with_validation(validation.clone());
 
         assert_eq!(diagnostics.validations, vec![validation]);
