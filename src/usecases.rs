@@ -8,7 +8,7 @@ pub(crate) mod vector_indexing;
 pub(crate) mod write_planning;
 
 pub(crate) use correct_forget::CorrectionForgetPipeline;
-pub(crate) use link::{admit_link, LinkAdmissionDecision, LinkAdmissionEvidence, LinkPipeline};
+pub(crate) use link::LinkPipeline;
 pub(crate) use remember::RememberPipeline;
 pub(crate) use retrieve::RetrievePipeline;
 pub(crate) use stats_projection::StatsProjectionService;
