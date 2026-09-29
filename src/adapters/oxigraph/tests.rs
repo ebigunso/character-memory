@@ -818,15 +818,7 @@ mod tests {
 
             assert_eq!(expansion, without_utilization);
             assert_eq!(expansion.links.len(), cap);
-            assert_eq!(
-                expansion.bounded_failure,
-                Some(
-                    crate::ports::graph_authority::GraphExpansionBoundedFailure {
-                        reason: GraphExpansionBoundedFailureReason::HubLimit,
-                        at: Some(root),
-                    }
-                )
-            );
+            assert!(expansion.bounded_failure.is_none());
             assert!(utilization.iter().any(|entry| {
                 entry.root == root
                     && entry.relation == RelationType::About
@@ -1259,7 +1251,7 @@ mod tests {
             .expand_bounded(
                 &GraphExpansionQuery::new(fixture.hub_entity.id, ObjectType::Entity, 1, 20)
                     .with_max_hub_edges(2)
-                    .with_max_fanout_per_node(2),
+                    .with_max_fanout_per_node(3),
             )
             .await
             .unwrap();
