@@ -768,6 +768,21 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
 
 - None yet.
 
+- 2026-09-29 Plan complete. Tasks 1 to 14 are approved and stacked (PRs 160 to 173); every Definition of Done item is met.
+  - Measurements:
+    - Task_1: direction confirmed.
+    - Task_14 timing: 0.40 times the consolidation parent.
+    - Final proof: passed.
+  - Completion value audit (orchestrator):
+    - EARNS ITS PLACE: the fanout fix (a companion's scene comes to mind) and the hub fix (knowing someone well no longer reads as degraded), both correctness; the read fix (speed that no longer grows with the store). The deletions are the point of the plan: about 4,000 lines of code nothing called or read, and tests that repeated each other.
+    - OVERSIZED: none.
+    - DELETE: none left in scope.
+  - Carried forward:
+    - the paired evals test migration (evals cleanup Task_12);
+    - the unhealthy-stats marker that never clears (logged under ruling 77);
+    - the unlived-topic relevance floor (consolidation residual);
+    - the ADR-I-0007 line that names the retired schema constants, for the decider's record batch.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-24 Decision: the library cleanup follows ruling 77 (value-audit cleanup, 2026-09-24).
@@ -821,6 +836,34 @@ Task_1 lands and is measured before Wave 2 is dispatched, so the final-tip proof
   Trigger / new insight: consolidation Task_3 made retrieval about 1.59 times slower, which interleaved timing confirmed and attributed to that step alone. The investigation found a pre-existing whole-store link hydration per expanded root (contrary to ruling 67), which Task_3 multiplied, plus redundant occasion-metadata queries. Task_13's review showed that selecting before the hub check also returns an occasion that a person root's aboutness links used to starve out.
   - Plan delta (what changed): Task_14 fixes both read costs without changing outcomes, and is timed against the consolidation parent. The final-tip proof allows bounded-failure counts only to fall, and memories only to be recovered where a false bound starved them; each recovery is reported, never masked. Unchanged-output claims for Task_13 are scoped to the recorded non-root and obligations fixtures.
   - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-29 Task_1 measurement read: direction confirmed.
+  Trigger / new insight: AFTER at library 52dc5353, harness 26a43960, run twice (timed A, untimed B), byte-identical (SHA-256 `9351e9c4…`). BEFORE is the consolidation slice-end AFTER for the old families (`b4150b36…`) and the accepted obligations BEFORE for the new family (`e8835d8a…`); the harness reproduces the old families exactly. Readings:
+  - 955 saved observations, 57 keyed and 898 keyless. Exactly 8 changed, and all 8 are the observations registered in advance as having a present participant at a native budget of zero: familiar person and familiar person with salient remarks, in both identifier orders. No keyless observation changed, no other keyed one, and not the obligations family. There were no bounded failures.
+  - In 6 of the 8 the budget rose from 0 to 1 and the pack did not change: Iris's latest occasion was already there by another road.
+  - In the 2 full-store salient-remarks cases, one of Iris's remark episodes enters and the oldest ordinary occasion with her leaves (remark-31 for occasion-000 in the original order, remark-24 for occasion-006 in the opposed). Each added episode already had its observation selected, so the distinct occasions represented fall from 19 to 18.
+  - The falsifier did not fire: at most one episode was gained per participant, and nothing outside the pre-registered cases moved.
+  - What it means for the character: with Iris present, the scene of a time with her comes to mind whole, not only what was observed in it, and it takes the place of the oldest time with her. The small cost is that one occasion is now represented twice (the episode and its observation), and one fewer distinct time with her is recalled. That is the right trade for a person who is present.
+  - Verdict: direction confirmed. The AFTER is the reference for the final-tip proof and the prospective slice's BEFORE, for the old families and the obligations family alike.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-29 Task_14 timing read: direction confirmed; the consolidation's timing claim is settled.
+  Trigger / new insight: the consolidation parent 67d6735 and the Task_14 tip b95acbba were interleaved on the same frozen 50 queries used for the step attribution (harness 1b8f02a, three warm samples each, both pins under the same load). The paired median ratio (Task_14 tip over parent) is 0.397 (interquartile 0.376 to 0.592, range 0.335 to 0.728): keyless 0.380 and time 0.600. Every ratio is below 1.1, so no residual needed attributing. Task_14 against its exact parent c9f0ad1d: packs are equal, 50 of 50.
+  - What it means for the character: the same memories come to mind about two and a half times faster than before the consolidation, and the cost no longer grows with unrelated history in the store.
+  - Verdict: direction confirmed. The consolidation plan's timing question (Task_3's read path) is closed by this reading.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-29 Final behavior-free proof: passed.
+  Trigger / new insight: the integrated tip fa90d57f (all fourteen tasks), harness 26a43960, full default capture run twice. Both runs are byte-identical (SHA-256 `292cc25e…`). Compared with Task_1's AFTER (`9351e9c4…`):
+  - All 955 observations have the same ids, sections, order, scores, trace rank and fanout utilization.
+  - The only differences are the 14,387 authorized field deletions (the telemetry trim, and `timeout_ms` and `failure_mode` in the graph limits, including 30 copies inside the obligations controls, each equal to the default) and the library provenance.
+  - Bounded failures are 0 before and 0 after, and no memory was recovered: the reference had no false hub bound to remove.
+  - The integration gates at fa90d57f pass: 507 tests, clippy, fmt and pre-commit, and the evals calibrator builds and links.
+  - What it means for the character: the cleanup changed nothing that comes to mind beyond Task_1's measured change. It removed about 4,000 lines, and Task_14 made recall faster than before the consolidation.
+  - Verdict: the final proof passes, and the plan is complete.
   - Record proposed: none.
 
 ## Notes
