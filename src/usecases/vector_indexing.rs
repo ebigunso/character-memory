@@ -197,34 +197,8 @@ fn failed(objects: Vec<MemoryObjectRef>, cause: VectorIndexingCause) -> VectorIn
 mod tests {
     use super::*;
     use crate::ports::embedder::MemoryEmbedder;
-    use async_trait::async_trait;
 
     use crate::domain::{MemoryId, VectorSurface, DEFAULT_SCHEMA_VERSION};
-    use crate::models::vector::VectorCandidateSearch;
-    use crate::ports::vector_candidate::VectorCandidateRecall;
-
-    struct AdapterMustNotRun;
-
-    #[async_trait]
-    impl VectorCandidateStore for AdapterMustNotRun {
-        async fn upsert_vector_records(
-            &self,
-            _records: &[VectorRecordEmbedding<'_>],
-        ) -> Result<(), CustomError> {
-            panic!("zero-norm embeddings must be rejected before the adapter")
-        }
-
-        async fn search_candidates(
-            &self,
-            _query: &VectorCandidateSearch,
-        ) -> Result<VectorCandidateRecall, CustomError> {
-            unreachable!("search is not part of this test")
-        }
-
-        async fn delete_candidates(&self, _objects: &[MemoryObjectRef]) -> Result<(), CustomError> {
-            unreachable!("deletion is not part of this test")
-        }
-    }
 
     #[tokio::test]
     async fn zero_norm_record_embedding_is_typed_failure_before_adapter() {
@@ -236,7 +210,9 @@ mod tests {
             DEFAULT_SCHEMA_VERSION,
             "Episode summary",
         );
-        let store = AdapterMustNotRun;
+        let mut store = crate::test_support::TemporaryVectorCandidateStore::open(2).await;
+        store.upsert_hook =
+            Some(|| panic!("zero-norm embeddings must be rejected before the adapter"));
         let embedder = crate::test_support::TestEmbedder(|_: &EmbeddingInput| vec![0.0, 0.0]);
         let service = VectorIndexingService::new(&store);
         let inputs = [record.embedding_input()];
