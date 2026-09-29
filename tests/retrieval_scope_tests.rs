@@ -474,11 +474,11 @@ async fn dense_place_records_topic_admission_at_root_cap() {
         "topic should be the strongest vector match: {recalled:?}"
     );
     assert_eq!(
-        result
-            .rationale
-            .telemetry
-            .graph_expansion
-            .attempted_root_count,
+        trace
+            .graph_expansions
+            .iter()
+            .filter(|entry| entry.outcome != GraphExpansionOutcome::RootLimit)
+            .count(),
         12
     );
     let root_trace = trace

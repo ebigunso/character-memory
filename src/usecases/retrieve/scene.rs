@@ -14,7 +14,6 @@ pub(super) struct RecallCues {
     pub orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     pub participants: Vec<MemoryId>,
     pub references: Vec<SceneReferenceResult>,
-    pub dimension: usize,
     pub completeness: VectorRecallCompleteness,
     pub floor_admissions: Vec<CueFloorAdmission>,
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
@@ -128,7 +127,6 @@ where
         let mut candidates_by_kind: BTreeMap<RecallRoad, Vec<VectorCandidateMatch>> =
             BTreeMap::new();
         let mut scene_cue_searches = Vec::new();
-        let mut dimension = 0;
         let mut completeness = VectorRecallCompleteness::NotRequested;
         let topic = nonblank(context.topic.as_deref()).map(|text| {
             (
@@ -164,7 +162,6 @@ where
                     embeddings.insert(text.clone(), self.embedder.embed(&input).await?);
                 }
                 let embedding = embeddings[&text].clone();
-                dimension = embedding.len();
                 let mut query = VectorCandidateSearch::new(
                     embedding,
                     RecallRoad::Topic.contribution(context),
@@ -342,7 +339,6 @@ where
             orders,
             participants,
             references,
-            dimension,
             completeness,
             floor_admissions,
             scene_cue_searches,

@@ -10,13 +10,12 @@ use crate::api::types::{
     GraphExpansionTrace, GraphRootSource, IncludedDerivedMemory, LifecycleFilterDecision,
     LifecycleFilterReason, LifecycleOmissionSummary, RetrievalContext, RetrievalCueFloors,
     RetrievalRationale, RetrievalTelemetry, RetrievalTrace, RetrieveOutcome, SectionAssignment,
-    SectionAssignmentReason, SectionPressureSummary, SectionScoreComponents, SelectivityTelemetry,
-    StaleCandidateOmission, StaleCandidateOmissionSummary, StaleCandidateReason,
-    VectorCandidateTrace,
+    SectionAssignmentReason, SectionScoreComponents, StaleCandidateOmission,
+    StaleCandidateOmissionSummary, StaleCandidateReason, VectorCandidateTrace,
 };
 use crate::domain::{
-    DerivedMemory, DerivedType, GraphExpansionBoundedReason, MemoryId, MemoryObject,
-    MemoryObjectRef, ObjectType, RelationType, ThreadStatus, VectorSurface,
+    DerivedMemory, DerivedType, MemoryId, MemoryObject, MemoryObjectRef, ObjectType, RelationType,
+    ThreadStatus, VectorSurface,
 };
 use crate::errors::CustomError;
 use crate::models::vector::{EmbeddingInput, VectorCandidateMatch, VectorCandidateSearch};
@@ -27,9 +26,8 @@ use crate::policy::{
 };
 use crate::ports::embedder::MemoryEmbedder;
 use crate::ports::graph_authority::{
-    GraphAuthorityStore, GraphExpansion, GraphExpansionBoundedFailureReason,
-    GraphExpansionFailurePolicy, GraphExpansionFilteredReason, GraphExpansionLifecyclePolicy,
-    GraphExpansionQuery, TraceMode,
+    GraphAuthorityStore, GraphExpansion, GraphExpansionFailurePolicy, GraphExpansionFilteredReason,
+    GraphExpansionLifecyclePolicy, GraphExpansionQuery, TraceMode,
 };
 use crate::ports::retrieval_stats::RetrievalStatsStore;
 #[cfg(test)]
@@ -99,7 +97,6 @@ where
         context.validate()?;
         let cues = self.recall_cues(&context).await?;
         let vector_candidates = cues.candidates;
-        let query_embedding_dimension = cues.dimension;
         let vector_recall_completeness = cues.completeness;
         let trace_mode = TraceMode::from_enabled(context.include_trace);
         let mut explicit_roots = cues
@@ -263,7 +260,6 @@ where
             }
         }
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
-        let mut selectivity_telemetry = SelectivityTelemetry::default();
         let mut graph_expansion_traces = trace_mode.is_enabled().then(Vec::new);
         let mut fanout_utilization_traces = trace_mode.is_enabled().then(Vec::new);
         let mut selectivity_traces = trace_mode.is_enabled().then(Vec::new);
@@ -302,7 +298,6 @@ where
             } else {
                 SelectivityPlan::default()
             };
-            absorb_selectivity_telemetry(&mut selectivity_telemetry, &selectivity_plan.telemetry);
             if let Some(traces) = &mut selectivity_traces {
                 traces.extend(selectivity_plan.traces);
             }
@@ -315,11 +310,8 @@ where
                 // Filter traversal itself: the bounded audit cannot list every resolved member.
                 query.current_thread_state = true;
             }
-            graph_expansion_telemetry.attempted_root_count += 1;
             match self.graph_store.expand_bounded(&query).await {
                 Ok(expansion) => {
-                    graph_expansion_telemetry.expanded_root_count += 1;
-                    record_expansion_telemetry(&mut graph_expansion_telemetry, &expansion);
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(graph_expansion_trace(candidate, &expansion));
                     }
@@ -327,6 +319,7 @@ where
                         traces.extend(fanout_utilization_traces_for_expansion(&expansion));
                     }
                     if let Some(failure) = expansion.bounded_failure {
+                        graph_expansion_telemetry.bounded_failure_count += 1;
                         fail_if_closed(context.graph_limits.failure_mode, failure)?;
                     }
                     if candidate.source() == GraphRootSource::Participant {
@@ -358,7 +351,6 @@ where
                     assembly.absorb_expansion(candidate, &query, expansion)?;
                 }
                 Err(CustomError::GraphExpansionRootNotFound { .. }) => {
-                    graph_expansion_telemetry.missing_root_count += 1;
                     if let Some(traces) = &mut graph_expansion_traces {
                         traces.push(missing_root_expansion_trace(candidate));
                     }
@@ -421,7 +413,6 @@ where
             .floor_admissions
             .extend(root_selection.floor_admissions);
 
-        let mut section_pressure = initial_section_pressure(context.section_limits);
         let pack = build_pack(
             ranked_objects,
             (&state_scopes, &scope_kinds),
@@ -429,7 +420,6 @@ where
             context.section_limits,
             context.cue_floors,
             &mut details,
-            &mut section_pressure,
         );
         let graph_verified_count = included_section_assignment_count(&details.section_assignments);
         let stale_candidate_omission_reasons =
@@ -450,27 +440,18 @@ where
             stale_candidate_omission_count,
             lifecycle_omission_count,
         ));
-        rationale.vector_candidate_count = vector_candidates.len();
         rationale.graph_verified_count = graph_verified_count;
         rationale.stale_candidate_omission_count = stale_candidate_omission_count;
         rationale.stale_candidate_omission_reasons = stale_candidate_omission_reasons;
         rationale.lifecycle_omission_count = lifecycle_omission_count;
         rationale.lifecycle_omission_reasons = lifecycle_omission_reasons;
         rationale.telemetry = RetrievalTelemetry {
-            configured_candidate_limits: context.candidate_limits,
-            configured_graph_limits: context.graph_limits.clone(),
-            configured_section_limits: context.section_limits,
-            configured_object_types: context.object_type_defaults.clone(),
-            configured_lifecycle_policy: context.lifecycle_policy,
-            query_embedding_dimension,
             returned_vector_candidate_count: vector_candidates.len(),
             vector_recall_completeness,
             unique_graph_root_candidate_count: root_selection.unique_count,
             selected_graph_root_count: candidate_roots.len(),
             graph_root_omission_count: root_selection.omitted.len(),
             graph_expansion: graph_expansion_telemetry,
-            selectivity: selectivity_telemetry,
-            section_pressure,
         };
         let memory_scenes = self
             .memory_scenes(
@@ -964,7 +945,6 @@ fn build_pack(
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
-    section_pressure: &mut [SectionPressureSummary],
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
     let mut selected = HashSet::new();
@@ -1034,6 +1014,10 @@ fn build_pack(
         entry.reason != LifecycleFilterReason::ResolvedOmitted || !selected.contains(&entry.object)
     });
 
+    let mut section_counts = prompt_ready_sections()
+        .into_iter()
+        .map(|section| (section, 0))
+        .collect::<Vec<_>>();
     for ranked in ranked_objects {
         let Some(section) = section_for_object(&ranked) else {
             details.section_assignments.push(SectionAssignment {
@@ -1046,9 +1030,7 @@ fn build_pack(
             continue;
         };
 
-        let pressure = section_pressure_for(section_pressure, section);
         if !selected.contains(&ranked.object.object_ref()) {
-            pressure.omitted_by_limit_count += 1;
             details
                 .stale_candidate_omissions
                 .push(StaleCandidateOmission {
@@ -1069,8 +1051,12 @@ fn build_pack(
             continue;
         }
 
-        pressure.included_count += 1;
-        let rank = pressure.included_count;
+        let (_, count) = section_counts
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == section)
+            .expect("every pack section has a count");
+        *count += 1;
+        let rank = *count;
         details.admitted_by.insert(
             ranked.object.object_ref(),
             ranked
@@ -1110,20 +1096,6 @@ fn included_section_assignment_count(section_assignments: &[SectionAssignment]) 
         .count()
 }
 
-fn initial_section_pressure(
-    limits: crate::api::types::ContinuitySectionLimits,
-) -> Vec<SectionPressureSummary> {
-    prompt_ready_sections()
-        .into_iter()
-        .map(|section| SectionPressureSummary {
-            section,
-            limit: section_limit(section, limits),
-            included_count: 0,
-            omitted_by_limit_count: 0,
-        })
-        .collect()
-}
-
 fn prompt_ready_sections() -> Vec<ContextPackSection> {
     vec![
         ContextPackSection::ActiveThreads,
@@ -1136,16 +1108,6 @@ fn prompt_ready_sections() -> Vec<ContextPackSection> {
         ContextPackSection::Commitments,
         ContextPackSection::CharacterSignals,
     ]
-}
-
-fn section_pressure_for(
-    section_pressure: &mut [SectionPressureSummary],
-    section: ContextPackSection,
-) -> &mut SectionPressureSummary {
-    section_pressure
-        .iter_mut()
-        .find(|summary| summary.section == section)
-        .expect("every pack section has a pressure summary")
 }
 
 fn count_reasons<R: Copy + Eq>(
@@ -1643,39 +1605,6 @@ fn graph_query_for_candidate(
     query
 }
 
-fn absorb_selectivity_telemetry(total: &mut SelectivityTelemetry, next: &SelectivityTelemetry) {
-    total.decision_count += next.decision_count;
-    total.high_selectivity_count += next.high_selectivity_count;
-    total.low_selectivity_supported_count += next.low_selectivity_supported_count;
-    total.low_selectivity_rejected_count += next.low_selectivity_rejected_count;
-    total.fallback_count += next.fallback_count;
-}
-
-fn record_expansion_telemetry(telemetry: &mut GraphExpansionTelemetry, expansion: &GraphExpansion) {
-    telemetry.expanded_object_count += expansion.objects.len();
-    telemetry.expanded_relation_count += expansion.relations.len();
-    telemetry.filtered_node_count += expansion.filtered_nodes.len();
-    if let Some(failure) = expansion.bounded_failure {
-        telemetry.bounded_failure_count += 1;
-        increment_bounded_failure_reason(&mut telemetry.bounded_failure_reasons, failure.reason);
-    }
-}
-
-fn increment_bounded_failure_reason(
-    summaries: &mut Vec<crate::api::types::GraphExpansionBoundedFailureSummary>,
-    reason: GraphExpansionBoundedFailureReason,
-) {
-    let reason = public_bounded_failure_reason(reason);
-    if let Some(summary) = summaries
-        .iter_mut()
-        .find(|summary| summary.reason == reason)
-    {
-        summary.count += 1;
-    } else {
-        summaries.push(crate::api::types::GraphExpansionBoundedFailureSummary { reason, count: 1 });
-    }
-}
-
 fn graph_expansion_trace(
     candidate: &CandidateRoot,
     expansion: &GraphExpansion,
@@ -1724,16 +1653,6 @@ fn missing_root_expansion_trace(candidate: &CandidateRoot) -> GraphExpansionTrac
         filtered_node_count: 0,
         bounded_failure: None,
         outcome: GraphExpansionOutcome::MissingRoot,
-    }
-}
-
-fn public_bounded_failure_reason(
-    reason: GraphExpansionBoundedFailureReason,
-) -> GraphExpansionBoundedReason {
-    match reason {
-        GraphExpansionBoundedFailureReason::NodeLimit => GraphExpansionBoundedReason::NodeLimit,
-        GraphExpansionBoundedFailureReason::Timeout => GraphExpansionBoundedReason::Timeout,
-        GraphExpansionBoundedFailureReason::HubLimit => GraphExpansionBoundedReason::HubLimit,
     }
 }
 
@@ -1883,8 +1802,8 @@ fn rationale_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::GraphFailureMode;
     use crate::domain::ScopeKey;
+    use crate::domain::{GraphExpansionBoundedReason, GraphFailureMode};
     use crate::ports::graph_authority::GraphExpansionFilteredNode;
 
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -2316,8 +2235,6 @@ mod tests {
             outcome.pack.relevant_episodes[0].raw_ref,
             fixtures.episode.raw_ref
         );
-        assert_eq!(outcome.rationale.vector_candidate_count, 4);
-        assert_eq!(outcome.rationale.telemetry.query_embedding_dimension, 2);
         assert_eq!(
             outcome.rationale.telemetry.returned_vector_candidate_count,
             4
@@ -2331,15 +2248,8 @@ mod tests {
         );
         assert_eq!(outcome.rationale.telemetry.selected_graph_root_count, 4);
         assert_eq!(outcome.rationale.telemetry.graph_root_omission_count, 0);
-        assert_eq!(
-            outcome
-                .rationale
-                .telemetry
-                .graph_expansion
-                .attempted_root_count,
-            4
-        );
         let trace = outcome.trace.as_ref().unwrap();
+        assert_eq!(trace.graph_expansions.len(), 4);
         assert!(trace.section_assignments.iter().any(|assignment| {
             matches!(assignment.reason, SectionAssignmentReason::Selected { .. })
         }));
@@ -2726,11 +2636,10 @@ mod tests {
             2
         );
         assert_eq!(
-            outcome
-                .rationale
-                .telemetry
-                .graph_expansion
-                .bounded_failure_reasons[0]
+            trace.graph_expansions[0]
+                .bounded_failure
+                .as_ref()
+                .unwrap()
                 .reason,
             GraphExpansionBoundedReason::NodeLimit
         );
@@ -2819,7 +2728,6 @@ mod tests {
         assert_eq!(telemetry.unique_graph_root_candidate_count, 2);
         assert_eq!(telemetry.selected_graph_root_count, 1);
         assert_eq!(telemetry.graph_root_omission_count, 1);
-        assert_eq!(telemetry.graph_expansion.attempted_root_count, 1);
         assert!(outcome.trace.is_none());
     }
 
@@ -2912,16 +2820,28 @@ mod tests {
                     }
                 )
                 && assignment.cue_kinds == BTreeSet::from([CueKind::Topic])));
-        let preference_pressure = first
-            .rationale
-            .telemetry
-            .section_pressure
-            .iter()
-            .find(|summary| summary.section == ContextPackSection::Preferences)
-            .unwrap();
-        assert_eq!(preference_pressure.limit, 1);
-        assert_eq!(preference_pressure.included_count, 1);
-        assert_eq!(preference_pressure.omitted_by_limit_count, 1);
+        assert_eq!(
+            trace
+                .section_assignments
+                .iter()
+                .filter(|assignment| assignment.section == ContextPackSection::Preferences)
+                .count(),
+            1
+        );
+        assert_eq!(
+            trace
+                .section_assignments
+                .iter()
+                .filter(|assignment| matches!(
+                    assignment.reason,
+                    SectionAssignmentReason::OmittedByLimit {
+                        intended_section: ContextPackSection::Preferences,
+                        ..
+                    }
+                ))
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -3257,7 +3177,10 @@ mod tests {
             outcome.pack.derived_memories[0].memory.id,
             fixtures.derived_reflection.id
         );
-        assert_eq!(outcome.rationale.vector_candidate_count, 1);
+        assert_eq!(
+            outcome.rationale.telemetry.returned_vector_candidate_count,
+            1
+        );
         assert_eq!(outcome.rationale.graph_verified_count, included_assignments);
         assert!(trace.graph_expansions.iter().any(|expansion| {
             expansion.root.id == fixtures.derived_reflection.id && expansion.object_count > 0

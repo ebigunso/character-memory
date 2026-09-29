@@ -234,14 +234,6 @@ async fn named_people_share_section_room_in_scope_rounds() {
             assert_eq!(&states[6..8], &[1198, 9000]);
         }
         assert_eq!(result.pack.derived_memories.len(), 12);
-        let telemetry = &result.rationale.telemetry.selectivity;
-        assert_eq!(
-            telemetry.decision_count,
-            telemetry.high_selectivity_count
-                + telemetry.low_selectivity_supported_count
-                + telemetry.low_selectivity_rejected_count
-                + telemetry.fallback_count
-        );
         let trace = result.trace.unwrap();
         let scope_states = if topic.is_some() {
             &states[..6]

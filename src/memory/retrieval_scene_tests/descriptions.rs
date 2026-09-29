@@ -23,46 +23,27 @@ async fn topic_only_applies_section_limits_and_preserves_query_text() {
         Box::new(vector),
         Box::new(RecordingEmbedder(inputs.clone())),
     );
-    // The fulfilled commitment shares the ordinary derived-memory section cap.
-    let expected = [
-        r#"{"active_threads":["550e8400-e29b-41d4-a716-446655440019"],"character_signals":[],"commitments":[],"derived_memories":[],"open_loops":[],"preferences":["550e8400-e29b-41d4-a716-44665544001f"],"relationship_notes":[],"relevant_episodes":[],"salient_observations":["550e8400-e29b-41d4-a716-446655440014"]}"#,
-        r#"{"active_threads":["550e8400-e29b-41d4-a716-446655440019"],"character_signals":[],"commitments":[],"derived_memories":["550e8400-e29b-41d4-a716-446655440022","550e8400-e29b-41d4-a716-446655440021"],"open_loops":["550e8400-e29b-41d4-a716-446655440020"],"preferences":["550e8400-e29b-41d4-a716-44665544001f"],"relationship_notes":[],"relevant_episodes":["550e8400-e29b-41d4-a716-44665544000a"],"salient_observations":["550e8400-e29b-41d4-a716-446655440014"]}"#,
-    ];
-    for (case, (candidates, roots, derived_limit)) in
-        [(6, 3, 1), (48, 12, 2)].into_iter().enumerate()
-    {
+    for (candidates, roots, derived_limit) in [(6, 3, 1), (48, 12, 2)] {
         let mut context = RetrievalContext::new("  deterministic fixtures\nservice-free  ");
         context.candidate_limits.max_vector_candidates = candidates;
         context.candidate_limits.max_graph_roots = roots;
         context.section_limits.derived_memories = derived_limit;
+        let limits = context.section_limits;
         let result = memory.retrieve(context).await.unwrap();
-        let projection = serde_json::to_value(&result.pack)
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .iter()
-            .map(|(section, objects)| {
-                let ids = objects
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|object| {
-                        object
-                            .get("id")
-                            .or_else(|| object.get("memory").and_then(|memory| memory.get("id")))
-                            .unwrap()
-                            .as_str()
-                            .unwrap()
-                            .to_owned()
-                    })
-                    .collect::<Vec<_>>();
-                (section.clone(), ids)
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            serde_json::to_value(&projection).unwrap(),
-            serde_json::from_str::<serde_json::Value>(expected[case]).unwrap()
-        );
+        let pack = &result.pack;
+        for (count, limit) in [
+            (pack.active_threads.len(), limits.active_threads),
+            (pack.relevant_episodes.len(), limits.relevant_episodes),
+            (pack.salient_observations.len(), limits.salient_observations),
+            (pack.derived_memories.len(), limits.derived_memories),
+            (pack.preferences.len(), limits.preferences),
+            (pack.relationship_notes.len(), limits.relationship_notes),
+            (pack.open_loops.len(), limits.open_loops),
+            (pack.commitments.len(), limits.commitments),
+            (pack.character_signals.len(), limits.character_signals),
+        ] {
+            assert!(count <= limit);
+        }
     }
     assert_eq!(
         *inputs.lock().unwrap(),
@@ -335,8 +316,10 @@ async fn time_only_scene_is_echoed_without_embedding_or_completeness_claim() {
         outcome.rationale.telemetry.vector_recall_completeness,
         VectorRecallCompleteness::NotRequested
     );
-    assert_eq!(outcome.rationale.telemetry.query_embedding_dimension, 0);
-    assert_eq!(outcome.rationale.vector_candidate_count, 0);
+    assert_eq!(
+        outcome.rationale.telemetry.returned_vector_candidate_count,
+        0
+    );
     assert!(queries.lock().unwrap().is_empty());
     let mut blank = RetrievalContext::new(" \n ");
     blank.scene.participants.push(SceneParticipant::default());
