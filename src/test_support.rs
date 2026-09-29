@@ -280,6 +280,10 @@ impl TestGraphStore {
 
 #[async_trait]
 impl GraphAuthorityStore for TestGraphStore {
+    async fn ensure_character_identity(&self, character_id: MemoryId) -> Result<(), CustomError> {
+        self.store.ensure_character_identity(character_id).await
+    }
+
     async fn query_anniversaries(
         &self,
         date: chrono::NaiveDate,
@@ -621,11 +625,13 @@ pub(crate) fn deterministic_embedder(dimensions: usize) -> impl MemoryEmbedder {
 pub(crate) async fn memory_with_embedder(
     dimensions: usize,
     embedder: impl MemoryEmbedder + 'static,
+    character_id: MemoryId,
 ) -> crate::CharacterMemory {
     crate::CharacterMemory::from_parts(
         Box::new(in_memory_graph_store()),
         Box::new(TemporaryVectorCandidateStore::open(dimensions).await),
         Box::new(embedder),
+        character_id,
     )
 }
 

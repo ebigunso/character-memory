@@ -417,6 +417,15 @@ pub struct IncludedDerivedMemory {
     pub source_observation_ids: Vec<MemoryId>,
     /// Memories linked by Resolves or FulfillsCommitment; empty means unresolved.
     pub resolved_by: Vec<MemoryId>,
+    /// The character's side of an admitted obligation; absent when no role names it.
+    pub direction: Option<ObligationDirection>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationDirection {
+    OwedByCharacter,
+    OwedToCharacter,
 }
 
 impl From<DerivedMemory> for IncludedDerivedMemory {
@@ -425,6 +434,7 @@ impl From<DerivedMemory> for IncludedDerivedMemory {
             source_episode_ids: memory.derived_from_episode_ids.clone(),
             source_observation_ids: memory.derived_from_observation_ids.clone(),
             resolved_by: Vec::new(),
+            direction: None,
             memory,
         }
     }

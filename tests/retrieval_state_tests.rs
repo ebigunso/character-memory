@@ -117,6 +117,7 @@ async fn default_settings_recall_a_ubiquitous_participants_latest_occasion() {
         settings,
         test_support::unique_collection_name(),
         Box::new(test_support::deterministic_provider(8)),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     .unwrap();
@@ -164,7 +165,10 @@ async fn default_settings_recall_a_ubiquitous_participants_latest_occasion() {
 
 #[tokio::test]
 async fn named_people_share_section_room_in_scope_rounds() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut seed = RememberInput::new("six notions");
     for id in 50..=55 {
         seed = seed.with_entity(entity(id));
@@ -270,7 +274,10 @@ async fn named_people_share_section_room_in_scope_rounds() {
 
 #[tokio::test]
 async fn named_subject_fanout_selects_current_salient_then_recent_state() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     commit_input(
         &memory,
         RememberInput::new("one notion").with_entity(entity(60)),
@@ -338,7 +345,10 @@ async fn named_subject_fanout_selects_current_salient_then_recent_state() {
 
 #[tokio::test]
 async fn named_person_topic_match_keeps_first_place_in_their_scope() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut seed = RememberInput::new("six topic-test notions");
     for id in 70..76 {
         seed = seed.with_entity(entity(id));
@@ -386,7 +396,10 @@ async fn named_person_topic_match_keeps_first_place_in_their_scope() {
 
 #[tokio::test]
 async fn named_subject_preserves_lifecycle_evidence_and_independent_opt_ins() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     commit_input(
         &memory,
         RememberInput::new("lifecycle notion").with_entity(entity(70)),

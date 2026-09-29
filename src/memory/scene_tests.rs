@@ -61,8 +61,12 @@ impl MemoryEmbedder for RecordingEmbedder {
 
 async fn memory() -> (CharacterMemory, Arc<Mutex<Vec<EmbeddingInput>>>) {
     let inputs = Arc::new(Mutex::new(Vec::new()));
-    let memory =
-        crate::test_support::memory_with_embedder(8, RecordingEmbedder(inputs.clone())).await;
+    let memory = crate::test_support::memory_with_embedder(
+        8,
+        RecordingEmbedder(inputs.clone()),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     (memory, inputs)
 }
 
@@ -270,9 +274,12 @@ fn text_embedder(words: [&'static str; 2]) -> impl MemoryEmbedder {
 
 #[tokio::test]
 async fn typed_vector_identity_preserves_content_and_scene_surfaces_through_forget() {
-    let memory =
-        crate::test_support::memory_with_embedder(3, text_embedder(["experience", "observed"]))
-            .await;
+    let memory = crate::test_support::memory_with_embedder(
+        3,
+        text_embedder(["experience", "observed"]),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let id = MemoryId::from_u128(8802);
     let mut thread = MemoryThreadDraft::new("A thread", "An ongoing topic");
     thread.id = Some(id);
@@ -608,8 +615,12 @@ async fn writes_reject_missing_scene_and_unknown_keys() {
 
 #[tokio::test]
 async fn default_correction_embeds_its_rationale_and_is_recalled_by_content() {
-    let memory =
-        crate::test_support::memory_with_embedder(3, text_embedder(["Monday", "Tuesday"])).await;
+    let memory = crate::test_support::memory_with_embedder(
+        3,
+        text_embedder(["Monday", "Tuesday"]),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let old_id = MemoryId::from_u128(8902);
     let mut old = DerivedMemoryDraft::new(DerivedType::Claim, "The meeting is Monday.");
     old.id = Some(old_id);

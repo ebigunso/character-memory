@@ -446,15 +446,19 @@ async fn authority_split_outcome_fields_are_coherent_on_healthy_commit() {
 }
 
 async fn setup_basic() -> (CharacterMemory, TempDir) {
-    base::try_setup_character_memory()
+    base::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
         .await
         .expect("basic setup should succeed")
 }
 
 async fn setup_persistent(collection_name: &str, root: &TempDir) -> CharacterMemory {
-    base::try_setup_persistent_character_memory(collection_name.to_owned(), root.path())
-        .await
-        .expect("persistent setup should succeed")
+    base::try_setup_persistent_character_memory(
+        collection_name.to_owned(),
+        root.path(),
+        character_memory::MemoryId::from_u128(1),
+    )
+    .await
+    .expect("persistent setup should succeed")
 }
 
 fn core_input(label: &str) -> RememberInput {

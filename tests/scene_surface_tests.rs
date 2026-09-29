@@ -84,6 +84,7 @@ async fn open() -> (CharacterMemory, Arc<Calls>, tempfile::TempDir) {
         Settings::new(settings).unwrap(),
         collection,
         Box::new(Provider(calls.clone())),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     .unwrap();

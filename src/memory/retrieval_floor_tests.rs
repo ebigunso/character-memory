@@ -8,7 +8,12 @@ use crate::CharacterMemory;
 
 #[tokio::test]
 async fn open_loop_activity_reserves_the_latest_recorded_source() {
-    let memory = crate::test_support::memory_with_embedder(4, TestEmbedder(floor_embedding)).await;
+    let memory = crate::test_support::memory_with_embedder(
+        4,
+        TestEmbedder(floor_embedding),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let provenance = || CandidateProvenance::caller("open-loop source order");
     let mut plan = RememberWritePlan::new();
     // Neither IDs nor creation times give the scene order: 2, 3, 1.
@@ -210,7 +215,12 @@ fn occasion() -> Scene {
 }
 
 async fn floor_memory(scene_surfaces: bool, overlap: bool) -> CharacterMemory {
-    let memory = crate::test_support::memory_with_embedder(4, TestEmbedder(floor_embedding)).await;
+    let memory = crate::test_support::memory_with_embedder(
+        4,
+        TestEmbedder(floor_embedding),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let provenance = || CandidateProvenance::caller("floor pressure");
     let mut episode = EpisodeDraft::new("An occasion with several recollections.");
     episode.id = Some(MemoryId::from_u128(1));
@@ -329,7 +339,12 @@ fn mixed_context() -> RetrievalContext {
 }
 
 async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
-    let memory = crate::test_support::memory_with_embedder(4, TestEmbedder(floor_embedding)).await;
+    let memory = crate::test_support::memory_with_embedder(
+        4,
+        TestEmbedder(floor_embedding),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let mut thread = MemoryThreadDraft::new("Work in progress", "The current activity.");
     thread.id = Some(MemoryId::from_u128(5000));
     let mut input = RememberInput::new("Progress on the work.")
@@ -357,7 +372,12 @@ async fn overlapping_cue_memory() -> (CharacterMemory, MemoryId) {
 }
 
 async fn overlapping_scene_memory() -> (CharacterMemory, MemoryId) {
-    let memory = crate::test_support::memory_with_embedder(4, TestEmbedder(floor_embedding)).await;
+    let memory = crate::test_support::memory_with_embedder(
+        4,
+        TestEmbedder(floor_embedding),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     for id in (6000..6012).chain([7000]) {
         let text = if id == 7000 {
             "orchids need careful watering."
@@ -709,7 +729,12 @@ async fn floors_preserve_witnesses_lost_at_three_different_caps() {
 
 #[tokio::test]
 async fn default_depth_credits_participant_inherited_through_the_episode() {
-    let memory = crate::test_support::memory_with_embedder(4, TestEmbedder(floor_embedding)).await;
+    let memory = crate::test_support::memory_with_embedder(
+        4,
+        TestEmbedder(floor_embedding),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     let provenance = || CandidateProvenance::caller("shared occasion");
     let mut person = EntityDraft::new();
     person.id = Some(MemoryId::from_u128(7));
@@ -1230,6 +1255,7 @@ mod scene_cohorts {
             TestEmbedder(move |input: &EmbeddingInput| {
                 cohort_embedding(input, cohort_id(49, ascending_ids))
             }),
+            crate::domain::MemoryId::from_u128(1),
         )
         .await;
         let mut person = EntityDraft::new();

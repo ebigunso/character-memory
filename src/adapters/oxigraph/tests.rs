@@ -60,6 +60,7 @@ mod tests {
             Box::new(graph),
             Box::new(TemporaryVectorCandidateStore::open(8).await),
             Box::new(deterministic_embedder(8)),
+            crate::domain::MemoryId::from_u128(1),
         );
         let mut episode = EpisodeDraft::new("quiet cafe");
         episode.id = Some(episode_id);

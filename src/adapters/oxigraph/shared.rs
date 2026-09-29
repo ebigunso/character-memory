@@ -431,11 +431,13 @@ fn belief_assertions_from_rdf(
             let values = subjects
                 .get(&node)
                 .ok_or_else(|| missing_rdf_value(&node, vocab::ASSERTION))?;
-            let predicate = serde_json::from_value(serde_json::json!({
-                "predicate": values.literal(&node, vocab::ASSERTION_PREDICATE)?,
-                "name": values.literal(&node, vocab::ASSERTION_NAME)?,
-            }))
-            .map_err(|error| rdf_parse_error(&node, vocab::ASSERTION_PREDICATE, error))?;
+            let literal = values.literal(&node, vocab::ASSERTION_PREDICATE)?;
+            let mut predicate = serde_json::json!({ "predicate": literal });
+            if literal == "known_as" {
+                predicate["name"] = values.literal(&node, vocab::ASSERTION_NAME)?.into();
+            }
+            let predicate = serde_json::from_value(predicate)
+                .map_err(|error| rdf_parse_error(&node, vocab::ASSERTION_PREDICATE, error))?;
             Ok(crate::domain::BeliefAssertion {
                 subject: memory_id_from_resource(
                     &values.resource(&node, vocab::ASSERTION_SUBJECT)?,

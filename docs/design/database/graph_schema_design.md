@@ -19,6 +19,8 @@ Each canonical object or link has a UUID and a deterministic resource URI:
 
 RDF named graphs store the authoritative representation. Common identity literals are `objectId`, `objectType`, `graphUri` and `schemaVersion`; timestamps belong to the object types that declare them. All predicate names below use the `urn:cmem:vocab:` namespace unless a relation URI is shown explicitly. The [RDF vocabulary](../../../src/adapters/oxigraph/vocabulary.rs) and [mapping](../../../src/adapters/oxigraph/rdf_mapping.rs) define the persisted spellings.
 
+The named graph `urn:cmem:store` contains a separate store identity: subject `urn:cmem:store`, predicate `characterIdentity`, and a literal UUID identifying the character. The [identity check (`ensure_character_identity`)](../../../src/adapters/oxigraph/embedded.rs) writes it when absent, accepts the same id, and rejects a different id. Construction checks the graph before opening vectors. This record is not a notion and no recall selector reads it; the supplied identity is otherwise read only to report the character's side of admitted obligations.
+
 Hydration reconstructs domain objects and links from the selected RDF named graphs. It does not require a process-local object cache or vector payload content. Raw transcripts remain in caller-owned storage; `rawRef` is a pointer to source material.
 
 ## Experiences, Notions And Threads
@@ -65,7 +67,7 @@ Scene-key retrieval uses the indexed predicate and scalar lifecycle/salience/cre
 
 Assertions record commitments the character holds about a memory's notion subjects. Reported claims and doubts can remain text without assertions. Every assertion subject must appear in the containing memory's `entity_ids`.
 
-The supported assertion predicate is `KnownAs { name }`, persisted as `known_as`. An assertion is represented by a resource beneath its containing memory:
+The supported assertion predicates are `KnownAs { name }`, persisted as `known_as`, and the obligation roles `Actor` and `Counterpart`, persisted as `actor` and `counterpart`. An assertion is represented by a resource beneath its containing memory:
 
 ```text
 <memory> assertion <memory>:assertion:<zero-padded ordinal>
@@ -76,6 +78,8 @@ The supported assertion predicate is `KnownAs { name }`, persisted as `known_as`
 ```
 
 `assertionName` preserves the supplied spelling. `normalizedName` is derived by Unicode NFKC normalization, lowercase conversion and whitespace folding. Lowercasing keeps `ß` and `ss` distinct, as implemented by [name normalization (`normalize_name`)](../../../src/domain/belief.rs).
+
+An obligation role uses the same assertion resource and subject, with only its predicate literal and no name literals. Several subjects may carry either role, but one subject cannot carry both in a memory. Roles are valid only on open loops and commitments; write and correction validation enforce these constraints. The [pack writer (`push_derived`)](../../../src/usecases/retrieve.rs) reports `OwedByCharacter` for the character as actor, `OwedToCharacter` for the character as counterpart, and no direction otherwise. Roles do not change recall selection.
 
 Assertions are ordered payloads: ordinal assertion resources preserve their order and repeated values. The [assertion reader (`belief_assertions_from_rdf`)](../../../src/adapters/oxigraph/shared.rs) sorts those resources before reconstructing the list. They do not use the ID-list set semantics.
 

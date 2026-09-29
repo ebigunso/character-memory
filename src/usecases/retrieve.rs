@@ -43,6 +43,7 @@ where
     embedder: &'a E,
     stats_store: &'a dyn RetrievalStatsStore,
     selectivity_policy: RetrievalSelectivityPolicy,
+    character_id: MemoryId,
 }
 
 impl<'a, G, V, E> RetrievePipeline<'a, G, V, E>
@@ -52,9 +53,15 @@ where
     E: MemoryEmbedder + ?Sized,
 {
     #[cfg(test)]
-    pub(crate) fn new(graph_store: &'a G, vector_store: &'a V, embedder: &'a E) -> Self {
+    pub(crate) fn new(
+        graph_store: &'a G,
+        vector_store: &'a V,
+        embedder: &'a E,
+        character_id: MemoryId,
+    ) -> Self {
         let settings = crate::config::Settings::new(Default::default()).unwrap();
         Self {
+            character_id,
             graph_store,
             vector_store,
             embedder,
@@ -80,8 +87,10 @@ where
         embedder: &'a E,
         stats_store: &'a dyn RetrievalStatsStore,
         selectivity_policy: RetrievalSelectivityPolicy,
+        character_id: MemoryId,
     ) -> Self {
         Self {
+            character_id,
             graph_store,
             vector_store,
             embedder,
@@ -420,6 +429,7 @@ where
             context.section_limits,
             context.cue_floors,
             &mut details,
+            self.character_id,
         );
         let graph_verified_count = included_section_assignment_count(&details.section_assignments);
         let stale_candidate_omission_reasons =
@@ -945,6 +955,7 @@ fn build_pack(
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
     details: &mut RetrievalDetails,
+    character_id: MemoryId,
 ) -> ContinuityContextPack {
     let mut pack = ContinuityContextPack::empty();
     let mut selected = HashSet::new();
@@ -1080,7 +1091,7 @@ fn build_pack(
             MemoryObject::Observation(object) => pack.salient_observations.push(object),
             MemoryObject::MemoryThread(object) => pack.active_threads.push(object),
             MemoryObject::DerivedMemory(object) => {
-                push_derived(&mut pack, section, object, ranked.resolved_by)
+                push_derived(&mut pack, section, object, ranked.resolved_by, character_id)
             }
             MemoryObject::Entity(_) | MemoryObject::MemoryLink(_) => {}
         }
@@ -1153,9 +1164,29 @@ fn push_derived(
     section: ContextPackSection,
     object: DerivedMemory,
     resolved_by: Vec<MemoryId>,
+    character_id: MemoryId,
 ) {
     let mut included = IncludedDerivedMemory::from(object);
     included.resolved_by = resolved_by;
+    if matches!(
+        included.memory.derived_type,
+        DerivedType::OpenLoop | DerivedType::Commitment
+    ) {
+        included.direction = included.memory.assertions.iter().find_map(|assertion| {
+            if assertion.subject != character_id {
+                return None;
+            }
+            match assertion.predicate {
+                crate::domain::BeliefPredicate::Actor => {
+                    Some(crate::api::types::ObligationDirection::OwedByCharacter)
+                }
+                crate::domain::BeliefPredicate::Counterpart => {
+                    Some(crate::api::types::ObligationDirection::OwedToCharacter)
+                }
+                crate::domain::BeliefPredicate::KnownAs { .. } => None,
+            }
+        });
+    }
     match section {
         ContextPackSection::Preferences => pack.preferences.push(included),
         ContextPackSection::RelationshipNotes => pack.relationship_notes.push(included),
@@ -1825,10 +1856,15 @@ mod tests {
             let mut vector = TemporaryVectorCandidateStore::open(2).await;
             vector.completeness = None;
             vector.candidate = Some(vector_candidate(object.id, object.object_type, score));
-            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
-                .recall_cues(&RetrievalContext::new("score boundary"))
-                .await
-                .unwrap();
+            let cues = RetrievePipeline::new(
+                &graph,
+                &vector,
+                &embedder,
+                crate::domain::MemoryId::from_u128(1),
+            )
+            .recall_cues(&RetrievalContext::new("score boundary"))
+            .await
+            .unwrap();
             assert_eq!(
                 cues.candidates.iter().next().unwrap().score.to_bits(),
                 expected.to_bits()
@@ -1870,10 +1906,15 @@ mod tests {
                 raw.candidates.iter().next().unwrap().object_id,
                 MemoryId::from_u128(near)
             );
-            let cues = RetrievePipeline::new(&graph, &vector, &embedder)
-                .recall_cues(&RetrievalContext::new("unmatched topic"))
-                .await
-                .unwrap();
+            let cues = RetrievePipeline::new(
+                &graph,
+                &vector,
+                &embedder,
+                crate::domain::MemoryId::from_u128(1),
+            )
+            .recall_cues(&RetrievalContext::new("unmatched topic"))
+            .await
+            .unwrap();
             assert!(cues
                 .candidates
                 .iter()
@@ -2105,10 +2146,15 @@ mod tests {
             seed(&vector, MemoryObject::DerivedMemory(memory), tilt).await;
         }
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
-            .retrieve(RetrievalContext::new("rank by final score").with_trace())
-            .await
-            .unwrap();
+        let outcome = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        )
+        .retrieve(RetrievalContext::new("rank by final score").with_trace())
+        .await
+        .unwrap();
 
         let ids = outcome
             .pack
@@ -2203,7 +2249,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let context = RetrievalContext::new("deterministic store contracts").with_trace();
         let outcome = pipeline.retrieve(context.clone()).await.unwrap();
@@ -2317,7 +2368,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let outcome = pipeline
             .retrieve(RetrievalContext::new("score provenance").with_trace())
@@ -2398,7 +2454,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let without_trace = pipeline
             .retrieve(RetrievalContext::new("trace parity"))
@@ -2431,10 +2492,15 @@ mod tests {
             vector.completeness = Some(completeness);
             vector.candidate = None;
             let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-            let outcome = RetrievePipeline::new(&graph, &vector, &embedder)
-                .retrieve(RetrievalContext::new("completeness telemetry"))
-                .await
-                .unwrap();
+            let outcome = RetrievePipeline::new(
+                &graph,
+                &vector,
+                &embedder,
+                crate::domain::MemoryId::from_u128(1),
+            )
+            .retrieve(RetrievalContext::new("completeness telemetry"))
+            .await
+            .unwrap();
 
             assert_eq!(
                 outcome.rationale.telemetry.vector_recall_completeness,
@@ -2468,7 +2534,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let outcome = pipeline
             .retrieve(RetrievalContext::new("omit stale").with_trace())
@@ -2527,7 +2598,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let outcome = pipeline
             .retrieve(RetrievalContext::new("compact rationale omissions"))
@@ -2583,7 +2659,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("bounded graph limits");
         context.graph_limits.max_nodes = 0;
         context.include_trace = true;
@@ -2646,7 +2727,12 @@ mod tests {
         vector.completeness = None;
         vector.candidate = Some(vector_candidate(object_id, ObjectType::MemoryLink, 0.99));
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("propagate graph errors");
         context.object_type_defaults.push(ObjectType::MemoryLink);
 
@@ -2672,7 +2758,12 @@ mod tests {
             .await
             .unwrap();
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let outcome = pipeline
             .retrieve(RetrievalContext::new("preference"))
@@ -2704,7 +2795,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("root truncation");
         context.candidate_limits.max_graph_roots = 1;
 
@@ -2755,8 +2851,18 @@ mod tests {
         .await;
         let first_embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
         let second_embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let first_pipeline = RetrievePipeline::new(&graph, &first_vector, &first_embedder);
-        let second_pipeline = RetrievePipeline::new(&graph, &second_vector, &second_embedder);
+        let first_pipeline = RetrievePipeline::new(
+            &graph,
+            &first_vector,
+            &first_embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
+        let second_pipeline = RetrievePipeline::new(
+            &graph,
+            &second_vector,
+            &second_embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("preferences");
         context.section_limits = ContinuitySectionLimits {
             preferences: 1,
@@ -2843,7 +2949,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("section limits");
         context.section_limits = ContinuitySectionLimits {
             relevant_episodes: 0,
@@ -2886,7 +2997,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut context = RetrievalContext::new("pack counts").with_trace();
         context.section_limits = ContinuitySectionLimits {
             relevant_episodes: 0,
@@ -2944,7 +3060,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
 
         let outcome = pipeline
             .retrieve(RetrievalContext::new("relationship note").with_trace())
@@ -2982,7 +3103,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let context = RetrievalContext::new("dormant thread").with_trace();
 
         let outcome = pipeline.retrieve(context).await.unwrap();
@@ -3065,7 +3191,12 @@ mod tests {
         )
         .await;
         let embedder = RecordingEmbedder::new(vec![1.0, 0.0]);
-        let pipeline = RetrievePipeline::new(&graph, &vector, &embedder);
+        let pipeline = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        );
         let mut root_only = RetrievalContext::new("lifecycle graph truth").with_trace();
         root_only.graph_limits.max_depth = 0;
         let root_only = pipeline.retrieve(root_only).await.unwrap();
