@@ -219,7 +219,7 @@
 
 ## Integration
 - The library stack: the cues, fixes, state, scene-words and time slices, the phase correctness fixes, the write-path warnings, the consolidation slice (code at f6926ef, records at ef8dbfb), then this plan, then the renderer plan, which reads this plan's fields.
-- Base: the consolidation's final tip, `feature/2026-09-23/consolidation-records` at ef8dbfb, pinned in the dispatch brief. Task_1 is cut from it after the consolidation's slice-end measurement is recorded.
+- Base: the value-audit cleanup's final tip, `feature/2026-09-24/cleanup-selected-reads` at 9c885e14, with this plan merged onto it (7ecb353e). It sits on the consolidation's final tip and carries the cleanup's one behavior change (the participant fanout default) plus behavior-free changes (see the Decision Log, 2026-09-30).
 - Inherited and not redone here: the road table and the five principles; the root key; rounds per kind; `select_state` ranking in Rust; the resolution filter and `resolved_by`; `AdmissionRoad` and `admitted_by`; the leaf and reminder merge rules (rulings 46, 47, 49, 54); the as-of cut; the UTC instant literal with the given offset stored beside it; the write-path warning for a resolver that shares no subject with what it resolves. This plan adds:
   - two predicates and one field;
   - two table rows, one expands value, two kinds, two floors, two root sources and one admission value;
@@ -273,7 +273,7 @@
   - any other file only for the mechanical update where the facade or the retrieval pipeline is constructed, or where a test `GraphAuthorityStore` impl gains the identity method, with no change of behavior or expectation
 - depends_on: []
 - description: |
-  Base: the consolidation's final tip (see Integration).
+  Base: the value-audit cleanup's final tip with this plan merged, 7ecb353e (see Integration).
 
   First, at the parent commit, through the public facade on the real embedded stores, record:
   - Given two notions, the character and Bob; a commitment "I will bring Bob the book" with both as subjects; and an open loop "Bob said he would send the draft" with both as subjects, a retrieval with Bob present and no topic. Nothing in the result can say who owes whom, and nothing can tell the library which notion is the character.
@@ -605,6 +605,13 @@ The tasks share one crate and its files, so they run in sequence, one worker at 
   - Record proposed: none.
 
 - 2026-09-23 Decision: one-hop lowering details from the Tier D re-check. The one-hop depth is the smaller of the caller's limit and 1; reach is decided per expansion by each row (only Opens carries score and history, OneHop its own road for one hop, Leaf unchanged), so mixed roots neither lose a road nor leak one onto another's reach.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-30 Base moved onto the value-audit cleanup, and the BEFORE is re-anchored there.
+  Trigger / new insight: the value-audit cleanup (library plan completed 2026-09-29, PRs 159 to 173) landed under this plan after its approval. Its Task_1 raised the participant fanout minimum to one, a measured behavior change; its other tasks are proven behavior-free at the final tip. Before-numbers taken at the consolidation tip would count that change against this slice (Tier A review of Task_1, finding F1).
+  - Plan delta (what changed): the base is 7ecb353e, the cleanup's final tip 9c885e14 with this plan merged. The slice-end BEFORE is the cleanup's Task_1 AFTER capture (SHA-256 `9351e9c4…`, harness 26a43960). It covers every existing family and the obligations family (A6). The cleanup's final behavior-free proof showed 9c885e14 reads identically to it, so it is this base's reading. The slice-end AFTER uses the same harness plus the paired self-identity change (evals c9ba1b3/1ed8b82, behavior-free apart from the header's self map).
+  - Also: the plan had not named the paired evals change the self identity requires (the harness constructs the facade). It runs as its own evals task, paired with Task_1.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
