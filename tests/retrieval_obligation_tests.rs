@@ -112,19 +112,6 @@ mod trigger_road {
         query
     }
 
-    fn record(case: &str, result: &RetrieveOutcome) {
-        println!(
-            "TRIGGER_WITNESS={}",
-            json!({
-                "case": case, "selection": selection(result),
-                "expansions": result.trace.as_ref().unwrap().graph_expansions,
-                "relations": result.trace.as_ref().unwrap().graph_relations,
-                "lifecycle": result.trace.as_ref().unwrap().lifecycle_filter_decisions,
-                "floors": result.trace.as_ref().unwrap().floor_admissions,
-            })
-        );
-    }
-
     fn assignment(result: &RetrieveOutcome, n: u128) -> &SectionAssignment {
         result
             .trace
@@ -171,7 +158,7 @@ mod trigger_road {
     }
 
     #[tokio::test]
-    async fn crowded_party_parent_witness() {
+    async fn crowded_parties_recall_obligations_by_key_or_name() {
         let mut drafts = vec![open(20, 2, 0.1)];
         drafts.extend(
             (100..132)
@@ -206,7 +193,7 @@ mod trigger_road {
                 .retrieve(request(participants, topic, 3))
                 .await
                 .unwrap();
-            record(case, &result);
+
             if matches!(case, "crowded_key" | "crowded_name" | "crowded_loud") {
                 assert!(
                     result
@@ -256,22 +243,19 @@ mod trigger_road {
     }
 
     #[tokio::test]
-    async fn direct_root_score_and_role_free_parent_witness() {
+    async fn trigger_roots_raise_proximity_and_preserve_role_free_recall() {
         for roles in [false, true] {
             let mut draft = open(20, 2, 0.5);
             if !roles {
                 draft.assertions.clear();
             }
             let (memory, root) = fixture(vec![draft]).await;
-            for (label, topic) in [
-                ("participant_descendant", None),
-                ("also_topic_root", Some("open")),
-            ] {
+            for topic in [None, Some("open")] {
                 let result = memory
                     .retrieve(request(vec![keyed(2)], topic, 8))
                     .await
                     .unwrap();
-                record(&format!("{label}_roles_{roles}"), &result);
+
                 assert!(result
                     .pack
                     .open_loops
@@ -356,7 +340,7 @@ mod trigger_road {
     }
 
     #[tokio::test]
-    async fn hop_and_mixed_provenance_parent_witness() {
+    async fn trigger_hops_are_bounded_and_report_only_reaching_roads() {
         let mut drafts = (100..132)
             .map(|n| belief(n, DerivedType::Claim, &[2], 0.9, "current belief about Bob"))
             .collect::<Vec<_>>();
@@ -390,7 +374,7 @@ mod trigger_road {
                 query.section_limits.derived_memories = room;
                 query.graph_limits.max_depth = depth;
                 let result = memory.retrieve(query).await.unwrap();
-                record(&format!("hop_depth_{depth}_room_{room}"), &result);
+
                 assert!(expanded(&result).contains(&id(20)));
                 assert!(admitted(&result, 31).is_none());
                 assert!(!result
@@ -441,7 +425,7 @@ mod trigger_road {
                 query.scene.setting.key = Some("kitchen".into());
             }
             let result = memory.retrieve(query).await.unwrap();
-            record(&format!("mixed_topic_place_{place}"), &result);
+
             for n in [30, 300] {
                 assert_eq!(
                     admitted(&result, n).unwrap().admitted_by,
@@ -458,7 +442,7 @@ mod trigger_road {
     }
 
     #[tokio::test]
-    async fn reservation_and_displacement_parent_witness() {
+    async fn trigger_reservations_share_party_rounds_and_displace_spare_roots() {
         let (memory, root) = fixture(vec![open(20, 2, 0.5)]).await;
         occasion(&memory, 300, 2, true).await;
         occasion(&memory, 400, 1, true).await;
@@ -466,7 +450,7 @@ mod trigger_road {
             .retrieve(request(vec![keyed(2)], None, 3))
             .await
             .unwrap();
-        record("root_seat_displacement", &result);
+
         assert_eq!(expanded(&result), vec![id(2), id(20), id(400)]);
         assert!(admitted(&result, 300).is_none());
         assert!(admitted(&result, 301).is_none());
@@ -493,12 +477,11 @@ mod trigger_road {
         drafts.extend((200..208).map(|n| belief(n, DerivedType::Claim, &[4], 1.0, "loud topic")));
         let (memory, root) = fixture(drafts).await;
         for participants in [vec![keyed(2), keyed(3)], vec![keyed(3), keyed(2)]] {
-            let first = participants[0].key.unwrap();
             let mut query = request(participants, Some("loud"), 4);
             query.cue_floors.trigger = 2;
             query.section_limits.open_loops = 2;
             let result = memory.retrieve(query).await.unwrap();
-            record(&format!("two_parties_first_{first}"), &result);
+
             assert_eq!(
                 result
                     .pack
@@ -520,7 +503,7 @@ mod trigger_road {
             ample.cue_floors.trigger = 2;
             ample.section_limits.open_loops = 2;
             let result = memory.retrieve(ample).await.unwrap();
-            record("two_parties_tight_section", &result);
+
             assert_eq!(
                 result
                     .pack
@@ -535,7 +518,7 @@ mod trigger_road {
     }
 
     #[tokio::test]
-    async fn lifecycle_parties_and_ambiguous_name_parent_witness() {
+    async fn triggers_follow_party_roles_resolution_and_lifecycle() {
         let mut old = open(20, 2, 0.9);
         old.text = "open superseded obligation".into();
         let mut current = open(21, 2, 0.1);
@@ -593,7 +576,7 @@ mod trigger_road {
             let mut query = request(participants, topic, cap);
             query.lifecycle_policy.include_superseded = superseded;
             let result = memory.retrieve(query).await.unwrap();
-            record(case, &result);
+
             assert!(!result
                 .trace
                 .as_ref()
@@ -680,10 +663,7 @@ mod trigger_road {
                 let mut query = request(vec![keyed(2)], None, cap);
                 query.lifecycle_policy.include_superseded = include_superseded;
                 let result = memory.retrieve(query).await.unwrap();
-                record(
-                    &format!("current_floor_cap_{cap}_superseded_{include_superseded}"),
-                    &result,
-                );
+
                 assert!(expanded(&result).contains(&id(21)));
                 assert_eq!(
                     expanded(&result).contains(&id(20)),
@@ -715,7 +695,7 @@ mod trigger_road {
             .retrieve(request(vec![keyed(2)], Some("loud"), 4))
             .await
             .unwrap();
-        record("trigger_takes_no_spare_turn", &result);
+
         assert_eq!(expanded(&result), vec![id(2), id(200), id(201), id(20)]);
         test_support::close_and_remove_root(memory, root).await;
     }
