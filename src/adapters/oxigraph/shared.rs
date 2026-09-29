@@ -172,24 +172,6 @@ pub(super) fn hydrate_objects_by_refs_from_store(
     Ok(objects)
 }
 
-pub(super) fn hydrate_all_links_from_store(store: &Store) -> Result<Vec<MemoryLink>, CustomError> {
-    let subjects = rdf_subject_values(store)?;
-    let mut links = subjects
-        .iter()
-        .filter_map(|(subject, values)| {
-            let object_type = values
-                .optional_literal(super::vocabulary::OBJECT_TYPE)
-                .and_then(|value| enum_value_from_literal::<ObjectType>(&value).ok());
-            match object_type {
-                Some(ObjectType::MemoryLink) => Some(memory_link_from_rdf(subject, values)),
-                _ => None,
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    links.sort_by_key(|link| link.id);
-    Ok(links)
-}
-
 pub(super) fn hydrate_links_by_ids_from_store(
     store: &Store,
     link_ids: &[MemoryId],
@@ -214,10 +196,13 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
     lifecycle_link_ids: &HashSet<MemoryId>,
     graph_ref_set: &HashSet<MemoryObjectRef>,
 ) -> Result<Vec<MemoryLink>, CustomError> {
-    let links = hydrate_all_links_from_store(store)?;
+    let ids = graph_link_ids
+        .union(lifecycle_link_ids)
+        .copied()
+        .collect::<Vec<_>>();
+    let links = hydrate_links_by_ids_from_store(store, &ids)?;
     Ok(links
         .into_iter()
-        .filter(|link| graph_link_ids.contains(&link.id) || lifecycle_link_ids.contains(&link.id))
         .filter(|link| {
             let endpoints_in_graph = graph_ref_set
                 .contains(&MemoryObjectRef::from_id_type(link.from_id, link.from_type))
@@ -226,12 +211,6 @@ pub(super) fn hydrate_links_by_id_sets_from_store(
                 || lifecycle_link_ids.contains(&link.id)
         })
         .collect())
-}
-
-pub(super) fn rdf_subject_values(
-    store: &Store,
-) -> Result<HashMap<String, RdfSubjectValues>, CustomError> {
-    rdf_subject_values_from_quads(store.iter())
 }
 
 fn rdf_subject_values_from_quads(
@@ -699,13 +678,13 @@ pub(super) fn bounded_graph_visible_refs(
                     matches!(
                         object.object_type,
                         ObjectType::Episode | ObjectType::Observation
-                    )
+                    ) && !participant_occasions.contains_key(object)
                 })
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .collect::<Vec<_>>();
-            let occasions = selectors.select_participant_occasions(&memories)?;
-            let future = occasions
+            participant_occasions.extend(selectors.select_participant_occasions(&memories)?);
+            let future = participant_occasions
                 .iter()
                 .filter(|(object, occasion)| {
                     occasion.memory_time(object.object_type) > query.participant_reference_time
@@ -713,7 +692,6 @@ pub(super) fn bounded_graph_visible_refs(
                 })
                 .map(|(object, _)| *object)
                 .collect::<HashSet<_>>();
-            participant_occasions.extend(occasions);
             for link in &link_refs {
                 if !query.allowed_relation_types.is_empty()
                     && !query.allowed_relation_types.contains(&link.relation)

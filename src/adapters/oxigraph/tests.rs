@@ -38,6 +38,234 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retrieval_reads_only_selected_graphs_and_reuses_occasion_metadata() {
+        use super::super::shared::RDF_QUADS_READ;
+        use super::super::sparql_selectors::SELECT_CALLS;
+        use crate::api::types::{
+            EpisodeDraft, ObservationDraft, RememberInput, RememberOptions, RetrievalContext,
+        };
+        use crate::domain::{graph_uri, Scene};
+        use crate::test_support::{deterministic_embedder, TemporaryVectorCandidateStore};
+        use oxigraph::model::{GraphNameRef, NamedNode};
+
+        let reference = chrono::DateTime::parse_from_rfc3339("2026-09-21T18:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let past = reference - chrono::Duration::days(1);
+        let episode_id = MemoryId::from_u128(8000);
+        let observation_id = MemoryId::from_u128(9000);
+        let graph = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let rdf = graph.store.clone();
+        let memory = crate::CharacterMemory::from_parts(
+            Box::new(graph),
+            Box::new(TemporaryVectorCandidateStore::open(8).await),
+            Box::new(deterministic_embedder(8)),
+        );
+        let mut episode = EpisodeDraft::new("quiet cafe");
+        episode.id = Some(episode_id);
+        episode.created_at = Some(past);
+        let mut observation = ObservationDraft::new(episode_id, "quiet cafe");
+        observation.id = Some(observation_id);
+        observation.created_at = Some(past);
+        let written = memory
+            .remember(
+                RememberInput::new("quiet cafe")
+                    .with_scene(Scene::at(past.fixed_offset()))
+                    .with_episode(episode)
+                    .with_observation(observation),
+                RememberOptions::default(),
+            )
+            .await
+            .unwrap();
+        assert!(written.vector_indexing_failure.is_none());
+        let [link_id] = written.persisted_link_ids.as_slice() else {
+            panic!("one ObservedIn link expected")
+        };
+        let budget = [
+            (ObjectType::Episode, episode_id),
+            (ObjectType::Observation, observation_id),
+            (ObjectType::MemoryLink, *link_id),
+        ]
+        .into_iter()
+        .map(|(kind, id)| {
+            let graph = NamedNode::new(graph_uri(kind, id)).unwrap();
+            rdf.quads_for_pattern(
+                None,
+                None,
+                None,
+                Some(GraphNameRef::NamedNode(graph.as_ref())),
+            )
+            .count()
+        })
+        .sum::<usize>();
+        let mut baseline = Vec::new();
+        let mut reads = Vec::new();
+        for unrelated in [0, 200] {
+            if unrelated > 0 {
+                let extras = (0..unrelated)
+                    .map(|index| {
+                        let mut episode = crate::test_support::simple_episode();
+                        episode.id = MemoryId::from_u128(100_000 + index);
+                        episode.scene =
+                            Scene::at((reference + chrono::Duration::days(30)).fixed_offset());
+                        MemoryObject::Episode(episode)
+                    })
+                    .collect::<Vec<_>>();
+                memory
+                    .memory_composition
+                    .graph_store
+                    .upsert_objects(&extras)
+                    .await
+                    .unwrap();
+            }
+            for (index, topic) in [None, Some("quiet cafe")].into_iter().enumerate() {
+                let mut context = RetrievalContext::default()
+                    .with_scene(Scene::at(reference.fixed_offset()))
+                    .with_trace();
+                context.topic = topic.map(str::to_owned);
+                RDF_QUADS_READ.with(|count| count.set(0));
+                SELECT_CALLS.with(|count| count.set(0));
+                let outcome = memory.retrieve(context).await.unwrap();
+                reads.push((
+                    RDF_QUADS_READ.with(|count| count.get()),
+                    SELECT_CALLS.with(|count| count.get()),
+                ));
+                assert_eq!(
+                    outcome
+                        .pack
+                        .relevant_episodes
+                        .iter()
+                        .map(|episode| episode.id)
+                        .collect::<Vec<_>>(),
+                    [episode_id]
+                );
+                assert_eq!(
+                    outcome
+                        .pack
+                        .salient_observations
+                        .iter()
+                        .map(|observation| observation.id)
+                        .collect::<Vec<_>>(),
+                    [observation_id]
+                );
+                let trace = outcome.trace.as_ref().unwrap();
+                assert_eq!(trace.graph_expansions.len(), index + 1);
+                assert!(trace
+                    .graph_expansions
+                    .iter()
+                    .all(|entry| entry.bounded_failure.is_none()));
+                assert!(trace.graph_relations.iter().any(|link| {
+                    link.link_id == *link_id
+                        && link.relation == RelationType::ObservedIn
+                        && link.from
+                            == MemoryObjectRef::new(ObjectType::Observation, observation_id)
+                        && link.to == MemoryObjectRef::new(ObjectType::Episode, episode_id)
+                }));
+                if unrelated == 0 {
+                    baseline.push(outcome);
+                } else {
+                    assert_eq!(outcome, baseline[index]);
+                }
+            }
+        }
+        assert_eq!(
+            reads,
+            [(budget, 8), (2 * budget, 14), (budget, 8), (2 * budget, 14)]
+        );
+    }
+
+    #[tokio::test]
+    async fn expansion_does_not_hydrate_a_future_neighbor_seen_at_an_earlier_depth() {
+        use super::super::shared::RDF_QUADS_READ;
+        use crate::domain::graph_uri;
+        use oxigraph::model::{GraphNameRef, NamedNode};
+
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let mut parent = fixtures.episode.clone();
+        let reference = parent.scene.time.with_timezone(&chrono::Utc) + chrono::Duration::days(1);
+        parent.scene.time += chrono::Duration::days(2);
+        // The observation has its own past timestamp. Its future parent is seen
+        // first from the entity, then again through ObservedIn at the next depth.
+        let observation = fixtures.salient_observation.clone();
+        let entity = fixtures.user_entity.clone();
+        store
+            .upsert_objects(&[
+                MemoryObject::Entity(entity.clone()),
+                MemoryObject::Episode(parent.clone()),
+                MemoryObject::Observation(observation.clone()),
+            ])
+            .await
+            .unwrap();
+        let mut links = Vec::new();
+        for (index, from, to, relation) in [
+            (
+                0,
+                MemoryObjectRef::new(ObjectType::Entity, entity.id),
+                MemoryObjectRef::new(ObjectType::Episode, parent.id),
+                RelationType::Involves,
+            ),
+            (
+                1,
+                MemoryObjectRef::new(ObjectType::Entity, entity.id),
+                MemoryObjectRef::new(ObjectType::Observation, observation.id),
+                RelationType::Mentions,
+            ),
+            (
+                2,
+                MemoryObjectRef::new(ObjectType::Observation, observation.id),
+                MemoryObjectRef::new(ObjectType::Episode, parent.id),
+                RelationType::ObservedIn,
+            ),
+        ] {
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(8000 + index);
+            link.from_id = from.id;
+            link.from_type = from.object_type;
+            link.to_id = to.id;
+            link.to_type = to.object_type;
+            link.relation = relation;
+            links.push(link);
+        }
+        store.upsert_links(&links).await.unwrap();
+        let budget = [
+            (ObjectType::Entity, entity.id),
+            (ObjectType::Observation, observation.id),
+            (ObjectType::MemoryLink, links[1].id),
+        ]
+        .into_iter()
+        .map(|(kind, id)| {
+            let graph = NamedNode::new(graph_uri(kind, id)).unwrap();
+            store
+                .store
+                .quads_for_pattern(
+                    None,
+                    None,
+                    None,
+                    Some(GraphNameRef::NamedNode(graph.as_ref())),
+                )
+                .count()
+        })
+        .sum::<usize>();
+        let mut query = GraphExpansionQuery::new(entity.id, ObjectType::Entity, 2, 10);
+        query.participant_reference_time = reference;
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let expansion = store.expand_bounded(&query).await.unwrap();
+        let read = RDF_QUADS_READ.with(|count| count.get());
+        assert_eq!(expansion.objects.len(), 2);
+        assert!(expansion.objects.contains(&MemoryObject::Entity(entity)));
+        assert!(expansion
+            .objects
+            .contains(&MemoryObject::Observation(observation)));
+        assert_eq!(expansion.links, [links[1].clone()]);
+        assert!(expansion.filtered_nodes.iter().any(|entry| entry.object_ref
+            == MemoryObjectRef::new(ObjectType::Episode, parent.id)
+            && entry.reason == GraphExpansionFilteredReason::LaterThanReferenceTime));
+        assert!(expansion.bounded_failure.is_none());
+        assert_eq!(read, budget);
+    }
+
+    #[tokio::test]
     async fn by_refs_hydration_reads_only_requested_graphs_in_a_large_store() {
         use super::super::shared::RDF_QUADS_READ;
         use crate::domain::graph_uri;
