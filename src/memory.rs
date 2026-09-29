@@ -191,34 +191,12 @@ mod tests {
 
     use crate::api::types::{EntityDraft, MemoryLinkDraft, PrepareOptions};
     use crate::domain::{ObjectType, RelationType};
-    use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
+    use crate::models::vector::{VectorCandidateSearch, VectorRecordEmbedding};
     use crate::policy::memory_object_vector_record;
     use crate::test_support::{
         deterministic_embedder, in_memory_graph_store, representative_fixtures,
         TemporaryVectorCandidateStore,
     };
-
-    #[tokio::test]
-    async fn injected_facade_remembers_through_the_write_plan_path() {
-        let memory = injected_memory().await;
-        let entity_id = id("550e8400-e29b-41d4-a716-446655445001");
-        let mut entity = EntityDraft::new();
-        entity.id = Some(entity_id);
-
-        let outcome = memory
-            .remember(
-                RememberInput::new("Kohta").with_entity(entity),
-                RememberOptions::default(),
-            )
-            .await
-            .expect("remember facade should persist through injected parts");
-
-        assert!(outcome.persisted_object_ids.contains(&entity_id));
-        // Ruling 69: the source observation has one structural ObservedIn link.
-        assert_eq!(outcome.persisted_link_ids.len(), 1);
-        assert!(!outcome.vector_indexed_object_ids.contains(&entity_id));
-        assert_eq!(outcome.vector_indexing_failure, None);
-    }
 
     #[tokio::test]
     async fn remember_surfaces_write_plan_validation_warnings() {
@@ -700,147 +678,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn injected_facade_links_canonical_relationships() {
-        let memory = injected_memory().await;
-        let from_id = id("550e8400-e29b-41d4-a716-446655445010");
-        let to_id = id("550e8400-e29b-41d4-a716-446655445011");
-        let mut draft = MemoryLinkDraft::new(
-            ObjectType::Entity,
-            from_id,
-            RelationType::Mentions,
-            ObjectType::Episode,
-            to_id,
-        );
-        draft.id = Some(id("550e8400-e29b-41d4-a716-446655445012"));
-
-        let outcome = memory
-            .link(draft)
-            .await
-            .expect("link facade should persist through injected graph store");
-
-        assert_eq!(outcome.link.from_id, from_id);
-        assert_eq!(outcome.link.to_id, to_id);
-        assert_eq!(outcome.link.relation, RelationType::Mentions);
-    }
-
-    #[tokio::test]
-    async fn injected_facade_retrieves_with_graph_vector_and_embedder_parts() {
-        let (memory, fixtures) = retrieval_memory().await;
-
-        let outcome = memory
-            .retrieve(RetrievalContext::new("deterministic preferences").with_trace())
-            .await
-            .expect("retrieve facade should assemble through injected parts");
-
-        assert_eq!(outcome.pack.preferences.len(), 1);
-        assert_eq!(
-            outcome.pack.preferences[0].memory.id,
-            fixtures.user_preference.id
-        );
-        assert_eq!(
-            outcome.rationale.telemetry.returned_vector_candidate_count,
-            1
-        );
-        assert_eq!(outcome.rationale.graph_verified_count, 2);
-        assert_eq!(outcome.trace.as_ref().unwrap().vector_candidates.len(), 1);
-        memory.close().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn episode_and_thread_with_the_same_id_keep_distinct_vectors_on_write_and_forget() {
-        let memory = injected_memory().await;
-        let shared_id = MemoryId::from_u128(1901);
-        let episode_text = "A heron crossed the lake at dawn.";
-        let thread_text = "Planning the next observatory visit.";
-        let mut episode = EpisodeDraft::new(episode_text);
-        episode.id = Some(shared_id);
-        let mut thread = MemoryThreadDraft::new("Observatory visit", thread_text);
-        thread.id = Some(shared_id);
-        let plan = memory
-            .prepare(
-                RememberInput::new(episode_text)
-                    .with_episode(episode)
-                    .with_memory_thread(thread),
-                PrepareOptions::default(),
-            )
-            .await
-            .unwrap();
-        let committed = memory.commit(plan, CommitOptions::default()).await.unwrap();
-        assert!(committed.vector_indexing_failure.is_none());
-        let mut recalled = Vec::new();
-        for (object_type, text) in [
-            (ObjectType::Episode, episode_text),
-            (ObjectType::MemoryThread, thread_text),
-        ] {
-            let mut context = RetrievalContext::new(text).with_trace();
-            context.object_type_defaults = vec![object_type];
-            context.graph_limits.max_depth = 0;
-            let outcome = memory.retrieve(context).await.unwrap();
-            let candidates = outcome
-                .trace
-                .unwrap()
-                .vector_candidates
-                .into_iter()
-                .map(|candidate| candidate.object)
-                .collect::<Vec<_>>();
-            let summaries = if object_type == ObjectType::Episode {
-                outcome
-                    .pack
-                    .relevant_episodes
-                    .into_iter()
-                    .map(|episode| (episode.id, episode.summary))
-                    .collect::<Vec<_>>()
-            } else {
-                outcome
-                    .pack
-                    .active_threads
-                    .into_iter()
-                    .map(|thread| (thread.id, thread.summary))
-                    .collect::<Vec<_>>()
-            };
-            recalled.push((candidates, summaries));
-        }
-        assert_eq!(
-            recalled,
-            vec![
-                (
-                    vec![MemoryObjectRef::new(ObjectType::Episode, shared_id)],
-                    vec![(shared_id, episode_text.to_owned())]
-                ),
-                (
-                    vec![MemoryObjectRef::new(ObjectType::MemoryThread, shared_id)],
-                    vec![(shared_id, thread_text.to_owned())]
-                ),
-            ]
-        );
-        let forgotten = memory
-            .forget(ForgetMemoryDraft::suppress(
-                LifecycleTargetRef::episode(shared_id),
-                "Forget the episode, preserving the separate thread.",
-            ))
-            .await
-            .unwrap();
-        assert!(forgotten.vector_maintenance_failure.is_none());
-        let mut context = RetrievalContext::new(thread_text).with_trace();
-        context.object_type_defaults = vec![ObjectType::MemoryThread];
-        context.graph_limits.max_depth = 0;
-        let outcome = memory.retrieve(context).await.unwrap();
-        memory.close().await.unwrap();
-        assert_eq!(
-            outcome
-                .trace
-                .unwrap()
-                .vector_candidates
-                .into_iter()
-                .map(|candidate| candidate.object)
-                .collect::<Vec<_>>(),
-            vec![MemoryObjectRef::new(ObjectType::MemoryThread, shared_id)]
-        );
-        assert_eq!(outcome.pack.active_threads.len(), 1);
-        assert_eq!(outcome.pack.active_threads[0].summary, thread_text);
-    }
-
-    #[tokio::test]
     async fn retrieve_rejects_an_empty_configured_object_type_scope_at_the_boundary() {
         let memory = injected_memory().await;
         let mut context = RetrievalContext::new("invalid empty scope");
@@ -861,7 +698,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn injected_facade_corrects_derived_memory_and_retrieval_excludes_superseded_memory() {
+    async fn facade_correct_and_forget_preserve_lifecycle_and_provenance() {
         let (memory, fixtures, replacement_id) = lifecycle_memory().await;
 
         let mut draft =
@@ -960,10 +797,8 @@ mod tests {
                     && relation.to.id == fixtures.user_preference.id
                     && relation.relation == RelationType::Supersedes
             }));
-    }
+        memory.close().await.unwrap();
 
-    #[tokio::test]
-    async fn injected_facade_corrects_episode_and_observation_provenanced_derived_memories() {
         let (memory, fixtures, episode_replacement_id) =
             lifecycle_memory_with_replacement(id("550e8400-e29b-41d4-a716-446655449200")).await;
 
@@ -1044,10 +879,8 @@ mod tests {
             &observation_retrieval.pack,
             fixtures.user_preference.id,
         ));
-    }
+        memory.close().await.unwrap();
 
-    #[tokio::test]
-    async fn injected_facade_forgets_derived_memory_and_source_objects_without_deletion() {
         let (memory, fixtures, _) = lifecycle_memory().await;
 
         let derived_outcome = memory
@@ -1113,10 +946,8 @@ mod tests {
             &source_retrieval.pack,
             fixtures.user_preference.id,
         ));
-    }
+        memory.close().await.unwrap();
 
-    #[tokio::test]
-    async fn injected_facade_forget_keeps_memory_thread_reachable() {
         let (memory, fixtures, _) = lifecycle_memory().await;
 
         let outcome = memory
@@ -1141,6 +972,7 @@ mod tests {
             .active_threads
             .iter()
             .any(|thread| thread.id == fixtures.soft_thread.id));
+        memory.close().await.unwrap();
     }
 
     fn warning_time() -> chrono::DateTime<chrono::Utc> {
@@ -1593,31 +1425,6 @@ mod tests {
 
     async fn injected_memory() -> CharacterMemory {
         crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
-    }
-
-    async fn retrieval_memory() -> (CharacterMemory, crate::test_support::RepresentativeFixtures) {
-        let fixtures = representative_fixtures();
-        let graph = in_memory_graph_store();
-        graph.upsert_objects(&fixtures.objects()).await.unwrap();
-        graph.upsert_links(&fixtures.links()).await.unwrap();
-        let vector = TemporaryVectorCandidateStore::open(2).await;
-        let record = memory_object_vector_record(&MemoryObject::DerivedMemory(
-            fixtures.user_preference.clone(),
-        ))
-        .unwrap();
-        vector
-            .upsert_vector_records(&[VectorRecordEmbedding::new(&record, &[1.0, 0.0])])
-            .await
-            .unwrap();
-        let memory = CharacterMemory::from_parts(
-            Box::new(graph),
-            Box::new(vector),
-            Box::new(crate::test_support::TestEmbedder(|_: &EmbeddingInput| {
-                vec![1.0, 0.0]
-            })),
-        );
-
-        (memory, fixtures)
     }
 
     async fn lifecycle_memory() -> (

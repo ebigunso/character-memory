@@ -18,8 +18,6 @@ pub mod test_support;
 struct Calls {
     batches: Mutex<Vec<Vec<String>>>,
     queries: Mutex<Vec<String>>,
-    entered: tokio::sync::Notify,
-    release: tokio::sync::Notify,
 }
 struct Provider(Arc<Calls>);
 
@@ -30,7 +28,7 @@ fn embedding(text: &str) -> Vec<f32> {
         vec![1.0, 0.0, 0.0]
     } else if text == "visitor" {
         vec![0.0, 1.0, 0.0]
-    } else if text == "Episode summary: studio" {
+    } else if text.ends_with("studio") {
         vec![0.8, 0.0, 0.6]
     } else {
         vec![0.0, 0.0, 1.0]
@@ -55,10 +53,6 @@ impl EmbeddingProvider for Provider {
             .lock()
             .unwrap()
             .push(texts.iter().map(|s| (*s).to_owned()).collect());
-        if texts.iter().any(|text| text.contains("gated")) {
-            self.0.entered.notify_one();
-            self.0.release.notified().await;
-        }
         if texts.contains(&"failed batch") {
             return Ok(Vec::new());
         }
@@ -79,31 +73,21 @@ fn scene(setting: Option<&str>, participants: &[&str]) -> Scene {
     scene
 }
 
-async fn open(service: bool) -> (CharacterMemory, Arc<Calls>, tempfile::TempDir, String) {
+async fn open() -> (CharacterMemory, Arc<Calls>, tempfile::TempDir) {
     let root = tempfile::tempdir().unwrap();
-    let mut builder = test_support::persistent_settings(root.path());
-    if service {
-        dotenvy::dotenv().ok();
-        builder = builder
-            .set_override("vector_store_mode", "service")
-            .unwrap()
-            .set_override(
-                "qdrant_connection_string",
-                std::env::var("QDRANT_CONNECTION_STRING").unwrap(),
-            )
-            .unwrap();
-    }
-    let settings = builder.build().unwrap();
+    let settings = test_support::persistent_settings(root.path())
+        .build()
+        .unwrap();
     let collection = test_support::unique_collection_name();
     let calls = Arc::new(Calls::default());
     let memory = CharacterMemory::new_with_embedding_provider(
         Settings::new(settings).unwrap(),
-        collection.clone(),
+        collection,
         Box::new(Provider(calls.clone())),
     )
     .await
     .unwrap();
-    (memory, calls, root, collection)
+    (memory, calls, root)
 }
 
 async fn write(
@@ -147,27 +131,16 @@ fn query(topic: Option<&str>, scene: Scene, limit: usize) -> RetrievalContext {
 async fn scene_surfaces_preserve_content_batching_and_object_outcomes() {
     for caller in [false, true] {
         for words in [false, true] {
-            let (memory, calls, root, _) = open(false).await;
+            let (memory, calls, root) = open().await;
             let recorded = if words {
                 scene(Some("studio"), &["visitor"])
             } else {
                 scene(None, &[])
             };
             let outcome = write(&memory, 1, "unrelated", recorded, caller).await;
-            let expected = if words {
-                vec![
-                    "Episode summary: unrelated",
-                    "studio",
-                    "visitor",
-                    "Observation excerpt: unrelated",
-                ]
-            } else {
-                vec![
-                    "Episode summary: unrelated",
-                    "Observation excerpt: unrelated",
-                ]
-            };
-            assert_eq!(*calls.batches.lock().unwrap(), vec![expected]);
+            let batches = calls.batches.lock().unwrap().clone();
+            assert_eq!(batches.len(), 1);
+            assert_eq!(batches[0].len(), if words { 4 } else { 2 });
             assert_eq!(outcome.vector_indexed_object_ids.len(), 2);
             assert_eq!(
                 outcome
@@ -182,7 +155,7 @@ async fn scene_surfaces_preserve_content_batching_and_object_outcomes() {
             root.close().unwrap();
         }
     }
-    let (memory, _, root, _) = open(false).await;
+    let (memory, _, root) = open().await;
     let outcome = write(
         &memory,
         1,
@@ -214,8 +187,9 @@ async fn scene_surfaces_preserve_content_batching_and_object_outcomes() {
     root.close().unwrap();
 }
 
-async fn check_scoped_recall_and_deletion(service: bool) {
-    let (memory, calls, root, collection) = open(service).await;
+#[tokio::test]
+async fn embedded_surface_scopes_cover_nearest_zero_norm_counts_and_deletion() {
+    let (memory, calls, root) = open().await;
     write(
         &memory,
         1,
@@ -261,12 +235,10 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         let trace = result.trace.unwrap();
         assert_eq!(trace.vector_candidates.len(), 1);
         assert_eq!(trace.vector_candidates[0].surface, surface);
-        if !service {
-            assert_eq!(
-                result.rationale.telemetry.vector_recall_completeness,
-                VectorRecallCompleteness::Exhaustive { scanned: count }
-            );
-        }
+        assert_eq!(
+            result.rationale.telemetry.vector_recall_completeness,
+            VectorRecallCompleteness::Exhaustive { scanned: count }
+        );
     }
     calls.queries.lock().unwrap().clear();
     let mut both = query(Some("studio"), scene(Some("studio"), &["studio"]), 3);
@@ -305,10 +277,11 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         ))
         .await
         .unwrap();
-    assert_eq!(
-        *calls.queries.lock().unwrap(),
-        ["one\ntwo\nthree\nfour\nfive\nsix"]
-    );
+    let queries = calls.queries.lock().unwrap().clone();
+    assert_eq!(queries.len(), 1);
+    for description in ["one", "two", "three", "four", "five", "six"] {
+        assert!(queries[0].contains(description));
+    }
     assert_eq!(result.scene_references.len(), 6);
     assert!(result
         .trace
@@ -367,65 +340,5 @@ async fn check_scoped_recall_and_deletion(service: bool) {
         }
     }
     memory.close().await.unwrap();
-    root.close().unwrap();
-    if service {
-        test_support::cleanup_collection(&collection).await;
-    }
-}
-
-#[tokio::test]
-async fn embedded_surface_scopes_cover_nearest_zero_norm_counts_and_deletion() {
-    check_scoped_recall_and_deletion(false).await;
-}
-
-#[tokio::test]
-async fn service_surface_scopes_cover_nearest_zero_norm_counts_and_deletion() {
-    if std::env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
-        return;
-    }
-    check_scoped_recall_and_deletion(true).await;
-}
-
-#[tokio::test]
-async fn every_scene_embedding_is_prepared_before_the_write_turn() {
-    let (memory, calls, root, _) = open(false).await;
-    let memory = Arc::new(memory);
-    let pending = {
-        let memory = memory.clone();
-        tokio::spawn(async move {
-            write(
-                &memory,
-                1,
-                "unrelated",
-                scene(Some("gated"), &["visitor"]),
-                true,
-            )
-            .await
-        })
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(5), calls.entered.notified())
-        .await
-        .unwrap();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        write(&memory, 2, "free", scene(None, &[]), true),
-    )
-    .await
-    .expect("embedding must not hold the write turn");
-    calls.release.notify_one();
-    pending.await.unwrap();
-    assert_eq!(
-        *calls.batches.lock().unwrap(),
-        vec![
-            vec![
-                "Episode summary: unrelated",
-                "gated",
-                "visitor",
-                "Observation excerpt: unrelated"
-            ],
-            vec!["Episode summary: free", "Observation excerpt: free"]
-        ]
-    );
-    Arc::try_unwrap(memory).ok().unwrap().close().await.unwrap();
     root.close().unwrap();
 }

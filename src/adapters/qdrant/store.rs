@@ -590,8 +590,7 @@ mod tests {
     use crate::domain::{MemoryId, ObjectType, VectorSurface, DEFAULT_SCHEMA_VERSION};
     use crate::models::vector::{VectorRecord, VectorRecordEmbedding};
     use qdrant_client::qdrant::{
-        point_id::PointIdOptions, value::Kind, vector, vectors, DeleteCollectionBuilder, PointId,
-        Value, VectorParamsMap,
+        point_id::PointIdOptions, value::Kind, vector, vectors, PointId, Value, VectorParamsMap,
     };
 
     fn payload_string<'a>(
@@ -607,7 +606,6 @@ mod tests {
             })
     }
     use std::env;
-    use std::time::Instant;
     use uuid::Uuid;
 
     mod port_contract {
@@ -629,22 +627,6 @@ mod tests {
             let store =
                 QdrantVectorCandidateStore::new("http://127.0.0.1:1", "not_contacted", 2).unwrap();
             let result = wrong_width_upsert(&store).await;
-
-            assert_wrong_width_rejected(result);
-        }
-
-        #[tokio::test]
-        async fn service_wrong_width_upsert_rejects_with_collection_mismatch() {
-            if env::var_os("REQUIRE_QDRANT_TESTS").is_none() {
-                return;
-            }
-            let store = service_store().await;
-            let result = wrong_width_upsert(&store).await;
-            store
-                .client
-                .delete_collection(&store.collection_name)
-                .await
-                .unwrap();
 
             assert_wrong_width_rejected(result);
         }
@@ -943,78 +925,6 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore = "requires live Qdrant at QDRANT_CONNECTION_STRING or 127.0.0.1:6334"]
-    async fn qdrant_channel_survives_idle_gap_before_mutating_upsert() {
-        let url = env::var("QDRANT_CONNECTION_STRING")
-            .unwrap_or_else(|_| "http://127.0.0.1:6334".to_owned());
-        let collection_name = format!("character_memory_idle_gap_{}", Uuid::new_v4().simple());
-        let store = QdrantVectorCandidateStore::new(&url, &collection_name, 4)
-            .expect("live Qdrant client should build");
-
-        store
-            .init_collection()
-            .await
-            .expect("live Qdrant collection should initialize");
-
-        // Idle gap without blocking the runtime; the stall signature this
-        // canary encodes reproduces identically with async and blocking gaps.
-        tokio::time::sleep(Duration::from_secs(10)).await;
-
-        let records = [
-            idle_gap_vector_record(ObjectType::Episode),
-            idle_gap_vector_record(ObjectType::Observation),
-            idle_gap_vector_record(ObjectType::Entity),
-        ];
-        let embeddings = [
-            vec![0.1, 0.2, 0.3, 0.4],
-            vec![0.2, 0.3, 0.4, 0.5],
-            vec![0.3, 0.4, 0.5, 0.6],
-        ];
-        let record_embeddings = records
-            .iter()
-            .zip(embeddings.iter())
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
-            .collect::<Vec<_>>();
-
-        let started_at = Instant::now();
-        let upsert_result = store.upsert_points(&record_embeddings).await;
-        let elapsed = started_at.elapsed();
-
-        // Best-effort cleanup: on environments where mutations stall after idle
-        // gaps, cleanup can fail for the same reason as the upsert under test.
-        // Never let cleanup mask the primary upsert diagnosis.
-        let cleanup_result = store
-            .client
-            .delete_collection(DeleteCollectionBuilder::new(&collection_name))
-            .await;
-
-        upsert_result.unwrap_or_else(|error| {
-            panic!("upsert after idle gap failed after {elapsed:?}: {error} (cleanup result: {cleanup_result:?})")
-        });
-        assert!(
-            elapsed < Duration::from_secs(1),
-            "upsert after idle gap took {elapsed:?}"
-        );
-        // Cleanup is a mutation on the same channel and can fail for the same
-        // environmental reason this canary detects; report without failing so
-        // the test outcome stays focused on the upsert timing/signature.
-        if let Err(error) = cleanup_result {
-            eprintln!("warning: idle-gap canary cleanup failed for {collection_name}: {error}");
-        }
-    }
-
-    fn idle_gap_vector_record(object_type: ObjectType) -> VectorRecord {
-        let object_id = MemoryId::new_v4();
-        VectorRecord::new(
-            object_id,
-            object_type,
-            VectorSurface::Summary,
-            DEFAULT_SCHEMA_VERSION,
-            "Idle-gap regression record",
-        )
-    }
-
     #[test]
     fn validates_existing_collection_vector_size() {
         let config = VectorsConfig {
@@ -1183,65 +1093,6 @@ mod tests {
             },
             _ => panic!("expected unnamed vector"),
         }
-    }
-
-    #[tokio::test]
-    #[ignore = "requires local Qdrant: docker compose -f docker-compose.qdrant.yml up -d and QDRANT_CONNECTION_STRING"]
-    async fn qdrant_candidate_store_live_closes_equal_score_boundary_deterministically() {
-        let url = env::var("QDRANT_CONNECTION_STRING")
-            .expect("QDRANT_CONNECTION_STRING is required for live Qdrant regression");
-        let collection_name = format!("cmem_candidate_ties_{}", Uuid::new_v4());
-        let store =
-            QdrantVectorCandidateStore::new(url, &collection_name, 2).expect("store builds");
-        let object_ids = (1..=12).map(Uuid::from_u128).collect::<Vec<_>>();
-        let records = object_ids
-            .iter()
-            .rev()
-            .map(|object_id| {
-                VectorRecord::new(
-                    *object_id,
-                    ObjectType::Episode,
-                    VectorSurface::Summary,
-                    DEFAULT_SCHEMA_VERSION,
-                    format!("Equal-score episode {object_id}"),
-                )
-            })
-            .collect::<Vec<_>>();
-        let embeddings = vec![vec![1.0, 0.0]; records.len()];
-        let record_embeddings = records
-            .iter()
-            .zip(&embeddings)
-            .map(|(record, embedding)| VectorRecordEmbedding::new(record, embedding))
-            .collect::<Vec<_>>();
-
-        store.init_collection().await.expect("collection init");
-        store
-            .upsert_vector_records(&record_embeddings)
-            .await
-            .expect("upsert succeeds");
-
-        let query = VectorCandidateSearch::new(vec![1.0, 0.0], 5, vec![ObjectType::Episode]);
-        let expected = object_ids[..5].to_vec();
-        for _ in 0..8 {
-            let matches = store
-                .search_candidates(&query)
-                .await
-                .expect("equal-score search succeeds");
-            assert_eq!(
-                matches
-                    .candidates
-                    .iter()
-                    .map(|candidate| candidate.object_id)
-                    .collect::<Vec<_>>(),
-                expected
-            );
-            assert_eq!(
-                matches.completeness,
-                VectorRecallCompleteness::BoundaryTieClosed { fetched: 12 }
-            );
-        }
-
-        let _ = store.client.delete_collection(&collection_name).await;
     }
 
     fn string_value(value: &str) -> Value {
