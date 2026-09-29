@@ -6,7 +6,7 @@ pub(super) type StateScopes = HashMap<MemoryObjectRef, Vec<usize>>;
 
 pub(super) fn scopes_for_kind(
     scopes: &StateScopes,
-    kinds: &[CueKind],
+    roads: &[RecallRoad],
     kind: CueKind,
 ) -> StateScopes {
     scopes
@@ -15,7 +15,7 @@ pub(super) fn scopes_for_kind(
             let memberships = memberships
                 .iter()
                 .copied()
-                .filter(|&scope| kinds[scope] == kind)
+                .filter(|&scope| roads[scope].rule().kind == kind)
                 .collect::<Vec<_>>();
             (!memberships.is_empty()).then_some((object, memberships))
         })
@@ -61,14 +61,21 @@ pub(super) fn record_subject_state(
 pub(super) fn order_state_per_kind<T: Clone>(
     objects: &mut [T],
     scopes: &StateScopes,
-    kinds: &[CueKind],
+    roads: &[RecallRoad],
     reference: impl Fn(&T) -> Option<MemoryObjectRef>,
     priority: impl Fn(usize, &T) -> usize,
 ) {
-    for kind in kinds.iter().copied().collect::<BTreeSet<_>>() {
+    // Scope rounds affect standing order only for roads that open history.
+    // Every road still rounds its own reservation queue through order_state.
+    for kind in roads
+        .iter()
+        .filter(|road| road.rule().expands == Expansion::Opens)
+        .map(|road| road.rule().kind)
+        .collect::<BTreeSet<_>>()
+    {
         order_state(
             objects,
-            &scopes_for_kind(scopes, kinds, kind),
+            &scopes_for_kind(scopes, roads, kind),
             &reference,
             &priority,
         );

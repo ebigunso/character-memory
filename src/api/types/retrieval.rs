@@ -129,6 +129,8 @@ pub struct RetrievalCueFloors {
     pub participant: usize,
     pub place: usize,
     pub activity: usize,
+    /// Provisional reservation for unsettled obligations naming someone present.
+    pub trigger: usize,
     /// Provisional reservation for an application-supplied time range.
     pub date_match: usize,
     pub topic: usize,
@@ -142,6 +144,7 @@ impl Default for RetrievalCueFloors {
             participant: 1,
             place: 1,
             activity: 1,
+            trigger: 1,
             date_match: 1,
             topic: 1,
             recency: 0,
@@ -376,6 +379,7 @@ pub enum GraphRootSource {
     Vector,
     Participant,
     Activity,
+    Trigger,
     Place,
     Recency,
     DateMatch,
@@ -785,6 +789,7 @@ pub enum CueKind {
     Participant,
     Place,
     Activity,
+    Trigger,
     Recency,
     DateMatch,
 }

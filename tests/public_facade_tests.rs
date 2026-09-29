@@ -377,6 +377,7 @@ mod road_behavior {
             participant: 0,
             place: 0,
             activity: 0,
+            trigger: 0,
             date_match: 0,
             topic: 0,
             recency: 0,

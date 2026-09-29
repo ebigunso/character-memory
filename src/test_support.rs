@@ -469,6 +469,23 @@ impl GraphAuthorityStore for TestGraphStore {
         self.store.query_scope_state(key, policy, limit).await
     }
 
+    async fn query_party_obligations(
+        &self,
+        party: MemoryId,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        self.store
+            .query_party_obligations(party, policy, limit)
+            .await
+    }
+
     async fn expand_bounded(
         &self,
         query: &GraphExpansionQuery,

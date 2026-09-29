@@ -436,6 +436,13 @@ pub(crate) trait GraphAuthorityStore: Send + Sync {
         CustomError,
     >;
 
+    async fn query_party_obligations(
+        &self,
+        party: MemoryId,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError>;
+
     async fn query_last_interaction(
         &self,
         participant: MemoryId,

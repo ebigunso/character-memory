@@ -333,6 +333,28 @@ impl<'a> SparqlGraphSelectors<'a> {
             .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
     }
 
+    pub(crate) fn select_party_obligations(
+        &self,
+        party: MemoryId,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<(Vec<GraphMemoryRank>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        let predicate = format!(
+            r#"?memory a <{class}> ; <{kind}> ?kind ; <{assertion}> ?assertion .
+            VALUES ?kind {{ "open_loop" "commitment" }}
+            ?assertion <{subject}> <{party}> ; <{predicate}> ?predicate .
+            VALUES ?predicate {{ "actor" "counterpart" }}"#,
+            class = vocab::CLASS_DERIVED_MEMORY,
+            kind = vocab::DERIVED_TYPE,
+            assertion = vocab::ASSERTION,
+            subject = vocab::ASSERTION_SUBJECT,
+            party = graph_uri(ObjectType::Entity, party),
+            predicate = vocab::ASSERTION_PREDICATE,
+        );
+        self.select_state(&predicate, policy, limit, false, true, None)
+            .map(|(rows, filtered)| (rows.into_iter().map(State::rank).collect(), filtered))
+    }
+
     pub(crate) fn select_thread_state(
         &self,
         query: &GraphDerivedMemoryThreadQuery,

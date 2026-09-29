@@ -126,8 +126,12 @@ where
         let mut state_scopes = state::StateScopes::new();
         let mut root_order = HashMap::new();
         let keys = context.scene.scope_keys();
-        let scope_kinds = std::iter::repeat_n(CueKind::Participant, cues.participants.len())
-            .chain([CueKind::Activity])
+        let scope_roads = std::iter::repeat_n(RecallRoad::Participant, cues.participants.len())
+            .chain([RecallRoad::Activity])
+            .chain(std::iter::repeat_n(
+                RecallRoad::Trigger,
+                cues.participants.len(),
+            ))
             .collect::<Vec<_>>();
         if context.graph_limits.allowed_object_types.is_empty()
             || context
@@ -168,6 +172,38 @@ where
                     0.0,
                     rank,
                 ));
+            }
+            for (position, party) in cues.participants.iter().enumerate() {
+                let (rows, filtered) = self
+                    .graph_store
+                    .query_party_obligations(
+                        *party,
+                        GraphExpansionLifecyclePolicy::from(context.lifecycle_policy),
+                        RecallRoad::Trigger.contribution(&context),
+                    )
+                    .await?;
+                assembly
+                    .lifecycle_decisions
+                    .extend(filtered.into_iter().map(|entry| {
+                        filtered_lifecycle_decision(
+                            entry.object_ref,
+                            entry.reason,
+                            &entry.superseded_by,
+                        )
+                    }));
+                let scope = cues.participants.len() + 1 + position;
+                for (rank, row) in rows.into_iter().enumerate() {
+                    let root = CandidateRoot::from_rank(
+                        row,
+                        ObjectType::DerivedMemory,
+                        RecallRoad::Trigger,
+                        0.0,
+                        rank,
+                    );
+                    root_order.insert((scope, root.object), rank);
+                    state_scopes.entry(root.object).or_default().push(scope);
+                    explicit_roots.push(root);
+                }
             }
         }
         let (activity, activity_roots, filtered) = self.activity_roots(&context).await?;
@@ -259,7 +295,7 @@ where
             &cues.orders,
             context.candidate_limits.max_graph_roots,
             context.cue_floors,
-            (&state_scopes, &root_order, &scope_kinds),
+            (&state_scopes, &root_order, &scope_roads),
         );
         let candidate_roots = root_selection.roots;
         // Explicit roots and what they bring precede word matches at sections.
@@ -267,6 +303,13 @@ where
         for root in &explicit_roots {
             for kind in root.roads.keys() {
                 section_orders.entry(*kind).or_default().push(root.object);
+            }
+        }
+        // One-hop reservations keep their own scope rounds at sections too;
+        // the score order used to visit their roots is not their floor order.
+        for (road, order) in &root_selection.orders {
+            if road.rule().expands == Expansion::OneHop {
+                section_orders.insert(*road, order.clone());
             }
         }
         let mut graph_expansion_telemetry = GraphExpansionTelemetry::default();
@@ -424,7 +467,7 @@ where
 
         let pack = build_pack(
             ranked_objects,
-            (&state_scopes, &scope_kinds),
+            (&state_scopes, &scope_roads),
             &section_orders,
             context.section_limits,
             context.cue_floors,
@@ -541,30 +584,44 @@ impl RetrieveAssembly {
         let bounded_failure = expansion.bounded_failure;
         let candidate_ref = candidate.object;
 
-        // Reuse the traversal rule on the admitted graph. This reads no store and
-        // cannot widen the root's bounds; it identifies where the reminder road ends.
-        let reminder_reached = if candidate.expanding_score().is_some()
-            && candidate.roads.len() != candidate.expanding_roads().len()
-            && expansion
-                .objects
-                .iter()
-                .any(|object| object.object_ref() == candidate_ref)
-        {
-            let mut reminder_query = query.clone();
-            reminder_query.reminder_only = true;
-            crate::policy::graph_expansion::bounded_expansion(
-                &reminder_query,
-                expansion.objects.clone(),
-                expansion.links.clone(),
-                &crate::policy::graph_expansion::ParticipantOccasions::new(),
-            )?
+        // Attribute each road only as far as its traversal reaches. Reusing the
+        // admitted graph reads no store and cannot widen the root's bounds.
+        let mut reached = BTreeMap::new();
+        if expansion
             .objects
-            .into_iter()
-            .map(|object| object.object_ref())
-            .collect::<HashSet<_>>()
-        } else {
-            HashSet::new()
-        };
+            .iter()
+            .any(|object| object.object_ref() == candidate_ref)
+        {
+            for reach in candidate
+                .roads
+                .keys()
+                .map(|road| road.rule().expands)
+                .collect::<BTreeSet<_>>()
+            {
+                if reach == candidate.expansion() {
+                    continue;
+                }
+                let mut restricted = query.clone();
+                restricted.reminder_only = reach == Expansion::Leaf;
+                if reach == Expansion::OneHop {
+                    restricted.max_depth = restricted.max_depth.min(1);
+                }
+                let objects = crate::policy::graph_expansion::bounded_expansion(
+                    &restricted,
+                    expansion.objects.clone(),
+                    expansion.links.clone(),
+                    &crate::policy::graph_expansion::ParticipantOccasions::new(),
+                )?
+                .objects;
+                reached.insert(
+                    reach,
+                    objects
+                        .into_iter()
+                        .map(|object| object.object_ref())
+                        .collect::<HashSet<_>>(),
+                );
+            }
+        }
 
         if let Some(graph_relations) = &mut self.graph_relations {
             for relation in &expansion.relations {
@@ -602,20 +659,38 @@ impl RetrieveAssembly {
                 .copied()
                 .map(graph_component)
                 .unwrap_or(0.0);
-            let (score, kinds) = match candidate.expanding_score() {
-                Some(score)
-                    if object_ref != candidate_ref && !reminder_reached.contains(&object_ref) =>
-                {
-                    (score, candidate.expanding_roads())
-                }
-                _ => (candidate.score(), candidate.road_set()),
-            };
+            let roads = candidate
+                .roads
+                .keys()
+                .copied()
+                .filter(|road| {
+                    object_ref == candidate_ref
+                        || road.rule().expands == candidate.expansion()
+                        || reached
+                            .get(&road.rule().expands)
+                            .is_some_and(|objects| objects.contains(&object_ref))
+                })
+                .collect::<BTreeSet<_>>();
+            let admitted_by = roads
+                .iter()
+                .map(|road| road.rule().admitted_by)
+                .collect::<BTreeSet<_>>();
+            let kinds = roads
+                .into_iter()
+                .filter(|road| {
+                    object_ref == candidate_ref || road.rule().expands != Expansion::OneHop
+                })
+                .collect::<BTreeSet<_>>();
+            let score = kinds
+                .iter()
+                .map(|road| candidate.roads[road].score)
+                .max_by(f32::total_cmp)
+                .unwrap_or(0.0);
             let inherited_cue = if object_ref == candidate_ref {
                 score
             } else {
                 score * 0.75
             };
-            let kinds = kinds.clone();
             let reminder_only = candidate.reminder_only();
             let candidate_score = candidate
                 .vector_score
@@ -626,6 +701,7 @@ impl RetrieveAssembly {
                 .and_modify(|ranked| {
                     ranked.cue_component = ranked.cue_component.max(inherited_cue);
                     ranked.roads.extend(&kinds);
+                    ranked.admitted_by.extend(&admitted_by);
                     ranked.is_root |= object_ref == candidate_ref;
                     if ranked.is_root || ranked.reminder_only == reminder_only {
                         ranked.graph_component = ranked.graph_component.max(graph_component);
@@ -651,6 +727,7 @@ impl RetrieveAssembly {
                         candidate_score,
                     );
                     ranked.reminder_only = reminder_only;
+                    ranked.admitted_by = admitted_by.clone();
                     ranked.is_root = object_ref == candidate_ref;
                     ranked
                 });
@@ -747,6 +824,7 @@ struct RankedObject {
     object: MemoryObject,
     cue_component: f32,
     roads: BTreeSet<RecallRoad>,
+    admitted_by: BTreeSet<AdmissionRoad>,
     reminder_only: bool,
     memory_time: Option<chrono::DateTime<chrono::Utc>>,
     is_root: bool,
@@ -776,6 +854,7 @@ impl RankedObject {
         Self {
             object,
             cue_component,
+            admitted_by: roads.iter().map(|road| road.rule().admitted_by).collect(),
             roads,
             reminder_only: false,
             memory_time,
@@ -868,16 +947,17 @@ fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    roads.sort_by_key(|road| (!road.rule().expands, *road));
+    roads.sort_by_key(|road| (road.rule().expands != Expansion::Opens, *road));
     let expanding_kinds = roads
         .iter()
-        .filter(|road| road.rule().expands)
+        .filter(|road| road.rule().expands == Expansion::Opens)
         .map(|road| road.rule().kind)
         .collect::<BTreeSet<_>>();
     let mut queues = [
         CueKind::Participant,
         CueKind::Place,
         CueKind::Activity,
+        CueKind::Trigger,
         CueKind::DateMatch,
         CueKind::Topic,
         CueKind::Recency,
@@ -925,10 +1005,9 @@ fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
                     queue.next()
                 } else {
                     queue.find(|&index| {
-                        candidates[index]
-                            .1
-                            .iter()
-                            .any(|road| road.rule().kind == *kind && road.rule().expands)
+                        candidates[index].1.iter().any(|road| {
+                            road.rule().kind == *kind && road.rule().expands == Expansion::Opens
+                        })
                     })
                 };
                 if let Some(index) = next {
@@ -950,7 +1029,7 @@ fn select_with_cue_floors<I: IntoIterator<Item = MemoryObjectRef>>(
 
 fn build_pack(
     mut ranked_objects: Vec<RankedObject>,
-    (state_scopes, scope_kinds): (&state::StateScopes, &[CueKind]),
+    (state_scopes, scope_roads): (&state::StateScopes, &[RecallRoad]),
     orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     limits: crate::api::types::ContinuitySectionLimits,
     floors: RetrievalCueFloors,
@@ -963,7 +1042,7 @@ fn build_pack(
         state::order_state_per_kind(
             &mut ranked_objects,
             state_scopes,
-            scope_kinds,
+            scope_roads,
             |object| {
                 (section_for_object(object) == Some(section)).then(|| object.object.object_ref())
             },
@@ -976,7 +1055,11 @@ fn build_pack(
         // Section state already has its scope/score order; root recency must not
         // become the section floor order. Reuse this prefix without re-sorting it.
         let mut state_orders = BTreeMap::new();
-        for kind in scope_kinds.iter().copied().collect::<BTreeSet<_>>() {
+        for kind in scope_roads
+            .iter()
+            .map(|road| road.rule().kind)
+            .collect::<BTreeSet<_>>()
+        {
             let state_order = candidates
                 .iter()
                 .filter_map(|ranked| {
@@ -984,7 +1067,7 @@ fn build_pack(
                     state_scopes.get(&object).and_then(|scopes| {
                         scopes
                             .iter()
-                            .any(|&scope| scope_kinds[scope] == kind)
+                            .any(|&scope| scope_roads[scope].rule().kind == kind)
                             .then_some(object)
                     })
                 })
@@ -998,7 +1081,9 @@ fn build_pack(
             |road| {
                 state_orders
                     .get(&road.rule().kind)
-                    .filter(|_| road.rule().expands && orders.contains_key(&road))
+                    .filter(|_| {
+                        road.rule().expands == Expansion::Opens && orders.contains_key(&road)
+                    })
                     .into_iter()
                     .flatten()
                     .chain(orders.get(&road).into_iter().flatten())
@@ -1068,14 +1153,9 @@ fn build_pack(
             .expect("every pack section has a count");
         *count += 1;
         let rank = *count;
-        details.admitted_by.insert(
-            ranked.object.object_ref(),
-            ranked
-                .roads
-                .iter()
-                .map(|road| road.rule().admitted_by)
-                .collect(),
-        );
+        details
+            .admitted_by
+            .insert(ranked.object.object_ref(), ranked.admitted_by.clone());
         details.section_assignments.push(SectionAssignment {
             object: ranked.object.object_ref(),
             section,
@@ -1204,6 +1284,7 @@ enum RecallRoad {
     Participant,
     Place,
     Activity,
+    Trigger,
     Topic,
     ParticipantDescription,
     SettingWords,
@@ -1221,11 +1302,18 @@ enum Contribution {
     Room,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Expansion {
+    Opens,
+    OneHop,
+    Leaf,
+}
+
 struct RoadRule {
     kind: CueKind,
     admitted_by: AdmissionRoad,
     source: GraphRootSource,
-    expands: bool,
+    expands: Expansion,
     reserves: bool,
     contribution: Contribution,
     time_rank: bool,
@@ -1234,12 +1322,13 @@ struct RoadRule {
 impl RecallRoad {
     fn rule(self) -> RoadRule {
         use Contribution::*;
+        use Expansion::*;
         let (kind, admitted_by, source, expands, reserves, contribution, time_rank) = match self {
             Self::Participant => (
                 CueKind::Participant,
                 AdmissionRoad::Participant,
                 GraphRootSource::Participant,
-                true,
+                Opens,
                 true,
                 RootCap,
                 false,
@@ -1248,7 +1337,7 @@ impl RecallRoad {
                 CueKind::Place,
                 AdmissionRoad::Place,
                 GraphRootSource::Place,
-                false,
+                Leaf,
                 true,
                 RootCap,
                 true,
@@ -1257,16 +1346,25 @@ impl RecallRoad {
                 CueKind::Activity,
                 AdmissionRoad::Activity,
                 GraphRootSource::Activity,
-                true,
+                Opens,
                 true,
                 RootCap,
                 false,
+            ),
+            Self::Trigger => (
+                CueKind::Trigger,
+                AdmissionRoad::Participant,
+                GraphRootSource::Trigger,
+                OneHop,
+                true,
+                RootCap,
+                true,
             ),
             Self::Topic => (
                 CueKind::Topic,
                 AdmissionRoad::Topic,
                 GraphRootSource::Vector,
-                true,
+                Opens,
                 true,
                 CandidateCap,
                 false,
@@ -1275,7 +1373,7 @@ impl RecallRoad {
                 CueKind::Participant,
                 AdmissionRoad::PersonDescription,
                 GraphRootSource::Vector,
-                false,
+                Leaf,
                 true,
                 Description,
                 false,
@@ -1284,7 +1382,7 @@ impl RecallRoad {
                 CueKind::Place,
                 AdmissionRoad::SettingWords,
                 GraphRootSource::Vector,
-                false,
+                Leaf,
                 true,
                 Description,
                 false,
@@ -1293,7 +1391,7 @@ impl RecallRoad {
                 CueKind::DateMatch,
                 AdmissionRoad::Range,
                 GraphRootSource::DateMatch,
-                false,
+                Leaf,
                 true,
                 Room,
                 true,
@@ -1302,7 +1400,7 @@ impl RecallRoad {
                 CueKind::DateMatch,
                 AdmissionRoad::Anniversary,
                 GraphRootSource::DateMatch,
-                false,
+                Leaf,
                 true,
                 Room,
                 true,
@@ -1311,7 +1409,7 @@ impl RecallRoad {
                 CueKind::DateMatch,
                 AdmissionRoad::Anniversary,
                 GraphRootSource::DateMatch,
-                false,
+                Leaf,
                 false,
                 Room,
                 true,
@@ -1320,7 +1418,7 @@ impl RecallRoad {
                 CueKind::Recency,
                 AdmissionRoad::Recency,
                 GraphRootSource::Recency,
-                false,
+                Leaf,
                 true,
                 Room,
                 true,
@@ -1359,6 +1457,7 @@ fn cue_floor(floors: RetrievalCueFloors, kind: CueKind) -> usize {
         CueKind::Participant => floors.participant,
         CueKind::Place => floors.place,
         CueKind::Activity => floors.activity,
+        CueKind::Trigger => floors.trigger,
         CueKind::Topic => floors.topic,
         CueKind::DateMatch => floors.date_match,
         CueKind::Recency => floors.recency,
@@ -1430,24 +1529,16 @@ impl CandidateRoot {
         self.roads.keys().copied().collect()
     }
 
-    fn expanding_roads(&self) -> BTreeSet<RecallRoad> {
+    fn reminder_only(&self) -> bool {
+        self.expansion() != Expansion::Opens
+    }
+
+    fn expansion(&self) -> Expansion {
         self.roads
             .keys()
-            .filter(|road| road.rule().expands)
-            .copied()
-            .collect()
-    }
-
-    fn expanding_score(&self) -> Option<f32> {
-        self.roads
-            .iter()
-            .filter(|(road, _)| road.rule().expands)
-            .map(|(_, reach)| reach.score)
-            .max_by(f32::total_cmp)
-    }
-
-    fn reminder_only(&self) -> bool {
-        !self.roads.keys().any(|road| road.rule().expands)
+            .map(|road| road.rule().expands)
+            .min()
+            .expect("a root has a road")
     }
 
     fn source(&self) -> GraphRootSource {
@@ -1520,10 +1611,10 @@ fn select_candidate_roots(
     content_orders: &BTreeMap<RecallRoad, Vec<MemoryObjectRef>>,
     max_graph_roots: usize,
     floors: RetrievalCueFloors,
-    (scopes, root_order, scope_kinds): (
+    (scopes, root_order, scope_roads): (
         &state::StateScopes,
         &HashMap<(usize, MemoryObjectRef), usize>,
-        &[CueKind],
+        &[RecallRoad],
     ),
 ) -> CandidateRootSelection {
     let mut orders: BTreeMap<RecallRoad, Vec<MemoryObjectRef>> = BTreeMap::new();
@@ -1545,7 +1636,7 @@ fn select_candidate_roots(
     for (road, order) in &mut orders {
         let mut seen = HashSet::new();
         order.retain(|object| seen.insert(*object));
-        let own_scopes = state::scopes_for_kind(scopes, scope_kinds, road.rule().kind);
+        let own_scopes = state::scopes_for_kind(scopes, scope_roads, road.rule().kind);
         state::order_state(
             order,
             &own_scopes,
@@ -1565,7 +1656,7 @@ fn select_candidate_roots(
     state::order_state_per_kind(
         &mut merged,
         scopes,
-        scope_kinds,
+        scope_roads,
         |root| Some(root.object),
         |scope, root| root_order[&(scope, root.object)],
     );
@@ -1625,7 +1716,10 @@ fn graph_query_for_candidate(
     ));
     query.current_subject_state = candidate.object.object_type == ObjectType::Entity
         && candidate.source() == GraphRootSource::Participant;
-    query.reminder_only = candidate.reminder_only();
+    query.reminder_only = candidate.expansion() == Expansion::Leaf;
+    if candidate.expansion() == Expansion::OneHop {
+        query.max_depth = query.max_depth.min(1);
+    }
     query.participant_reference_time = context.scene.time.to_utc();
     query.allow_future_root = candidate.object.object_type == ObjectType::Episode
         && candidate.roads.contains_key(&RecallRoad::Range);
