@@ -267,9 +267,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), RetrievalStatsStoreE
                 object_id TEXT NOT NULL,
                 object_type TEXT NOT NULL,
                 retention_state TEXT NOT NULL,
-                is_current INTEGER NOT NULL,
-                first_seen_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
+                is_current INTEGER NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS entity_edge_index_object
@@ -360,16 +358,12 @@ fn upsert_edge(
                 .execute(
                     "UPDATE entity_edge_index
                      SET retention_state = ?2,
-                         is_current = ?3,
-                         first_seen_at = MIN(first_seen_at, ?4),
-                         last_seen_at = MAX(last_seen_at, ?5)
+                         is_current = ?3
                      WHERE edge_key = ?1",
                     params![
                         edge.edge_key,
                         retention_state_key(merged_retention),
                         bool_int(merged_is_current),
-                        edge.first_seen_at.to_rfc3339(),
-                        edge.last_seen_at.to_rfc3339()
                     ],
                 )
                 .map_err(sqlite_error)?;
@@ -380,8 +374,8 @@ fn upsert_edge(
                 .execute(
                     "INSERT INTO entity_edge_index
                      (edge_key, entity_id, relation_kind, object_id, object_type,
-                      retention_state, is_current, first_seen_at, last_seen_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                      retention_state, is_current)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         edge.edge_key,
                         edge.entity_id.to_string(),
@@ -390,8 +384,6 @@ fn upsert_edge(
                         object_type_key(edge.object_type),
                         retention_state_key(edge.retention_state),
                         bool_int(edge.is_current),
-                        edge.first_seen_at.to_rfc3339(),
-                        edge.last_seen_at.to_rfc3339()
                     ],
                 )
                 .map_err(sqlite_error)?;
@@ -449,14 +441,12 @@ fn update_object_state(
             .execute(
                 "UPDATE entity_edge_index
                  SET retention_state = ?2,
-                     is_current = ?3,
-                     last_seen_at = MAX(last_seen_at, ?4)
+                     is_current = ?3
                  WHERE edge_key = ?1",
                 params![
                     edge_key,
                     retention_state_key(state.retention_state),
                     bool_int(state.is_current),
-                    state.observed_at.to_rfc3339()
                 ],
             )
             .map_err(sqlite_error)?;
@@ -676,7 +666,6 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, RetrievalStatsStoreErr
 mod tests {
     use super::*;
     use crate::test_support::parse_id as id;
-    use crate::test_support::write_time as timestamp;
     use tempfile::tempdir;
 
     use crate::domain::{MemoryId, ObjectType, RelationType};
@@ -712,19 +701,21 @@ mod tests {
         let episode_id = id("550e8400-e29b-41d4-a716-446655461022");
         let edge = test_edge(entity_id, episode_id, RetentionState::Active, true);
 
+        let generic_edge = RetrievalStatsEdge {
+            edge_key: format!("{entity_id}:associated_with:episode:{episode_id}"),
+            relation_kind: RelationType::AssociatedWith,
+            ..edge.clone()
+        };
+
         {
             let store = SqliteRetrievalStatsStore::open(&path).unwrap();
-            store
-                .record_edges(std::slice::from_ref(&edge))
-                .await
-                .unwrap();
+            store.record_edges(&[edge, generic_edge]).await.unwrap();
             store
                 .record_object_states(&[RetrievalStatsObjectState {
                     object_id: episode_id,
                     object_type: ObjectType::Episode,
                     retention_state: RetentionState::Active,
                     is_current: true,
-                    observed_at: timestamp(),
                 }])
                 .await
                 .unwrap();
@@ -745,6 +736,17 @@ mod tests {
         assert_eq!(counter.current_count, 1);
         assert_eq!(
             reopened.global_episode_counter().await.unwrap(),
+            Some(counter)
+        );
+        assert_eq!(
+            reopened
+                .counter(&RetrievalStatsCounterKey {
+                    entity_id,
+                    relation_kind: RelationType::AssociatedWith,
+                    object_type: ObjectType::Episode,
+                })
+                .await
+                .unwrap(),
             Some(counter)
         );
         assert_eq!(
@@ -843,8 +845,6 @@ mod tests {
             object_type: ObjectType::Episode,
             retention_state,
             is_current,
-            first_seen_at: timestamp(),
-            last_seen_at: timestamp(),
         }
     }
 }

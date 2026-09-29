@@ -537,8 +537,6 @@ mod tests {
                 object_type: ObjectType::DerivedMemory,
                 retention_state,
                 is_current,
-                first_seen_at: chrono::DateTime::UNIX_EPOCH,
-                last_seen_at: chrono::DateTime::UNIX_EPOCH,
             },
         )
         .collect::<Vec<_>>();

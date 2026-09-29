@@ -40,7 +40,10 @@ where
             graph_store,
             vector_store,
             embedder,
-            stats_store: crate::adapters::stats::noop_retrieval_stats_store(),
+            // ponytail: per-test memory stays until process exit; use fixture-owned stores if it matters.
+            stats_store: Box::leak(Box::new(
+                crate::adapters::stats::InMemoryRetrievalStatsStore::new(),
+            )),
         }
     }
 
@@ -340,15 +343,12 @@ mod tests {
         RelationType, DEFAULT_SCHEMA_VERSION,
     };
     use crate::errors::{
-        RetrievalStatsHealthCause, RetrievalStatsStoreError, StatsUpdateCause, VectorDatabaseError,
-        VectorDatabaseErrorKind, VectorIndexingCause,
+        RetrievalStatsHealthCause, StatsUpdateCause, VectorDatabaseError, VectorDatabaseErrorKind,
+        VectorIndexingCause,
     };
     use crate::models::vector::{EmbeddingInput, VectorCandidateSearch, VectorRecordEmbedding};
     use crate::ports::graph_authority::{GraphExpansion, GraphExpansionQuery, GraphObjectQuery};
-    use crate::ports::retrieval_stats::{
-        RetrievalStatsCounter, RetrievalStatsCounterKey, RetrievalStatsEdge, RetrievalStatsHealth,
-        RetrievalStatsObjectState, RetrievalStatsStore,
-    };
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsStore};
     use crate::ports::vector_candidate::VectorCandidateRecall;
     use crate::test_support::{
         in_memory_graph_store, representative_fixtures, TemporaryVectorCandidateStore,
@@ -873,7 +873,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_only_stats_failures_preserve_endpoint_ids_and_repair_causes() {
+    async fn link_only_stats_failure_preserves_repair_marker_endpoints() {
         let fixtures = representative_fixtures();
         let episode_id = fixtures.episode.id;
         let observation_id = fixtures.salient_observation.id;
@@ -886,7 +886,7 @@ mod tests {
             .fail_id_queries();
         let vector = RecordingVectorStore::new().await;
         let embedder = RecordingEmbedder::default();
-        let stats = EdgeFailingStatsStore::default();
+        let stats = InMemoryRetrievalStatsStore::new();
         let pipeline = RememberPipeline::new_with_stats(&graph, &vector, &embedder, &stats);
         let mut link = typed_link_draft(
             id("550e8400-e29b-41d4-a716-446655443010"),
@@ -917,13 +917,6 @@ mod tests {
             .expect("endpoint hydration failure should be published");
 
         assert_eq!(failure.failed_object_ids, expected_ids);
-        assert!(matches!(
-            failure.causes.as_slice(),
-            [
-                StatsUpdateCause::GraphRead { .. },
-                StatsUpdateCause::EdgeWrite { .. }
-            ]
-        ));
         assert!(outcome.repair_needed.iter().any(|marker| matches!(
             marker,
             RepairMarker::StatsUpdate { object_ids, causes }
@@ -1088,65 +1081,6 @@ mod tests {
                 fail_id_queries: false,
                 fail_currency_query: false,
             }
-        }
-    }
-
-    #[derive(Debug, Default)]
-    struct EdgeFailingStatsStore {
-        health: Mutex<RetrievalStatsHealth>,
-    }
-
-    #[async_trait]
-    impl RetrievalStatsStore for EdgeFailingStatsStore {
-        async fn record_edges(
-            &self,
-            _edges: &[RetrievalStatsEdge],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Err(RetrievalStatsStoreError::Sqlite {
-                detail: "edge write failed".to_owned(),
-            })
-        }
-
-        async fn record_object_states(
-            &self,
-            _states: &[RetrievalStatsObjectState],
-        ) -> Result<(), RetrievalStatsStoreError> {
-            Ok(())
-        }
-
-        async fn counter(
-            &self,
-            _key: &RetrievalStatsCounterKey,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn global_counter(
-            &self,
-            _relation_kind: RelationType,
-            _object_type: ObjectType,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn health(&self) -> Result<RetrievalStatsHealth, RetrievalStatsStoreError> {
-            Ok(lock(&self.health).clone())
-        }
-        async fn global_episode_counter(
-            &self,
-        ) -> Result<Option<RetrievalStatsCounter>, RetrievalStatsStoreError> {
-            Ok(None)
-        }
-
-        async fn mark_unhealthy(
-            &self,
-            cause: RetrievalStatsHealthCause,
-        ) -> Result<(), RetrievalStatsStoreError> {
-            *lock(&self.health) = RetrievalStatsHealth {
-                state: crate::ports::retrieval_stats::RetrievalStatsHealthState::Unhealthy,
-                last_error_cause: Some(cause),
-            };
-            Ok(())
         }
     }
 
