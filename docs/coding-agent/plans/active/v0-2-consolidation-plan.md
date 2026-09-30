@@ -14,7 +14,7 @@
 - Principle 2: a road contributes as much as its match can vouch for. Exact roads (keys, names, a caller range, dates, recency) contribute up to the room. A description contributes up to its floor, as today, until a similarity bound is measured on a production embedder. The topic contributes up to the room. A road's score is the larger of zero and its similarity.
 - Principle 3: a caller range replaces "now" as recency's window instead of competing with it. The date-match tie priority is deleted, and so is the dependence on the order roots are pushed.
 - Principle 4: after reservations, one order at every stage: the stage's score, with ties going to the newest; at root selection, where search roads give no score, salience comes first, as the section will judge it (ruling 65). Turns among kinds exist only at root selection, and only for roads that expand. Rounds among the scopes of one given kind (several people the scene names) stay at every stage, and they run per kind.
-- Principle 5: what a root opens follows the road. A participant key or name, the activity and the topic open history at their own strength. A description, a setting key, a custom value, recency, a range and an anniversary are leaves.
+- Principle 5: what a root opens follows the road. A participant key or name, the activity and the topic open history at their own strength. A description, a setting key, a custom value, recency, a range and an anniversary are leaves: they bring what rests on their own occasion, what was observed and concluded there, and open no history through a notion or thread (rulings 46 and 54).
 - A memory reached by a setting key or a custom value is a reminder. It has a cue component of zero and is a leaf. It holds the place floor, takes only room nothing else claims, and takes no turn. The place road offers its memories newest first and records no state scope.
 - Every admitted memory's `MemoryScenes` entry carries the cue kinds that admitted it (`admitted_by`), with the trace off.
 - The audits' hygiene items are done with no change to what comes to mind, apart from what the Compatibility stance lists. A scene time reads back with the offset it was given, which is one stored-time correction. A same-id write with the same instant and a different offset is a new collision rejection. Each is shown failing before the fix and passing after, in its own task. The domain field `scene_local_date` is gone. One shared test support module replaces the repeated helpers and embedders.
@@ -77,18 +77,18 @@
 ## Design
 - Chosen, one road table. Every root holds the set of roads that reached it. What it reports, whether it expands, the kinds it may reserve under and its contribution budget come from this table. The table is one match in `retrieve.rs`, and the README copies it. This is the final table; Task_1 keeps the place row as it is today (a key opens history at a score of one), and Task_2 changes it:
 
-  | road | reported kind | expands | reserves | contributes |
-  | --- | --- | --- | --- | --- |
-  | participant key or name | participant | opens history | yes | the notion, expanded |
-  | setting key, custom value | place | leaf | yes | up to the root cap, newest first by memory time |
-  | activity | activity | opens history | yes | the thread's members |
-  | topic | topic | opens history | yes | up to the candidate cap |
-  | participant description | participant | leaf | yes | the larger of one and the participant floor |
-  | setting words | place | leaf | yes | the larger of one and the place floor |
-  | range | date match | leaf | yes | up to the room, plus one to mark that more exists |
-  | anniversary shared with someone present | date match | leaf | yes | up to the room |
-  | anniversary shared with nobody | date match | leaf | no | up to the room |
-  | recency (no range given) | recency | leaf | only what the caller's recency floor sets (default zero) | up to the room |
+  | road | floor kind | admitted by (reported) | expands | reserves | contributes |
+  | --- | --- | --- | --- | --- | --- |
+  | participant key or name | participant | participant | opens history | yes | the notion, expanded |
+  | setting key, custom value | place | place | leaf | yes | up to the root cap, newest first by memory time |
+  | activity | activity | activity | opens history | yes | the thread's members |
+  | topic | topic | topic | opens history | yes | up to the candidate cap |
+  | participant description | participant | person description | leaf | yes | the larger of one and the participant floor |
+  | setting words | place | setting words | leaf | yes | the larger of one and the place floor |
+  | range | date match | range | leaf | yes | up to the room, plus one to mark that more exists |
+  | anniversary shared with someone present | date match | anniversary | leaf | yes | up to the room |
+  | anniversary shared with nobody | date match | anniversary | leaf | no | up to the room |
+  | recency (no range given) | recency | recency | leaf | only what the caller's recency floor sets (default zero) | up to the room |
 
   The row order is part of the root key: given roads (participant, place key, activity), then search roads (topic, descriptions), then time roads. "The room" is today's time budget, the largest section cap in force. The prospective slice adds its due and trigger rows.
 - Principle 1, reserved room. It replaces:
@@ -344,10 +344,10 @@
   - README.md
 - depends_on: [Task_3]
 - description: |
-  `MemoryScenes` gains `admitted_by`: the cue kinds of the admitted ranked object, passed from pack building to `memory_scenes` with no read, filled with the trace on or off. Nothing else in the result changes. The README says what each kind means for a consumer ("asked about" for date match from a range, "about someone present" for participant, "matched the topic", "reminded by the place", "from lately" for recency) and that the words belong to the consumer.
+  `MemoryScenes` gains `admitted_by`: the roads that admitted the ranked object, as a reported enum separate from the floor kinds (the table's "admitted by" column: participant, place, activity, topic, person description, setting words, range, anniversary, recency), so a description is never reported as knowing someone and an anniversary never as a date the caller asked about, passed from pack building to `memory_scenes` with no read, filled with the trace on or off. Nothing else in the result changes. The README defines each reported road by what reached the memory (for example: participant, someone present given by key or name, meaning occasions they were at and what is held about them; person description, a resemblance to how someone present was described, which can be a stranger), and says the words the character uses belong to the consumer; it gives no phrasing.
 - acceptance:
   - Every `MemoryScenes` entry carries `admitted_by`, with the trace off.
-  - A range occasion reports date match; a faint topic hit reports topic; recent occasions with nothing said report recency; a keyed-place memory reports place; a memory reached by a participant key and the topic reports both.
+  - Exact sets, both identifier orders: a range occasion reports range; an anniversary with a range also given reports anniversary, not range; a faint topic hit reports topic; recent occasions with nothing said report recency; a keyed-place memory reports place; a description-only match reports person description (or setting words), never participant or place; a memory reached by a participant key and the topic reports both.
   - The field is identical with the trace on and off, and the pack (members, order and scores) equals the parent's.
 - validation:
   - kind: command
@@ -592,9 +592,23 @@ The tasks run in sequence, one worker at a time, because they share one crate an
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-09-23 Base: PR 150 at `67d6735` (the phase correctness fixes merged with the time stack). New families (keyed setting, activity pressure) and the anniversary capability sentinel passed instrument review at companion `52abadb`; the capture runs on `12af98b`, which only moves the calibration entry to an 8 MiB thread after the full capture overflowed the Windows debug main stack at both `d36d96d` and `67d6735` (a harness limit, reviewed). BEFORE captured twice, byte-identical (SHA-256 `a8579019...`), zero bounded failures, 599 rows. What the base shows, as the falsifiers expect: last Tuesday with no topic brings all 5 Tuesdays plus 3 of today's occasions counted as recency; a salient unshared anniversary in the year-deep daily store is cut at the root cap; with the home key the same top home belief is in 6 of 6 packs; the office key shrinks two people's state; the activity takes more than its floor from the topic. Readings stay in the companion's scratch until the slice-end AFTER exists; then the evidence rule decides where they live.
+- 2026-09-23 Task_1 done (PR 151, tip `fe38576`), approved by Tier D and Tier A after one fix round. One road table (`RecallRoad::rule`) replaces the special cases; the root key is one total order with salience before time among equal scores. Rulings during the task: the time selectors keep their bounds and gain memory time and salience (about 5 ms at 2000 episodes); shared and unshared anniversaries are separate rows; the activity's floor serves its thread first (rulings log 68). The review round replaced a committed capture harness with focused behavior tests and found that the anniversary read with people present took 20.6 s at 2000 daily episodes (31.3 s after the first rewrite); it now reads compact calendar and link rows and decides in Rust, 6.3 ms, same selections.
+- 2026-09-23 Task_2 done (PR 152, tip `f36dd08`), approved by Tier D and Tier A after one fix round. A setting key or custom value is a reminder: cue zero, a leaf, holds the place floor, no spare turn, no state scope. At the parent, an office key left two of six present people with nothing about themselves and a constant home key pinned the same salient belief in every pack; both are gone. The review round found that several place keys were read key by key with a cap each, so the home key's newest memory always took the floor over a newer custom-value memory; several keys now form one place road, merged newest first under one cap. Residual risk to read at the slice end: an old significant memory formed at a place comes only if it is among the newest there or the topic finds it.
+- 2026-09-23 Task_3 done (PR 153, tip `9c905e6`), approved by Tier D and Tier A after two fix rounds. The presence hint is gone and ObservedIn is written at commit, so what was observed at an occasion is reached through it (rulings log 69). The review rounds separated presence from aboutness on the read side too (70): presence is Involves on the occasion; About and Mentions of a subject are one aboutness list with one bounded budget, pruned before the hub check, so someone often talked about never makes recall fail; at an entity root, shared occasions come before aboutness. The as-of cut now applies to occasions and observations on every road by each memory's one clock, except what a caller's range contributes (71). A reminder reaches observations only through its own occasion. Lost admissions, each explained: two lowest tail state rows behind shared occasions, one future topic episode, and in tight mention-only cases the notion-creation occasion replaced by the mentioned one. A query-shape fix restored the anniversary fixture from 9.6 s to 3.0 s. Slice-end reading adds: a person with many high-salience remarks, and retrieval latency.
+- 2026-09-23 Task_4 done (PR 154, tip `56077a2`), approved by Tier D and Tier A after one contract revision (rulings log 72): `admitted_by` reports the roads that admitted a memory as its own enum (participant, place, activity, topic, person description, setting words, range, anniversary, recency), separate from the floor kinds, so a stranger's description never reads as knowing someone and an anniversary never as a date the caller asked about. No new read; every result equals the parent apart from the new field (36 paired outcomes).
+- 2026-09-23 Task_5 done (PR 155, tip `c53baed`), approved by Tier D and Tier A after one fix round: 34 commits, dead and duplicated production code removed with no change to what comes to mind (84 whole-outcome pairs equal apart from the two intended surface changes). The review round restored a count-scope test that had been deleted with a dead route although the logic still ran on live routes, and removed unused global counter reads for About and Mentions (a failed unused read had marked the whole statistics store unhealthy and pushed the live routes into fallback); the stats adapters no longer maintain those counts.
+- 2026-09-23 Task_6 done (PR 156, tip `80845e5`), approved by Tier D and Tier A after two follow-ups. A scene time reads back exactly as the application gave it: the UTC instant every query uses is unchanged, the offset is stored beside it and read back at hydration, `scene_local_date` is gone, and a same-id write at the same instant with a different offset is a collision. Review found returned Scene JSON lossy for offsets with a seconds part (RFC 3339 has only minute offsets), so every offset RFC 3339 can express is accepted and a seconds part is rejected where a scene enters the library (rulings log 74, refining 64); a time the library fixes itself is at UTC and the application gives the offset it means (73). An exhaustive check covered all 172,799 representable offsets.
+- 2026-09-23 Task_7 done (PR 157, tip `f6926ef`), approved by Tier D and Tier A after one fix round. Test helpers live once on each side of the crate boundary (`src/test_support.rs`, `tests/support`); oversized test files are split by behavior; the review-evidence dumps are gone with their assertions kept; every time-ordered fixture opposes identifiers to time or runs both directions. The review round replaced three vector doubles' own search logic with the real in-memory adapter (only recording and failure hooks remain) and made a shared scene cohort run both id directions. The slice's code is complete at `f6926ef`; the slice-end measurement runs there.
+- 2026-09-23 Task_8 records done (PR 158, tip `ef8dbfb`), approved by Tier D and Tier A after one fix round: ADR-I-0036 (proposed) labels the activity floor provisional, allows a provisional default only when labelled as one, adds an activity-pressure calibration to Revisit When, and drops the unused content-hit entity-root rule; ADR-D-0039 (proposed) says a setting key or custom value recalls what was formed there, as a reminder, citing rulings 26 and 59 by title and date. The docs truth sweep brought the README and the database design documents in line with rulings 69 to 74 and replaced source line anchors with named-function links. Both records await the decider; ADR-D-0039 also settles the earlier question of what a custom value is (rulings log item 28, answered by 59). Remaining: the slice-end measurement.
 
 ## Decision Log (append-only; re-plans and major discoveries)
+
+- 2026-09-23 Decision: an observation is reached through its occasion by the ObservedIn relation, written at commit (Task_3, rulings log 69).
+  - Trigger / new insight: removing the presence hint lost an observation about a present person, because the store never wrote ObservedIn, and the hint had carried that path by treating presence as aboutness.
+  - Plan delta (what changed): Task_3 writes ObservedIn at commit alongside Involves; principle 5's wording now says what a leaf brings, so it cannot be read as "opens nothing".
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
 
 - 2026-09-23 Decision: consolidate how recall room is divided before any more cue kinds are added.
   - Trigger / new insight: the re-audit (rulings 58 to 61) found that the rules had grown into special cases nobody could explain without the log. It also found that a keyed place crowds out the people present, and that the memo would print reminders as plain history.
@@ -712,6 +726,12 @@ The tasks run in sequence, one worker at a time, because they share one crate an
     - Every file was already in the owning task's owns.
   - Tradeoffs considered: none; each item lands in the task that already owns its file.
   - User approval: ruled by the coordinator.
+  - Record proposed: none.
+
+- 2026-09-23 Decision: what the result reports is the roads, not the floor kinds (Task_4 Tier A, rulings log 72).
+  - Trigger / new insight: reporting the floor kind made a stranger's description read as "someone present" and an anniversary read as a date the caller asked about, the false continuity rulings 60 and 62 exist to prevent.
+  - Plan delta (what changed): the road table gains an "admitted by" column; `admitted_by` is a separate reported enum; Task_4's acceptance uses exact sets including a description-only match and an anniversary with a range; the README defines meanings, not phrasing.
+  - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
 - 2026-09-23 Decision: ruling 74 refines ruling 64's offset input contract after the Task_6 returned-Scene JSON probe.
