@@ -1492,6 +1492,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn party_obligations_match_bounded_subject_ids_without_hydration() {
+        use super::super::shared::RDF_QUADS_READ;
+        use super::super::sparql_selectors::SparqlGraphSelectors;
+        use crate::domain::{BeliefAssertion, BeliefPredicate};
+
+        let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
+        let fixtures = representative_fixtures();
+        let party = fixtures.hub_entity.id;
+        let mut objects = vec![MemoryObject::Entity(fixtures.hub_entity.clone())];
+        let mut links = Vec::new();
+        for index in 0..32_u128 {
+            let mut memory = fixtures.open_loop.clone();
+            memory.id = MemoryId::from_u128(10_000 + index);
+            memory.created_at += chrono::Duration::minutes(index as i64);
+            memory.salience_score = (index % 7) as f32 / 10.0;
+            memory.entity_ids = vec![party];
+            memory.assertions = vec![BeliefAssertion {
+                subject: party,
+                predicate: if index % 2 == 0 {
+                    BeliefPredicate::Actor
+                } else {
+                    BeliefPredicate::Counterpart
+                },
+            }];
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(100_000 + index);
+            link.from_id = memory.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = party;
+            link.to_type = ObjectType::Entity;
+            link.relation = RelationType::About;
+            links.push(link);
+            objects.push(MemoryObject::DerivedMemory(memory));
+        }
+        objects.extend(links.into_iter().map(MemoryObject::MemoryLink));
+        store.upsert_objects(&objects).await.unwrap();
+        let selectors = SparqlGraphSelectors::new(&store.store);
+        let query = GraphExpansionQuery::new(party, ObjectType::Entity, 1, 10)
+            .with_max_fanout_per_node(3)
+            .with_allowed_object_types(vec![ObjectType::DerivedMemory]);
+        let policy = GraphExpansionLifecyclePolicy::default();
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let (trigger, excluded) = selectors
+            .select_party_obligations(party, policy, 3)
+            .unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(trigger.len(), 3);
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+        let (subject, excluded) = selectors.select_subject_state(&query).unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(
+            trigger.iter().map(|row| row.id).collect::<Vec<_>>(),
+            subject.iter().map(|row| row.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
     async fn retrieval_selectors_bound_state_and_occasion_prefixes() {
         use super::super::shared::RDF_QUADS_READ;
         use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS, SELECT_CALLS};
