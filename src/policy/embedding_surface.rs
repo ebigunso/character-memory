@@ -364,6 +364,7 @@ mod tests {
         DerivedMemory {
             scope_keys: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             id: id(40),
             object_type: ObjectType::DerivedMemory,

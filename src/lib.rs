@@ -19,7 +19,7 @@ pub use crate::api::types::{
     CandidateProducerKind, CandidateProvenance, CandidateRationale, CommitOptions,
     ContextPackSection, ContinuityContextPack, ContinuitySectionLimits, CorrectMemoryDraft,
     CorrectionCascadePolicy, CorrectionTarget, CueKind, DerivedMemoryCandidate, DerivedMemoryDraft,
-    DiagnosticSeverity, DraftDefaults, EntityCandidate, EntityDraft, EpisodeCandidate,
+    DiagnosticSeverity, DraftDefaults, DueState, EntityCandidate, EntityDraft, EpisodeCandidate,
     EpisodeDraft, ExternalSourceReference, FanoutUtilizationTrace, ForgetCascadePolicy,
     ForgetLifecyclePolicy, ForgetMemoryDraft, GraphExpansionOutcome, GraphExpansionTelemetry,
     GraphExpansionTrace, GraphRelationTrace, GraphRootSource, IncludedDerivedMemory,

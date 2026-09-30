@@ -338,6 +338,8 @@ pub struct DerivedMemoryDraft {
     pub entity_ids: Vec<MemoryId>,
     /// The character's commitments about subjects in `entity_ids`.
     pub assertions: Vec<BeliefAssertion>,
+    /// An application-supplied due instant for an open loop or commitment.
+    pub due_at: Option<DateTime<Utc>>,
     /// Source-free grounding given by the application; requires at least one notion subject.
     pub given_by_application: bool,
     pub salience_score: f32,
@@ -359,6 +361,7 @@ impl DerivedMemoryDraft {
             thread_ids: Vec::new(),
             entity_ids: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             salience_score: 0.5,
             supersedes: Vec::new(),
@@ -400,6 +403,7 @@ impl DerivedMemoryDraft {
             entity_ids: self.entity_ids,
             scope_keys: Vec::new(),
             assertions: self.assertions,
+            due_at: self.due_at,
             given_by_application: self.given_by_application,
             salience_score: self.salience_score,
             supersedes: self.supersedes,

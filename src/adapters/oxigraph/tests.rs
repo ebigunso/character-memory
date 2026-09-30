@@ -171,7 +171,8 @@ mod tests {
         }
         assert_eq!(
             reads,
-            [(budget, 8), (2 * budget, 14), (budget, 8), (2 * budget, 14)]
+            // Due adds one bounded selector read, without hydrating another graph.
+            [(budget, 9), (2 * budget, 15), (budget, 9), (2 * budget, 15)]
         );
     }
 
@@ -1492,10 +1493,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn party_obligations_match_bounded_subject_ids_without_hydration() {
+    async fn obligation_selectors_stay_bounded_without_hydration() {
         use super::super::shared::RDF_QUADS_READ;
-        use super::super::sparql_selectors::SparqlGraphSelectors;
-        use crate::domain::{BeliefAssertion, BeliefPredicate};
+        use super::super::sparql_selectors::{SparqlGraphSelectors, MAX_SELECT_ROWS};
+        use crate::domain::{BeliefAssertion, BeliefPredicate, DerivedType};
 
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
@@ -1506,6 +1507,7 @@ mod tests {
             let mut memory = fixtures.open_loop.clone();
             memory.id = MemoryId::from_u128(10_000 + index);
             memory.created_at += chrono::Duration::minutes(index as i64);
+            memory.due_at = Some(memory.created_at);
             memory.salience_score = (index % 7) as f32 / 10.0;
             memory.entity_ids = vec![party];
             memory.assertions = vec![BeliefAssertion {
@@ -1540,12 +1542,54 @@ mod tests {
         assert!(excluded.is_empty());
         assert_eq!(trigger.len(), 3);
         assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
+        let (due, excluded) = selectors
+            .select_due_obligations(
+                fixtures.open_loop.created_at + chrono::Duration::days(4),
+                policy,
+                3,
+            )
+            .unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(due, trigger);
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
         let (subject, excluded) = selectors.select_subject_state(&query).unwrap();
         assert!(excluded.is_empty());
         assert_eq!(
             trigger.iter().map(|row| row.id).collect::<Vec<_>>(),
             subject.iter().map(|row| row.id).collect::<Vec<_>>()
         );
+
+        let mut resolver = fixtures.open_loop.clone();
+        resolver.id = MemoryId::from_u128(9000);
+        resolver.derived_type = DerivedType::Claim;
+        let mut settled = vec![MemoryObject::DerivedMemory(resolver.clone())];
+        for index in 0..29 {
+            let mut link = fixtures.soft_thread_link.clone();
+            link.id = MemoryId::from_u128(200_000 + index);
+            link.from_id = resolver.id;
+            link.from_type = ObjectType::DerivedMemory;
+            link.to_id = MemoryId::from_u128(10_000 + index);
+            link.to_type = ObjectType::DerivedMemory;
+            link.relation = RelationType::Resolves;
+            settled.push(MemoryObject::MemoryLink(link));
+        }
+        store.upsert_objects(&settled).await.unwrap();
+        MAX_SELECT_ROWS.with(|count| count.set(0));
+        RDF_QUADS_READ.with(|count| count.set(0));
+        let (due, excluded) = selectors
+            .select_due_obligations(
+                fixtures.open_loop.created_at + chrono::Duration::days(4),
+                policy,
+                3,
+            )
+            .unwrap();
+        assert_eq!(
+            due.iter().map(|row| row.id).collect::<Vec<_>>(),
+            [10031, 10030, 10029].map(MemoryId::from_u128)
+        );
+        assert!(excluded.is_empty());
+        assert_eq!(MAX_SELECT_ROWS.with(|count| count.get()), 3);
+        assert_eq!(RDF_QUADS_READ.with(|count| count.get()), 0);
     }
 
     #[tokio::test]

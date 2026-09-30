@@ -2,7 +2,7 @@ use character_memory::*;
 use serde_json::{json, Value};
 use test_support::{id, keyed};
 
-mod trigger_road {
+mod obligation_roads {
     use super::*;
 
     fn belief(
@@ -155,6 +155,449 @@ mod trigger_road {
             (actual - expected).abs() < 0.000001,
             "{actual} != {expected}"
         );
+    }
+
+    fn due(n: u128, kind: DerivedType, salience: f32, instant: &str) -> DerivedMemoryDraft {
+        let mut draft = open(n, 2, salience);
+        draft.derived_type = kind;
+        draft.due_at = Some(instant.parse().unwrap());
+        draft.created_at = Some(now() - chrono::Duration::days(30));
+        draft.updated_at = draft.created_at;
+        draft
+    }
+
+    fn included(result: &RetrieveOutcome, n: u128) -> &IncludedDerivedMemory {
+        result
+            .pack
+            .commitments
+            .iter()
+            .chain(&result.pack.open_loops)
+            .chain(&result.pack.derived_memories)
+            .find(|item| item.memory.id == id(n))
+            .unwrap()
+    }
+
+    async fn overdue_fixture() -> (CharacterMemory, tempfile::TempDir) {
+        let mut drafts = (200..216)
+            .map(|n| belief(n, DerivedType::Claim, &[4], 1.0, "loud topic"))
+            .collect::<Vec<_>>();
+        drafts.extend([
+            belief(30, DerivedType::Claim, &[3], 0.5, "direct objection"),
+            belief(31, DerivedType::Claim, &[3], 0.5, "distant detail"),
+            belief(32, DerivedType::Claim, &[2], 0.5, "other memory about Bob"),
+        ]);
+        let (memory, root) = fixture(drafts).await;
+        occasion(&memory, 300, 30, false).await;
+        occasion(&memory, 400, 2, false).await;
+        occasion(&memory, 500, 1, false).await;
+        let mut promise = due(
+            20,
+            DerivedType::Commitment,
+            0.8,
+            "2026-09-20T17:00:00+09:00",
+        );
+        promise.given_by_application = false;
+        promise.derived_from_episode_ids = vec![id(300)];
+        write_belief(&memory, promise).await;
+        let mut source = MemoryLinkDraft::new(
+            ObjectType::DerivedMemory,
+            id(20),
+            RelationType::DerivedFrom,
+            ObjectType::Episode,
+            id(300),
+        );
+        source.id = Some(id(802));
+        source.created_at = Some(now());
+        source.schema_version = Some(DEFAULT_SCHEMA_VERSION.into());
+        memory.link(source).await.unwrap();
+        link(&memory, 800, 20, RelationType::Supports, 30).await;
+        link(&memory, 801, 30, RelationType::Supports, 31).await;
+        (memory, root)
+    }
+
+    #[tokio::test]
+    async fn overdue_promises_recall_one_hop_with_nothing_said_or_a_loud_topic() {
+        let (memory, root) = overdue_fixture().await;
+        for topic in [None, Some("loud")] {
+            for depth in [0, 1, 3] {
+                let mut query = request(vec![], topic, 2);
+                query.graph_limits.max_depth = depth;
+                let result = memory.retrieve(query).await.unwrap();
+                assert_eq!(included(&result, 20).due_state, Some(DueState::Overdue));
+                assert_eq!(
+                    included(&result, 20).direction,
+                    Some(ObligationDirection::OwedByCharacter)
+                );
+                assert_eq!(
+                    admitted(&result, 20).unwrap().admitted_by,
+                    [AdmissionRoad::Due].into()
+                );
+                assert!(assignment(&result, 20).cue_kinds.contains(&CueKind::Due));
+                assert!(result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .graph_expansions
+                    .iter()
+                    .any(|entry| entry.root.id == id(20) && entry.source == GraphRootSource::Due));
+                assert!(admitted(&result, 31).is_none());
+                assert!(admitted(&result, 32).is_none());
+                assert_eq!(admitted(&result, 300).is_some(), depth > 0);
+                if depth > 0 {
+                    assert_eq!(
+                        admitted(&result, 300).unwrap().admitted_by,
+                        [AdmissionRoad::Due].into()
+                    );
+                    for n in [30, 300] {
+                        assert_eq!(scores(&result, n).cue_score, Some(0.0));
+                        assert!(assignment(&result, n).cue_kinds.is_empty());
+                        assert!(!result
+                            .trace
+                            .as_ref()
+                            .unwrap()
+                            .floor_admissions
+                            .iter()
+                            .any(|entry| entry.object.id == id(n)));
+                    }
+                    assert!(result
+                        .trace
+                        .as_ref()
+                        .unwrap()
+                        .graph_relations
+                        .iter()
+                        .any(|entry| entry.link_id == id(802) && entry.proximity == 1));
+                }
+                assert!(!result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .graph_relations
+                    .iter()
+                    .any(|entry| entry.link_id == id(801)));
+            }
+        }
+        let mut query = request(vec![], None, 2);
+        query.section_limits.derived_memories = 128;
+        let result = memory.retrieve(query).await.unwrap();
+        assert_eq!(
+            admitted(&result, 30).unwrap().admitted_by,
+            [AdmissionRoad::Due].into()
+        );
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn due_hops_report_topic_reach_without_inheriting_place() {
+        let (memory, root) = overdue_fixture().await;
+        for place in [false, true] {
+            let mut query = request(vec![], Some("open"), 8);
+            query.candidate_limits.max_graph_roots = 1;
+            query.graph_limits.max_depth = 3;
+            if place {
+                query.scene.setting.key = Some("kitchen".into());
+            }
+            let result = memory.retrieve(query).await.unwrap();
+            for n in [30, 300] {
+                assert_eq!(
+                    admitted(&result, n).unwrap().admitted_by,
+                    [AdmissionRoad::Topic, AdmissionRoad::Due].into()
+                );
+                assert!(!assignment(&result, n).cue_kinds.contains(&CueKind::Due));
+            }
+            assert_eq!(
+                assignment(&result, 20).cue_kinds.contains(&CueKind::Place),
+                place
+            );
+        }
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn due_uses_the_scene_local_day_and_reports_without_trace() {
+        use DueState::{DueToday, NotYetDue, Overdue};
+        for (instant, scene, expected) in [
+            (
+                "2026-09-20T17:00:00+09:00",
+                "2026-09-20T08:00:00+09:00",
+                DueToday,
+            ),
+            (
+                "2026-09-20T17:00:00+09:00",
+                "2026-09-19T20:00:00+09:00",
+                NotYetDue,
+            ),
+            (
+                "2026-09-20T17:00:00+09:00",
+                "2026-09-18T12:00:00Z",
+                NotYetDue,
+            ),
+            (
+                "2026-09-20T00:00:00+09:00",
+                "2026-09-20T08:00:00+09:00",
+                DueToday,
+            ),
+            (
+                "2026-09-19T23:59:59.999999999+09:00",
+                "2026-09-20T08:00:00+09:00",
+                Overdue,
+            ),
+            (
+                "2026-09-20T23:59:59.999999999+09:00",
+                "2026-09-20T08:00:00+09:00",
+                DueToday,
+            ),
+            (
+                "2026-09-21T00:00:00+09:00",
+                "2026-09-20T08:00:00+09:00",
+                NotYetDue,
+            ),
+            (
+                "2026-09-20T00:30:00+14:00",
+                "2026-09-20T08:00:00-10:00",
+                Overdue,
+            ),
+            ("2026-09-20T23:00:00Z", "2026-09-20T08:00:00Z", DueToday),
+            (
+                "2026-09-19T16:00:00Z",
+                "2026-09-20T08:00:00+23:00",
+                DueToday,
+            ),
+            ("2026-09-20T22:00:00Z", "2026-09-20T08:00:00-23:00", Overdue),
+        ] {
+            let mut promise = due(20, DerivedType::Commitment, 0.5, instant);
+            promise.assertions.clear();
+            // Interpreted memories carry write time, so the as-of cut does not apply.
+            promise.created_at = Some(now() + chrono::Duration::days(1));
+            promise.updated_at = promise.created_at;
+            let (memory, root) = fixture(vec![promise]).await;
+            let mut query = request(vec![], None, 2);
+            query.scene.time = scene.parse().unwrap();
+            let result = memory.retrieve(query.clone()).await.unwrap();
+            assert_eq!(
+                admitted(&result, 20).is_some(),
+                expected != NotYetDue,
+                "{instant} at {scene}"
+            );
+            if expected != NotYetDue {
+                assert_eq!(included(&result, 20).due_state, Some(expected));
+                assert_eq!(
+                    admitted(&result, 20).unwrap().admitted_by,
+                    [AdmissionRoad::Due].into()
+                );
+            }
+            query.topic = Some("open".into());
+            query.include_trace = false;
+            let reported = memory.retrieve(query.clone()).await.unwrap();
+            assert!(reported.trace.is_none());
+            assert_eq!(included(&reported, 20).due_state, Some(expected));
+            assert_eq!(included(&reported, 20).direction, None);
+            assert_eq!(
+                admitted(&reported, 20)
+                    .unwrap()
+                    .admitted_by
+                    .contains(&AdmissionRoad::Due),
+                expected != NotYetDue
+            );
+            assert_eq!(reported.pack, memory.retrieve(query).await.unwrap().pack);
+            test_support::close_and_remove_root(memory, root).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn tomorrow_obligations_trigger_for_a_present_party_without_being_due() {
+        let (memory, root) = fixture(vec![due(
+            20,
+            DerivedType::OpenLoop,
+            0.5,
+            "2026-09-22T17:00:00Z",
+        )])
+        .await;
+        let result = memory
+            .retrieve(request(vec![keyed(2)], None, 3))
+            .await
+            .unwrap();
+        assert_eq!(included(&result, 20).due_state, Some(DueState::NotYetDue));
+        assert!(assignment(&result, 20)
+            .cue_kinds
+            .contains(&CueKind::Trigger));
+        assert!(!assignment(&result, 20).cue_kinds.contains(&CueKind::Due));
+        assert!(!admitted(&result, 20)
+            .unwrap()
+            .admitted_by
+            .contains(&AdmissionRoad::Due));
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn due_floors_reserve_salient_promises_without_taking_spare_turns() {
+        let mut drafts = vec![
+            due(20, DerivedType::Commitment, 0.9, "2026-09-20T12:00:00Z"),
+            due(21, DerivedType::Commitment, 0.6, "2026-09-20T12:00:00Z"),
+            due(22, DerivedType::Commitment, 0.3, "2026-09-20T12:00:00Z"),
+        ];
+        drafts.extend((200..208).map(|n| belief(n, DerivedType::Claim, &[4], 1.0, "loud topic")));
+        let (memory, root) = fixture(drafts).await;
+        for cap in [1, 8] {
+            let mut query = request(vec![], if cap == 1 { Some("loud") } else { None }, cap);
+            query.section_limits.commitments = 3;
+            let result = memory.retrieve(query).await.unwrap();
+            assert_eq!(
+                result
+                    .pack
+                    .commitments
+                    .iter()
+                    .map(|item| item.memory.id)
+                    .collect::<Vec<_>>(),
+                if cap == 1 {
+                    vec![id(20)]
+                } else {
+                    vec![id(20), id(21), id(22)]
+                }
+            );
+            if cap == 1 {
+                assert!(result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .floor_admissions
+                    .iter()
+                    .any(|entry| entry.object.id == id(20) && entry.cue_kind == CueKind::Due));
+            }
+        }
+        for floor in [0, 1] {
+            let mut query = request(vec![], Some("loud"), 1);
+            query.cue_floors.due = floor;
+            let result = memory.retrieve(query).await.unwrap();
+            assert_eq!(admitted(&result, 20).is_some(), floor == 1);
+        }
+        let result = memory
+            .retrieve(request(vec![], Some("loud"), 4))
+            .await
+            .unwrap();
+        assert_eq!(expanded(&result), vec![id(200), id(201), id(202), id(20)]);
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn todays_promise_takes_the_due_floor_and_spare_room_keeps_score_order() {
+        let mut drafts = vec![
+            due(20, DerivedType::Commitment, 0.8, "2026-06-21T12:00:00Z"),
+            due(21, DerivedType::Commitment, 0.6, "2026-09-21T17:00:00Z"),
+        ];
+        drafts.extend((200..208).map(|n| belief(n, DerivedType::Claim, &[4], 1.0, "loud topic")));
+        let (memory, root) = fixture(drafts).await;
+        for (roots, commitments) in [(1, 1), (16, 1), (16, 16)] {
+            let mut query = request(vec![], Some("loud"), roots);
+            query.section_limits.commitments = commitments;
+            let result = memory.retrieve(query).await.unwrap();
+            assert_eq!(
+                result
+                    .pack
+                    .commitments
+                    .iter()
+                    .map(|item| item.memory.id)
+                    .collect::<Vec<_>>(),
+                if commitments == 1 {
+                    vec![id(21)]
+                } else {
+                    vec![id(20), id(21)]
+                },
+                "root cap {roots}, commitment cap {commitments}"
+            );
+            assert_eq!(included(&result, 21).due_state, Some(DueState::DueToday));
+            if roots == 1 {
+                assert!(result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .floor_admissions
+                    .iter()
+                    .any(|entry| entry.object.id == id(21) && entry.cue_kind == CueKind::Due));
+            }
+        }
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn due_current_first_applies_to_floors_and_score_orders_admitted_promises() {
+        let (memory, root) = fixture(vec![due(
+            20,
+            DerivedType::Commitment,
+            0.9,
+            "2026-09-20T12:00:00Z",
+        )])
+        .await;
+        let mut current = due(21, DerivedType::Commitment, 0.1, "2026-09-20T12:00:00Z");
+        current.supersedes = vec![id(20)];
+        write_belief(&memory, current).await;
+        for cap in [1, 8] {
+            for superseded in [false, true] {
+                let mut query = request(vec![], None, cap);
+                query.lifecycle_policy.include_superseded = superseded;
+                let result = memory.retrieve(query).await.unwrap();
+                assert_eq!(
+                    result
+                        .pack
+                        .commitments
+                        .iter()
+                        .map(|item| item.memory.id)
+                        .collect::<Vec<_>>(),
+                    if cap > 1 && superseded {
+                        vec![id(20), id(21)]
+                    } else {
+                        vec![id(21)]
+                    }
+                );
+            }
+        }
+        test_support::close_and_remove_root(memory, root).await;
+    }
+
+    #[tokio::test]
+    async fn settled_obligations_keep_their_due_report_but_leave_the_due_road() {
+        let (memory, root) = fixture(vec![
+            due(20, DerivedType::Commitment, 0.8, "2026-09-20T12:00:00Z"),
+            due(21, DerivedType::OpenLoop, 0.8, "2026-09-20T12:00:00Z"),
+            belief(30, DerivedType::Claim, &[2], 0.5, "settled both"),
+        ])
+        .await;
+        link(&memory, 800, 30, RelationType::FulfillsCommitment, 20).await;
+        link(&memory, 801, 30, RelationType::Resolves, 21).await;
+        for suppress_resolver in [false, true] {
+            if suppress_resolver {
+                memory
+                    .forget(ForgetMemoryDraft::suppress(
+                        LifecycleTargetRef::derived_memory(id(30)),
+                        "hide resolver",
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let result = memory.retrieve(request(vec![], None, 8)).await.unwrap();
+            for n in [20, 21] {
+                assert!(admitted(&result, n).is_none());
+                assert!(!result
+                    .trace
+                    .as_ref()
+                    .unwrap()
+                    .lifecycle_filter_decisions
+                    .iter()
+                    .any(|entry| entry.object.id == id(n)));
+            }
+            let result = memory
+                .retrieve(request(vec![], Some("open"), 8))
+                .await
+                .unwrap();
+            for n in [20, 21] {
+                assert_eq!(included(&result, n).resolved_by, vec![id(30)]);
+                assert_eq!(included(&result, n).due_state, Some(DueState::Overdue));
+                assert!(!admitted(&result, n)
+                    .unwrap()
+                    .admitted_by
+                    .contains(&AdmissionRoad::Due));
+            }
+        }
+        test_support::close_and_remove_root(memory, root).await;
     }
 
     #[tokio::test]
@@ -793,6 +1236,140 @@ fn selection(result: &RetrieveOutcome) -> Value {
         "assignments": result.trace.as_ref().unwrap().section_assignments,
         "admitted_by": result.memory_scenes.iter().map(|entry| json!({"memory": entry.memory, "roads": entry.admitted_by})).collect::<Vec<_>>(),
     })
+}
+
+#[tokio::test]
+async fn due_instants_survive_reopen_define_replay_and_belong_to_each_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let collection = test_support::unique_collection_name();
+    let memory =
+        test_support::try_setup_persistent_character_memory(collection.clone(), root.path(), id(1))
+            .await
+            .unwrap();
+    let instant = "2026-09-20T12:00:00.123456789Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let mut original = plan(true);
+    for candidate in &mut original.candidates {
+        if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+            if candidate.draft.id == Some(id(10)) {
+                candidate.draft.due_at = Some(instant);
+            }
+        }
+    }
+    let written = memory
+        .commit(original.clone(), CommitOptions::default())
+        .await
+        .unwrap();
+    memory.close().await.unwrap();
+    let memory =
+        test_support::try_setup_persistent_character_memory(collection, root.path(), id(1))
+            .await
+            .unwrap();
+    assert_eq!(
+        memory
+            .commit(original.clone(), CommitOptions::default())
+            .await
+            .unwrap(),
+        written
+    );
+    let result = memory.retrieve(query(false, false)).await.unwrap();
+    assert!(result.trace.is_none());
+    let promise = result
+        .pack
+        .commitments
+        .iter()
+        .find(|item| item.memory.id == id(10))
+        .unwrap();
+    assert_eq!(promise.memory.due_at, Some(instant));
+    assert_eq!(promise.due_state, Some(DueState::Overdue));
+    assert_eq!(
+        result
+            .pack
+            .open_loops
+            .iter()
+            .find(|item| item.memory.id == id(11))
+            .unwrap()
+            .due_state,
+        None
+    );
+    for candidate in &mut original.candidates {
+        if let MemoryCandidate::DerivedMemory(candidate) = candidate {
+            if candidate.draft.id == Some(id(10)) {
+                candidate.draft.due_at = Some(instant + chrono::Duration::nanoseconds(1));
+            }
+        }
+    }
+    assert!(
+        matches!(memory.commit(original, CommitOptions::default()).await,
+        Err(CustomError::DeterministicIdCollision { object })
+        if object == MemoryObjectRef::new(ObjectType::DerivedMemory, id(10)))
+    );
+
+    let mut invalid = obligation(99, DerivedType::Claim, "a claim cannot fall due");
+    invalid.due_at = Some(instant);
+    let invalid = RememberWritePlan::new().with_candidate(MemoryCandidate::DerivedMemory(
+        DerivedMemoryCandidate::new(invalid, CandidateProvenance::caller("invalid due field")),
+    ));
+    let expected = CandidateValidationIssue::InvalidBelief {
+        reason: BeliefValidationError::ObligationFieldOnOtherKind {
+            derived_type: DerivedType::Claim,
+        },
+    };
+    assert!(
+        matches!(memory.commit(invalid, CommitOptions::default()).await,
+        Err(CustomError::WritePlanValidationRejected { validations })
+        if validations.iter().any(|entry| entry.errors.contains(&expected)))
+    );
+
+    let next = Some(instant + chrono::Duration::days(3));
+    for (old, new, due_at) in [(10, 20, next), (20, 21, None)] {
+        let mut replacement =
+            ReplacementDerivedMemoryDraft::new(DerivedType::Commitment, "An amended promise");
+        replacement.id = Some(id(new));
+        replacement.entity_ids = vec![id(1), id(2)];
+        replacement.assertions = vec![
+            role(1, BeliefPredicate::Actor),
+            role(2, BeliefPredicate::Counterpart),
+        ];
+        replacement.given_by_application = true;
+        replacement.due_at = due_at;
+        replacement
+            .correction_origin_provenance
+            .external_refs
+            .push(ExternalSourceReference::raw("raw://amended-promise"));
+        let mut correction = CorrectMemoryDraft::new(
+            CorrectionTarget::derived_memory(id(old)),
+            "The promise changed",
+        )
+        .with_replacement(replacement.clone());
+        correction.correction_origin = replacement.correction_origin_provenance.clone();
+        let mut invalid = correction.clone();
+        invalid.replacement_derived_memories[0].derived_type = DerivedType::Claim;
+        invalid.replacement_derived_memories[0].assertions.clear();
+        invalid.replacement_derived_memories[0].due_at = Some(instant);
+        assert!(matches!(
+            memory.correct(invalid).await,
+            Err(CustomError::LifecycleDraftInvalid(
+                LifecycleDtoValidationError::InvalidBelief(
+                    BeliefValidationError::ObligationFieldOnOtherKind {
+                        derived_type: DerivedType::Claim
+                    }
+                )
+            ))
+        ));
+        memory.correct(correction).await.unwrap();
+        let result = memory.retrieve(query(false, false)).await.unwrap();
+        let promise = result
+            .pack
+            .commitments
+            .iter()
+            .find(|item| item.memory.id == id(new))
+            .unwrap();
+        assert_eq!(promise.memory.due_at, due_at);
+        assert_eq!(promise.due_state, due_at.map(|_| DueState::NotYetDue));
+    }
+    test_support::close_and_remove_root(memory, root).await;
 }
 
 #[tokio::test]
