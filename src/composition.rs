@@ -10,6 +10,7 @@ use crate::config::{
     GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode, Settings, VectorStoreMode,
 };
+use crate::domain::MemoryId;
 use crate::errors::{
     ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
     RetrievalStatsHealthCause,
@@ -23,6 +24,7 @@ use crate::ports::retrieval_stats::RetrievalStatsStore;
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct MemoryComposition {
+    pub(crate) character_id: MemoryId,
     pub(crate) graph_store: Box<dyn GraphAuthorityStore>,
     pub(crate) vector_store: Box<dyn VectorCandidateStore>,
     pub(crate) embedder: Box<dyn MemoryEmbedder>,
@@ -65,10 +67,12 @@ impl CharacterMemory {
         graph_store: Box<dyn GraphAuthorityStore>,
         vector_store: Box<dyn VectorCandidateStore>,
         embedder: Box<dyn MemoryEmbedder>,
+        character_id: MemoryId,
     ) -> Self {
         let settings = Settings::new(Default::default()).unwrap();
         Self {
             memory_composition: MemoryComposition {
+                character_id,
                 graph_store,
                 vector_store,
                 embedder,
@@ -93,9 +97,11 @@ impl CharacterMemory {
         embedder: Box<dyn MemoryEmbedder>,
         stats_store: Box<dyn RetrievalStatsStore>,
         selectivity_policy: RetrievalSelectivityPolicy,
+        character_id: MemoryId,
     ) -> Self {
         Self {
             memory_composition: MemoryComposition {
+                character_id,
                 graph_store,
                 vector_store,
                 embedder,
@@ -127,6 +133,7 @@ impl CharacterMemory {
     ///   and queried.
     /// - `embed_provider`: A boxed implementation of [`EmbeddingProvider`] that is responsible
     ///   for generating embeddings from input data.
+    /// - `character_id`: The character's notion id. An existing graph store must belong to it.
     ///
     /// # Returns
     ///
@@ -141,20 +148,34 @@ impl CharacterMemory {
         settings: Settings,
         collection_name: String,
         embed_provider: Box<dyn EmbeddingProvider>,
+        character_id: MemoryId,
     ) -> Result<Self, CustomError> {
-        Self::construct(settings, collection_name, Some(embed_provider)).await
+        Self::construct(
+            settings,
+            collection_name,
+            Some(embed_provider),
+            character_id,
+        )
+        .await
     }
 
     async fn construct(
         settings: Settings,
         collection_name: String,
         embed_provider: Option<Box<dyn EmbeddingProvider>>,
+        character_id: MemoryId,
     ) -> Result<Self, CustomError> {
         let (embed_provider, vector_size) = preflight(&settings, embed_provider)?;
         let persistent_graph_path = match settings.get_graph_store_mode() {
             ConfigGraphStoreMode::Persistent => Some(settings.get_oxigraph_path()?),
             ConfigGraphStoreMode::InMemory => None,
         };
+        let graph_store = match persistent_graph_path {
+            Some(path) => Box::new(OxigraphGraphAuthorityStore::new_persistent(path)?)
+                as Box<dyn GraphAuthorityStore>,
+            None => Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
+        };
+        graph_store.ensure_character_identity(character_id).await?;
 
         let vector_store: Box<dyn VectorCandidateStore> = match settings.get_vector_store_mode() {
             VectorStoreMode::Embedded => Box::new(
@@ -175,11 +196,6 @@ impl CharacterMemory {
                 Box::new(store)
             }
         };
-        let graph_store = match persistent_graph_path {
-            Some(path) => Box::new(OxigraphGraphAuthorityStore::new_persistent(path)?)
-                as Box<dyn GraphAuthorityStore>,
-            None => Box::new(OxigraphGraphAuthorityStore::new_in_memory()?),
-        };
         let stats_store = retrieval_stats_store(&settings)?;
         let fanout_budgets =
             settings
@@ -199,6 +215,7 @@ impl CharacterMemory {
             Box::new(EmbeddingProviderMemoryEmbedder::new(embed_provider)),
             stats_store,
             selectivity_policy,
+            character_id,
         ))
     }
 
@@ -213,6 +230,7 @@ impl CharacterMemory {
     ///
     /// - `settings`: Configuration settings for the memory system
     /// - `collection_name`: Name of the vector collection to use
+    /// - `character_id`: The character's notion id, checked against the graph store before opening vectors
     ///
     /// # Returns
     ///
@@ -220,8 +238,12 @@ impl CharacterMemory {
     ///
     /// - `Ok`: A new `CharacterMemory` instance
     /// - `Err`: A `CustomError` if initialization fails
-    pub async fn new(settings: Settings, collection_name: String) -> Result<Self, CustomError> {
-        Self::construct(settings, collection_name, None).await
+    pub async fn new(
+        settings: Settings,
+        collection_name: String,
+        character_id: MemoryId,
+    ) -> Result<Self, CustomError> {
+        Self::construct(settings, collection_name, None, character_id).await
     }
 }
 

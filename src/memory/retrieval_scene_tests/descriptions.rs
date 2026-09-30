@@ -22,6 +22,7 @@ async fn topic_only_applies_section_limits_and_preserves_query_text() {
         Box::new(graph),
         Box::new(vector),
         Box::new(RecordingEmbedder(inputs.clone())),
+        crate::domain::MemoryId::from_u128(1),
     );
     for (candidates, roots, derived_limit) in [(6, 3, 1), (48, 12, 2)] {
         let mut context = RetrievalContext::new("  deterministic fixtures\nservice-free  ");

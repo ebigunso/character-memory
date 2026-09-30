@@ -422,6 +422,7 @@ impl DerivedMemory {
         let has_sources = !self.derived_from_episode_ids.is_empty()
             || !self.derived_from_observation_ids.is_empty();
         belief::validate_belief(
+            self.derived_type,
             &self.entity_ids,
             has_sources,
             self.given_by_application,

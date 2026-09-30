@@ -344,6 +344,9 @@ impl GraphExpansion {
 
 #[async_trait]
 pub(crate) trait GraphAuthorityStore: Send + Sync {
+    /// Binds this store to one character, accepting only that identity on later opens.
+    async fn ensure_character_identity(&self, character_id: MemoryId) -> Result<(), CustomError>;
+
     /// Return bounded eligible episode rank rows, newest recorded time then ID.
     /// Both time bounds are inclusive; an absent start leaves that end open.
     async fn query_episodes_by_time(

@@ -39,6 +39,7 @@ async fn open() -> (CharacterMemory, tempfile::TempDir) {
         test_support::persistent_settings(root.path()),
         test_support::unique_collection_name(),
         test_support::TestEmbeddingProvider::new(2, time_embedding),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     .unwrap();

@@ -81,7 +81,12 @@ fn scene() -> Scene {
 
 async fn scene_memory() -> (CharacterMemory, Arc<Mutex<Vec<String>>>) {
     let queries = Arc::new(Mutex::new(Vec::new()));
-    let memory = crate::test_support::memory_with_embedder(3, CueEmbedder(queries.clone())).await;
+    let memory = crate::test_support::memory_with_embedder(
+        3,
+        CueEmbedder(queries.clone()),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await;
     (memory, queries)
 }
 

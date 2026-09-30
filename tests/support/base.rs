@@ -24,12 +24,19 @@ pub fn embedded_settings(root: &Path) -> ConfigBuilder<DefaultState> {
 pub async fn open(
     builder: ConfigBuilder<DefaultState>,
     collection_name: String,
+    character_id: character_memory::MemoryId,
 ) -> Result<CharacterMemory, CustomError> {
     let settings = Settings::new(builder.build().unwrap())?;
     let embed_provider = Box::new(deterministic_provider(
         settings.get_embedding_vector_size()?,
     ));
-    CharacterMemory::new_with_embedding_provider(settings, collection_name, embed_provider).await
+    CharacterMemory::new_with_embedding_provider(
+        settings,
+        collection_name,
+        embed_provider,
+        character_id,
+    )
+    .await
 }
 
 /// Closes the facade so its local stores release their files, then removes the store root.
@@ -110,11 +117,13 @@ pub async fn open_with_provider(
     builder: ConfigBuilder<DefaultState>,
     collection: String,
     provider: impl EmbeddingProvider + 'static,
+    character_id: character_memory::MemoryId,
 ) -> Result<CharacterMemory, CustomError> {
     CharacterMemory::new_with_embedding_provider(
         Settings::new(builder.build().unwrap())?,
         collection,
         Box::new(provider),
+        character_id,
     )
     .await
 }

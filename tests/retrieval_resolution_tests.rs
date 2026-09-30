@@ -42,7 +42,10 @@ fn derived(
 }
 
 async fn fixture(resolvers_share_state: bool) -> (CharacterMemory, tempfile::TempDir) {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut person = EntityDraft::new();
     person.id = Some(id(501));
     let mut thread = MemoryThreadDraft::new("shared work", "shared work");

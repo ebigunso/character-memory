@@ -9,8 +9,9 @@ use super::base;
 pub async fn try_setup_persistent_character_memory(
     collection_name: String,
     root: &Path,
+    character_id: character_memory::MemoryId,
 ) -> Result<CharacterMemory, CustomError> {
-    base::open(persistent_settings(root), collection_name).await
+    base::open(persistent_settings(root), collection_name, character_id).await
 }
 
 /// Persistent vector, graph and stats stores at a caller-owned test root.

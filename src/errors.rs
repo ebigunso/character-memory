@@ -303,6 +303,12 @@ pub enum ReplacementIdentityConflict {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum CustomError {
+    #[error("store belongs to character {stored}; cannot open it as character {requested}")]
+    CharacterIdentityMismatch {
+        stored: MemoryId,
+        requested: MemoryId,
+    },
+
     #[error("Configuration parse error: {0}")]
     ConfigParseError(String),
 

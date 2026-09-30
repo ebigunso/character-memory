@@ -322,8 +322,12 @@ async fn setup(
     collection_name: &str,
     root: &TempDir,
 ) -> Result<character_memory::CharacterMemory, CustomError> {
-    test_support::try_setup_persistent_character_memory(collection_name.to_owned(), root.path())
-        .await
+    test_support::try_setup_persistent_character_memory(
+        collection_name.to_owned(),
+        root.path(),
+        character_memory::MemoryId::from_u128(1),
+    )
+    .await
 }
 
 fn belief_root_context(query: &str) -> RetrievalContext {

@@ -395,6 +395,16 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
                     ),
                 ]);
             }
+            crate::domain::BeliefPredicate::Actor => triples.push(RdfTriple::literal(
+                &assertion_node,
+                vocab::ASSERTION_PREDICATE,
+                "actor",
+            )),
+            crate::domain::BeliefPredicate::Counterpart => triples.push(RdfTriple::literal(
+                &assertion_node,
+                vocab::ASSERTION_PREDICATE,
+                "counterpart",
+            )),
         }
     }
     for id in &memory.supersedes {

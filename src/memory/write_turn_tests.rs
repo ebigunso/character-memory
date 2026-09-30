@@ -78,6 +78,7 @@ impl Fixture {
                 inner: Box::new(deterministic_embedder(8)),
                 gate: embed.clone(),
             }),
+            crate::domain::MemoryId::from_u128(1),
         );
         memory.memory_composition.stats_store = Box::new(TestStatsStore {
             gate: Some(stats.clone()),

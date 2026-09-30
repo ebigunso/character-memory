@@ -203,7 +203,11 @@ future interactions become more continuous
 
 ## Construction
 
-`CharacterMemory::new(settings, collection_name).await?` constructs the default memory system.
+`CharacterMemory::new(settings, collection_name, character_id).await?` constructs the default memory system. Both constructors require the character's notion id. The graph store records that identity on first open, accepts it on later opens, and refuses a different id before opening any vector collection. The identity record does not create a notion.
+
+An open loop or commitment names its parties among its subjects through `BeliefPredicate::Actor` (who owes) and `BeliefPredicate::Counterpart` (to whom). Several actors or counterparts are allowed, but a subject cannot have both roles in one memory. These roles are valid only on open loops and commitments. Each admitted obligation reports `direction: Some(OwedByCharacter)` when the character is an actor, `Some(OwedToCharacter)` when it is a counterpart, or `None` when neither role names it. Obligations without roles also report `None`.
+
+The character perceives the scene and is not listed as a participant. If an application lists it anyway, recall treats it as any other notion. The constructor identity affects only the direction report and the store identity check; it does not change what comes to mind.
 
 By default, this uses:
 
@@ -212,7 +216,7 @@ By default, this uses:
 - Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
-let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned()).await?;
+let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned(), character_id).await?;
 ```
 
 For deterministic tests or custom embedding backends, use:
@@ -222,6 +226,7 @@ let memory = CharacterMemory::new_with_embedding_provider(
     settings,
     "my-assistant-memory".to_owned(),
     embed_provider,
+    character_id,
 ).await?;
 ```
 

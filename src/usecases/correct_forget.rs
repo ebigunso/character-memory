@@ -1328,7 +1328,12 @@ mod tests {
                     .unwrap(),
                 vec![predecessor_id]
             );
-            let retrieve = RetrievePipeline::new(&graph, &vector, &embedder);
+            let retrieve = RetrievePipeline::new(
+                &graph,
+                &vector,
+                &embedder,
+                crate::domain::MemoryId::from_u128(1),
+            );
             let normal = retrieve
                 .retrieve(RetrievalContext::new("concise answers").with_trace())
                 .await
@@ -3133,10 +3138,15 @@ mod tests {
             .unwrap();
         assert!(outcome.vector_maintenance_failure.is_some());
 
-        let retrieval = RetrievePipeline::new(&graph, &vector, &embedder)
-            .retrieve(RetrievalContext::new("stable correction behavior").with_trace())
-            .await
-            .unwrap();
+        let retrieval = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        )
+        .retrieve(RetrievalContext::new("stable correction behavior").with_trace())
+        .await
+        .unwrap();
 
         let trace = retrieval.trace.as_ref().unwrap();
         assert!(trace.stale_candidate_omissions.iter().any(|omission| {
@@ -3183,10 +3193,15 @@ mod tests {
             .unwrap();
         assert!(outcome.vector_maintenance_failure.is_some());
 
-        let retrieval = RetrievePipeline::new(&graph, &vector, &embedder)
-            .retrieve(RetrievalContext::new("deterministic store contracts").with_trace())
-            .await
-            .unwrap();
+        let retrieval = RetrievePipeline::new(
+            &graph,
+            &vector,
+            &embedder,
+            crate::domain::MemoryId::from_u128(1),
+        )
+        .retrieve(RetrievalContext::new("deterministic store contracts").with_trace())
+        .await
+        .unwrap();
 
         let trace = retrieval.trace.as_ref().unwrap();
         assert!(trace.stale_candidate_omissions.iter().any(|omission| {
