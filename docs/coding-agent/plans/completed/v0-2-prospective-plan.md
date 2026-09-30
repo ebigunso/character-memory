@@ -460,6 +460,24 @@ The tasks share one crate and its files, so they run in sequence, one worker at 
 
 - (none yet)
 
+- 2026-09-30 Plan complete. Tasks 1 to 3 are approved at both tiers (PRs 174 to 176). The paired evals changes are evals PR 84 (self identity) and the obligation bridge (3a712252). The slice-end measurement and its verdict are in the Decision Log.
+  - Completion value audit (orchestrator):
+    - EARNS ITS PLACE:
+      - obligations know whose they are, and a store never opens as another self;
+      - a present person's open matter comes under any topic;
+      - today's promise is never starved by a stale one;
+      - the due read excludes settled history inside the query (78 s down to 0.08 s at 2,000, mostly settled).
+    - OVERSIZED: none.
+    - DELETE: none.
+  - Carried forward:
+    - the residual cost of a reserved root seat (a topic subtree);
+    - the slow existing subject-state read at scale (ruling 78);
+    - the renderer phrasing constraints: a settled promise reporting "Overdue", and "Owed" for an open question;
+    - "do not list the self" repeated in the renderer and companion docs.
+  - Lessons:
+    - a library task that adds a capability must name its paired evals change: identity and the obligation bridge were both missed;
+    - keep parent-witness tooling out of the permanent suite.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 
 - 2026-09-22 Decision: prospective memory is direction as two assertion predicates, the self at construction with two readers, a due instant, and two given-cue routes through the state selector.
@@ -612,6 +630,26 @@ The tasks share one crate and its files, so they run in sequence, one worker at 
   Trigger / new insight: the value-audit cleanup (library plan completed 2026-09-29, PRs 159 to 173) landed under this plan after its approval. Its Task_1 raised the participant fanout minimum to one, a measured behavior change; its other tasks are proven behavior-free at the final tip. Before-numbers taken at the consolidation tip would count that change against this slice (Tier A review of Task_1, finding F1).
   - Plan delta (what changed): the base is 7ecb353e, the cleanup's final tip 9c885e14 with this plan merged. The slice-end BEFORE is the cleanup's Task_1 AFTER capture (SHA-256 `9351e9c4…`, harness 26a43960). It covers every existing family and the obligations family (A6). The cleanup's final behavior-free proof showed 9c885e14 reads identically to it, so it is this base's reading. The slice-end AFTER uses the same harness plus the paired self-identity change (evals c9ba1b3/1ed8b82, behavior-free apart from the header's self map).
   - Also: the plan had not named the paired evals change the self identity requires (the harness constructs the facade). It runs as its own evals task, paired with Task_1.
+  - User approval: decided under the standing instruction and logged for presentation.
+  - Record proposed: none.
+
+- 2026-09-30 Slice-end measurement read: direction confirmed; one falsifier's threshold was mis-specified, and its reading is recorded.
+  Trigger / new insight: AFTER at library 9c7eb40f (Tasks 1 to 3), harness 3a712252 (the approved obligation bridge on top of the self-identity pairing). Run twice, byte-identical (SHA-256 `9060ce4e…`). BEFORE is the re-anchored `9351e9c4…`. All 32 obligation cases and 44 time and prospective cases ran; none ran at BEFORE for lack of capability.
+  - F1: 16 of 16 first-listed people had their top obligation selected. F2: 4 of 4 targets, both directions.
+  - F3, read under ruling 79: 28 of 28. In the added case, the promise due today at salience 0.10 holds the due seat and the stale overdue promise at 0.99 does not, in both identifier orders.
+  - F4: nothing due later came by Due, no settled obligation came by Trigger or Due, and every settled obligation selected by topic carries `resolved_by`.
+  - F5: the own undated promise came in 4 of 28 retrievals, not all of them. F6: 2 of 2.
+  - F8: no person's non-obligation state fell by more than one.
+  - F9: the latest daily occasions stayed at 8.
+  - F10: all 747 recorded non-obligation snapshots are identical to BEFORE.
+  - Ruling 78's reading: every later-listed person had 2 obligations in every two-person retrieval, so none was starved. One trigger seat per kind stands.
+  - F7 fired literally: on-topic memories kept under the loud topic fell by 2 to 4 per retrieval, and the matched topic-alone control fell 48 to 46. The attribution from the retained captures found:
+    - No hop neighbor displaced anything: newly selected one-hop reminders 0, and selected zero-cue non-root memories 0. Ruling 76 holds.
+    - Every loss comes from the reserved seats at the root stage. A Trigger or Due root takes one of the 12 root seats, and the weakest vector root loses root standing. It then drops out of its section, and so do the memories only its expansion brought (for example its observation). Present-person rows lose two roots (Trigger and Due), hence about four topic memories.
+    - F7's threshold assumed one displaced memory per seat. A displaced root takes its descendants with it, so the cost of a seat is about two topic memories.
+  - What it means for the character: meeting Bob during an absorbing conversation, the character keeps the one thing open between them and today's promise in mind, at the cost of the weakest one or two topic memories. That is the trade the plan argued for, and the hop's reminders cost the topic nothing.
+  - Residual, recorded and not fixed here: a reserved root seat costs a whole topic subtree, not one memory. If loud-topic conversations prove too thin in practice, a section-level reservation that does not take a root seat is the refinement to measure.
+  - Verdict: direction confirmed.
   - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
