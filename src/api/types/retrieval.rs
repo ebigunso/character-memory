@@ -129,6 +129,10 @@ pub struct RetrievalCueFloors {
     pub participant: usize,
     pub place: usize,
     pub activity: usize,
+    /// Provisional reservation for unsettled obligations naming someone present.
+    pub trigger: usize,
+    /// Provisional reservation for obligations due by the scene's local day.
+    pub due: usize,
     /// Provisional reservation for an application-supplied time range.
     pub date_match: usize,
     pub topic: usize,
@@ -142,6 +146,8 @@ impl Default for RetrievalCueFloors {
             participant: 1,
             place: 1,
             activity: 1,
+            trigger: 1,
+            due: 1,
             date_match: 1,
             topic: 1,
             recency: 0,
@@ -274,6 +280,7 @@ pub enum AdmissionRoad {
     Participant,
     Place,
     Activity,
+    Due,
     Topic,
     PersonDescription,
     SettingWords,
@@ -376,6 +383,8 @@ pub enum GraphRootSource {
     Vector,
     Participant,
     Activity,
+    Trigger,
+    Due,
     Place,
     Recency,
     DateMatch,
@@ -417,6 +426,25 @@ pub struct IncludedDerivedMemory {
     pub source_observation_ids: Vec<MemoryId>,
     /// Memories linked by Resolves or FulfillsCommitment; empty means unresolved.
     pub resolved_by: Vec<MemoryId>,
+    /// The character's side of an admitted obligation; absent when no role names it.
+    pub direction: Option<ObligationDirection>,
+    /// The due instant relative to the reference scene's local day.
+    pub due_state: Option<DueState>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationDirection {
+    OwedByCharacter,
+    OwedToCharacter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DueState {
+    Overdue,
+    DueToday,
+    NotYetDue,
 }
 
 impl From<DerivedMemory> for IncludedDerivedMemory {
@@ -425,6 +453,8 @@ impl From<DerivedMemory> for IncludedDerivedMemory {
             source_episode_ids: memory.derived_from_episode_ids.clone(),
             source_observation_ids: memory.derived_from_observation_ids.clone(),
             resolved_by: Vec::new(),
+            direction: None,
+            due_state: None,
             memory,
         }
     }
@@ -548,6 +578,7 @@ pub struct RetrievalTrace {
     pub fanout_utilization: Vec<FanoutUtilizationTrace>,
     pub selectivity_decisions: Vec<SelectivityTrace>,
     /// Omission evidence is bounded, so future occasions cut by the participant prefilter may have no entry.
+    /// Settled obligations prefiltered by the Due query also have no entry from that road.
     pub lifecycle_filter_decisions: Vec<LifecycleFilterDecision>,
     pub stale_candidate_omissions: Vec<StaleCandidateOmission>,
     pub section_assignments: Vec<SectionAssignment>,
@@ -775,6 +806,8 @@ pub enum CueKind {
     Participant,
     Place,
     Activity,
+    Trigger,
+    Due,
     Recency,
     DateMatch,
 }
@@ -857,6 +890,7 @@ mod tests {
         DerivedMemory {
             scope_keys: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             id,
             object_type: ObjectType::DerivedMemory,

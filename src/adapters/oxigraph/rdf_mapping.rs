@@ -330,6 +330,13 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
         RdfTriple::literal(&subject, vocab::CREATED_AT, timestamp(memory.created_at)),
         RdfTriple::literal(&subject, vocab::UPDATED_AT, timestamp(memory.updated_at)),
     ]);
+    if let Some(due_at) = memory.due_at {
+        triples.push(RdfTriple::literal(
+            &subject,
+            vocab::DUE_AT,
+            timestamp(due_at),
+        ));
+    }
     for key in &memory.scope_keys {
         triples.push(RdfTriple::literal(
             &subject,
@@ -395,6 +402,16 @@ fn derived_memory_triples(memory: &DerivedMemory) -> Vec<RdfTriple> {
                     ),
                 ]);
             }
+            crate::domain::BeliefPredicate::Actor => triples.push(RdfTriple::literal(
+                &assertion_node,
+                vocab::ASSERTION_PREDICATE,
+                "actor",
+            )),
+            crate::domain::BeliefPredicate::Counterpart => triples.push(RdfTriple::literal(
+                &assertion_node,
+                vocab::ASSERTION_PREDICATE,
+                "counterpart",
+            )),
         }
     }
     for id in &memory.supersedes {

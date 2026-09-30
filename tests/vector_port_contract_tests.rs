@@ -34,6 +34,7 @@ async fn injected_provider_opens_without_unused_settings_and_ignores_them_when_p
             settings,
             "injected_without_placeholders".to_owned(),
             Box::new(constant_provider(2)),
+            character_memory::MemoryId::from_u128(1),
         )
         .await
         .unwrap();
@@ -51,6 +52,7 @@ async fn injected_provider_dimension_must_match_existing_vector_storage() {
         Settings::new(config.clone()).unwrap(),
         "injected_dimensions".to_owned(),
         Box::new(constant_provider(2)),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     .unwrap();
@@ -60,6 +62,7 @@ async fn injected_provider_dimension_must_match_existing_vector_storage() {
         Settings::new(config).unwrap(),
         "injected_dimensions".to_owned(),
         Box::new(constant_provider(3)),
+        character_memory::MemoryId::from_u128(1),
     )
     .await;
     assert!(matches!(
@@ -92,6 +95,7 @@ async fn persistent_graph_requires_a_path_at_facade_construction() {
             settings,
             "missing_graph_path".to_owned(),
             Box::new(constant_provider(2)),
+            character_memory::MemoryId::from_u128(1),
         )
         .await;
         assert!(matches!(
@@ -124,7 +128,12 @@ async fn openai_requires_its_key_and_model_at_facade_construction() {
             }
         }
         let settings = Settings::new(builder.build().unwrap()).unwrap();
-        let result = CharacterMemory::new(settings, "missing_openai_settings".to_owned()).await;
+        let result = CharacterMemory::new(
+            settings,
+            "missing_openai_settings".to_owned(),
+            character_memory::MemoryId::from_u128(1),
+        )
+        .await;
         assert!(matches!(
             result,
             Err(CustomError::ConfigValidation(ConfigValidationError {
@@ -150,9 +159,13 @@ async fn flat_openai_settings_still_open_the_default_facade() {
         .unwrap();
     let settings = Settings::new(config).unwrap();
     assert_eq!(settings.get_embedding_vector_size().unwrap(), 1536);
-    let memory = CharacterMemory::new(settings, "flat_openai_settings".to_owned())
-        .await
-        .unwrap();
+    let memory = CharacterMemory::new(
+        settings,
+        "flat_openai_settings".to_owned(),
+        character_memory::MemoryId::from_u128(1),
+    )
+    .await
+    .unwrap();
     test_support::close_and_remove_root(memory, temp).await;
 }
 
@@ -193,10 +206,16 @@ async fn empty_sqlite_path_fails_before_either_constructor_creates_stores() {
                 settings,
                 "preflight".to_owned(),
                 Box::new(constant_provider(2)),
+                character_memory::MemoryId::from_u128(1),
             )
             .await
         } else {
-            CharacterMemory::new(settings, "preflight".to_owned()).await
+            CharacterMemory::new(
+                settings,
+                "preflight".to_owned(),
+                character_memory::MemoryId::from_u128(1),
+            )
+            .await
         };
         assert!(matches!(
             result,
@@ -292,6 +311,7 @@ async fn default_construction_rejects_a_missing_vector_store_path() {
             vector_size,
             move |_: &str| constant_embedding(vector_size),
         )),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     {
@@ -445,6 +465,7 @@ async fn open(
             vector_size,
             move |_: &str| constant_embedding(vector_size),
         )),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
 }
@@ -466,6 +487,7 @@ async fn open_for_zero_norm(
             ],
             fixture_embedding: vec![0.0; vector_size],
         }),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
 }

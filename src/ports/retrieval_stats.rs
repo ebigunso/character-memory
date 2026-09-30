@@ -739,6 +739,7 @@ mod tests {
             MemoryObject::DerivedMemory(DerivedMemory {
                 scope_keys: Vec::new(),
                 assertions: Vec::new(),
+                due_at: None,
                 given_by_application: false,
                 id: memory_id,
                 object_type: ObjectType::DerivedMemory,
@@ -780,6 +781,7 @@ mod tests {
         let objects = vec![MemoryObject::DerivedMemory(DerivedMemory {
             scope_keys: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             id: memory_id,
             object_type: ObjectType::DerivedMemory,
@@ -851,6 +853,7 @@ mod tests {
         let memory = MemoryObject::DerivedMemory(DerivedMemory {
             scope_keys: Vec::new(),
             assertions: Vec::new(),
+            due_at: None,
             given_by_application: false,
             id: memory_id,
             object_type: ObjectType::DerivedMemory,

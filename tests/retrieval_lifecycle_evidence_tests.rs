@@ -23,7 +23,10 @@ async fn commit(memory: &CharacterMemory, input: RememberInput) {
         .unwrap();
 }
 async fn lifecycle_evidence_fixture(relation: RelationType) {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut episode = EpisodeDraft::new("source");
     episode.id = Some(id(101));
     episode.scene = Some(Scene::at((at()).fixed_offset()));

@@ -61,10 +61,13 @@ fn context(scene: Scene) -> RetrievalContext {
 async fn source_union_namespaces_and_restart_determine_scope() {
     let root = tempfile::tempdir().unwrap();
     let collection = test_support::unique_collection_name();
-    let memory =
-        test_support::try_setup_persistent_character_memory(collection.clone(), root.path())
-            .await
-            .unwrap();
+    let memory = test_support::try_setup_persistent_character_memory(
+        collection.clone(),
+        root.path(),
+        character_memory::MemoryId::from_u128(1),
+    )
+    .await
+    .unwrap();
     let common = "quote \" slash \\ newline\n";
     let first = scene(Some("cafe"), &[("project", common), ("zone", "42")]);
     let second = scene(Some("library"), &[("project", common), ("zone", "43")]);
@@ -109,9 +112,13 @@ async fn source_union_namespaces_and_restart_determine_scope() {
         .await
         .unwrap();
     memory.close().await.unwrap();
-    let memory = test_support::try_setup_persistent_character_memory(collection, root.path())
-        .await
-        .unwrap();
+    let memory = test_support::try_setup_persistent_character_memory(
+        collection,
+        root.path(),
+        character_memory::MemoryId::from_u128(1),
+    )
+    .await
+    .unwrap();
     // Rehydrated internal keys must preserve equality for exact plan replay.
     memory.commit(plan, CommitOptions::default()).await.unwrap();
     for (scene, expected) in [
@@ -150,7 +157,10 @@ async fn source_union_namespaces_and_restart_determine_scope() {
 
 #[tokio::test]
 async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     commit(
         &memory,
         RememberInput::new("new source").with_episode(episode(102, scene(Some("new"), &[]))),
@@ -230,7 +240,10 @@ async fn corrections_derive_their_own_scope_and_lifecycle_precedes_root_cap() {
 
 #[tokio::test]
 async fn place_reminders_share_caps_with_participant_state_and_activity() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut thread = MemoryThreadDraft::new("work", "work");
     thread.id = Some(id(600));
     let mut notion = EntityDraft::new();
@@ -303,7 +316,10 @@ async fn place_reminders_share_caps_with_participant_state_and_activity() {
 
 #[tokio::test]
 async fn scope_priority_survives_both_caps_and_map_order() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let old = belief(301, 101);
     let mut newer = belief(302, 101);
     newer.created_at = Some(at(30));
@@ -351,7 +367,10 @@ async fn scope_priority_survives_both_caps_and_map_order() {
 
 #[tokio::test]
 async fn overlapping_place_keys_share_candidates_without_outscoring_the_topic() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     for (source, scope, memory_id, salience) in [
         (101, scene(Some("place"), &[]), 301, 1.0),
         (102, scene(Some("place"), &[("project", "42")]), 302, 0.1),
@@ -395,7 +414,10 @@ async fn overlapping_place_keys_share_candidates_without_outscoring_the_topic() 
 
 #[tokio::test]
 async fn shared_explicit_state_keeps_expansion_order_for_each_kind() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut thread = MemoryThreadDraft::new("work", "work");
     thread.id = Some(id(600));
     commit(
@@ -442,7 +464,10 @@ async fn shared_explicit_state_keeps_expansion_order_for_each_kind() {
 
 #[tokio::test]
 async fn dense_place_records_topic_admission_at_root_cap() {
-    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .unwrap();
     let mut input =
         RememberInput::new("place state").with_episode(episode(101, scene(Some("place"), &[])));
     for n in 301..314 {

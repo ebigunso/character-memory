@@ -133,6 +133,7 @@ impl CharacterMemory {
             parts.embedder.as_ref(),
             parts.stats_store.as_ref(),
             parts.selectivity_policy,
+            parts.character_id,
         )
         .retrieve(context)
         .await
@@ -637,6 +638,7 @@ mod tests {
                     .fail_upsert("vector store unavailable"),
             ),
             Box::new(deterministic_embedder(8)),
+            crate::domain::MemoryId::from_u128(1),
         );
         let plan = memory
             .prepare(
@@ -1426,7 +1428,12 @@ mod tests {
     }
 
     async fn injected_memory() -> CharacterMemory {
-        crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
+        crate::test_support::memory_with_embedder(
+            8,
+            deterministic_embedder(8),
+            crate::domain::MemoryId::from_u128(1),
+        )
+        .await
     }
 
     async fn lifecycle_memory() -> (
@@ -1470,6 +1477,7 @@ mod tests {
             Box::new(graph),
             Box::new(vector),
             Box::new(deterministic_embedder(4)),
+            crate::domain::MemoryId::from_u128(1),
         );
 
         (memory, fixtures, replacement_id)

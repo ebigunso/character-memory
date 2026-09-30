@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 
-use super::MemoryId;
+use super::{DerivedType, MemoryId};
 
 /// A commitment the character holds about one of a memory's notion subjects.
 /// Someone else's claim or the character's doubt remains text without an assertion.
@@ -18,6 +18,8 @@ pub struct BeliefAssertion {
 #[serde(tag = "predicate", rename_all = "snake_case")]
 pub enum BeliefPredicate {
     KnownAs { name: String },
+    Actor,
+    Counterpart,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Error)]
@@ -31,13 +33,19 @@ pub enum BeliefValidationError {
     AssertionSubjectNotInMemory { subject: MemoryId },
     #[error("asserted name for {subject} must not be empty after normalization")]
     EmptyAssertionName { subject: MemoryId },
+    #[error("obligation subject {subject} cannot be both actor and counterpart")]
+    ConflictingObligationRoles { subject: MemoryId },
+    #[error("obligation fields require an open loop or commitment, got {derived_type:?}")]
+    ObligationFieldOnOtherKind { derived_type: DerivedType },
 }
 
 pub(crate) fn validate_belief(
+    derived_type: DerivedType,
     subjects: &[MemoryId],
     has_sources: bool,
     given_by_application: bool,
     assertions: &[BeliefAssertion],
+    has_due_instant: bool,
 ) -> Result<(), BeliefValidationError> {
     if given_by_application {
         if has_sources {
@@ -47,6 +55,14 @@ pub(crate) fn validate_belief(
             return Err(BeliefValidationError::GivenWithoutSubject);
         }
     }
+    let is_obligation = matches!(
+        derived_type,
+        DerivedType::OpenLoop | DerivedType::Commitment
+    );
+    if has_due_instant && !is_obligation {
+        return Err(BeliefValidationError::ObligationFieldOnOtherKind { derived_type });
+    }
+    let mut roles = std::collections::HashMap::new();
     for assertion in assertions {
         if !subjects.contains(&assertion.subject) {
             return Err(BeliefValidationError::AssertionSubjectNotInMemory {
@@ -60,6 +76,19 @@ pub(crate) fn validate_belief(
                 });
             }
             BeliefPredicate::KnownAs { .. } => {}
+            BeliefPredicate::Actor | BeliefPredicate::Counterpart => {
+                if !is_obligation {
+                    return Err(BeliefValidationError::ObligationFieldOnOtherKind { derived_type });
+                }
+                if roles
+                    .insert(assertion.subject, &assertion.predicate)
+                    .is_some_and(|previous| previous != &assertion.predicate)
+                {
+                    return Err(BeliefValidationError::ConflictingObligationRoles {
+                        subject: assertion.subject,
+                    });
+                }
+            }
         }
     }
     Ok(())

@@ -42,6 +42,7 @@ mod scene_offset_behavior {
             let memory = test_support::try_setup_persistent_character_memory(
                 collection.clone(),
                 root.path(),
+                character_memory::MemoryId::from_u128(1),
             )
             .await
             .unwrap();
@@ -51,10 +52,13 @@ mod scene_offset_behavior {
                 .unwrap();
             let before = memory.retrieve(query(now().fixed_offset())).await.unwrap();
             memory.close().await.unwrap();
-            let memory =
-                test_support::try_setup_persistent_character_memory(collection, root.path())
-                    .await
-                    .unwrap();
+            let memory = test_support::try_setup_persistent_character_memory(
+                collection,
+                root.path(),
+                character_memory::MemoryId::from_u128(1),
+            )
+            .await
+            .unwrap();
             let replay = memory.commit(plan, CommitOptions::default()).await.unwrap();
             assert_eq!(first, replay);
             let after = memory.retrieve(query(now().fixed_offset())).await.unwrap();
@@ -79,7 +83,10 @@ mod scene_offset_behavior {
     async fn second_offsets_are_rejected_at_write_and_retrieval_admission() {
         let mut readings = Vec::new();
         for seconds in [1, -1, 30, -30, 86_399, -86_399] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let time = now().with_timezone(&FixedOffset::east_opt(seconds).unwrap());
             let scene = Scene::at(time);
             let mut draft = EpisodeDraft::new("invalid offset");
@@ -153,7 +160,10 @@ mod scene_offset_behavior {
     #[tokio::test]
     async fn same_instant_with_another_offset_is_an_episode_collision() {
         for (hours, other) in [(9, 10), (23, 22), (-23, -22)] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let time = "2025-09-21T12:30:00.123456789Z"
                 .parse::<DateTime<Utc>>()
                 .unwrap()
@@ -180,7 +190,10 @@ mod scene_offset_behavior {
     async fn time_roads_keep_instant_order_and_the_authored_anniversary_day() {
         for reverse in [false, true] {
             let id = |n| MemoryId::from_u128(if reverse { 100_000 - n } else { n });
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut entity = EntityDraft::new();
             entity.id = Some(id(7));
             let times = [
@@ -364,6 +377,8 @@ mod road_behavior {
             participant: 0,
             place: 0,
             activity: 0,
+            trigger: 0,
+            due: 0,
             date_match: 0,
             topic: 0,
             recency: 0,
@@ -390,7 +405,10 @@ mod road_behavior {
     #[tokio::test]
     async fn admitted_memories_report_their_roads_without_a_trace() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut plan = episode(RememberWritePlan::new(), 100, 20, 0.5, None, reverse);
             let faint = format!("ferry {}", "noise ".repeat(40));
             plan = episode(plan, 101, 10, 0.5, Some(&faint), reverse);
@@ -561,7 +579,10 @@ mod road_behavior {
     #[tokio::test]
     async fn descriptions_and_anniversaries_report_their_own_roads() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut plan = episode(
                 RememberWritePlan::new(),
                 500,
@@ -643,7 +664,10 @@ mod road_behavior {
         remarks: u128,
         reverse: bool,
     ) -> (CharacterMemory, tempfile::TempDir) {
-        let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+        let (memory, root) =
+            test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                .await
+                .unwrap();
         let mut plan = RememberWritePlan::new();
         for n in [10, 11] {
             let mut person = EntityDraft::new();
@@ -843,7 +867,11 @@ mod road_behavior {
                     RelationType::About,
                     RelationType::Involves,
                 ] {
-                    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                    let (memory, root) = test_support::try_setup_character_memory(
+                        character_memory::MemoryId::from_u128(1),
+                    )
+                    .await
+                    .unwrap();
                     let mut person = EntityDraft::new();
                     person.id = Some(id(10, reverse));
                     let mut source = EpisodeDraft::new("Alex was here");
@@ -918,7 +946,10 @@ mod road_behavior {
     async fn a_present_person_reaches_the_observation_through_its_episode() {
         let mut results = Vec::new();
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut person = EntityDraft::new();
             person.id = Some(id(10, reverse));
             let mut scene = Scene::at((time() - Duration::days(1)).fixed_offset());
@@ -983,7 +1014,10 @@ mod road_behavior {
     async fn a_reminder_keeps_its_observations_without_opening_other_occasions() {
         let mut results = Vec::new();
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut person = EntityDraft::new();
             person.id = Some(id(10, reverse));
             let mut thread = MemoryThreadDraft::new("repairs", "ongoing repairs");
@@ -1083,7 +1117,10 @@ mod road_behavior {
     async fn a_real_mention_reaches_its_occasion_but_not_a_sibling_at_depth_two() {
         let mut results = Vec::new();
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut person = EntityDraft::new();
             person.id = Some(id(10, reverse));
             let mut other_person = EntityDraft::new();
@@ -1238,7 +1275,11 @@ mod road_behavior {
         #[tokio::test]
         async fn an_office_key_leaves_room_for_every_person_present() {
             for reverse in [false, true] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 write(
                     &memory,
                     RememberInput::new("office formation").with_episode(source(
@@ -1331,7 +1372,11 @@ mod road_behavior {
         #[tokio::test]
         async fn activity_does_not_join_the_round_among_people() {
             for reverse in [false, true] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 let mut thread = MemoryThreadDraft::new("work", "work");
                 thread.id = Some(id(500, reverse));
                 let mut input = RememberInput::new("people and activity")
@@ -1388,7 +1433,11 @@ mod road_behavior {
         #[tokio::test]
         async fn home_reserves_its_newest_memory_across_distinct_topics() {
             for reverse in [false, true] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 let mut salient = belief(500, 100, 100, "old important home belief", reverse);
                 salient.salience_score = 1.0;
                 let mut input = RememberInput::new("a constant home key")
@@ -1436,7 +1485,11 @@ mod road_behavior {
         async fn place_keys_share_one_newest_first_road_and_budget() {
             let mut outcomes = Vec::new();
             for reverse in [false, true] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 let mut home = RememberInput::new("home memories").with_episode(source(
                     100,
                     20,
@@ -1526,7 +1579,11 @@ mod road_behavior {
         async fn a_place_reminder_only_opens_history_when_the_topic_also_matches() {
             for reverse in [false, true] {
                 for custom in [false, true] {
-                    let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                    let (memory, root) = test_support::try_setup_character_memory(
+                        character_memory::MemoryId::from_u128(1),
+                    )
+                    .await
+                    .unwrap();
                     let mut entity = EntityDraft::new();
                     entity.id = Some(id(7, reverse));
                     let mut formation = source(100, 2, (!custom).then_some("library"), reverse);
@@ -1623,7 +1680,11 @@ mod road_behavior {
         let ordinary = EpisodeDraft::new("ordinary").salience_score;
         for reverse in [false, true] {
             for (salience, shared) in [(ordinary, false), (1.0, false), (ordinary, true)] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 let mut plan = RememberWritePlan::new();
                 if shared {
                     let mut entity = EntityDraft::new();
@@ -1698,7 +1759,10 @@ mod road_behavior {
     #[tokio::test]
     async fn shared_and_unshared_anniversaries_have_independent_room() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut entity = EntityDraft::new();
             entity.id = Some(id(77, reverse));
             entity.created_at = Some(time());
@@ -1766,7 +1830,11 @@ mod road_behavior {
     async fn descriptions_do_not_take_spare_root_turns() {
         for reverse in [false, true] {
             for setting in [false, true] {
-                let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+                let (memory, root) = test_support::try_setup_character_memory(
+                    character_memory::MemoryId::from_u128(1),
+                )
+                .await
+                .unwrap();
                 let mut plan = episode(
                     episode(
                         RememberWritePlan::new(),
@@ -1823,7 +1891,10 @@ mod road_behavior {
     #[tokio::test]
     async fn a_timestamped_occasion_beats_an_unmatched_topic_tail() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut plan = episode(
                 episode(
                     RememberWritePlan::new(),
@@ -1859,7 +1930,10 @@ mod road_behavior {
     #[tokio::test]
     async fn only_a_zero_score_overlap_uses_root_time() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let plan = episode(
                 episode(
                     RememberWritePlan::new(),
@@ -1889,7 +1963,10 @@ mod road_behavior {
     #[tokio::test]
     async fn quiet_recency_preserves_a_saturated_strong_topic_pack() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut plan = RememberWritePlan::new();
             for n in 100..104 {
                 plan = episode(plan, n, n as i64, 0.0, Some("orchid"), reverse);
@@ -1943,7 +2020,10 @@ mod road_behavior {
     #[tokio::test]
     async fn section_ties_use_observed_parent_and_creation_times() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut plan = episode(
                 episode(RememberWritePlan::new(), 100, 10, 0.0, None, reverse),
                 101,
@@ -2014,7 +2094,10 @@ mod road_behavior {
     #[tokio::test]
     async fn an_activity_reservation_takes_its_thread_before_a_member() {
         for reverse in [false, true] {
-            let (memory, root) = test_support::try_setup_character_memory().await.unwrap();
+            let (memory, root) =
+                test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+                    .await
+                    .unwrap();
             let mut thread = MemoryThreadDraft::new("work", "work");
             thread.id = Some(id(600, reverse));
             thread.created_at = Some(time());
@@ -2084,9 +2167,10 @@ pub mod test_support;
 
 #[tokio::test]
 async fn public_remember_and_retrieve_use_graph_authoritative_path() {
-    let (memory, root) = test_support::try_setup_character_memory()
-        .await
-        .expect("unexpected live public facade setup failure");
+    let (memory, root) =
+        test_support::try_setup_character_memory(character_memory::MemoryId::from_u128(1))
+            .await
+            .expect("unexpected live public facade setup failure");
 
     let test_result = async {
         let episode_id = id("550e8400-e29b-41d4-a716-446655440101");

@@ -50,7 +50,12 @@ fn plan_with_belief(draft: DerivedMemoryDraft, create_notion: bool) -> RememberW
 }
 
 async fn memory() -> CharacterMemory {
-    crate::test_support::memory_with_embedder(8, deterministic_embedder(8)).await
+    crate::test_support::memory_with_embedder(
+        8,
+        deterministic_embedder(8),
+        crate::domain::MemoryId::from_u128(1),
+    )
+    .await
 }
 
 #[tokio::test]

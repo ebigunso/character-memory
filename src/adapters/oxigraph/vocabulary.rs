@@ -64,3 +64,6 @@ pub(crate) const ASSERTION_PREDICATE: &str = "urn:cmem:vocab:assertionPredicate"
 pub(crate) const ASSERTION_NAME: &str = "urn:cmem:vocab:assertionName";
 pub(crate) const NORMALIZED_NAME: &str = "urn:cmem:vocab:normalizedName";
 pub(crate) const GIVEN_BY_APPLICATION: &str = "urn:cmem:vocab:givenByApplication";
+pub(crate) const DUE_AT: &str = "urn:cmem:vocab:dueAt";
+pub(crate) const STORE_IDENTITY: &str = "urn:cmem:store";
+pub(crate) const CHARACTER_IDENTITY: &str = "urn:cmem:vocab:characterIdentity";

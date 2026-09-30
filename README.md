@@ -56,9 +56,10 @@ Retrieval is graph-authoritative and hybrid:
 
 | Admission road | What reached the memory |
 | --- | --- |
-| `Participant` | Someone present, supplied by key or name, reached occasions they were at or what is held about them. |
+| `Participant` | Someone present, supplied by key or name, reached occasions they were at, what is held about them, or an unsettled obligation naming them and what its one hop reached. |
 | `Place` | A setting key or custom value reached a memory formed there. |
 | `Activity` | A supplied thread or open loop reached its members, sources or linked memories. |
+| `Due` | An unsettled obligation fell due before the end of the scene's local day, or its one hop reached the memory. |
 | `Topic` | Content matched the supplied topic, even faintly, and could bring connected memories. |
 | `PersonDescription` | A resemblance to how someone present was described reached an occasion and memories resting on it; the person may be a stranger. |
 | `SettingWords` | A resemblance to the described surroundings reached an occasion and memories resting on it. |
@@ -72,7 +73,7 @@ An episode has a content search surface for its summary and up to two separate s
 
 For each recognized participant, `last_interactions` says when the character last met them and how much time has passed. If a name could mean several participants, each has its own answer. No eligible encounter at or before the scene time means never met. These facts remain available even when no memories fit the requested amount. Forgotten encounters count only when `include_suppressed` is enabled.
 
-Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Give an ongoing project as the activity; custom values describe the context in which memories were formed. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values used for floors: `Topic`, `Participant`, `Place`, `Activity`, `DateMatch` and `Recency`.
+Use `.with_activity(ActivityRef::Thread(thread_id))` or `.with_activity(ActivityRef::OpenLoop(open_loop_id))` to recall ongoing work without a topic. Give an ongoing project as the activity; custom values describe the context in which memories were formed. Thread membership, open-loop sources and linked memories supply candidates within the retrieval limits. The result echoes the activity with `Found` or `Unknown`; finding an activity does not guarantee an admitted memory. With tracing enabled, each section assignment reports its set of `CueKind` values used for floors: `Topic`, `Participant`, `Place`, `Activity`, `Trigger`, `Due`, `DateMatch` and `Recency`.
 
 Each way of reaching a memory is a **road**. One memory can be reached by several roads. The same table controls what each road reports, whether it opens history, its reservation, and how many roots it contributes:
 
@@ -81,6 +82,8 @@ Each way of reaching a memory is a **road**. One memory can be reached by severa
 | Participant key or name | Participant | Participant | Yes | Yes | The recognized notion, expanded |
 | Setting key or custom value | Place | Place | No | Yes | Up to the root cap, newest first by memory time |
 | Activity | Activity | Activity | Yes | Yes | The thread's members |
+| Unsettled obligation naming someone present | Trigger | Participant | One hop | Yes | Up to the root cap per recognized notion, current first, then salience and newest |
+| Obligation due by the scene's local day | Due | Due | One hop | Yes | Up to the room, today before overdue; current first, then salience and newest within each group |
 | Topic | Topic | Topic | Yes | Yes | Up to the candidate cap |
 | Participant description | Participant | PersonDescription | No | Yes | The larger of one and the participant floor |
 | Setting words | Place | SettingWords | No | Yes | The larger of one and the place floor |
@@ -95,7 +98,7 @@ The room is the largest requested section cap. Five principles govern these road
 2. **Contribute only the table's amount.** Every search score enters as the larger of zero and its similarity. Contributing a candidate does not guarantee a place in the result.
 3. **A range is recency's window.** One time read uses the supplied span, or otherwise ends at the scene time. A supplied range reports date matches and contributes no recency outside it.
 4. **Recall the strongest matches first.** Among memories that nothing matched, the more significant come first, then the newer. When a section fills, equally strong memories favor the newer one. After reservations, only roads that open history share spare turns as roots are chosen; other stages fill the remaining room in order. Several people present retain rounds among their own memories.
-5. **A road determines what opens.** A memory keeps its best score from all roads. Beyond a reminder's leaf reach, only expanding roads pass on their score and kind. Reminder proximity applies where no expanding road reached; a memory that expands as a root retains its own best strength and proximity.
+5. **A road determines what opens.** A memory keeps its best score from all roads. A surfaced obligation re-cues one bounded hop ([ADR-D-0023](docs/decisions/design/ADR-D-0023-purpose-is-never-a-supplied-cue.md)); that hop reports its admission road but passes on no cue or reservation. Beyond a reminder's leaf reach, only roads that open history pass on their score and kind. Reminder proximity applies where no such road reached; a memory that expands as a root retains its own best strength and proximity.
 
 Memory time is an episode's scene time, an observation's observed time or parent scene time, and creation time for other objects. Root scores of one from a participant key, name or activity stay ahead of zero-score place and time reminders. Among zero-score place and time roots, stored salience comes first, then the newest memory time.
 
@@ -122,7 +125,7 @@ A scene time reads back with the instant, fractional precision and offset suppli
 
 The same local month and day in an earlier local year contributes anniversary occasions as date matches, with February 29 matching only February 29. Shared and unshared anniversaries each contribute their own newest-first list, up to the room. An anniversary reserves room only when it was shared with a notion that the present scene resolves to one identity; an ambiguous name grants no reservation. The range and shared anniversaries share one date-match floor. Unshared anniversaries compete for unclaimed room by the root key: among zero-score roots, salience first, then newest. An ordinary anniversary therefore loses to a recent occasion of equal salience; a more salient one can come to mind.
 
-Without a supplied range, recent recallable episodes at or before the scene time can come to mind without any other cue, together with memories resting on those occasions. Recorded scene time determines recency, not creation time. Recency contributes the newest occasions up to the largest requested section cap, in newest-first selector order; all-zero section caps contribute none. Its floor ships at zero until measured. It takes no spare turn at root selection and competes for room remaining after reservations and expanding-road turns. The root and section caps still bound what is recalled. Every reminder road, including scene descriptions, stays on its occasion: a person, thread or interpreted memory reached through it is a leaf. Another occasion does not open or inherit the reminder kind through shared work. An object that actually expands as a root keeps the best proximity of every road that reached it; objects reached only through roots inherit proximity from full-standing roads when present.
+Without a supplied range, recent recallable episodes at or before the scene time can come to mind without any other cue, together with memories resting on those occasions. Recorded scene time determines recency, not creation time. Recency contributes the newest occasions up to the largest requested section cap, in newest-first selector order; all-zero section caps contribute none. Its floor ships at zero until measured. It takes no spare turn at root selection and competes for room remaining after reservations and expanding-road turns. The root and section caps still bound what is recalled. Leaf reminder roads, including scene descriptions, stay on their occasion: a person, thread or interpreted memory reached through it is a leaf. Another occasion does not open or inherit the reminder kind through shared work. An object that actually expands as a root keeps the best proximity of every road that reached it; objects reached only through roots inherit proximity from full-standing roads when present.
 
 Once a recent occasion has root room, section selection uses the ordinary score: a low-scoring Topic descendant can yield to a salient recent occasion under a section cap. Recency has zero cue score, so even its most salient root scores at most 0.35; stronger Topic roots keep their places. A raised recency floor reserves the latest contributions at roots and sections. Remaining section room uses score, then memory time, type and ID for every memory. With a zero floor, an older, more salient contribution may survive when the newest does not. Chronological presentation belongs to the renderer: admitted memories already report their recorded source scenes.
 
@@ -132,7 +135,7 @@ A description brings the most recent few recallable occasions among its fetched 
 
 An occasion recalled by a description can bring what was observed and concluded there. It does not by itself bring the whole history of a person or thread mentioned there. A topic, key or name can still recall that history on its own strength.
 
-Each cue kind has a floor at the caps it encounters. The measured defaults reserve one slot each for participant, place and topic; activity and date match provisionally reserve one each, and recency defaults to zero. Floors apply per kind, not per person or place: five people share one participant floor. `context.cue_floors` is a calibration knob for these defaults; applications are not expected to set it. Slots are reserved in successive rounds: participant, place, activity, date match, topic, recency. Unused room returns to the common pool, and selected memories keep their ranked order. A zero floor reserves nothing for that kind; a zero cap admits nothing. A single kind also receives its floor from its own queue, then fills remaining room in final-ranked order. Calibration uses the public companion evaluation repository, a development aid outside the core library.
+Each cue kind has a floor at the caps it encounters. The measured defaults reserve one slot each for participant, place and topic; activity, trigger, due and date match provisionally reserve one each, and recency defaults to zero. Floors apply per kind, not per person or place: five people share one participant floor. `context.cue_floors` is a calibration knob for these defaults; applications are not expected to set it. Slots are reserved in successive rounds: participant, place, activity, trigger, due, date match, topic, recency. Unused room returns to the common pool, and selected memories keep their ranked order. A zero floor reserves nothing for that kind; a zero cap admits nothing. A single kind also receives its floor from its own queue, then fills remaining room in final-ranked order. Calibration uses the public companion evaluation repository, a development aid outside the core library.
 
 With tracing enabled, `floor_admissions` identifies the object, stage and cue kind when a reserved or spare turn admitted an object outside that stage's original capped prefix. Earlier-stage evidence remains even when a later stage omits the object.
 
@@ -143,6 +146,12 @@ The trace's `scene_cue_searches` reports the best similarity found for the setti
 A participant present in most experiences brings fewer past encounters to mind, while retaining the latest eligible one within the requested limits. A participant recognized by key or name brings only encounters at or before the scene time. Several remarks or participants in one encounter do not make it count more than once. Familiarity limits recalled encounters, not beliefs about that participant. This applies to every notion, including whichever one the application regards as the character.
 
 Meeting a participant recognized by key or name brings what is held about them, even if it was learned elsewhere. Beliefs and observations about that person share one bounded list, with current memories first, then higher salience, newer memory time and ID. Replaced beliefs appear only when `include_superseded` is enabled. The participant's shared occasions come before this aboutness list during expansion. Being mentioned does not count as being present or as an encounter. When several participants bring beliefs to mind, they take turns in scene order within the participant kind; a shared belief counts for each participant. The scene time limits episodes and observations, not interpreted beliefs. See the [retrieval design](docs/design/database/graph_schema_design.md#state-and-last-interaction) for selection details.
+
+A recognized participant also brings unsettled open loops and commitments naming them as actor or counterpart, even when stronger beliefs fill the aboutness list. The trigger floor is shared per kind: with the default of one, only the first-listed person with an eligible obligation has a reserved seat. An application can raise `cue_floors.trigger` to reserve seats for more people present. The reservation queue takes turns among people; within each person, current obligations precede superseded ones, then higher salience and newer memories. Current-first is a floor guarantee only: admitted obligations use score order. The trigger floor reserves the obligation itself; its one hop takes no reserved room and competes for the rest at reminder standing, opening nothing further. An ambiguous name triggers for each possible notion; a description alone triggers nothing. Listing the character as present triggers their obligations by the same rule.
+
+An open loop or commitment can carry an application-supplied `due_at: Option<DateTime<Utc>>`; the library never parses a deadline from text. Due is judged by the scene's local day at the offset the application gave. Scene times the library fixes itself use UTC; an application wanting another local day supplies its offset. Give an all-day deadline as the start of that local day, converted to a UTC instant. A promise due in the evening can come to mind in the morning, without its party present or its topic mentioned. Overdue obligations keep coming until resolved or superseded; `include_superseded` can include replaced ones. Nothing is removed by time: other roads still recall future and settled obligations.
+
+The due floor provisionally reserves one obligation per kind. Its queue puts obligations due on the scene's local day before overdue ones, so a salient old debt does not keep today's promise out of the reserved seat. Within each group, current obligations come first, then salience and newest. These are selector and floor guarantees only; admitted obligations use score order, and overdue promises still come as room allows. Due takes no spare root turn. Its one hop takes no reserved room and competes for the rest at reminder standing, carrying `AdmissionRoad::Due` without a Due cue or floor. Each admitted obligation reports `due_state` as `Overdue`, `DueToday`, `NotYetDue`, or `None` without an instant, even with tracing off. This report changes no selection or score. A replacement carries its own due instant, and changing an instant on a same-id replay is a content collision.
 
 Retrieval statistics are derived from writes. Missing or unhealthy statistics use conservative fanout, normally one neighbour per covered relation/object bucket; the participant routes share the latest occasion, just as a ubiquitous participant does with healthy statistics. The library provides no statistics schema migration or graph-to-statistics rebuild; stores using a superseded schema must be recreated and populated through writes.
 
@@ -203,7 +212,11 @@ future interactions become more continuous
 
 ## Construction
 
-`CharacterMemory::new(settings, collection_name).await?` constructs the default memory system.
+`CharacterMemory::new(settings, collection_name, character_id).await?` constructs the default memory system. Both constructors require the character's notion id. The graph store records that identity on first open, accepts it on later opens, and refuses a different id before opening any vector collection. The identity record does not create a notion.
+
+An open loop or commitment names its parties among its subjects through `BeliefPredicate::Actor` (who owes) and `BeliefPredicate::Counterpart` (to whom). Several actors or counterparts are allowed, but a subject cannot have both roles in one memory. These roles are valid only on open loops and commitments. Each admitted obligation reports `direction: Some(OwedByCharacter)` when the character is an actor, `Some(OwedToCharacter)` when it is a counterpart, or `None` when neither role names it. Obligations without roles also report `None`.
+
+The character perceives the scene and is not listed as a participant. If an application lists it anyway, recall treats it as any other notion. The constructor identity affects only the direction report and the store identity check; it does not change what comes to mind.
 
 By default, this uses:
 
@@ -212,7 +225,7 @@ By default, this uses:
 - Embedded persistent Oxigraph for graph-authoritative memory objects, relationships, provenance, and lifecycle state
 
 ```rust
-let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned()).await?;
+let memory = CharacterMemory::new(settings, "my-assistant-memory".to_owned(), character_id).await?;
 ```
 
 For deterministic tests or custom embedding backends, use:
@@ -222,6 +235,7 @@ let memory = CharacterMemory::new_with_embedding_provider(
     settings,
     "my-assistant-memory".to_owned(),
     embed_provider,
+    character_id,
 ).await?;
 ```
 

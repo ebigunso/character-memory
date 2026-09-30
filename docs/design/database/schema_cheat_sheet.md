@@ -13,6 +13,8 @@ Oxigraph holds memory truth. Qdrant recalls content candidates. Retrieval statis
 
 Vector payload `object_id` joins the graph's UUID `objectId`. RDF resources also carry `objectType`, `graphUri` and `schemaVersion`. Vector records carry `schema_version`; version admission is enforced when records are written.
 
+The graph `urn:cmem:store` holds subject `urn:cmem:store` with `urn:cmem:vocab:characterIdentity` and the character's UUID as a literal. The [store identity check](../../../src/adapters/oxigraph/embedded.rs) writes it once and refuses a different identity before vector initialization. It is not a notion and no recall selector reads it.
+
 ## Vector Records
 
 | Payload field | Shape | Purpose |
@@ -87,6 +89,7 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | Predicate | Meaning |
 |---|---|
 | `derivedType` | Interpreted-memory category |
+| `dueAt` | Optional lossless UTC due-instant literal, only on open loops and commitments; no offset property |
 | `derivedFromEpisode`, `derivedFromObservation` | Experience provenance |
 | `partOfThread` | Thread membership |
 | `aboutEntity` | Notion subject from `entity_ids` |
@@ -95,11 +98,15 @@ Notions carry only common identity/schema literals and `createdAt`. The followin
 | `givenByApplication` | Source-free application grounding; requires a subject and excludes experience sources |
 | `assertion` | Reference to an ordinal assertion resource |
 | `assertionSubject` | Notion subject, present in the containing memory's subject list |
-| `assertionPredicate` | `known_as` |
-| `assertionName` | Supplied name spelling |
-| `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling |
+| `assertionPredicate` | `known_as`, `actor` or `counterpart` |
+| `assertionName` | Supplied name spelling; only for `known_as` |
+| `normalizedName` | NFKC, lowercase and whitespace-folded lookup spelling; only for `known_as` |
 
 Assertion resources use `<memory-uri>:assertion:<zero-padded ordinal>`. Their ordering and repeated values are preserved by the [assertion reader (`belief_assertions_from_rdf`)](../../../src/adapters/oxigraph/shared.rs). Interpreted-memory source, thread, subject and supersedes ID lists use set semantics: conversion sorts IDs and removes duplicates, including on replacement drafts. Scene participants preserve authored order and duplicates.
+
+Obligation roles require an open loop or commitment. Multiple actors and counterparts are allowed; one subject cannot have both roles. The character's role determines the admitted memory's direction report (`OwedByCharacter`, `OwedToCharacter`, or absent), without changing recall through that report. Unsettled obligations can be recalled by a named party through Trigger, or by an elapsed local due day through Due.
+
+The [due reader (`select_due_obligations`)](../../../src/adapters/oxigraph/sparql_selectors.rs) casts `dueAt` as `xsd:dateTime` and selects unsettled obligations before the next local midnight of the retrieval scene, bound as UTC. Missing `dueAt` means no due instant; a replacement supplies its own, and replay equality includes it.
 
 Name lookup reads active beliefs with no incoming `Supersedes` link. It can resolve the same normalized name to several notion IDs; see the [name selector (`select_notions_known_as`)](../../../src/adapters/oxigraph/sparql_selectors.rs).
 

@@ -69,6 +69,7 @@ async fn ann_reopen(root: &std::path::Path) -> CharacterMemory {
         test_support::persistent_settings(root),
         "anniversary_roundtrip".to_owned(),
         test_support::TestEmbeddingProvider::new(2, time_embedding),
+        character_memory::MemoryId::from_u128(1),
     )
     .await
     .unwrap()

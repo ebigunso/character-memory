@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use oxigraph::model::{GraphName, NamedNode, Quad};
+use oxigraph::model::{GraphName, Literal, NamedNode, Quad, Term};
 use oxigraph::store::Store;
 
 use crate::domain::{
@@ -106,6 +106,50 @@ impl OxigraphGraphAuthorityStore {
 
 #[async_trait]
 impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
+    async fn ensure_character_identity(&self, character_id: MemoryId) -> Result<(), CustomError> {
+        let _guard = lock(&self.inserted_quads)?;
+        let subject = NamedNode::new(super::vocabulary::STORE_IDENTITY)?;
+        let predicate = NamedNode::new(super::vocabulary::CHARACTER_IDENTITY)?;
+        let mut transaction = self.store.start_transaction().map_err(oxigraph_error)?;
+        let existing = transaction
+            .quads_for_pattern(
+                Some(subject.as_ref().into()),
+                Some(predicate.as_ref()),
+                None,
+                Some(subject.as_ref().into()),
+            )
+            .next()
+            .transpose()
+            .map_err(oxigraph_error)?;
+        if let Some(quad) = existing {
+            let Term::Literal(literal) = quad.object else {
+                return Err(CustomError::DatabaseError(
+                    "store character identity must be a literal".into(),
+                ));
+            };
+            let stored = literal.value().parse().map_err(|error| {
+                CustomError::DatabaseError(format!("invalid store character identity: {error}"))
+            })?;
+            if stored != character_id {
+                return Err(CustomError::CharacterIdentityMismatch {
+                    stored,
+                    requested: character_id,
+                });
+            }
+            return Ok(());
+        }
+        transaction.insert(
+            Quad::new(
+                subject.clone(),
+                predicate,
+                Literal::new_simple_literal(character_id.to_string()),
+                subject,
+            )
+            .as_ref(),
+        );
+        transaction.commit().map_err(oxigraph_error)
+    }
+
     async fn query_anniversaries(
         &self,
         date: chrono::NaiveDate,
@@ -363,6 +407,36 @@ impl GraphAuthorityStore for OxigraphGraphAuthorityStore {
         CustomError,
     > {
         SparqlGraphSelectors::new(&self.store).select_scope_state(key, policy, limit)
+    }
+
+    async fn query_party_obligations(
+        &self,
+        party: MemoryId,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        SparqlGraphSelectors::new(&self.store).select_party_obligations(party, policy, limit)
+    }
+
+    async fn query_due_obligations(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+        policy: GraphExpansionLifecyclePolicy,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        SparqlGraphSelectors::new(&self.store).select_due_obligations(before, policy, limit)
     }
 
     async fn expand_bounded(
