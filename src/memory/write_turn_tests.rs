@@ -553,7 +553,7 @@ impl GraphAuthorityStore for GatedGraph {
         participants: &[crate::domain::MemoryId],
         limit: usize,
         policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+    ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError> {
         let _ = (date, participants, limit, policy);
         Ok(Vec::new())
     }
@@ -564,7 +564,7 @@ impl GraphAuthorityStore for GatedGraph {
         end: chrono::DateTime<chrono::Utc>,
         limit: usize,
         policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-    ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+    ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
         self.store
             .query_episodes_by_time(start, end, limit, policy)
             .await
@@ -632,12 +632,33 @@ impl GraphAuthorityStore for GatedGraph {
     ) -> Result<(Vec<DerivedMemory>, Vec<GraphExpansionFilteredNode>), CustomError> {
         self.store.query_derived_memories_by_thread(query).await
     }
+    async fn query_thread_state(
+        &self,
+        query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+        limit: usize,
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
+        let _ = (query, limit);
+        self.store.query_thread_state(query, limit).await
+    }
+
     async fn query_scope_state(
         &self,
         key: &ScopeKey,
         policy: GraphExpansionLifecyclePolicy,
         limit: usize,
-    ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+    ) -> Result<
+        (
+            Vec<crate::ports::graph_authority::GraphMemoryRank>,
+            Vec<GraphExpansionFilteredNode>,
+        ),
+        CustomError,
+    > {
         self.store.query_scope_state(key, policy, limit).await
     }
 

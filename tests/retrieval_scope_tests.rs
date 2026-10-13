@@ -284,10 +284,11 @@ async fn key_scopes_share_root_and_pack_caps_with_shared_members_and_activity() 
     }
     let mut scoped = context(scene(Some("place"), &[("z", "42"), ("a", "42")]));
     scoped.activity = Some(ActivityRef::Thread(id(600)));
-    // Three root slots cover place, both custom scopes with one memory, and activity.
+    // Principle 1 serves activity's own head (the thread) before its members.
     scoped.candidate_limits.max_graph_roots = 3;
     let result = memory.retrieve(scoped.clone()).await.unwrap();
-    assert_eq!(ids(&result), vec![id(301), id(311), id(321)]);
+    assert_eq!(ids(&result), vec![id(301), id(311)]);
+    assert_eq!(result.pack.active_threads[0].id, id(600));
     scoped.candidate_limits.max_graph_roots = 12;
     scoped.section_limits.derived_memories = 3;
     let result = memory.retrieve(scoped.clone()).await.unwrap();
@@ -332,8 +333,8 @@ async fn scope_priority_survives_both_caps_and_map_order() {
             .with_derived_memory(same_time_later_id),
     )
     .await;
-    // Selection uses recency; equal final pack scores retain the existing id tie-break.
-    for (root_cap, expected) in [(1, 302), (12, 301)] {
+    // Principle 4 breaks equal section scores by memory time, then id.
+    for (root_cap, expected) in [(1, 302), (12, 302)] {
         let mut limited = context(scene(Some("place"), &[]));
         limited.candidate_limits.max_graph_roots = root_cap;
         limited.section_limits.derived_memories = 1;

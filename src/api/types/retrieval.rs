@@ -121,7 +121,7 @@ impl Default for RetrievalCandidateLimits {
 /// person or place: five people share the participant floor.
 ///
 /// After reservations, spare room follows score order except at root selection,
-/// where given non-time kinds share turns. Time kinds then take remaining room.
+/// where kinds with expanding roads share turns. Other roads fill remaining room.
 /// A zero floor removes the reservation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetrievalCueFloors {
@@ -556,8 +556,6 @@ pub struct RetrievalTrace {
     /// `None` means no range was supplied. Determined by one extra bounded ID read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_range_has_more: Option<bool>,
-    /// More eligible occasions share this local calendar date in earlier years.
-    pub anniversary_has_more: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_cue_searches: Vec<SceneCueSearchTrace>,
     pub floor_admissions: Vec<CueFloorAdmission>,
@@ -575,7 +573,6 @@ impl RetrievalTrace {
         Self {
             vector_candidates: Vec::new(),
             time_range_has_more: None,
-            anniversary_has_more: false,
             scene_cue_searches: Vec::new(),
             floor_admissions: Vec::new(),
             graph_relations: Vec::new(),

@@ -571,7 +571,8 @@ mod tests {
             participants: &[crate::domain::MemoryId],
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<(crate::domain::MemoryId, bool)>, CustomError> {
+        ) -> Result<Vec<(crate::ports::graph_authority::GraphMemoryRank, bool)>, CustomError>
+        {
             let _ = (date, participants, limit, policy);
             Ok(Vec::new())
         }
@@ -582,7 +583,7 @@ mod tests {
             end: chrono::DateTime<chrono::Utc>,
             limit: usize,
             policy: crate::ports::graph_authority::GraphExpansionLifecyclePolicy,
-        ) -> Result<Vec<crate::domain::MemoryId>, CustomError> {
+        ) -> Result<Vec<crate::ports::graph_authority::GraphMemoryRank>, CustomError> {
             let _ = (start, end, limit, policy);
             Ok(Vec::new())
         }
@@ -666,12 +667,33 @@ mod tests {
             Ok((Vec::new(), Vec::new()))
         }
 
+        async fn query_thread_state(
+            &self,
+            query: &crate::ports::graph_authority::GraphDerivedMemoryThreadQuery,
+            limit: usize,
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<crate::ports::graph_authority::GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
+            let _ = (query, limit);
+            unreachable!("this fixture never queries thread state")
+        }
+
         async fn query_scope_state(
             &self,
             key: &ScopeKey,
             policy: GraphExpansionLifecyclePolicy,
             limit: usize,
-        ) -> Result<(Vec<MemoryId>, Vec<GraphExpansionFilteredNode>), CustomError> {
+        ) -> Result<
+            (
+                Vec<crate::ports::graph_authority::GraphMemoryRank>,
+                Vec<GraphExpansionFilteredNode>,
+            ),
+            CustomError,
+        > {
             let _ = (key, policy, limit);
             unreachable!("scope selector is not used by this failure fixture")
         }

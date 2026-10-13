@@ -1182,15 +1182,16 @@ async fn each_zero_floor_removes_only_its_reservation() {
             .iter()
             .filter(|row| row.stage == CueFloorStage::GraphRoots)
             .all(|row| row.cue_kind != kind));
-        // A zero reservation still participates when spare turns are available.
+        // Expanding roads still share spare turns; descriptions do not.
         context.candidate_limits.max_graph_roots = 8;
         let spare = memory.retrieve(context).await.unwrap();
-        assert!(
+        assert_eq!(
             spare
                 .pack
                 .relevant_episodes
                 .iter()
                 .any(|object| object.id == MemoryId::from_u128(witness)),
+            matches!(kind, CueKind::Activity | CueKind::Topic),
             "{kind:?}"
         );
     }
