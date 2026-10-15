@@ -22,7 +22,7 @@ Beliefs remain ordinary interpreted memories, grounded in the character's experi
 
 The first-class fact-acceptance objects deferred by ADR-D-0005—`Assertion`, `Claim`, `EvidenceLink`, `BeliefAssessment` and `SourceAssessment`, with confidence and stance for deciding factual acceptance—leave the roadmap rather than remain conditional future work. This is the outcome of that record's revisit, replacing its expectation that richer factual rigor will require a separate belief ontology.
 
-ADR-D-0035's assertions stay: a mechanical assertion is the character's commitment carried by an ordinary belief, not a separate fact-acceptance object. A claim held in interpreted memory and the provenance that grounds it stay too. Source reliability is what the character believes about a source, held as remembered experience. How firmly a belief is held is read from its recorded basis, as ADR-D-0030 requires.
+ADR-D-0035's assertions stay: a mechanical assertion is the character's commitment carried by an ordinary belief, not a separate fact-acceptance object. A claim held in interpreted memory and the provenance that grounds it stay too. Source reliability is what the character believes about a source, held as remembered experience.
 
 ## Why
 
@@ -35,7 +35,7 @@ This serves the product philosophy's section 8.2, “A belief is built from expe
 
 ## Decision Boundary
 
-Invariant: beliefs remain grounded, revisable interpretations of the character's experience; the library has no first-class ontology that adjudicates factual acceptance. Ordinary claims, provenance and ADR-D-0035's belief-carried assertions are within that boundary.
+Invariant: beliefs remain grounded, revisable interpretations of the character's experience; the library has no first-class ontology that adjudicates factual acceptance. Ordinary claims, provenance and ADR-D-0035's belief-carried assertions are within that boundary. Derived-memory kinds stay distinguished by the `derived_type` field rather than first-class objects for each kind. How firmly a belief is held is read from its recorded basis, as ADR-D-0030 requires.
 
 Not covered: the representation and scheduling of temporal validity, attribution, aliases or roles over time, who else knows, or the character's beliefs about sources; predicate vocabulary, storage and rendering; or fact-checking an application performs outside the library.
 
@@ -51,6 +51,8 @@ The library's product purpose expands from preserving a character's experience t
 ## More Information
 
 - [ADR-D-0005](ADR-D-0005-derived-memory-subtypes-before-belief-ontology.md) is the deferral this proposal revisits and would replace.
+- [ADR-D-0001](ADR-D-0001-episode-backed-object-model.md)'s expectation of richer claim or belief objects as future work is foreclosed by this record; its six-object decision stands.
+- [ADR-D-0016](ADR-D-0016-do-not-add-generic-metamemory-plane.md)'s Decision line “claim support lives in EvidenceLink” is affected: under this decision, claim support is the recorded basis and provenance an interpreted memory already carries ([ADR-D-0028](ADR-D-0028-interpreted-memory-carries-its-evidence.md)); that line awaits the owner's retirement.
 - [ADR-D-0030](ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) keeps the basis of a belief separate from a confidence score.
 - [ADR-D-0035](ADR-D-0035-assertions-are-commitments-carried-by-ordinary-beliefs.md) defines the assertions retained by this decision.
 - [Product philosophy, section 8.2](../../project_philosophy.md#82-memory-held-as-experience) states the subjective memory boundary; [the v0.2 completion brief, section 3](../../coding-agent/briefs/active/v0-2-completion-brief.md#3-the-roadmap) directs the roadmap's change.
