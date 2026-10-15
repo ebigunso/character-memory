@@ -18,12 +18,15 @@
     - The stream is built in the memo's construction, not in its display.
   - Every other section stays per section, in the order the pack already has.
   - Nothing is dropped, folded, truncated or deduplicated by the memo (ADR-D-0038, ADR-D-0018).
-- Each entry carries its own text and the result's typed facts, reused and joined by object reference. The text is an episode's summary, an observation's text, a thread's title and summary labelled in progress, or an interpreted memory's text. The facts are `admitted_by`, `resolved_by`, `direction`, `due_state`, `seconds_since_support` and `sources`. The display prints:
+- Each entry carries its own text and the result's typed facts, reused and joined by object reference. The text is an episode's summary, an observation's text, a thread's title and summary labelled in progress, or an interpreted memory's text. The facts are `admitted_by`, `resolved_by`, `direction`, `due_state`, `seconds_since_support`, `sources` and, for an interpreted memory, its `derived_type`. The display prints:
   - settled, when `resolved_by` is non-empty;
   - you owe this, for `OwedByCharacter`; this is owed to you, for `OwedToCharacter`; and nothing about owing when `direction` is `None`;
   - overdue, due today or not yet due;
   - last supported an elapsed time ago;
-  - the recorded source scenes, or that a source is forgotten or missing.
+  - the recorded source scenes, or that a source is forgotten or missing;
+  - the kind of an interpreted memory, from its `derived_type` in one exhaustive match (a promise, an open matter, a note about someone, a preference of the other person, a preference of your own, a signal about yourself, a claim, a correction, and so on), neutral about direction ("a promise", never "your promise"). The kind decides no owing and no standing.
+
+  When `resolved_by` is non-empty, owing and due state are still shown (ADR-D-0018) but in the past tense, so a kept promise that reports `OwedByCharacter` and `Overdue` reads as settled and never as still owed (ruling 79). A settled obligation sits in the pack's derived memories, so it appears under "what you hold", not under "promises and open matters".
 
   No score, rank, cue kind, rationale, telemetry, trace or id appears in the text. Who a promise concerns is told by the memory's own text.
 - Each entry says how it came to mind, phrased from its `admitted_by` set and nothing else, with one phrase per road present, in the enum's order. Each phrase is true for everything that road can bring:
@@ -152,6 +155,7 @@
 - justification: no existing surface changes. The companion evaluation repository reads the native result and may print the memo in its own plan.
 
 ## Context (workspace)
+- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`.
 - Related files and areas, at the consolidation's final tip ef8dbfb; the prospective slice adds its fields on top:
   - `src/api/types/retrieval.rs`:
     - `RetrieveOutcome` at 245;
@@ -174,7 +178,7 @@
   - `Cargo.toml`: `tempfile` at 41.
   - `README.md`: the admission-road table at 55-67; the road table at 77-90.
 - Neighbour plans: the prospective plan, which provides `direction`, `due_state`, `AdmissionRoad::Due` with its one-hop reach, and the constructor taking the self. The consolidation plan (completed), which provides `admitted_by`.
-- Rulings: the rulings log, items 6, 10, 11, 20, 31, 32, 42, 52, 60, 62, 72, 73, 75, 76.
+- Rulings: the rulings log, items 6, 10, 11, 20, 31, 32, 42, 52, 60, 62, 72, 73, 75, 76, 79, 80.
 - Reviews: `.agent-work/reviewer/v0-2-renderer-plan-review.md` (Tier D R1 to R4, 2026-09-23) and the Tier A findings 6 and 9.
 - Design records consulted, and deviations from their acceptance: ADR-D-0018, D-0020, D-0022, D-0023, D-0028, D-0029, D-0038, ADR-I-0013, I-0029. There is one deviation from the phase draft's illustrative shape: the projection is on the result rather than the pack, and it takes no style value. The draft calls that shape illustrative, so no record is touched.
 
@@ -185,7 +189,7 @@
 - Controls that must not change: every retrieval test's expectation, and the whole result at the parent commit and at each tip for the example's own store and scenes.
 
 ## Open Questions (max 3)
-- None. The chronological order of "what happened" was ruled from behavior, and its cost under a topic is stated in the Design. The decider may veto it at the slice boundary, and the veto is one deleted sort.
+- None. The decider kept the chronological order of "what happened" on 2026-10-15 (ruling 80).
 
 ## Assumptions
 - A1: The base carries `IncludedDerivedMemory.direction: Option<ObligationDirection>`, `due_state: Option<DueState>`, `AdmissionRoad::Due`, and the constructors taking the self, with the names the prospective plan pins. Source: that plan. A precondition of dispatch.
@@ -240,7 +244,8 @@
     - The Bob–Alice open loop with `direction` `None` and `admitted_by` including `Participant`. Its display says nothing about owing.
     - The relationship note with its whole seconds.
     - The Alice episode with its recorded scene with Alice and without Bob.
-    - Every entry's `admitted_by` equal to the result's, including these exact sets: `PersonDescription` for the description-only occasion; `Place` for the custom-value memory; `Topic` for the topic descendant; `Anniversary`, `Range` and `Recency` for those memories.
+    - Every entry's `admitted_by` equal to the result's.
+    - A settled, overdue commitment owed by the character, with `resolved_by` non-empty, read in the past tense and never as still owed; and each interpreted memory's `derived_type` equal to the admitted memory's.
     - Every other section in pack order; every admitted memory once as a typed entry; no score or id in the text.
   - Stream order cases, asserted on typed entry order:
     - Mixed episodes and observations: an observation whose `observed_at` lies between two episodes' scene times and differs from its own parent's time sits between those episodes.
@@ -249,17 +254,17 @@
     - Equal times keep the concatenation order, episode before observation.
   - The one text assertion is scoped to a section's body. No test asserts the memo's wording.
   - The elapsed function is tested at the unit boundaries (59 seconds, 60 seconds, an hour, a day, a year) on its numeric or enum-shaped result.
-  - Retrieving the store at the parent commit and at this tip gives the same result, twice, in both id orders.
+  - The report files the printed memo of every fixture retrieval, including the four R4 witnesses, for the decider's read.
   - The report lists every field the memo reads and records whether any admitted memory had an empty `admitted_by` (A2).
 - validation:
   - kind: command
     required: true
     owner: worker
-    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test; the parent-equality run recorded in the report"
+    detail: "cargo fmt --check; cargo check; cargo clippy --all-targets -- -D warnings; cargo test"
   - kind: review
     required: true
     owner: reviewer
-    detail: "Tier D diff review, tracing every field the memo reads, the stream's concatenation and time source, that each entry's admitted_by is the result's and nothing else decides how a memory came or whether anything is owed, that only Memo is public, that no retrieval code is touched, and that the display is the one place the words live; Tier A altitude review against the philosophy (7.2 knowing versus being reminded; 9.3 gist and stance), rulings 60, 62 and 72, each road phrase checked against everything its road can bring, ADR-D-0038 (nothing withheld, no verdict), ADR-D-0023 and ADR-D-0029 (no purpose, no identity from a description) and ADR-I-0029 (structure authoritative, tests on fields)"
+    detail: "Tier D diff review, tracing every field the memo reads, the stream's concatenation and time source, that each entry's admitted_by is the result's and nothing else decides how a memory came or whether anything is owed, that derived_type is copied from the admitted memory and feeds only the kind word (never owing or standing), that a settled obligation is never phrased as still owed, that only Memo is public, that no retrieval code is touched, and that the display is the one place the words live; Tier A altitude review against the philosophy (7.2 knowing versus being reminded; 9.3 gist and stance), rulings 60, 62 and 72, each road phrase checked against everything its road can bring, ADR-D-0038 (nothing withheld, no verdict), ADR-D-0023 and ADR-D-0029 (no purpose, no identity from a description) and ADR-I-0029 (structure authoritative, tests on fields)"
 
 ### Task_2: A character carries its memory through a few turns, in code anyone can run
 - type: impl
@@ -310,7 +315,7 @@ The two tasks share one crate, so they run in sequence, each as one pull request
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-10-16: the v0.2 completion brief governs this plan from revision `785391cf` (the brief and the ratified philosophy committed on this branch). Held under the brief's section 4: "the renderer's phrasing of standing and roads" waits for the amendment carrying the v0.2 design re-examination, so Task_1 (WIP `ae319921` on `feature/2026-10-15/renderer-memo`, report `.agent-work/worker/renderer-task1-report.md`) and Task_2 stay stopped with every proof input kept. The brief's section 3 puts this renderer and the example loop ahead of the evals re-baseline and the paid runs, so this plan resumes first once the amendment lands, and is re-anchored to it before any go.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
@@ -420,6 +425,22 @@ The two tasks share one crate, so they run in sequence, each as one pull request
     - "ongoing threads" as a fifth heading: EARNS-ITS-PLACE (threads are not promises).
   - Lesson: when a revision deletes a mechanism, grep the earlier draft for the records it carried, and carry each forward or name it. Here, deleting `MemoParty` removed the only place the scene's words for a party reached the memo; that is named as dropped, with direction and the memory's text carrying the fact.
   - User approval: ruled by the coordinator; logged for presentation.
+  - Record proposed: none.
+
+- 2026-10-15 Decision: the decider keeps the chronological "what happened" stream (ruling 80), and the plan is re-anchored before dispatch.
+  - Base: renderer plan tip `ac41e5c0`, which carries the prospective slice's last tip `b3aba0b2`. Assumption A1 holds there.
+  - Measurement BEFORE: the prospective slice-end AFTER, `official-after-a.json` (SHA `9060ce4e…`, library 9c7eb40f, harness 3a712252), in `CharacterMemoryEvals/.agent-work/worker2/prospective-slice-end/`. The harness for the slice-end run is evals PR 85's tip, 3a712252.
+  - Paired evals change: the generated runner prints `memo()` for every after-retrieval (A4). It is the slice-end instrument and lands as an evals PR on the stack top, after Task_1, before the slice-end run.
+  - User approval: the decider ruled the stream; the re-anchor is the orchestrator's.
+  - Record proposed: none.
+
+- 2026-10-15 Decision: value audit of the re-anchored plan (Tier A), applied.
+  - Settled obligations carry direction and due state too (`push_derived`), so the display phrases them in the past when `resolved_by` is non-empty (ruling 79), and the fixture gains a settled, overdue commitment.
+  - "What you hold" mixes kinds in one pack section, and philosophy 9.3 keeps reflections apart from character signals and preferences with their holder; the approved crate-internal `derived_type` field is phrased for every kind in one exhaustive match. Splitting headings by pack section was rejected because the derived section holds mixed kinds.
+  - Task_1's report files the printed memos of its fixtures, so R4's witnesses reach the decider.
+  - The exact per-road `admitted_by` sets: OVERSIZED, replaced by equality with the result. The parent-equality retrieval run: DELETE (the diff touches no retrieval code; R1 covers it at slice end).
+  - Integration: the residuals plan (ruling 81) changes retrieval on a sibling line. The slice-end AFTER runs at the renderer's Task_2 tip with no residuals commit beneath it; if the stack is reordered first, a new BEFORE is taken.
+  - User approval: decided under the standing instruction and logged for presentation.
   - Record proposed: none.
 
 ## Notes
