@@ -143,6 +143,8 @@
   - No item ask-now or ungraded. Inferred calls journaled: failed-rebuild cause retention with its one-cause limit; no public call; the mid-session limit; the subject-state read's move to the 4a plan.
 - 2026-10-16: the narrowed plan goes to a plan re-review (the Plan Gate's second source needs one closed after the revision); go for Task_1 follows it.
 
+- 2026-10-16: Task_1 built (38b7e702; docs follow-up afb97202 after the reviewer's R1 P2 on README and the database design documents, two consistency touches outside owns accepted). Worker gates pass (532 tests); witness base healthy 4 / degraded 1 / reopened 1 unhealthy, tip 4 / 1 / 4 healthy, same ids and order, replayed twice. Tier D APPROVED through afb97202 (`.agent-work/reviewer/residual-stats-recovery-review.md`). Judgement calls: the expectation change in `oxigraph_queries_links_separately_from_memory_objects` (a query asking for a link now gets it). Pending: evals-worker's scene and keyless controls at the tip, then the measurement verdict, then the closeout audit. Pull requests opened: the plan on #144's branch, the task on the plan branch.
+
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
   - User approval: the decider chose the scope; plan approval is waived under the standing authorization.
