@@ -970,3 +970,20 @@ Prevention:
 
 Evidence:
 - `docs/coding-agent/plans/active/v0-2-situated-recall-plan.md` Decision Log 2026-10-16; the catalog and roadmap plan's Task_2 report (ADR-D-0013 and ADR-D-0014).
+
+## 2026-10-16 - Read push output, and keep machine paths out of committed records [tags: orchestration, git, privacy]
+
+Symptom:
+- Several pushes reported as successful had been refused by the machine's pre-push privacy hook, which rejects any outgoing commit containing the local user path; the refusals were hidden by an output filter on the push command. Three plan branches had up to fifteen unpublished commits, and the value-audit dispatch texts logged verbatim in the plans carried absolute worktree paths.
+
+Root cause:
+- Dispatch texts were logged with absolute paths, against the rule that committed artifacts carry no machine-local paths; the push commands piped their output through a filter that dropped the hook's refusal.
+
+Fix applied:
+- The unpublished commits were rewritten with `git filter-branch` over `origin/<branch>..<branch>` to repository-relative paths and pushed; nothing already on the remote was touched.
+
+Prevention:
+- Audit dispatch texts and any logged command are recorded with repository-relative paths. A push command's output is read in full; a background push reports its tip against `git ls-remote` before the branch is called published.
+
+Evidence:
+- The 2026-10-16 commits on the residuals, catalog and situated recall plan branches.
