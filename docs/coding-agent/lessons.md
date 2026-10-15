@@ -953,3 +953,20 @@ Prevention:
 
 Evidence:
 - `src/adapters/qdrant/store.rs` `service_wrong_width_upsert_fails_before_contacting_qdrant`; `docs/coding-agent/plans/completed/facade-contract-gaps-plan.md` Progress Log 2026-09-17.
+
+## 2026-10-16 - A task's owns come from the root cause's scope section, and a planner-added invariant is checked against its task's other bullets [tags: orchestration, planning, plan-integrity]
+
+Symptom:
+- The situated recall plan passed the validator with three tasks whose acceptance could not be met inside their owns (the busy-occasion fix needs `shared.rs`, the batched subject read needs `select_state`'s body, the records task needs the retirement procedure's moves and reference repairs), and with one task whose planner-added same-set control contradicted the deletions the same task performed.
+
+Root cause:
+- Owns were written from where each symptom sits, not from the root-cause reports' "scope a fix would need" sections; the control arm was added for measurement value without checking it against the task's own acceptance.
+
+Fix applied:
+- Owns widened from the root causes; the contradictory control dropped, the base tip is the control arm.
+
+Prevention:
+- When a plan carries a root-cause report, each task's owns are checked against that report's scope section before the validator runs. Each planner-added requirement is checked against every acceptance bullet of the task it constrains, not only against the request. When a plan removes a mechanism from a draft or record, its Context lists every accepted record that names that mechanism (grep docs/decisions for its words).
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-situated-recall-plan.md` Decision Log 2026-10-16; the catalog and roadmap plan's Task_2 report (ADR-D-0013 and ADR-D-0014).
