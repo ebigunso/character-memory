@@ -115,6 +115,34 @@
 - 2026-10-16: the amendment landed (brief section 4a, committed at `a9e0daac`, merged here); Counsel's relays are admitted standing by the owner in this session. This plan is narrowed to the statistics recovery and is audited again as a revision.
 
 
+- 2026-10-16: plan-draft value audit of the narrowed plan dispatched at `fb726717`, text verbatim: "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-residuals-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: plan draft. Documents read: the brief (sections 1 to 8 with the 4a amendment and its ratification record), the philosophy by the pointer line, its companion, common.md (Standing Approvals: one entry, Counsel's relays, "Acceptance of this entry as written: pending", so none in effect; nothing in this plan relies on one), the plan whole as claims; code read only to judge whether the hydrator change is observable (shared.rs 138-173, embedded.rs callers, write_planning.rs, correct_forget.rs, lib.rs, composition.rs 302-316); notes never opened; readings opened once after grading. Product basis: the philosophy (companion, second version, current) and the brief in the product owner's words (section 8; 4a carries its own record). Not audited: the engineering side (no document). Missing inputs: none. Value documents changed in range: none.
+  - DoD 1 (heals at next open, failed rebuild keeps original cause, healthy selection unchanged) | maps to the brief | cited | brief section 4 "statistics recovery ... proceeds"; 4a "What this leaves standing ... the storage and schema work"; 4a "What it replaces: the recall selection and room" (untouched here) | -
+  - DoD 2 (measurement) | internal mechanics | not audited | - | the scene and keyless families are not the paid runs section 5 forbids; if a control run would spend, section 5 binds
+  - Planner-added: rebuild at open, no new call | maps to the brief | cited | brief section 4 | -
+  - Planner-added: failed rebuild keeps marker and original cause, one-cause limit | maps to the brief | inferred | extends philosophy 8.6 "Expose retrieval rationale", section 10 "Avoid silent forgetting ...", 8.5 "Forgetting is always someone's decision ..."; cheap to undo | -
+  - Planner-added: no public call or setting | maps to the brief | inferred | extends philosophy section 9 "a memory system, not a database client" and 8.1; cheap to undo | -
+  - Planner-added: witness changes selection at the base | internal mechanics | not audited | - | -
+  - Scope | maps to the brief | cited | brief section 4; 4a storage work stands | -
+  - Non-goal: busy-occasion order moves to the 4a plan | maps to the brief | cited | brief section 4 (waits); 4a replaces the selection | -
+  - Non-goal: subject-state read's speed moves to the 4a plan | maps to the brief | inferred | extends 4a "What it replaces: the recall selection and room"; section 4 lists the read among work that proceeds and 4a's storage line does not name it; a deferral within the run, cheap to undo | -
+  - Non-goals: no healthy-selection change, no public API, no stored-shape change | brief / internal | cited / cited / not audited | 4a; philosophy section 9 | -
+  - Design assumption: mid-session failure stays conservative until next open | maps to the brief | inferred | extends brief section 4 "statistics recovery"; cheap to undo | -
+  - Design: delete the hydrator's two MemoryLink exclusions | internal mechanics | not audited | - | auditor's own check found no observable change; the Reviewer's caller survey is the right check
+  - Integration | internal mechanics | not audited | - | merges into the run's own branch, not outward-facing
+  - Task_1 | maps to the brief | cited | brief section 4; 4a storage work stands | -
+  - Decision Log 2026-10-15 (four residuals, one plan, waiver line) | maps to the brief | cited | section 4; the waiver line is withdrawn by the narrowing entry | -
+  - Decision Log 2026-10-15 Task_2 root cause | internal mechanics | not audited | - | -
+  - Decision Log 2026-10-15 Task_4 key | maps to the brief | cited | 4a replaces the selection; the key travels to the 4a plan | -
+  - Decision Log 2026-10-15 drop the second-person residual | maps to the brief | cited | 4a "No room is reserved per kind of cue ..."; the entry's "is correct" reading is not relied on | -
+  - Decision Log 2026-10-15 first review applied; 2026-10-16 old Task_1 root cause; re-review; second re-review | internal mechanics | not audited | - | -
+  - Decision Log 2026-10-16 runs under the brief | maps to the brief | cited | section 4 | -
+  - Decision Log 2026-10-16 narrowing, waiver corrected, authority line | maps to the brief | cited | section 4; 4a; section 1 Governance "The Orchestrator decides and logs everything below direction level"; the authority line restates the Plan Gate's second source and this verdict approves nothing by itself; that source also requires a plan review closed after the narrowing, which the log does not yet record | -
+  - Human-only conditions pending: brief section 2 (catalog), section 3 (roadmap), 4a (the owner's blind reading at closeout). None touched by this plan.
+  - Scenarios: none
+  - No item ask-now or ungraded. Inferred calls journaled: failed-rebuild cause retention with its one-cause limit; no public call; the mid-session limit; the subject-state read's move to the 4a plan.
+- 2026-10-16: the narrowed plan goes to a plan re-review (the Plan Gate's second source needs one closed after the revision); go for Task_1 follows it.
+
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
   - User approval: the decider chose the scope; plan approval is waived under the standing authorization.

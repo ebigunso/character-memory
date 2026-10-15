@@ -55,4 +55,9 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Task_1 | covered | brief section 4, statistics recovery.
 - Decision Log 2026-10-16: narrowed under 4a, moved tasks, waiver corrected | covered | brief section 4a; brief section 1 governance.
 
+- Verdict comparison for the narrowed revision (2026-10-16), as returned:
+  - Reading compared: Goal diverges (Orchestrator covered by 4a's storage line; auditor: busy-occasion move cited, subject-state read's move inferred, since section 4 names that read among work that proceeds); DoD heals at next open agrees; DoD measurement agrees (internal); rebuild at open agrees; failed rebuild keeps marker and cause agrees; no public call agrees; witness at base agrees; Non-goals diverge on the subject-state read's move only; mid-session limit agrees; Task_1 agrees; Decision Log narrowing agrees. Unread under this heading: the hydrator-exclusions Design item, Integration, Scope, the earlier Decision Log entries.
+  - Findings compared: none found.
+  - Correction inside the run: the subject-state read's move is an inferred deferral, not covered; the 4a design plan's Context states where that work goes, so the brief's "proceeds" item is not lost.
+
 ## Findings
