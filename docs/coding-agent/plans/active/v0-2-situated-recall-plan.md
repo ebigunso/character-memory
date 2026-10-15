@@ -26,7 +26,7 @@
 - Fanout pruning in graph expansion becomes a reported cut, not a silent trace fact: without it a busy occasion's omitted observations are invisible to the result, the defect the busy-occasion root cause measured.
 - The cursor of the walk is keyset-based (last key seen), not an offset: an offset skips or repeats under concurrent writes, and 4a requires neither skip nor silent stop.
 - Verified absence requires a healthy statistics store and a complete walk at a snapshot token; where the engine gives no snapshot, the result says the check was at the time of reading: 4a requires "an exhaustive, healthy structural check ... at a stated snapshot", and claiming a snapshot the engine does not give would be an invented guarantee.
-- The null distribution for resemblance is measured on the deterministic test embedder in this plan, and the live embedder's distribution is a named follow-up needing the owner's spend decision (Open Questions): 4a requires the bound "measured against a null distribution on the intended embedder", which costs embedding calls.
+- The null distribution for resemblance is measured on the deterministic test embedder in the suite and once on the intended live embedder outside it (a bounded, one-time set of embedding calls, its size and cost recorded): 4a requires the bound "measured against a null distribution on the intended embedder".
 - Subject-state batching with one global lifecycle, order and cap pass: the only form measured fast with identical rows (root cause of 2026-10-15); per-batch caps would select differently.
 - Tests that the brief lists as standing but that assert floors or slots are restated to assert their behavioural claim: 4a names the obligation and resolution tests as standing, and their floor assertions cannot survive a design with no floors.
 - The result's situations keep the obligation's `direction`, `due_state` and `resolved_by`: they are the owed-and-due ingredient 4a names.
@@ -62,7 +62,7 @@
 - After this plan: the evaluation repository's re-baseline (Task_6 there) at the final tip, then the closeout reading (brief section 3), then the paid runs (section 5).
 
 ## Open Questions (max 3)
-- The resemblance null distribution on the intended embedder costs live embedding calls (not a benchmark run; outside the brief's section 5 wording but a spend). This plan measures the null on the deterministic test embedder and names the live measurement as a follow-up; the owner decides whether the spend happens in v0.2.
+- None. The live-embedder null distribution was authorized by the owner in this session on 2026-10-16: "You can do the embedding call." (Decision Log).
 
 ## Assumptions
 - A1: Oxigraph 0.5.7 exposes no read snapshot across queries; the walk reports "at the time of reading" unless Task_3's probe finds one. Checked by Task_3.
@@ -142,7 +142,7 @@
 - acceptance:
   - A situation anchored on a present person, a place, a thread or an unsettled matter gathers what rests on it through its own links one bounded hop and, through shared subject and thread, what bears on it that nobody linked; where the bound cut the gathering the situation says so with a continuation; fanout pruning is such a cut.
   - Situations and their parts are ordered by one rule stated in the design record over the reported ingredients, with identifier as the last resort; the companion's busy-occasion family selects the same observations in both identifier orders. The rule is chosen by a bounded experiment between a lexicographic order and a stated combination on the pressure families, recorded in the report and the Decision Log; the chosen rule is deterministic and has no hidden formula.
-  - A topic or description vector hit admits a situation only above the null distribution measured on the test embedder, is labelled as a match by wording where that is all that connects it, and never contributes to weight.
+  - A topic or description vector hit admits a situation only above the null distribution (measured on the test embedder in the suite, and once on the intended live embedder outside it, the live threshold recorded as the shipped default with its sample size), is labelled as a match by wording where that is all that connects it, and never contributes to weight.
   - A familiar person or place (read from share, frequency and recency) brings what is new or unresolved with it, measured against the recorded experience; one met once brings that occasion; a description brings a labelled reminder.
   - The three absence states are produced: nothing found names the paths attempted; something thin covers ambiguous names, names with little behind them (the share threshold recorded) and wording-only matches; verified absence is produced only when the walk of Task_3 ran to the end for that name, predicate or range on a healthy store, with its snapshot statement.
   - A coverage policy is added only if the measurement shows the present person crowded out by a loud topic, and then as a named, documented policy in the design record (4a, provisional); the report states whether it was needed, with the numbers.
@@ -244,3 +244,4 @@ Task_2 and Task_4 both touch `src/usecases/retrieve.rs`; the file is split by fu
   - Rulings in this plan: felt tone, departure from expectation and "ever said" for matters are reported `unknown` in v0.2 (no data; ADR-D-0033 forbids a number for feeling); the null distribution is measured on the test embedder here (Open Question for the live one); a coverage policy enters only on the measurement, as 4a's provisional line says; the share budget and the named-notion exemption are re-decided in the implementation record rather than left unrecorded by returning ADR-I-0036.
   - User approval: the brief's amendment, the owner's ratified words; authorization under the Plan Gate's second source after the plan review and the plan-draft value audit.
   - Record proposed: three (Task_1), plus supersessions and returns.
+- 2026-10-16 Decision: the owner authorized the live-embedder null measurement: "You can do the embedding call." (in this session, 2026-10-16). Task_4 measures it once, bounded, outside the suite, and records sample size and cost; the Open Question is closed.
