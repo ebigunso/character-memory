@@ -971,6 +971,40 @@ Prevention:
 Evidence:
 - `docs/coding-agent/plans/active/v0-2-situated-recall-plan.md` Decision Log 2026-10-16; the catalog and roadmap plan's Task_2 report (ADR-D-0013 and ADR-D-0014).
 
+## 2026-10-15 - A plan-approval waiver does not waive the plan review or the value audit [tags: orchestration, planning, gates]
+
+Symptom:
+- A four-task plan was written and its first wave dispatched within minutes, before its Reviewer plan review, before its plan-draft value audit and without a recorded research waiver. The same hour, a re-anchored plan was dispatched without the value audit its handoff named as a precondition.
+
+Root cause:
+- The decider asked to use spare worker capacity before a usage reset. Under that pressure the standing waiver of plan approval was read as covering the review and the audit, which it does not: the standing authorization says the plan reviews still run, and the value audit is a separate condition of autonomy.
+
+Fix applied:
+- The workers were told to finish the root-cause step and hold before writing any fix. The plan records the research waiver and the gate miss, each task's scope is narrowed from its root cause, and the plan review and value audit run before any fix is authorized.
+
+Prevention:
+- When the decider asks for speed, start with work that needs no new plan (tasks of plans already reviewed, measurement-only runs) while the new plan is reviewed. A new plan's workers may start only on a root-cause or research step that writes no fix, and the brief says so from the first message.
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-residuals-plan.md` Research and Progress Log, 2026-10-15.
+
+## 2026-10-16 - A plan revision re-reads every research input, and a document revision checks who cites it [tags: orchestration, planning, research]
+
+Symptom:
+- Two plan reviews returned changes for inputs that were already on disk. The residuals plan's revision kept a design for Task_1 that its own root-cause report had measured as ineffective, while the sibling tasks' reports had been folded in. The catalog and roadmap plan sent two parallel tasks to revise a document whose identifiers are cited across the roadmap, decision records and the evaluation repository, and to remove roadmap items an accepted record defers, without checking either.
+
+Root cause:
+- The revision applied review findings without re-reading every research output listed as input, and the catalog plan's research waiver rested on a mapping from the philosophy to the documents, not from the documents to their consumers and records.
+
+Fix applied:
+- Task_1's design now follows its measurements, with a root-cause entry in the Decision Log. The catalog plan rules on identifier stability, the accepted record and the placements before dispatch.
+
+Prevention:
+- Before a plan revision goes to review, every task whose research is cited has a root-cause entry, and its design is checked against the variants the report measured. Before drafting a revision of a referenced design document, grep its identifiers across docs, decisions and the evaluation repository, and grep the decision records for every concept the plan moves or removes.
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-residuals-plan.md` and `v0-2-catalog-roadmap-plan.md`, Decision Logs of 2026-10-16.
+
 ## 2026-10-16 - Read push output, and keep machine paths out of committed records [tags: orchestration, git, privacy]
 
 Symptom:

@@ -147,15 +147,15 @@ The edge index deduplicates counted `(entity, relation, object type, object)` tu
 
 The edge cache's `is_current` value is derived from graph state. Episodes have no supersession, so their active and current counts are equal. Including suppressed but excluding superseded memories uses total relation/object counts as an approximation, with possible fanout distortion in either direction; graph filtering still enforces eligibility.
 
-SQLite schema initialization is transactional, including the episode tables. The library provides no statistics schema migration or graph-to-statistics rebuild; stores using a superseded schema must be recreated and populated through writes.
+SQLite schema initialization is transactional, including the episode tables. No statistics schema migration is provided; stores using a superseded schema must be recreated and populated through writes.
 
-Statistics cannot establish object existence, provenance, links or retrieval eligibility. An unhealthy stats store causes conservative selectivity fallback and requires caller-managed recovery.
+Statistics cannot establish object existence, provenance, links or retrieval eligibility. Unhealthy statistics use conservative selectivity fallback. Opening `CharacterMemory` with an unhealthy SQLite statistics store rebuilds them from graph authority and clears the marker on success. A failed rebuild leaves the unhealthy marker and its original cause unchanged; the next open retries. Statistics that fail mid-session stay conservative until the instance is reopened.
 
 ## Failure Boundaries
 
 - Graph failure rejects the authoritative write. Later vector or stats failure is reported as a typed repair outcome while the graph commit stands.
 - Malformed candidate IDs or unknown object-type/surface tokens fail decoding. Graph hydration rejects absent or lifecycle-ineligible objects before context inclusion.
 - A graph-only object has reduced semantic recall until indexed. Superseded interpreted memories are not re-indexed by replaying old plans.
-- Cross-store reconciliation and stats rebuild are caller/operator responsibilities; the library exposes no such operation.
+- Cross-store reconciliation remains a caller or operator responsibility; the library exposes no reconciliation operation.
 
 The [graph schema design](graph_schema_design.md) explains the authority and belief model. The [vector payload design](vector_payload_design.md) describes the recall record contract.

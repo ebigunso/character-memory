@@ -146,6 +146,6 @@ Graph writes are critical. Vector and stats updates are repairable parts of the 
 
 A failed graph read feeding the stats projection is reported as `StatsUpdateCause::GraphRead` and retained in unhealthy stats as `RetrievalStatsHealthCause::GraphRead`. Both carry the underlying `GraphQueryError`, whether the read was endpoint hydration or currency lookup.
 
-The library has no cross-store reconciliation or stats-rebuild operation. Stats health remains unhealthy after an internal failure; recovery requires a fresh store and caller-managed replay. Raw-source resolution and cross-store census operations belong to callers or operators.
+Opening `CharacterMemory` with an unhealthy SQLite statistics store rebuilds the derived indexes from graph authority. The rebuilt indexes and cleared health marker commit in one SQLite transaction. A failed graph read or rebuild leaves the unhealthy marker and its original cause unchanged; the next open retries. An instance whose statistics fail while running continues to use conservative fanout until it is reopened. Cross-store reconciliation, raw-source resolution and cross-store census operations remain caller or operator responsibilities.
 
 See the [schema cheat sheet](schema_cheat_sheet.md) for predicate tables.
