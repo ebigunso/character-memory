@@ -282,7 +282,8 @@ mod tests {
                 name: "A reader".to_owned(),
             },
         }];
-        let expected = fixtures.objects();
+        let mut expected = fixtures.objects();
+        expected.push(MemoryObject::MemoryLink(fixtures.soft_thread_link.clone()));
         store.upsert_objects(&expected).await.unwrap();
         let refs = expected
             .iter()
@@ -341,7 +342,9 @@ mod tests {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
 
-        store.upsert_objects(&fixtures.objects()).await.unwrap();
+        let mut objects = fixtures.objects();
+        objects.push(MemoryObject::MemoryLink(fixtures.soft_thread_link.clone()));
+        store.upsert_objects(&objects).await.unwrap();
 
         let queried = store
             .query_objects(&GraphObjectQuery::by_ids(vec![
@@ -354,7 +357,7 @@ mod tests {
         assert_eq!(queried.len(), 2);
         assert!(queried.contains(&MemoryObject::Episode(fixtures.episode.clone())));
         assert!(queried.contains(&MemoryObject::DerivedMemory(fixtures.correction.clone())));
-        for object in fixtures.objects() {
+        for object in objects {
             assert_eq!(
                 store
                     .query_objects(&GraphObjectQuery::by_refs(vec![object.object_ref()]))
@@ -363,6 +366,16 @@ mod tests {
                 vec![object],
             );
         }
+        assert_eq!(
+            store
+                .query_objects(&GraphObjectQuery::by_types(
+                    vec![ObjectType::MemoryLink],
+                    None
+                ))
+                .await
+                .unwrap(),
+            vec![MemoryObject::MemoryLink(fixtures.soft_thread_link)]
+        );
     }
 
     #[tokio::test]
@@ -2886,7 +2899,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oxigraph_queries_links_separately_from_memory_objects() {
+    async fn explicit_link_queries_and_expansion_hydrate_the_same_link() {
         let store = OxigraphGraphAuthorityStore::new_in_memory().unwrap();
         let fixtures = representative_fixtures();
         let link = fixtures.soft_thread_link.clone();
@@ -2903,7 +2916,7 @@ mod tests {
             ]))
             .await
             .unwrap();
-        assert_eq!(graph_refs, Vec::<MemoryObject>::new());
+        assert_eq!(graph_refs, vec![MemoryObject::MemoryLink(link.clone())]);
 
         let expansion = store
             .expand_bounded(&GraphExpansionQuery::new(
@@ -2915,5 +2928,9 @@ mod tests {
             .await
             .unwrap();
         assert!(expansion.links.contains(&link));
+        assert!(expansion
+            .objects
+            .iter()
+            .all(|object| object.object_type() != ObjectType::MemoryLink));
     }
 }

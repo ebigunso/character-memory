@@ -141,7 +141,6 @@ pub(super) fn hydrate_objects_by_refs_from_store(
 ) -> Result<Vec<MemoryObject>, CustomError> {
     let graphs = refs
         .iter()
-        .filter(|object| object.object_type != ObjectType::MemoryLink)
         .map(|object| NamedNode::new(graph_uri(object.object_type, object.id)))
         .collect::<Result<Vec<_>, _>>()?;
     // Include assertion subjects owned by each graph, not just its root subject.
@@ -155,9 +154,6 @@ pub(super) fn hydrate_objects_by_refs_from_store(
     }))?;
     let mut objects = Vec::new();
     for object_ref in refs {
-        if object_ref.object_type == ObjectType::MemoryLink {
-            continue;
-        }
         let subject = graph_uri(object_ref.object_type, object_ref.id);
         if let Some(values) = subjects.get(&subject) {
             objects.push(memory_object_from_rdf(
