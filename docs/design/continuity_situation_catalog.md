@@ -5,10 +5,10 @@ Status: durable design reference. This document describes what is in mind and ho
 ## Purpose
 
 This catalog describes situations a persistent character encounters and, for each, what a person would have in mind at that moment and how they would hold it.
-That is the standard: human behaviour, since human-like means the behaviour and not the mechanism, with the departures the product philosophy states, and those departures are said once here and hold throughout rather than being restated per situation.
+That is the standard: human behavior, since human-like means the behavior and not the mechanism, with the departures the product philosophy states, and those departures are said once here and hold throughout rather than being restated per situation.
 The departures: recall is complete, where a person's thins; how something felt is kept as it was recorded, where a person's remembered feeling drifts toward the present; no feeling fades faster for being unpleasant; nothing is forgotten to keep the record tidy, and recalling one thing never pushes its neighbours out of reach; the character is never more sure of a detail than its record allows; the reason behind every disposition stays reachable, where a person's feeling can outlive every memory of its cause; dispositions toward people do not drift in silence; the between-times are not empty for the character, because its reflection counts as experience; and the date is always known beside the felt distance.
 Where a situation below rests on one of these it names it briefly and does not argue it again.
-Every statement in this catalog is a guarantee on what is in mind and how it is held, never a rule about what the character says or does: how what is held shows in behaviour depends on how that character tends to behave, so two characters meet the same situation differently and both meet the standard.
+Every statement in this catalog is a guarantee on what is in mind and how it is held, never a rule about what the character says or does: how what is held shows in behavior depends on how that character tends to behave, so two characters meet the same situation differently and both meet the standard.
 It is deliberately written from lived experience inward, not from the library's current mechanisms outward: designing evaluation scenarios only from what the mechanism supports can only confirm what the mechanism already does.
 Each situation records what is in mind and how it is held and, where useful, the characteristic failure shapes, each a failure of what is held rather than of what is said.
 Volatile state — which roadmap phase supplies the needed concepts, and which evaluation scenarios currently cover a situation — is deliberately kept out of this document; that mapping lives in roadmap phase documents and the evaluation scenario library, which change as the library evolves.
@@ -21,7 +21,7 @@ The catalog spans the deployment spectrum:
 
 ## Failures that outweigh success
 
-The philosophy ranks two failures above every success and names a third that memory-equipped agents measurably fall into. Each is stated here as a guarantee on recall and on the character's inner state, not on its words, because how a failure of memory shows in behaviour depends on how that character tends to behave.
+The philosophy ranks two failures above every success and names a third that memory-equipped agents measurably fall into. Each is stated here as a guarantee on recall and on the character's inner state, not on its words, because how a failure of memory shows in behavior depends on how that character tends to behave.
 
 ### Invented continuity
 
@@ -214,7 +214,7 @@ Target variant, a time of year: a season or a month is itself a thing the charac
 ### D10. Emotional residue
 
 A hard conversation yesterday colors today even on an unrelated subject. The cue is recency and weight together; it is in mind as shaping, not as a topic, and whether it is mentioned is the character's own.
-The longer run, a heavy week colouring every scene, is G5.
+The longer run, a heavy week coloring every scene, is G5.
 
 ### D11. Reunion after a gap
 
@@ -404,7 +404,7 @@ Each situation here states the human shape of what is in mind and how it is held
 
 ### G1. A familiar place
 
-Human shape: in a place lived in, the history is not what is in mind. What is in mind is what is new or unresolved there, and the place carries a felt tone, comfort or unease, that colours the moment without anything about the place being thought. When the moment is quiet a piece of the history may surface uninvited. The moment anything touches the history, it comes back whole.
+Human shape: in a place lived in, the history is not what is in mind. What is in mind is what is new or unresolved there, and the place carries a felt tone, comfort or unease, that colors the moment without anything about the place being thought. When the moment is quiet a piece of the history may surface uninvited. The moment anything touches the history, it comes back whole.
 Departure: none in kind; what comes back whole is the whole, where a person's would have thinned.
 D3 is the place as a cue; this is the long-kept place held as ground rather than memory.
 
@@ -430,7 +430,7 @@ A1 and D11 key on the gap as a cue and on the open loops; this is how the place 
 
 ### G5. Lately
 
-Human shape: a heavy week colours every scene. How things have been going lately is carried into every moment, whoever is in front of the character and whatever is asked: shorter with a friend, slower to be curious, quicker to hear criticism, noticing different things, including in scenes with people who have nothing to do with what made the week heavy. It is in mind as shaping, not as a topic; the person in front of it need never hear of it.
+Human shape: a heavy week colors every scene. How things have been going lately is carried into every moment, whoever is in front of the character and whatever is asked: shorter with a friend, slower to be curious, quicker to hear criticism, noticing different things, including in scenes with people who have nothing to do with what made the week heavy. It is in mind as shaping, not as a topic; the person in front of it need never hear of it.
 Departure: what has been going on lately is held with its reasons reachable, and it lessens by what is lived since, not by the hours (G10).
 D10 is yesterday's residue; this is the longer run of trouble or quiet.
 
@@ -454,7 +454,7 @@ D12 is a weak cue held as loose; invented continuity, above, is the failure this
 
 Human shape: two people in the same unsettled situation feel and behave differently, and the difference comes from who each is, which is what each has lived.
 Guarantee: the same overdue promise, to the same person, is in mind for both characters with the same facts, overdue by this long, to someone this close, this important, and each holds it as this character holds it: with its own tendencies, its own conduct on the matter and its own felt tone, all formed from what it remembers and none supplied by its prompt. The conscientious one feels apologetic and the proud one curt, and both are the standard met.
-This situation can be exercised only once reflection produces the character's own tendencies; until then it is stated here and not tested.
+This situation can be exercised only once reflection produces the character's own tendencies.
 
 ### G9. A story told five times
 
