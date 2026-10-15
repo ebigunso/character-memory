@@ -42,6 +42,29 @@ impl SqliteRetrievalStatsStore {
             connection: Mutex::new(connection),
         })
     }
+
+    pub(crate) fn rebuild(
+        &self,
+        edges: &[RetrievalStatsEdge],
+        states: &[RetrievalStatsObjectState],
+    ) -> Result<(), RetrievalStatsStoreError> {
+        let mut connection = lock(&self.connection)?;
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
+            .execute_batch(
+                "DELETE FROM entity_edge_index;
+                 DELETE FROM entity_relation_counts;
+                 DELETE FROM global_relation_counts;
+                 DELETE FROM episode_presence_index;
+                 DELETE FROM episode_state_index;
+                 UPDATE episode_counts SET total_count = 0, active_count = 0;",
+            )
+            .map_err(sqlite_error)?;
+        write_edges(&transaction, edges)?;
+        write_object_states(&transaction, states)?;
+        set_health(&transaction, RetrievalStatsHealth::default())?;
+        transaction.commit().map_err(sqlite_error)
+    }
 }
 
 #[async_trait]
@@ -52,16 +75,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for edge in edges
-            .iter()
-            .filter(|edge| is_counted_relation(edge.relation_kind))
-        {
-            if is_episode_presence(edge.relation_kind, edge.object_type) {
-                upsert_episode_presence(&transaction, edge)?;
-            } else {
-                upsert_edge(&transaction, edge)?;
-            }
-        }
+        write_edges(&transaction, edges)?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -71,43 +85,7 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
     ) -> Result<(), RetrievalStatsStoreError> {
         let mut connection = lock(&self.connection)?;
         let transaction = connection.transaction().map_err(sqlite_error)?;
-        for state in states {
-            if state.object_type == ObjectType::Episode {
-                transaction.execute(
-                    "UPDATE episode_presence_index SET retention_state = ?2, is_current = ?3 WHERE episode_id = ?1",
-                    params![state.object_id.to_string(), retention_state_key(state.retention_state), bool_int(state.is_current)],
-                ).map_err(sqlite_error)?;
-                let previous = transaction
-                    .query_row(
-                        "SELECT retention_state FROM episode_state_index WHERE episode_id = ?1",
-                        [state.object_id.to_string()],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .map_err(sqlite_error)?
-                    .map(|value| retention_from_key(&value))
-                    .transpose()?;
-                transaction.execute(
-                    "INSERT INTO episode_state_index (episode_id, retention_state) VALUES (?1, ?2)
-                     ON CONFLICT(episode_id) DO UPDATE SET retention_state = excluded.retention_state",
-                    params![state.object_id.to_string(), retention_state_key(state.retention_state)],
-                ).map_err(sqlite_error)?;
-                transaction
-                    .execute(
-                        "UPDATE episode_counts SET total_count = total_count + ?1,
-                        active_count = active_count + ?2 WHERE singleton = 1",
-                        params![
-                            i64::from(previous.is_none()),
-                            bool_delta(
-                                previous == Some(RetentionState::Active),
-                                state.retention_state == RetentionState::Active
-                            ),
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-            }
-            update_object_state(&transaction, state)?;
-        }
+        write_object_states(&transaction, states)?;
         transaction.commit().map_err(sqlite_error)
     }
 
@@ -213,6 +191,72 @@ impl RetrievalStatsStore for SqliteRetrievalStatsStore {
         )?;
         transaction.commit().map_err(sqlite_error)
     }
+}
+
+fn write_edges(
+    connection: &Connection,
+    edges: &[RetrievalStatsEdge],
+) -> Result<(), RetrievalStatsStoreError> {
+    for edge in edges
+        .iter()
+        .filter(|edge| is_counted_relation(edge.relation_kind))
+    {
+        if is_episode_presence(edge.relation_kind, edge.object_type) {
+            upsert_episode_presence(connection, edge)?;
+        } else {
+            upsert_edge(connection, edge)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_object_states(
+    connection: &Connection,
+    states: &[RetrievalStatsObjectState],
+) -> Result<(), RetrievalStatsStoreError> {
+    for state in states {
+        if state.object_type == ObjectType::Episode {
+            connection.execute(
+                "UPDATE episode_presence_index SET retention_state = ?2, is_current = ?3 WHERE episode_id = ?1",
+                params![state.object_id.to_string(), retention_state_key(state.retention_state), bool_int(state.is_current)],
+            ).map_err(sqlite_error)?;
+            let previous = connection
+                .query_row(
+                    "SELECT retention_state FROM episode_state_index WHERE episode_id = ?1",
+                    [state.object_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .map(|value| retention_from_key(&value))
+                .transpose()?;
+            connection
+                .execute(
+                    "INSERT INTO episode_state_index (episode_id, retention_state) VALUES (?1, ?2)
+                 ON CONFLICT(episode_id) DO UPDATE SET retention_state = excluded.retention_state",
+                    params![
+                        state.object_id.to_string(),
+                        retention_state_key(state.retention_state)
+                    ],
+                )
+                .map_err(sqlite_error)?;
+            connection
+                .execute(
+                    "UPDATE episode_counts SET total_count = total_count + ?1,
+                    active_count = active_count + ?2 WHERE singleton = 1",
+                    params![
+                        i64::from(previous.is_none()),
+                        bool_delta(
+                            previous == Some(RetentionState::Active),
+                            state.retention_state == RetentionState::Active
+                        ),
+                    ],
+                )
+                .map_err(sqlite_error)?;
+        }
+        update_object_state(connection, state)?;
+    }
+    Ok(())
 }
 
 fn is_episode_presence(relation: RelationType, object_type: ObjectType) -> bool {
@@ -829,6 +873,80 @@ mod tests {
         assert_eq!(health.last_error_cause, Some(failure));
         drop(reopened);
         dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_rebuild_rolls_back_counters_and_preserves_health_cause() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite3");
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        let edge = test_edge(
+            MemoryId::from_u128(1),
+            MemoryId::from_u128(2),
+            RetentionState::Active,
+            true,
+        );
+        let state = RetrievalStatsObjectState {
+            object_id: edge.object_id,
+            object_type: ObjectType::Episode,
+            retention_state: RetentionState::Active,
+            is_current: true,
+        };
+        store
+            .record_edges(std::slice::from_ref(&edge))
+            .await
+            .unwrap();
+        store
+            .record_object_states(std::slice::from_ref(&state))
+            .await
+            .unwrap();
+        let cause = RetrievalStatsHealthCause::CounterRead {
+            error: RetrievalStatsStoreError::NegativeCounter { value: -1 },
+        };
+        store.mark_unhealthy(cause.clone()).await.unwrap();
+        lock(&store.connection)
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_health_clear BEFORE UPDATE ON stats_meta
+             WHEN NEW.key = 'health_state' AND NEW.value = 'healthy'
+             BEGIN SELECT RAISE(FAIL, 'health write unavailable'); END;",
+            )
+            .unwrap();
+        let mut replacement = edge.clone();
+        replacement.retention_state = RetentionState::Suppressed;
+        let mut replacement_state = state;
+        replacement_state.retention_state = RetentionState::Suppressed;
+        assert!(matches!(
+            store.rebuild(&[replacement], &[replacement_state]),
+            Err(RetrievalStatsStoreError::Sqlite { .. })
+        ));
+        drop(store);
+
+        let reopened = SqliteRetrievalStatsStore::open(&path).unwrap();
+        assert_eq!(
+            reopened.health().await.unwrap(),
+            RetrievalStatsHealth {
+                state: RetrievalStatsHealthState::Unhealthy,
+                last_error_cause: Some(cause),
+            }
+        );
+        let expected = Some(RetrievalStatsCounter {
+            total_count: 1,
+            active_count: 1,
+            current_count: 1,
+        });
+        assert_eq!(
+            reopened
+                .counter(&RetrievalStatsCounterKey {
+                    entity_id: edge.entity_id,
+                    relation_kind: edge.relation_kind,
+                    object_type: edge.object_type,
+                })
+                .await
+                .unwrap(),
+            expected
+        );
+        assert_eq!(reopened.global_episode_counter().await.unwrap(), expected);
     }
 
     fn test_edge(
