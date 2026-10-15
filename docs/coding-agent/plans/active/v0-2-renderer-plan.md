@@ -155,6 +155,7 @@
 - justification: no existing surface changes. The companion evaluation repository reads the native result and may print the memo in its own plan.
 
 ## Context (workspace)
+- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`.
 - Related files and areas, at the consolidation's final tip ef8dbfb; the prospective slice adds its fields on top:
   - `src/api/types/retrieval.rs`:
     - `RetrieveOutcome` at 245;
@@ -314,7 +315,7 @@ The two tasks share one crate, so they run in sequence, each as one pull request
 
 ## Progress Log (append-only)
 
-- (none yet)
+- 2026-10-16: the v0.2 completion brief governs this plan from revision `785391cf` (the brief and the ratified philosophy committed on this branch). Held under the brief's section 4: "the renderer's phrasing of standing and roads" waits for the amendment carrying the v0.2 design re-examination, so Task_1 (WIP `ae319921` on `feature/2026-10-15/renderer-memo`, report `.agent-work/worker/renderer-task1-report.md`) and Task_2 stay stopped with every proof input kept. The brief's section 3 puts this renderer and the example loop ahead of the evals re-baseline and the paid runs, so this plan resumes first once the amendment lands, and is re-anchored to it before any go.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
