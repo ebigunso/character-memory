@@ -60,4 +60,15 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: none found.
   - Correction inside the run: the subject-state read's move is an inferred deferral, not covered; the 4a design plan's Context states where that work goes, so the brief's "proceeds" item is not lost.
 
+### v0-2-residuals-plan, closeout
+
+- The rebuild at open and the cleared marker (composition.rs, adapters/stats/sqlite.rs) | covered | brief section 4, statistics recovery; 4a storage work stands.
+- The hydrator's two MemoryLink exclusions deleted; one test expectation changed | covered | internal mechanics; no caller observes a change (reviewer's survey).
+- A failed rebuild keeps the marker and original cause; the repeated-failure test | extends | philosophy 8.6, section 10, 8.5.
+- Documentation corrected in five places (README, graph schema design, cheat sheet, vector payload design) to state the rebuild and its limits | covered | consumer-facing docs follow the code; philosophy section 9 (honest about what the library does).
+- Measurement verdict (witness red/green; controls equal) | covered | internal mechanics; brief section 4.
+- Judgement calls: the test expectation change; two doc consistency touches outside owns | covered | internal mechanics.
+- Orchestrator rulings: the plan narrowed under 4a; the one-cause limit accepted; the waiver line corrected | covered | brief sections 1, 4, 4a.
+- Human-only items: none for this unit.
+
 ## Findings

@@ -175,3 +175,9 @@
   - Correction to the 2026-10-15 entry "plan approval is waived under the standing authorization": that waiver does not authorize this plan. Its authority is the governing brief: a plan-draft value audit after the plan review that holds nothing, under the owner's ratification of the brief.
   - User approval: the brief and its amendment, the owner's ratified words.
   - Record proposed: none.
+- 2026-10-16 Decision: measurement verdict for Task_1 (statistics recovery).
+  - Instrument, the red/green witness on one store (4 healthy beliefs; one failure marks the statistics unhealthy; reopen): base 31dc6923 healthy 4 selected, degraded 1, reopened 1 and still unhealthy; tip 38b7e702 healthy 4, degraded 1, reopened 4 and healthy, the same ids in the same order as a never-failed store; replayed twice (`.worktrees/residual-stats-recovery/.agent-work/worker/recovery-witness-results.json`).
+  - Controls, run by evals-worker at harness 3a712252: the scene and keyless families, six sections, both identifier orders, 410 rows per capture, at 38b7e702 against the code-equivalent base 31dc6923, each pin twice: exactly equal (`evals:.agent-work/worker/residual-stats-controls.md`, SHA256 febfb412...).
+  - What it means for the character: a character whose recall statistics once failed is conservative for the rest of that session and whole again the next time its memory opens, with nobody acting; a character whose statistics never failed recalls exactly as before.
+  - Verdict: the residual is closed. Known limits stand as the Design states: a mid-session failure stays conservative until the next open; a rebuild that fails keeps the original cause only.
+  - Record proposed: none.
