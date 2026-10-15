@@ -6,33 +6,39 @@
 - work_type: docs
 
 ## Goal
-- Carry out sections 2 and 3 of the v0.2 completion brief: the continuity situation catalog becomes the standard the ratified product philosophy is judged by, and the roadmap and phase drafts carry the owner's directions for how v0.2 closes, what v0.3 is measured by, and where v0.4 and v0.5 contradict the philosophy or accepted records. Nothing about the v0.2 design itself (routes, floors, the fixed room, knowing versus being reminded, the one hop) changes here; that waits for the brief's amendment.
+- Carry out sections 2 and 3 of the v0.2 completion brief: the continuity situation catalog becomes the standard the ratified product philosophy is judged by, and the roadmap and phase drafts carry the owner's directions for how v0.2 closes, what v0.3 is measured by, and where v0.4 and v0.5 contradict the philosophy or accepted records. Nothing about the v0.2 design itself (routes, floors, the fixed room, knowing versus being reminded, the one hop, familiarity's place in it) changes here; that waits for the brief's amendment.
 
 ## Definition of Done
-- The catalog carries the brief's section 2 revision in full: the failures section (invented continuity, lost continuity, the mirror, and the month-long measure as a reading), the thirteen situations with their human shape and where the ideal AI character departs, the amended purpose paragraph, and the target variants for a topic, a group, a time of year and the self. Every catalog statement it adds or rewrites is a guarantee on what is in mind and how it is held, not a rule about what the character says.
+- The catalog carries the brief's section 2 revision in full: the failures section (invented continuity, lost continuity, the mirror, and the month-long measure as a reading), the thirteen situations with their human shape and where the ideal AI character departs, the amended purpose paragraph, and the target variants for a topic, a group, a time of year and the self. The whole catalog is written as guarantees on what is in mind and how it is held, not as rules about what the character says: existing restriction-shaped statements are reworded into that form without changing what their situation tests.
 - Each philosophy statement named in the discussion notes' mapping (the 2026-10-16 "Layer 2 opened" entry of `docs/coding-agent/briefs/active/v0-2-completion-notes.md`) has at least one situation, shown by a mapping table in the task report.
-- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude: v0.2 closes with the reading of behaviour under its four conditions, and the renderer and example loop come before the evals re-baseline and the paid runs; v0.3's measure, reflection's intent and its added definition of done, with attribution's core moved in and time counted in experience placed as the brief says; v0.4 and v0.5 corrected as the brief says, with familiarity and gist consolidation moved to the phases that need them.
+- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude, as Task_2's acceptance lists them.
+- The record that the roadmap's removal of the fact-acceptance machinery departs from (ADR-D-0005's deferral) has a proposed successor for the owner to accept or decline.
 - The owner accepts the revised catalog and the revised roadmap sections (human-only, the brief's pass conditions).
 
 ## Planner-added requirements
 - The mapping table in Task_1's report: the brief's agent-checkable pass condition needs evidence a reviewer can check line by line; the table is that evidence and is not committed.
-- A worker that finds an accepted decision record contradicting a brief change stops and reports it (Task_2): the roadmap may not silently contradict an accepted record, and changing a record is a reserved act of the owner's.
+- Catalog identifiers stay stable (Task_1): the roadmap (26 references), the v0.2 draft (31), the v0.3 draft, ADR-D-0027, ADR-D-0033, ADR-D-0034, ADR-I-0035 and the evaluation repository's situated-recall plan cite them; a renumber would break citations this plan may not repair.
+- The roadmap cites new situations by the brief's names (Task_2): the two tasks run in parallel, so Task_2 cannot know Task_1's new identifiers.
+- Task_3, a proposed successor to ADR-D-0005's deferral: the brief removes from the roadmap what an accepted record defers to later stages; an accepted record may not be contradicted silently, and changing one is the owner's act.
+- A worker that finds another accepted record contradicting a brief change stops and reports it (Task_2): for a conflict nobody has seen yet; the known one is Task_3's.
 
 ## Scope / Non-goals
-- Scope: `docs/design/continuity_situation_catalog.md`; `docs/roadmap/development_roadmap.md`; the phase drafts for v0.2 (its closeout and order only), v0.3, v0.4 and v0.5 under `docs/roadmap/roadmap-phases/`.
-- Non-goals: the v0.2 design and its records (the amendment's); the closeout reading's own probes, store and arms (planned after recall and the renderer are frozen, as the brief requires); decision records; the philosophy, the brief and the notes (Counsel's); any code or evals change; v1.0's definition beyond what the phase drafts' changes force.
+- Scope: `docs/design/continuity_situation_catalog.md`; `docs/roadmap/development_roadmap.md`; the phase drafts for v0.2 (its closeout, its order, and pointer lines naming another phase), v0.3, v0.4 and v0.5 under `docs/roadmap/roadmap-phases/`; one proposed design record.
+- Non-goals: the v0.2 design and its records (the amendment's), familiarity's placement included, since v0.2's design text names it (draft line 194, roadmap 1347) and standing against familiarity is under re-examination; the closeout reading's own probes, store and arms (planned after recall and the renderer are frozen, as the brief requires); editing any accepted record; the philosophy, the brief and the notes (Counsel's); any code or evals change; v1.0's definition beyond what the phase drafts' changes force.
 
 ## Design
-- Chosen: two documentation tasks with disjoint files, written from the brief's text on disk, each reviewed for altitude against the brief and the philosophy; no alternative required.
+- Chosen: three documentation tasks with disjoint files, written from the brief's text on disk, each reviewed for altitude against the brief and the philosophy; no alternative required.
 
 ## Context
-- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`.
-- The brief's statements bind by their kind marks; the one means in section 2 (guarantees, not restrictions) and the one in section 3 (renderer before the re-baseline) are built from and may be bettered, a departure being recorded as a finding.
-- The catalog today keys every situation on a person, place, thread or date (sections A to F, 362 lines). The roadmap is `docs/roadmap/development_roadmap.md` (1,808 lines) with one draft per phase; the v0.2 draft judges the phase at the retrieval tier only ("Behavioral-tier judging is scheduled with the generation phase").
-- The notes' 2026-10-16 "Layer 2 opened" entry lists, for the catalog, the philosophy statements with no situation, and for the roadmap, the contradictions found (v0.4's confidence fields, truth stances and source reliability against the philosophy's 8.2 and ADR-D-0030; v0.5's decay and reinforce against ADR-D-0018; gist consolidation in two phases at once). The notes are unratified: the brief decides, and the entry is used only as the brief's section 2 names it, as the checklist.
+- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`. Run record: `docs/coding-agent/plans/active/v0-2-completion-run.md`.
+- The brief's statements bind by their kind marks. Section 2's means ("written throughout as guarantees on what is in mind and how it is held, not as restrictions on behaviour") is built as written, for the whole catalog. Section 3's means (renderer and example loop before the re-baseline and the paid runs) is built as written.
+- The catalog keys every situation on a person, place, thread or date (sections A to F, 362 lines). Several new situations sit beside existing ones (return after absence by A1 and D11; a story told five times by C4; the hundred Tuesdays by E13; lately by D10; a familiar place by D3; the last thing she said by C6): they are cross-referenced, not merged.
+- ADR-D-0005 (accepted) defers first-class `Assertion`, `Claim`, `EvidenceLink`, `BeliefAssessment` and `SourceAssessment` to later stages and rejected never implementing them; its revisit clause (line 95) names source credibility and contradiction handling. The roadmap's v0.4 row keeps the ontology "behind ADR-D-0005's revisit clause". ADR-D-0016 (line 61) and ADR-D-0035 touch the same concepts.
+- The roadmap is `docs/roadmap/development_roadmap.md` (1,808 lines) with one draft per phase; the v0.2 draft judges the phase at the retrieval tier only ("Behavioral-tier judging is scheduled with the generation phase"). Familiarity appears in v0.2's design text and in v0.5; gist consolidation in the v0.3 draft and the v0.5 roadmap section.
+- The notes' Layer 2 entry is used only as the brief's section 2 names it, as the checklist.
 
 ## Integration
-- Branch `feature/2026-10-16/v0-2-catalog-roadmap` from the residuals plan tip `7bf694ff`, which carries the brief; one pull request on the residuals plan's.
+- Branch `feature/2026-10-16/v0-2-catalog-roadmap` on the residuals plan branch, which carries the brief; one pull request on the residuals plan's.
 - No library code, test or evals file changes, so no measurement item: nothing a character does changes.
 
 ## Tasks
@@ -42,19 +48,20 @@
 - owns: docs/design/continuity_situation_catalog.md
 - depends_on: []
 - acceptance:
-  - The brief's section 2 revision is in the catalog: the failures section, the thirteen situations, the purpose paragraph, the target variants.
-  - Each added or rewritten situation states the human shape of what is in mind and how it is held, and where the ideal AI character departs, as the brief gives it for that situation.
-  - No added or rewritten statement prescribes what the character says or does; each is a guarantee on what is in mind and how it is held.
+  - The brief's section 2 revision is in the catalog: the failures section, the thirteen situations under the brief's names, the purpose paragraph, the target variants.
+  - Each new situation states the human shape of what is in mind and how it is held, and where the ideal AI character departs, as the brief gives it; each near-neighbour among the existing situations is cross-referenced.
+  - Every statement in the catalog is a guarantee on what is in mind and how it is held; existing restriction-shaped statements are reworded without changing what their situation tests.
+  - No existing identifier changes and no situation is removed or merged; new situations take new identifiers.
   - The report carries a table from each philosophy statement in the notes' mapping to the situation that exercises it.
 - validation:
   - kind: review
     required: true
     owner: worker
-    detail: "Self-check: the mapping table is complete against the notes' 2026-10-16 Layer 2 entry; every new situation is checked against the brief's section 2 wording for it; no hard-wrapped prose (common.md)"
+    detail: "Self-check: the mapping table is complete against the notes' 2026-10-16 Layer 2 entry; every new situation is checked against the brief's section 2 wording for it; every reworded statement listed with its identifier; no hard-wrapped prose (common.md)"
   - kind: review
     required: true
     owner: reviewer
-    detail: "Tier A: the catalog against the brief's section 2 and the ratified philosophy; each situation's wording is a guarantee on recall and inner state, not on words; the mapping table holds; nothing beyond section 2 was added"
+    detail: "Tier A: the catalog against the brief's section 2 and the ratified philosophy; each statement is a guarantee on recall and inner state, not on words; rewordings keep what each situation tests; identifiers stable; the mapping table holds"
   - kind: manual
     required: true
     owner: user
@@ -62,34 +69,61 @@
 
 ### Task_2: The roadmap carries the owner's directions for v0.2's close and the phases after it
 - type: docs
-- owns: docs/roadmap/development_roadmap.md; docs/roadmap/roadmap-phases/v0_2_scoped_continuity_reflection.md (closeout and order only); docs/roadmap/roadmap-phases/v0_3_memory_generation_and_reflection.md; docs/roadmap/roadmap-phases/v0_4_temporal_validity_attribution_entity_evolution.md; docs/roadmap/roadmap-phases/v0_5_long_horizon_shape_and_associative_recall.md
+- owns: docs/roadmap/development_roadmap.md; docs/roadmap/roadmap-phases/v0_2_scoped_continuity_reflection.md (closeout, order, and pointer lines naming another phase); docs/roadmap/roadmap-phases/v0_3_memory_generation_and_reflection.md; docs/roadmap/roadmap-phases/v0_4_temporal_validity_attribution_entity_evolution.md; docs/roadmap/roadmap-phases/v0_5_long_horizon_shape_and_associative_recall.md
 - depends_on: []
 - acceptance:
-  - v0.2's closeout includes the reading of behaviour with its four binding conditions, its negative probes and its stated limit, and the rule that if any condition cannot be met the reading is not run and v0.2 closes on the retrieval tier with that limitation written in; the renderer and example loop come before the re-baseline and the paid runs. The v0.2 design text is otherwise untouched.
-  - v0.3 carries its measure (the two-characters reading against the same model with the whole transcript), reflection's intent in the owner's terms, the six added definition-of-done items, attribution's core, and time counted in experience placed as the brief says.
-  - v0.4 and v0.5 carry the brief's corrections at its altitude: the fact-acceptance machinery leaves the roadmap; decay and reinforce leave v0.5's draft; familiarity and gist consolidation sit in one phase each, where they are needed.
-  - No other change at that altitude; an accepted decision record that contradicts a change is reported, not edited.
+  - v0.2: the closeout includes the reading of behaviour with its four binding conditions, its negative probes and its stated limit, and the rule that if any condition cannot be met the reading is not run and v0.2 closes on the retrieval tier with that limitation written in; the order is renderer and example loop, then the reading, then the evals re-baseline and the paid runs; a pointer naming another phase follows a move this task makes; the v0.2 design text is otherwise untouched.
+  - v0.3: its measure (the two-characters reading against the same model with the whole transcript in context), reflection's intent in the owner's terms, the six added definition-of-done items, attribution's core (witnessed or told) moved in, and time counted in experience written as a decision for v0.3's planning: in v0.3 if cheap over the trace store, otherwise the first named item of v0.4.
+  - v0.4: what the character holds about the world over time (validity intervals, aliases and roles over time, who else knows, source reliability as the character's own belief about a source); attribution's core leaves it; the fact-acceptance machinery leaves the roadmap, citing Task_3's proposed record.
+  - v0.5: the long horizon proper (a decade of gists, recognition of a returning stranger, query-time associative activation, durable units on measured demand); decay and reinforce leave its draft; gist consolidation sits in one phase, by the ruling in the Decision Log.
+  - No other change at that altitude; new situations are cited by the brief's names; another accepted record found contradicting a change is reported, not edited.
 - validation:
   - kind: review
     required: true
     owner: worker
-    detail: "Self-check: each change traced to the brief's section 3 sentence it carries; a list of every edited heading; no hard-wrapped prose (common.md)"
+    detail: "Self-check: each change traced to the brief's section 3 or 5 sentence it carries; a list of every edited heading; no hard-wrapped prose (common.md)"
   - kind: review
     required: true
     owner: reviewer
-    detail: "Tier A: the roadmap and drafts against the brief's section 3 and the philosophy; these changes and no others at that altitude; the v0.2 design text untouched; accepted records not contradicted silently"
+    detail: "Tier A: the roadmap and drafts against the brief's sections 3 and 5 and the philosophy; these changes and no others at that altitude; the v0.2 design text untouched; accepted records not contradicted silently"
   - kind: manual
     required: true
     owner: user
     detail: "The owner accepts the revised roadmap sections (the brief's human-only pass condition)"
 
+### Task_3: The deferral of the fact-acceptance objects is put to the owner as a record
+- type: docs
+- owns: one new file under docs/decisions/design/ (the next free ADR-D number)
+- depends_on: []
+- acceptance:
+  - Propose an ADR if the admission test passes (`durable-docs-authoring/references/adr.md`): the brief's removal of the fact-acceptance machinery from the roadmap, as the outcome of ADR-D-0005's revisit, with status proposed.
+  - ADR-D-0005 and every other accepted record stay unedited; the report names each accepted record whose text the proposal would affect (ADR-D-0016 and ADR-D-0035 checked).
+- validation:
+  - kind: review
+    required: true
+    owner: reviewer
+    detail: "Tier A: one decision, at the brief's altitude, consistent with the philosophy's 8.2 and ADR-D-0030; no accepted record edited"
+  - kind: manual
+    required: true
+    owner: user
+    detail: "The owner accepts or declines the proposed record (a reserved act, carried by Counsel)"
+
 ## Task Waves (explicit parallel dispatch sets)
-- Wave 1: [Task_1, Task_2]
+- Wave 1: [Task_1, Task_2, Task_3]
 
 ## Research
-- Research waived: the brief states each change at the altitude it is to be written, and the notes' Layer 2 entry is the Researcher's mapping of the philosophy to the catalog and roadmap, made for Counsel on 2026-10-16. Each worker reads its own files.
+- Research waived: the Orchestrator read the brief, its notes (the Layer 2 mapping), the catalog's sections and headings, the roadmap and phase drafts' sizes, ADR-D-0005's deferral and revisit clause, and the plan review's census of inbound citations of catalog identifiers (roadmap, v0.2 and v0.3 drafts, ADR-D-0027, ADR-D-0033, ADR-D-0034, ADR-I-0035, the evaluation repository's situated-recall plan). Each task's scope, acceptance and validation are written from those.
 
 ## Progress Log (append-only)
 - 2026-10-16: plan drafted under the v0.2 completion brief, from revision `785391cf` (the brief and the ratified philosophy).
 
 ## Decision Log (append-only)
+- 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.
+  - ADR-D-0005: the roadmap carries the owner's ratified removal, and Task_3 proposes the record that makes it the outcome of ADR-D-0005's revisit, for the owner to accept. Holding the v0.4 portion instead was rejected: the brief states the removal outright, and the record is the owner's act either way.
+  - Familiarity's placement waits for the amendment: v0.2's design text names it, and standing against familiarity is under re-examination (the brief's section 4).
+  - Gist consolidation: "move down to the phases that need them" is read as the later phase where its use arises. The decade of gists sits in v0.5; v0.3 keeps only what its reflection's compression keeps (peak and ending, cause and central people), as a definition-of-done item, not as a consolidation feature. Cheap to undo; logged for the closeout audit.
+  - Time counted in experience is written into the roadmap as a decision for v0.3's planning, which judges "cheap" from a cost reading over the trace store; this plan does not judge it.
+  - A pointer in v0.2's text naming another phase (for example attribution fields "(v0.4)") follows the move, and is not design text.
+  - Catalog identifiers are stable; new situations take new identifiers and are cited in the roadmap by the brief's names; near-neighbours are cross-referenced.
+  - "Written throughout" is read as the whole catalog, so existing restriction-shaped statements are reworded; "nothing beyond section 2" is dropped.
+  - The order is renderer and example loop, the reading, then the re-baseline and the paid runs (sections 3 and 5).
