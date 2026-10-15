@@ -2,7 +2,7 @@
 
 - status: in-progress
 - generated: 2026-10-15
-- last_updated: 2026-10-15
+- last_updated: 2026-10-16
 - work_type: code
 
 ## Goal
@@ -25,9 +25,13 @@
 - Task_4 (busy-occasion order): which observations of one occasion survive the fanout bound is decided by the link identifier order today (`select_links_touching` sorts refs by id, and `apply_fanout_limits_by_pair` keeps the first 16). The chosen key orders an occasion's eligible observation neighbours before the bound: current first under the lifecycle policy (a suppressed or superseded observation takes no seat), then salient, then newest by memory time (the observation's own time, else its occasion's scene time, as `ParticipantOccasion::memory_time` defines), then identifier as the last resort. It is ruling 70's order (salient current first, then newest, then id) for what is held about a present person, applied to what was observed at an occasion, and ruling 65's rule of ordering before a bound the way the section will judge (observations of one occasion tie on graph and cue score), so a character recalls the striking details of a busy occasion and, among equals, the latest. The same key orders both the pre-hydration path and the materialized plan. The order comes from reusing `select_state`'s salience order scoped to the occasion's observations, which already puts current first and falls back from the observation's time to its occasion's scene time, as `order_current_subject_links` (674) does for subject state; never from hydrating every candidate (ruling 67). Because that reuses Task_1's selector, Task_4 follows Task_1. Rejected: a general key for every relation (changes recall far beyond this route); sorting after hydration or at the pack (the discarded observations were never read); raising the bound (moves the cliff); time before salience (minutes within one occasion say less than salience about what a person keeps).
 
 ## Integration
-- Base: the renderer plan tip `ac41e5c0`, which carries the whole library stack through the prospective slice. The renderer's tasks touch no retrieval code, so the two lines run in parallel and are joined by plain merges before the closeout re-baseline.
+- Base: the renderer plan tip `969faad7` (merged in at `53a301ff`), which carries the whole library stack through the prospective slice, the governing brief and the ratified philosophy. The task branches cut from `31dc6923` are joined by plain merges. The renderer's tasks touch no retrieval code, so the two lines run in parallel and are joined by plain merges before the closeout re-baseline.
 - Tasks 1 and 2 run in parallel; Task_4 follows Task_1 because it reuses the state selector Task_1 changes.
-- After this plan, the evals Task_6 re-baseline runs once on the finished library.
+- After this plan, the evals Task_6 re-baseline runs once on the finished library; under the brief's section 4 the re-baseline waits for the design amendment.
+
+## Context
+- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`.
+- The brief's section 4: "the subject-state read's speed, statistics recovery" proceed; "the busy-occasion ordering fix" waits for the amendment carrying the v0.2 design re-examination.
 
 ## Tasks
 
@@ -72,7 +76,7 @@
 
 ## Task Waves
 - Wave 1: [Task_1, Task_2]
-- Wave 2: [Task_4]
+- Wave 2: [Task_4], held under the brief's section 4 until the design amendment says whether its key stands.
 - Task_3 dropped.
 
 ## Research
@@ -80,6 +84,7 @@
 
 ## Progress Log (append-only)
 - 2026-10-15: plan written; Wave 1 dispatched for the root-cause step before the plan review had run (a missed gate). Workers hold after the root cause until the plan review closes and their owns are narrowed.
+- 2026-10-16: the v0.2 completion brief governs this plan from revision `785391cf` (the brief and the ratified philosophy, merged into this branch at `53a301ff`).
 
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
@@ -98,3 +103,7 @@
   - User approval: the decider, 2026-10-15, in this session: "Drop it" (answering whether to drop residual 3). Task_3 is dropped; Wave 1 is [Task_1, Task_2, Task_4].
 - 2026-10-15 Decision: the plan review (Tier D and Tier A) returned changes, applied: Task_1's design keeps the bound in Rust and fixes the scope (the earlier text pointed at the shape ruling 67 rejected); Task_4's key puts current first and reuses `select_state`'s order, so Task_4 follows Task_1, and its measurement tests the newest-16 rule with a control set; Task_2's witness must change selection at the base, and its mid-session limit is recorded; measurement follows the checkpoint rule; Task_3 is removed. Lesson candidate: when a Design says to do it like a sibling, quote the sibling's code location and check it against the rulings it touches.
   - Next: a re-review of this revision, then the plan-draft value audit against the product philosophy, then go for Wave 1.
+
+- 2026-10-16 Decision: the plan runs under the v0.2 completion brief (Context). Task_1 and Task_2 proceed under its section 4; Task_4 is held there, its root cause and design kept as written for the amendment to confirm or replace. The slice-end run covers Task_1 and Task_2's controls when Wave 1 closes, and Task_4's family when it is released.
+  - User approval: the brief's section 4, the owner's ratified words; the hold is the brief's, not an Orchestrator ruling.
+  - Record proposed: none.
