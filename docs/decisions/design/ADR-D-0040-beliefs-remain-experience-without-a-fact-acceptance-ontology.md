@@ -3,7 +3,7 @@ status: proposed
 adr_type: design
 date: 2026-10-16
 deciders: ["ebigunso"]
-consulted: ["GPT-6"]
+consulted: ["GPT-6 Astra"]
 informed: []
 supersedes: [ADR-D-0005-derived-memory-subtypes-before-belief-ontology.md]
 superseded_by: null
