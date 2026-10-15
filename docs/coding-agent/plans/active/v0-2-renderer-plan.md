@@ -185,7 +185,7 @@
 - Controls that must not change: every retrieval test's expectation, and the whole result at the parent commit and at each tip for the example's own store and scenes.
 
 ## Open Questions (max 3)
-- None. The chronological order of "what happened" was ruled from behavior, and its cost under a topic is stated in the Design. The decider may veto it at the slice boundary, and the veto is one deleted sort.
+- None. The decider kept the chronological order of "what happened" on 2026-10-15 (ruling 80).
 
 ## Assumptions
 - A1: The base carries `IncludedDerivedMemory.direction: Option<ObligationDirection>`, `due_state: Option<DueState>`, `AdmissionRoad::Due`, and the constructors taking the self, with the names the prospective plan pins. Source: that plan. A precondition of dispatch.
@@ -420,6 +420,13 @@ The two tasks share one crate, so they run in sequence, each as one pull request
     - "ongoing threads" as a fifth heading: EARNS-ITS-PLACE (threads are not promises).
   - Lesson: when a revision deletes a mechanism, grep the earlier draft for the records it carried, and carry each forward or name it. Here, deleting `MemoParty` removed the only place the scene's words for a party reached the memo; that is named as dropped, with direction and the memory's text carrying the fact.
   - User approval: ruled by the coordinator; logged for presentation.
+  - Record proposed: none.
+
+- 2026-10-15 Decision: the decider keeps the chronological "what happened" stream (ruling 80), and the plan is re-anchored before dispatch.
+  - Base: renderer plan tip `ac41e5c0`, which carries the prospective slice's last tip `b3aba0b2`. Assumption A1 holds there.
+  - Measurement BEFORE: the prospective slice-end AFTER, `official-after-a.json` (SHA `9060ce4e…`, library 9c7eb40f, harness 3a712252), in `CharacterMemoryEvals/.agent-work/worker2/prospective-slice-end/`. The harness for the slice-end run is evals PR 85's tip, 3a712252.
+  - Paired evals change: the generated runner prints `memo()` for every after-retrieval (A4). It is the slice-end instrument and lands as an evals PR on the stack top, after Task_1, before the slice-end run.
+  - User approval: the decider ruled the stream; the re-anchor is the orchestrator's.
   - Record proposed: none.
 
 ## Notes
