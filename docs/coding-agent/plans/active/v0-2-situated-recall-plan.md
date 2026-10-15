@@ -32,6 +32,8 @@
 - The result's situations keep the obligation's `direction`, `due_state` and `resolved_by`: they are the owed-and-due ingredient 4a names.
 - The order rule is chosen by a bounded experiment between a lexicographic order and a stated combination over the reported ingredients (Task_4): 4a demands an order with no hidden formula and reported ingredients; the experiment decides which open rule reads the pressure cases as a person would, and the record states it.
 - The walk's equality witness runs at stores of 1, 100 and 2,000 memories per key and with writes between pages: the three sizes catch an off-by-one at the page edge and the cost shape; writes between pages are the case a keyset cursor exists for.
+- A proposed amendment noting that ADR-D-0018 overrides the decay wording in ADR-D-0013 and ADR-D-0014 and that ADR-I-0017's `last_reinforced_at` has no producer (Task_1): found by the catalog and roadmap plan's roadmap task; two accepted records that contradict a later one mislead the next reader, and the record wave is the cheapest place to fix it.
+- The live null measurement's artifact (inputs, sample size, cost, the resulting threshold) is kept under `.agent-work/worker/` and promoted into Task_4's report and the gathering record's amendment: a shipped default rests on it.
 - The example runs twice to identical bytes and removes its stores: determinism is what makes the memo reviewable, and test and eval runs clean up every store they create (repository practice; the evaluation repository's retention rule).
 
 ## Scope / Non-goals
@@ -115,7 +117,7 @@
 
 ### Task_3: Every memory reachable by what it is can be walked in full, and absence can be verified
 - type: impl
-- owns: src/ports/graph_authority.rs (new walk and verification methods and a cursor type); new functions in src/adapters/oxigraph/sparql_selectors.rs and src/adapters/oxigraph/embedded.rs; src/test_support.rs (forwarding arms); src/memory.rs (the walk and `verify_absence` entry points); the cut marker's continuation in src/api/types/retrieval.rs (the cursor field Task_2 typed); tests/structural_walk_tests.rs (new)
+- owns: src/ports/graph_authority.rs (new walk and verification methods, using the cursor type of src/api/types/retrieval.rs); new functions in src/adapters/oxigraph/sparql_selectors.rs and src/adapters/oxigraph/embedded.rs; src/test_support.rs (forwarding arms); src/memory.rs (the walk and `verify_absence` entry points); the cut marker's continuation in src/api/types/retrieval.rs (the one public cursor type is defined there by Task_2, since a public result returns it; the port in graph_authority.rs uses that type and defines no second); tests/structural_walk_tests.rs (new)
 - depends_on: [Task_2]
 - acceptance:
   - A public walk by person, place (scope key), thread, time range and identifier returns pages in a total order with a keyset cursor, says whether more follows, and over a store with writes between pages neither skips nor repeats a memory that existed before the walk began.
@@ -151,7 +153,7 @@
   - kind: command
     required: true
     owner: worker
-    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test; both identifier orders on the busy-occasion fixture; the order-rule experiment's numbers; the live null measurement's sample size and cost"
+    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test; both identifier orders on the busy-occasion fixture; the order-rule experiment's numbers; the live null measurement's sample size and cost, its artifact under .agent-work/worker/ (PROMOTE: a shipped default rests on it)"
   - kind: review
     required: true
     owner: reviewer
@@ -255,3 +257,4 @@ Task_2 and Task_4 both touch `src/usecases/retrieve.rs`; the file is split by fu
   - Owns widened from the root causes' scope sections: Task_4 gains `shared.rs` and `select_participant_occasions`; Task_5 gains `select_state` except its ordering block; Task_1 owns the full retirement procedure outside README and roadmap and a proposed amendment to ADR-D-0023 (an accepted record's text changes only by a proposed amendment the owner accepts).
   - The health that verified absence needs is the graph read's, not the statistics store's.
   - Lesson candidates taken: owns are checked against a root cause's scope section; a planner-added invariant is checked against every acceptance bullet of its task (lessons.md).
+- 2026-10-16 Decision: the re-review of 8e77735d APPROVED with three minors, applied: the ADR-D-0013, ADR-D-0014 and ADR-I-0017 amendment listed as planner-added; one public cursor type, defined in `api/types/retrieval.rs` by Task_2; the live null measurement's artifact kept and promoted.
