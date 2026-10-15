@@ -36,4 +36,23 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Decision Log 2026-10-16, re-review applied | covered | internal mechanics.
 - Decision Log 2026-10-16, second re-review applied | covered | internal mechanics.
 
+- Verdict comparison (2026-10-16), as returned:
+  - Reading compared: Goal unread as an item; DoD 1 agrees; DoD 2 agrees; DoD 3 diverges (Orchestrator extends, philosophy 7.3 and 8.2, held; auditor ask-now, the brief withholds the key and rulings 65 and 70 are not grounds); DoD 4 read covered, recorded not audited (internal); 1 s falsifier diverges (covered as internal; auditor inferred, user-observable latency line); bound in Rust, batched read, timing samples, witness outside the suite, Task_2 witness design consistent (internal); rebuild at open agrees; failed rebuild keeps marker and cause diverges (covered as internal; auditor inferred, developer-visible diagnostics); one key for both paths diverges (covered as internal; auditor ask-now, part of the held key); no public call or setting diverges (covered, "without an operator"; auditor inferred, the brief does not say "without an operator"); Task_3 tie key diverges (extends; ask-now); mid-session limit assumption unread; non-goals agree; integration unread; Task_1 agrees; Task_2 agrees; Task_3 diverges (covered, held; ask-now); DL residuals chosen agrees on scope, the plan-approval waiver unread; DL Task_2 root cause consistent; DL Task_4 key diverges (extends; ask-now); DL drop of the second-person residual agrees on the grade, diverges on the source; DL first review applied diverges (covered as internal; ask-now for its key part); DL runs under the brief agrees; DL Task_1 root cause consistent; DL re-review of 7bf694ff diverges (covered as internal; ask-now for its Task_3 design part); DL second re-review consistent.
+  - Findings compared: none found.
+  - Correction inside the run: the diverging items were the busy-occasion task and its key, which leave the plan in the revision below; items read as internal that the auditor graded inferred are read by their user-facing effect in the next reading.
+
+### v0-2-residuals-plan, plan draft, revision narrowed to the statistics recovery
+
+- Goal (statistics recovery; the other two moved to the 4a design plan) | covered | brief section 4a, "What this leaves standing of the open stack: the storage and schema work".
+- DoD: unhealthy store heals at the next open, no new call, failed rebuild keeps marker | covered | brief section 4, statistics recovery; section 4a, storage work stands.
+- DoD: measurement with witness and controls | covered | internal mechanics.
+- Planner-added: rebuild at open | covered | brief section 4, statistics recovery.
+- Planner-added: failed rebuild keeps marker and original cause | extends | philosophy 8.6 (expose retrieval rationale) and section 10 (a decision that stops a memory's influence is visible).
+- Planner-added: no public call or setting | extends | philosophy section 9 (a memory system, not a database client).
+- Planner-added: witness changes selection at the base | covered | internal mechanics.
+- Non-goals (moved residuals, no selection change, no API, no stored-shape change) | covered | brief section 4a replaces the recall selection.
+- Design limit: mid-session failure stays conservative until next open | extends | brief section 4, statistics recovery.
+- Task_1 | covered | brief section 4, statistics recovery.
+- Decision Log 2026-10-16: narrowed under 4a, moved tasks, waiver corrected | covered | brief section 4a; brief section 1 governance.
+
 ## Findings
